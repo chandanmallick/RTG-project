@@ -15,6 +15,7 @@ from routes.rtg_dashboard_routes import router as rtg_dashboard_router
 
 import urllib3
 
+
 urllib3.disable_warnings(
     urllib3.exceptions.InsecureRequestWarning
 )
