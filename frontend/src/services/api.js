@@ -1,6 +1,6 @@
 import axios from "axios";
 
-const BASE_URL = "http://localhost:8001/api";
+const BASE_URL = `http://${window.location.hostname}:8001/api`;
 
 const API = {
 
@@ -132,6 +132,109 @@ const API = {
       `${BASE_URL}/pipeline/status`
     );
 
+    return res.data;
+  },
+
+  getPspStatus: async (startDate, endDate) => {
+    let url = `${BASE_URL}/psp/status`;
+    if (startDate && endDate) {
+      url += `?start_date=${startDate}&end_date=${endDate}`;
+    }
+    const res = await axios.get(url);
+    return res.data;
+  },
+
+  getPspSyncProgress: async () => {
+    const res = await axios.get(
+      `${BASE_URL}/psp/sync-progress`
+    );
+    return res.data;
+  },
+
+  runPspRange: async (startDate, endDate) => {
+    const res = await axios.post(
+      `${BASE_URL}/psp/run-range`,
+      {
+        start_date: startDate,
+        end_date: endDate
+      }
+    );
+    return res.data;
+  },
+
+  syncPspDate: async (dateStr) => {
+    const res = await axios.post(
+      `${BASE_URL}/psp/sync-date/${dateStr}`
+    );
+    return res.data;
+  },
+
+  getPspConfig: async () => {
+    const res = await axios.get(
+      `${BASE_URL}/psp/config`
+    );
+    return res.data;
+  },
+
+  savePspConfig: async (payload) => {
+    const res = await axios.post(
+      `${BASE_URL}/psp/config`,
+      payload
+    );
+    return res.data;
+  },
+
+  getPspAnalytics: async () => {
+    const res = await axios.get(
+      `${BASE_URL}/psp/analytics`
+    );
+    return res.data;
+  },
+
+  getPspEnergyConsumption: async (dateStr) => {
+    const params = dateStr ? `?date_str=${dateStr}` : '';
+    const res = await axios.get(
+      `${BASE_URL}/psp/energy-consumption${params}`
+    );
+    return res.data;
+  },
+
+  getPspEnergyBreakdown: async (dateStr) => {
+    const params = dateStr ? `?date_str=${dateStr}` : '';
+    const res = await axios.get(
+      `${BASE_URL}/psp/energy-breakdown${params}`
+    );
+    return res.data;
+  },
+
+  getPspPortfolioBreakdown: async (dateStr) => {
+    const params = dateStr ? `?date_str=${dateStr}` : '';
+    const res = await axios.get(
+      `${BASE_URL}/psp/portfolio-demand-breakdown${params}`
+    );
+    return res.data;
+  },
+
+  getPspHighestRecords: async () => {
+    const res = await axios.get(
+      `${BASE_URL}/psp/highest-records`
+    );
+    return res.data;
+  },
+
+  getPspPowerPosition: async (dateStr) => {
+    const params = dateStr ? `?date_str=${dateStr}` : '';
+    const res = await axios.get(
+      `${BASE_URL}/psp/power-position${params}`
+    );
+    return res.data;
+  },
+
+  getPspVoltageProfile: async (dateStr) => {
+    const params = dateStr ? `?date_str=${dateStr}` : '';
+    const res = await axios.get(
+      `${BASE_URL}/psp/voltage-profile${params}`
+    );
     return res.data;
   },
 

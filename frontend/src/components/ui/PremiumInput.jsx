@@ -52,7 +52,7 @@ export default function PremiumInput({
 
           "&:hover fieldset": {
             borderColor:
-              "#7B6BD6",
+              "#00DF81",
           },
 
           "&.Mui-focused": {
@@ -60,12 +60,12 @@ export default function PremiumInput({
               "rgba(255,255,255,0.92)",
 
             boxShadow:
-              "0 0 0 4px rgba(123,107,214,0.12)",
+              "0 0 0 4px rgba(0, 223, 129, 0.15)",
           },
 
           "&.Mui-focused fieldset": {
             borderColor:
-              "#6C63FF",
+              "#03624C",
           },
 
           "& input": {

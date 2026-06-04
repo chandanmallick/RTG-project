@@ -33,15 +33,33 @@ export default function TopNavbar() {
     setAnchorEl(null);
   };
 
+  // Menu states for the PSP dropdown
+  const [pspAnchorEl, setPspAnchorEl] = useState(null);
+  const pspOpen = Boolean(pspAnchorEl);
+
+  const handleOpenPspMenu = (event) => {
+    setPspAnchorEl(event.currentTarget);
+  };
+
+  const handleClosePspMenu = () => {
+    setPspAnchorEl(null);
+  };
+
   const handleNavigate = (path) => {
     navigate(path);
     handleCloseMenu();
+    handleClosePspMenu();
   };
 
   // Determine if RTG tab is active
   const isRTGActive =
     location.pathname === "/rtg-dashboard" ||
     location.pathname === "/database-sync";
+
+  // Determine if PSP tab is active
+  const isPSPActive =
+    location.pathname === "/psp-dashboard" ||
+    location.pathname === "/psp-admin";
 
   return (
     <Box
@@ -65,11 +83,11 @@ export default function TopNavbar() {
             width: 40,
             height: 40,
             borderRadius: "14px",
-            background: "#5AA55A",
+            background: "#03624C",
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
-            boxShadow: "0 4px 12px rgba(90, 165, 90, 0.3)",
+            boxShadow: "0 4px 12px rgba(3, 98, 76, 0.3)",
           }}
         >
           {/* Custom vector leaf/energy node logo */}
@@ -123,10 +141,10 @@ export default function TopNavbar() {
             px: 2.5,
             py: 1,
             minHeight: 40,
-            backgroundColor: isRTGActive ? "#5AA55A" : "transparent",
+            backgroundColor: isRTGActive ? "#03624C" : "transparent",
             color: isRTGActive ? "#FFFFFF" : "#475569",
             "&:hover": {
-              backgroundColor: isRTGActive ? "#499249" : "#F3F4F6",
+              backgroundColor: isRTGActive ? "#17876D" : "#F3F4F6",
             },
           }}
         >
@@ -184,6 +202,90 @@ export default function TopNavbar() {
             }}
           >
             Database Sync
+          </MenuItem>
+        </Menu>
+
+        {/* PSP Dropdown pill */}
+        <Button
+          onClick={handleOpenPspMenu}
+          endIcon={
+            <KeyboardArrowDownRoundedIcon
+              sx={{
+                color: isPSPActive ? "#FFF" : "#475569",
+                transition: "transform 0.2s",
+                transform: pspOpen ? "rotate(180deg)" : "none",
+              }}
+            />
+          }
+          sx={{
+            borderRadius: "999px",
+            textTransform: "none",
+            fontSize: 14,
+            fontWeight: 700,
+            px: 2.5,
+            py: 1,
+            minHeight: 40,
+            backgroundColor: isPSPActive ? "#03624C" : "transparent",
+            color: isPSPActive ? "#FFFFFF" : "#475569",
+            "&:hover": {
+              backgroundColor: isPSPActive ? "#17876D" : "#F3F4F6",
+            },
+          }}
+        >
+          PSP
+        </Button>
+
+        <Menu
+          anchorEl={pspAnchorEl}
+          open={pspOpen}
+          onClose={handleClosePspMenu}
+          disableScrollLock
+          PaperProps={{
+            sx: {
+              mt: 1,
+              borderRadius: "16px",
+              boxShadow: "0 10px 40px rgba(15, 23, 42, 0.08)",
+              border: "1px solid #E2E8F0",
+              minWidth: 180,
+              p: 0.5,
+            },
+          }}
+        >
+          <MenuItem
+            onClick={() => handleNavigate("/psp-dashboard")}
+            sx={{
+              borderRadius: "10px",
+              py: 1,
+              fontSize: 13.5,
+              fontWeight: 700,
+              color: location.pathname === "/psp-dashboard" ? "#0F4B2D" : "#334155",
+              backgroundColor:
+                location.pathname === "/psp-dashboard" ? "#E1F5FF" : "transparent",
+              "&:hover": {
+                backgroundColor:
+                  location.pathname === "/psp-dashboard" ? "#D2ECFA" : "#F8FAFC",
+              },
+            }}
+          >
+            PSP Dashboard
+          </MenuItem>
+          <MenuItem
+            onClick={() => handleNavigate("/psp-admin")}
+            sx={{
+              borderRadius: "10px",
+              py: 1,
+              fontSize: 13.5,
+              fontWeight: 700,
+              color: location.pathname === "/psp-admin" ? "#0F4B2D" : "#334155",
+              backgroundColor:
+                location.pathname === "/psp-admin" ? "#E1F5FF" : "transparent",
+              "&:hover": {
+                backgroundColor:
+                  location.pathname === "/psp-admin" ? "#D2ECFA" : "#F8FAFC",
+              },
+            }}
+          >
+            PSP Admin
           </MenuItem>
         </Menu>
 

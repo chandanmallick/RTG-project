@@ -6,8 +6,9 @@ import {
 } from "react-router-dom";
 
 import DatabaseSync from "./pages/DatabaseSync";
-
 import RTGDashboard from "./pages/RTGDashboard";
+import PSPDashboard from "./pages/PSPDashboard";
+import PSPAdmin from "./pages/PSPAdmin";
 
 export default function App() {
 
@@ -34,6 +35,16 @@ export default function App() {
         <Route
           path="/rtg-dashboard"
           element={<RTGDashboard />}
+        />
+
+        <Route
+          path="/psp-dashboard"
+          element={<PSPDashboard />}
+        />
+
+        <Route
+          path="/psp-admin"
+          element={<PSPAdmin />}
         />
 
       </Routes>

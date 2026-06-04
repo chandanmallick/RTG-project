@@ -35,7 +35,7 @@ import CloseRoundedIcon from "@mui/icons-material/CloseRounded";
 import VisibilityRoundedIcon from "@mui/icons-material/VisibilityRounded";
 
 const API =
-  "http://localhost:8001/api";
+  `http://${window.location.hostname}:8001/api`;
 
 export default function PipelineMonitor() {
 
@@ -1264,7 +1264,7 @@ export default function PipelineMonitor() {
                 borderRadius: "34px",
 
                 background:
-                    "linear-gradient(135deg,#f8f9ff,#eef2ff)",
+                    "linear-gradient(135deg,#f1f7f6,#ffffff)",
 
                 overflow: "hidden",
 
@@ -1272,7 +1272,7 @@ export default function PipelineMonitor() {
                     "1px solid rgba(255,255,255,0.5)",
 
                 boxShadow:
-                    "0 30px 80px rgba(76,60,140,0.2)",
+                    "0 30px 80px rgba(3,98,76,0.2)",
                 },
             }}
             >
@@ -1291,7 +1291,7 @@ export default function PipelineMonitor() {
                     p: 4,
 
                     background:
-                    "linear-gradient(135deg,#5B4B8A,#7B6BD6)",
+                    "linear-gradient(135deg,#03624C,#17876D)",
 
                     color: "white",
 

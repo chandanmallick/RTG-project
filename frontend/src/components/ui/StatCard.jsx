@@ -6,7 +6,7 @@ export default function StatCard({
   value,
   subtitle,
   icon,
-  color = "#6C63FF",
+  color = "#03624C",
   trend,
 }) {
   return (

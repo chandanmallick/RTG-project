@@ -365,7 +365,7 @@ export default function DatabaseSync() {
           mb: 1.8,
           p: 2,
           background:
-            "linear-gradient(135deg, #0064FA 0%, #76A5FF 100%)",
+            "linear-gradient(135deg, #022726 0%, #03624C 50%, #17876D 100%)",
           color: "#fff",
           position: "relative",
           overflow: "hidden",

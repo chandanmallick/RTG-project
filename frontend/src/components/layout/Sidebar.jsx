@@ -88,7 +88,7 @@ export default function Sidebar() {
           "all .38s cubic-bezier(.4,0,.2,1)",
 
         background:
-          "linear-gradient(180deg,#433878 0%,#524493 45%,#6A5CD8 100%)",
+          "linear-gradient(180deg,#022726 0%,#03624C 45%,#17876D 100%)",
 
         borderRadius: "36px",
 
@@ -110,7 +110,7 @@ export default function Sidebar() {
           "1px solid rgba(255,255,255,0.08)",
 
         boxShadow: `
-          0 30px 80px rgba(76,60,140,0.35),
+          0 30px 80px rgba(3,98,76,0.35),
           inset 0 1px 0 rgba(255,255,255,0.08)
         `,
       }}
@@ -300,9 +300,9 @@ export default function Sidebar() {
             height: 54,
 
             background:
-              "linear-gradient(135deg,#fff,#e9e7ff)",
+              "linear-gradient(135deg,#fff,#E8F5F1)",
 
-            color: "#5B4B8A",
+            color: "#03624C",
 
             fontWeight: 800,
 
@@ -435,10 +435,10 @@ export default function Sidebar() {
                       borderRadius: "999px",
 
                       background:
-                        "linear-gradient(180deg,#fff,#D9D5FF)",
+                        "linear-gradient(180deg,#fff,#00DF81)",
 
                       boxShadow:
-                        "0 0 18px rgba(255,255,255,0.9)",
+                        "0 0 18px rgba(0,223,129,0.9)",
                     }}
                   />
                 )}

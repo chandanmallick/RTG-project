@@ -15,10 +15,10 @@ export default function GradientButton({
 }) {
   const gradients = {
     primary:
-      "linear-gradient(135deg,#5AA55A 0%,#82C582 100%)",
+      "linear-gradient(135deg,#17876D 0%,#03624C 100%)",
 
     success:
-      "linear-gradient(135deg,#0BA360 0%,#3CBA92 100%)",
+      "linear-gradient(135deg,#00DF81 0%,#2CC295 100%)",
 
     error:
       "linear-gradient(135deg,#DC2626 0%,#F87171 100%)",
@@ -27,15 +27,15 @@ export default function GradientButton({
       "linear-gradient(135deg,#111827 0%,#374151 100%)",
 
     info:
-      "linear-gradient(135deg,#2563EB 0%,#60A5FA 100%)",
+      "linear-gradient(135deg,#2FA98C 0%,#17876D 100%)",
   };
 
   const shadows = {
     primary:
-      "0 12px 24px rgba(90, 165, 90, 0.25)",
+      "0 12px 24px rgba(3, 98, 76, 0.25)",
 
     success:
-      "0 12px 24px rgba(11,163,96,0.25)",
+      "0 12px 24px rgba(0, 223, 129, 0.25)",
 
     error:
       "0 12px 24px rgba(220,38,38,0.22)",
@@ -44,7 +44,7 @@ export default function GradientButton({
       "0 12px 24px rgba(17,24,39,0.20)",
 
     info:
-      "0 12px 24px rgba(37,99,235,0.24)",
+      "0 12px 24px rgba(23, 135, 109, 0.2)",
   };
 
   return (

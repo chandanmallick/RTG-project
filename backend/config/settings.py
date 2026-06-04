@@ -20,6 +20,8 @@ PIPELINE_LOG_COLLECTION = "pipeline_logs"
 
 RTG_DASHBOARD_COLLECTION = "rtg_dashboard_snapshot"
 
+PSP_COLLECTION = "psp_data"
+
 BASE_URL = "https://mdp.erldc.in/outageapi"
 
 STATIONS_API = f"{BASE_URL}/API/GeneratingStation/AllGeneratingStations/1"

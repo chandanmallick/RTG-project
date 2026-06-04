@@ -128,6 +128,23 @@ async def get_live_dashboard():
 
     except Exception as e:
 
+        try:
+            db = MongoService()
+            latest = db.rtg_dashboard_collection.find_one(
+                {},
+                sort=[("snapshot_time", -1)]
+            )
+            if latest and "data" in latest:
+                return {
+                    "success": True,
+                    "data": latest["data"],
+                    "is_cached": True,
+                    "snapshot_time": latest["snapshot_time"],
+                    "message": f"Live fetch failed ({str(e)}). Loaded cached data from snapshot."
+                }
+        except Exception as db_err:
+            pass
+
         return {
             "success": False,
             "message": str(e)

@@ -48,15 +48,15 @@ const popupStyles = {
     icon: <InfoRoundedIcon />,
 
     gradient:
-      "linear-gradient(135deg,#7B6BD6,#5B4B8A)",
+      "linear-gradient(135deg,#00DF81,#03624C)",
 
-    glow: "rgba(123,107,214,0.22)",
+    glow: "rgba(0,223,129,0.22)",
 
     shadow:
-      "0 35px 80px rgba(91,75,138,0.22)",
+      "0 35px 80px rgba(3,98,76,0.22)",
 
     bgSoft:
-      "linear-gradient(180deg,#F5F3FF,#FFFFFF)",
+      "linear-gradient(180deg,#F1F7F6,#FFFFFF)",
   },
 };
 

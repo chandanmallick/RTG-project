@@ -16,6 +16,9 @@ from services.pipeline_logger import (
     PipelineLogger
 )
 
+from services.psp_service import PSPService
+from datetime import timedelta
+
 scheduler = BackgroundScheduler()
 
 
@@ -108,6 +111,35 @@ scheduler.add_job(
     misfire_grace_time=300,
 
     next_run_time=datetime.now(),
+
+    replace_existing=True
+)
+
+
+def run_psp_daily_job():
+    try:
+        from datetime import date
+        yesterday = date.today() - timedelta(days=1)
+        PSPService.fetch_and_save_date(yesterday)
+        try:
+            from routes.psp_routes import check_and_update_highest_portfolio
+            check_and_update_highest_portfolio(yesterday)
+        except Exception as ex:
+            print(f"Error checking highest records for daily job: {ex}")
+    except Exception:
+        pass
+
+
+scheduler.add_job(
+    run_psp_daily_job,
+
+    trigger="cron",
+
+    hour=9,
+
+    minute=0,
+
+    id="psp_daily_9am",
 
     replace_existing=True
 )

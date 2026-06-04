@@ -29,12 +29,12 @@ export default function PremiumTable({
         },
 
         "&::-webkit-scrollbar-thumb": {
-          background: "#C7CDFC",
+          background: "#AACBC4",
           borderRadius: "999px",
         },
 
         "&::-webkit-scrollbar-track": {
-          background: "#EEF2FF",
+          background: "#F1F7F6",
         },
 
         "& .MuiTableCell-head": {
@@ -48,7 +48,7 @@ export default function PremiumTable({
 
           backdropFilter: "blur(14px)",
 
-          color: "#4C3C8C",
+          color: "#0B453A",
 
           fontWeight: 800,
 
@@ -62,7 +62,7 @@ export default function PremiumTable({
 
         "& .MuiTableRow-root:hover": {
           background:
-            "rgba(108,99,255,0.03)",
+            "rgba(0, 223, 129, 0.03)",
         },
 
         "& .MuiTableCell-root": {

@@ -20,7 +20,7 @@ export default function Topbar({
         borderRadius: "34px",
 
         background:
-          "linear-gradient(135deg,#5B4B8A,#7B6BD6)",
+          "linear-gradient(135deg,#03624C,#17876D)",
 
         color: "#fff",
 

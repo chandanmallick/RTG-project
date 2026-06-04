@@ -7,7 +7,8 @@ from config.settings import (
     MAP_COLLECTION,
     PIPELINE_CONFIG_COLLECTION,
     PIPELINE_LOG_COLLECTION,
-    RTG_DASHBOARD_COLLECTION
+    RTG_DASHBOARD_COLLECTION,
+    PSP_COLLECTION
 )
 
 
@@ -48,6 +49,14 @@ class MongoService:
         self.rtg_dashboard_collection = self.db[
             RTG_DASHBOARD_COLLECTION
         ]
+
+        self.psp_collection = self.db[
+            PSP_COLLECTION
+        ]
+
+        # Explicitly create the collection if it doesn't exist yet
+        if PSP_COLLECTION not in self.db.list_collection_names():
+            self.db.create_collection(PSP_COLLECTION)
 
     # 🔥 UPSERT LOGIC (CORE)
     def upsert_data(self, df: pd.DataFrame):

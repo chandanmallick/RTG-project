@@ -24,7 +24,7 @@ export default function GlassCard({
 
         background: "#FFFFFF",
 
-        border: "1px solid #E2E8F0",
+        border: "1px solid rgba(170, 203, 196, 0.4)",
 
         boxShadow: "0 10px 30px rgba(0, 0, 0, 0.02), 0 1px 3px rgba(0, 0, 0, 0.01)",
 
@@ -65,7 +65,7 @@ export default function GlassCard({
         }}
       />
 
-      {/* PURPLE GLOW */}
+      {/* GREEN GLOW */}
 
       {glow && (
         <Box
@@ -81,7 +81,7 @@ export default function GlassCard({
             borderRadius: "50%",
 
             background:
-              "rgba(123,107,214,0.14)",
+              "rgba(0, 223, 129, 0.12)",
 
             filter: "blur(70px)",
 
@@ -90,7 +90,7 @@ export default function GlassCard({
         />
       )}
 
-      {/* BLUE GLOW */}
+      {/* MINT GLOW */}
 
       {glow && (
         <Box
@@ -106,7 +106,7 @@ export default function GlassCard({
             borderRadius: "50%",
 
             background:
-              "rgba(96,165,250,0.10)",
+              "rgba(44, 194, 149, 0.08)",
 
             filter: "blur(70px)",
 

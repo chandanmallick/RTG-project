@@ -10,7 +10,9 @@ import App from "./App";
 
 import theme from "./theme/theme";
 
+import "bootstrap/dist/css/bootstrap.min.css";
 import "./index.css";
+import "./theme/theme.css";
 
 ReactDOM.createRoot(
   document.getElementById("root")

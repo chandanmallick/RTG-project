@@ -3,15 +3,15 @@ import { createTheme } from "@mui/material/styles";
 const theme = createTheme({
   palette: {
     primary: {
-      main: "#5AA55A",
+      main: "#03624C", // Bangladesh Green
     },
 
     secondary: {
-      main: "#0064FA",
+      main: "#00DF81", // Caribbean Green
     },
 
     background: {
-      default: "#F1F7F6",
+      default: "#F1F7F6", // Anti-Flash White
     },
   },
 

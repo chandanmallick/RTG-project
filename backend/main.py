@@ -13,6 +13,8 @@ from scheduler.jobs import scheduler
 
 from routes.rtg_dashboard_routes import router as rtg_dashboard_router
 
+from routes.psp_routes import router as psp_router
+
 import urllib3
 
 
@@ -48,6 +50,10 @@ app.include_router(
 
 app.include_router(
     rtg_dashboard_router
+)
+
+app.include_router(
+    psp_router
 )
 
 @app.on_event("startup")

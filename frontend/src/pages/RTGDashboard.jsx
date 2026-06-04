@@ -67,7 +67,7 @@ import RefreshRoundedIcon from "@mui/icons-material/RefreshRounded";
 
 import { showModernPopup } from "../components/ui/ModernPopup";
 
-const PIPELINE_API = "http://localhost:8001/api";
+const PIPELINE_API = `http://${window.location.hostname}:8001/api`;
 
 function PipelineRow({ icon, label, value }) {
   return (
@@ -891,7 +891,7 @@ export default function RTGDashboard() {
           mb: 1.8,
           p: 2,
           background:
-            "linear-gradient(135deg, #0064FA 0%, #76A5FF 100%)",
+            "linear-gradient(135deg, #022726 0%, #03624C 50%, #17876D 100%)",
           color: "#fff",
         }}
       >
@@ -1109,17 +1109,17 @@ export default function RTGDashboard() {
         PaperProps={{
           sx: {
             borderRadius: "34px",
-            background: "linear-gradient(135deg,#f8f9ff,#eef2ff)",
+            background: "linear-gradient(135deg,#f1f7f6,#ffffff)",
             overflow: "hidden",
             border: "1px solid rgba(255,255,255,0.5)",
-            boxShadow: "0 30px 80px rgba(76,60,140,0.2)",
+            boxShadow: "0 30px 80px rgba(3,98,76,0.2)",
           },
         }}
       >
         <DialogContent sx={{ p: 0 }}>
 
           {/* dialog header */}
-          <Box sx={{ p: 4, background: "linear-gradient(135deg,#5B4B8A,#7B6BD6)", color: "white", position: "relative" }}>
+          <Box sx={{ p: 4, background: "linear-gradient(135deg,#03624C,#17876D)", color: "white", position: "relative" }}>
             <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <Box>
                 <Typography sx={{ fontSize: 28, fontWeight: 800 }}>Pipeline Execution</Typography>

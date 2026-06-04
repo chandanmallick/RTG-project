@@ -57,7 +57,7 @@ export default function SectionAccordion({
           py: 1.5,
 
           background:
-            "linear-gradient(135deg,#5B4B8A,#7B6BD6)",
+            "linear-gradient(135deg,#17876D,#03624C)",
 
           color: "#fff",
 
@@ -154,7 +154,7 @@ export default function SectionAccordion({
           p: 3,
 
           background:
-            "rgba(248,250,255,0.72)",
+            "rgba(241,247,246,0.72)",
         }}
       >
         {children}
