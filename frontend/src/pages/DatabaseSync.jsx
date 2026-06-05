@@ -23,6 +23,7 @@ import API from "../services/api";
 
 // LAYOUT
 import AppShell from "../components/layout/AppShell";
+import PlantMappingGrid from "../components/PlantMappingGrid";
 
 // UI
 import GradientButton from "../components/ui/GradientButton";
@@ -61,7 +62,10 @@ export default function DatabaseSync() {
   const [stageSearch, setStageSearch] =
     useState("");
 
-  const [mapSearch, setMapSearch] =
+  const [stationSearch, setStationSearch] =
+    useState("");
+
+  const [stateSearch, setStateSearch] =
     useState("");
 
   // =====================================
@@ -281,14 +285,11 @@ export default function DatabaseSync() {
     };
 
   // =====================================
-  // SAVE MAP TABLE
-  // =====================================
-
-  const saveMapTable = async () => {
+  const saveMapTable = async (dirtyRows) => {
     try {
       setLoading(true);
 
-      const payload = mapData.map(
+      const payload = (dirtyRows || mapData).map(
         (row) => ({
           ...row,
         })
@@ -338,15 +339,6 @@ export default function DatabaseSync() {
           stageSearch.toLowerCase()
         )
     );
-
-  const filteredMapData = mapData.filter(
-    (row) =>
-      JSON.stringify(row)
-        .toLowerCase()
-        .includes(
-          mapSearch.toLowerCase()
-        )
-  );
 
   // =====================================
   // INIT
@@ -625,7 +617,7 @@ export default function DatabaseSync() {
           </Box>
         }
       >
-        <PremiumTable maxHeight="58vh">
+        <PremiumTable maxHeight="30vh">
           <Table stickyHeader>
             <TableHead>
               <TableRow>
@@ -790,7 +782,7 @@ export default function DatabaseSync() {
           </Box>
         }
       >
-        <PremiumTable maxHeight="42vh">
+        <PremiumTable maxHeight="25vh">
           <Table stickyHeader>
             <TableHead>
               <TableRow>
@@ -869,226 +861,85 @@ export default function DatabaseSync() {
       <SectionAccordion
         title="Station Mapping Table"
         subtitle="Editable station mapping"
-        count={mapData.length}
-      >
-
+        count={mapData.filter(r => !r.is_state).length}
         actions={
-          <Box
-            sx={{
-              width: 260,
-            }}
-          >
+          <Box sx={{ width: 260 }} onClick={(e) => e.stopPropagation()}>
             <PremiumInput
-              placeholder="Search map table..."
-              value={mapSearch}
-              onChange={(e) =>
-                setMapSearch(
-                  e.target.value
-                )
-              }
+              placeholder="Search stations..."
+              value={stationSearch}
+              onChange={(e) => setStationSearch(e.target.value)}
+              sx={{
+                "& .MuiOutlinedInput-root": {
+                  background: "rgba(255,255,255,0.14)",
+                  color: "#fff",
+                  backdropFilter: "blur(14px)",
+                  "& fieldset": { borderColor: "rgba(255,255,255,0.18)" },
+                },
+                "& input": { color: "#fff" },
+                "& input::placeholder": { color: "rgba(255,255,255,0.65)" },
+              }}
+              InputProps={{
+                startAdornment: (
+                  <SearchRoundedIcon sx={{ mr: 1, fontSize: 18, opacity: 0.7 }} />
+                ),
+              }}
             />
           </Box>
         }
-        <PremiumTable maxHeight="62vh">
-          <Table stickyHeader>
-            <TableHead>
-              <TableRow>
-                <TableCell>
-                  Plant
-                </TableCell>
-
-                <TableCell>
-                  Stage
-                </TableCell>
-
-                <TableCell>
-                  Owner
-                </TableCell>
-
-                <TableCell>
-                  Capacity
-                </TableCell>
-
-                <TableCell>
-                  WBES Name
-                </TableCell>
-
-                <TableCell>
-                  SCADA Key
-                </TableCell>
-
-                <TableCell>
-                  Outage Key
-                </TableCell>
-              </TableRow>
-            </TableHead>
-
-            <TableBody>
-              {(filteredMapData || []).map(
-                (row, i) => (
-                  <TableRow
-                    hover
-                    key={i}
-                  >
-                    <TableCell>
-                      {
-                        row.plant_name
-                      }
-                    </TableCell>
-
-                    <TableCell>
-                      {
-                        row.STAGE_NAME
-                      }
-                    </TableCell>
-
-                    <TableCell>
-                      {
-                        row.owner_name
-                      }
-                    </TableCell>
-
-                    <TableCell>
-                      {
-                        row.stage_installed_capacity
-                      }
-                    </TableCell>
-
-                    {/* WBES */}
-
-                    <TableCell>
-                      <PremiumInput
-                        value={
-                          row.wbes_name ||
-                          ""
-                        }
-                        onChange={(e) => {
-                          const updated = mapData.map(
-                            (item) =>
-                              item.plant_id ===
-                              row.plant_id
-                                ? {
-                                    ...item,
-                                    wbes_name:
-                                      e.target.value,
-                                  }
-                                : item
-                          );
-
-                          setMapData(updated);
-                        }}
-                      />
-                    </TableCell>
-
-                    {/* SCADA */}
-
-                    <TableCell>
-                      <PremiumInput
-                        value={
-                          row.scada_key ||
-                          ""
-                        }
-                        onChange={(e) => {
-                          const updated = mapData.map(
-                            (item) =>
-                              item.plant_id ===
-                              row.plant_id
-                                ? {
-                                    ...item,
-                                    scada_key:
-                                      e.target.value,
-                                  }
-                                : item
-                          );
-
-                          setMapData(updated);
-                        }}
-                      />
-                    </TableCell>
-
-                    {/* OUTAGE */}
-
-                    <TableCell>
-                      <PremiumInput
-                        value={
-                          row.outage_key ||
-                          ""
-                        }
-                        onChange={(e) => {
-                          const updated = mapData.map(
-                            (item) =>
-                              item.plant_id ===
-                              row.plant_id
-                                ? {
-                                    ...item,
-                                    outage_key:
-                                      e.target.value,
-                                  }
-                                : item
-                          );
-
-                          setMapData(updated);
-                        }}
-                      />
-                    </TableCell>
-                  </TableRow>
-                )
-              )}
-            </TableBody>
-          </Table>
-        </PremiumTable>
-
-        {/* Search */}
-
-        <Box
-          sx={{
-            width: 240,
-            mr: 1,
-          }}
-        >
-          <PremiumInput
-            placeholder="Search mapping..."
-            value={stageSearch}
-            onChange={(e) =>
-              setStageSearch(
-                e.target.value
-              )
-            }
+      >
+        <Box sx={{ p: 0.5 }}>
+          <PlantMappingGrid
+            data={mapData.filter(r => !r.is_state)}
+            loading={loading}
+            onSave={saveMapTable}
+            maxHeight="40vh"
+            searchText={stationSearch}
           />
         </Box>
+      </SectionAccordion>
 
-        {/* ACTIONS */}
-
-        <Box
-          sx={{
-            mt: 3,
-
-            display: "flex",
-
-            justifyContent:
-              "flex-end",
-
-            gap: 2,
-          }}
-        >
-          <GradientButton
-            variant="glass"
-            onClick={fetchMapData}
-          >
-            Refresh Table
-          </GradientButton>
-
-          <GradientButton
-            color="success"
-            startIcon={
-              <SaveRoundedIcon />
-            }
-            onClick={saveMapTable}
-          >
-            Save Mapping
-          </GradientButton>
+      <SectionAccordion
+        title="State & System Mapping Table"
+        subtitle="Editable state & system frequency mapping"
+        count={mapData.filter(r => r.is_state).length}
+        actions={
+          <Box sx={{ width: 260 }} onClick={(e) => e.stopPropagation()}>
+            <PremiumInput
+              placeholder="Search states..."
+              value={stateSearch}
+              onChange={(e) => setStateSearch(e.target.value)}
+              sx={{
+                "& .MuiOutlinedInput-root": {
+                  background: "rgba(255,255,255,0.14)",
+                  color: "#fff",
+                  backdropFilter: "blur(14px)",
+                  "& fieldset": { borderColor: "rgba(255,255,255,0.18)" },
+                },
+                "& input": { color: "#fff" },
+                "& input::placeholder": { color: "rgba(255,255,255,0.65)" },
+              }}
+              InputProps={{
+                startAdornment: (
+                  <SearchRoundedIcon sx={{ mr: 1, fontSize: 18, opacity: 0.7 }} />
+                ),
+              }}
+            />
+          </Box>
+        }
+      >
+        <Box sx={{ p: 0.5 }}>
+          <PlantMappingGrid
+            data={mapData.filter(r => r.is_state)}
+            loading={loading}
+            onSave={saveMapTable}
+            maxHeight="30vh"
+            searchText={stateSearch}
+          />
         </Box>
       </SectionAccordion>
+
+      {/* Spacing spacer for easy scrolling to the bottom */}
+      <Box sx={{ height: 80, flexShrink: 0 }} />
     </AppShell>
   );
 }

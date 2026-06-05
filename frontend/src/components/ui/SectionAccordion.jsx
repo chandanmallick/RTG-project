@@ -22,9 +22,9 @@ export default function SectionAccordion({
       disableGutters
       elevation={0}
       sx={{
-        mb: 3,
+        mb: 1.5,
 
-        borderRadius: "28px !important",
+        borderRadius: "16px !important",
 
         overflow: "hidden",
 
@@ -37,7 +37,7 @@ export default function SectionAccordion({
           "1px solid rgba(255,255,255,0.8)",
 
         boxShadow:
-          "0 16px 40px rgba(15,23,42,0.06)",
+          "0 12px 30px rgba(15,23,42,0.05)",
 
         "&:before": {
           display: "none",
@@ -49,12 +49,13 @@ export default function SectionAccordion({
           <ExpandMoreRoundedIcon
             sx={{
               color: "#fff",
+              fontSize: 20,
             }}
           />
         }
         sx={{
-          px: 3,
-          py: 1.5,
+          px: 2,
+          py: 0.75,
 
           background:
             "linear-gradient(135deg,#17876D,#03624C)",
@@ -62,10 +63,11 @@ export default function SectionAccordion({
           color: "#fff",
 
           minHeight:
-            "76px !important",
+            "52px !important",
 
           "& .MuiAccordionSummary-content": {
             alignItems: "center",
+            margin: "4px 0",
           },
         }}
       >
@@ -80,14 +82,15 @@ export default function SectionAccordion({
 
             alignItems: "center",
 
-            pr: 2,
+            pr: 1.5,
           }}
         >
           <Box>
             <Typography
               sx={{
-                fontSize: 18,
+                fontSize: 15,
                 fontWeight: 800,
+                lineHeight: 1.2,
               }}
             >
               {title}
@@ -96,11 +99,12 @@ export default function SectionAccordion({
             {subtitle && (
               <Typography
                 sx={{
-                  mt: 0.5,
+                  mt: 0.25,
 
-                  fontSize: 13,
+                  fontSize: 11.5,
 
                   opacity: 0.82,
+                  lineHeight: 1.2,
                 }}
               >
                 {subtitle}
@@ -118,15 +122,15 @@ export default function SectionAccordion({
             {count !== undefined && (
               <Box
                 sx={{
-                  px: 1.6,
-                  py: 0.7,
+                  px: 1.2,
+                  py: 0.3,
 
                   borderRadius: "999px",
 
                   background:
                     "rgba(255,255,255,0.16)",
 
-                  fontSize: 13,
+                  fontSize: 11,
 
                   fontWeight: 700,
                 }}
@@ -142,6 +146,9 @@ export default function SectionAccordion({
               onFocus={(e) =>
                 e.stopPropagation()
               }
+              onKeyDown={(e) =>
+                e.stopPropagation()
+              }
             >
               {actions}
             </Box>
@@ -151,7 +158,7 @@ export default function SectionAccordion({
 
       <AccordionDetails
         sx={{
-          p: 3,
+          p: 1.5,
 
           background:
             "rgba(241,247,246,0.72)",

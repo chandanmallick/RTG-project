@@ -25,6 +25,7 @@ import SettingsRoundedIcon from "@mui/icons-material/SettingsRounded";
 import HubRoundedIcon from "@mui/icons-material/HubRounded";
 
 import SyncRoundedIcon from "@mui/icons-material/SyncRounded";
+import BoltRoundedIcon from "@mui/icons-material/BoltRounded";
 
 const menus = [
 
@@ -50,6 +51,12 @@ const menus = [
     label: "RTG Dashboard",
     path: "/rtg-dashboard",
     icon: <InsightsRoundedIcon />
+  },
+
+  {
+    label: "Frequency Report",
+    path: "/frequency-report",
+    icon: <BoltRoundedIcon />,
   },
 
   {

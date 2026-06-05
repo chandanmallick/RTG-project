@@ -365,8 +365,23 @@ async def update_map_table(
                     "scada_key":
                         row.get("scada_key", ""),
 
+                    "scada_header":
+                        row.get("scada_header", ""),
+
                     "outage_key":
-                        row.get("outage_key", "")
+                        row.get("outage_key", ""),
+
+                    "schedule_source":
+                        row.get("schedule_source", "RTG"),
+
+                    "dc_source":
+                        row.get("dc_source", "RTG"),
+
+                    "wbes_acronym":
+                        row.get("wbes_acronym", ""),
+
+                    "rtg_plant_id":
+                        row.get("rtg_plant_id", "")
                 }
             }
         )

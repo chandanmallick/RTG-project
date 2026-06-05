@@ -38,6 +38,7 @@ import API from "../services/api";
 
 // LAYOUT
 import AppShell from "../components/layout/AppShell";
+import VoltageProfileMap from "../components/VoltageProfileMap";
 
 // Donut chart color palette - vibrant, modern, premium
 const DONUT_COLORS = [
@@ -338,8 +339,6 @@ export default function PSPDashboard() {
   const [powerPositionLoading, setPowerPositionLoading] = useState(true);
   const [voltageData, setVoltageData] = useState(null);
   const [voltageLoading, setVoltageLoading] = useState(true);
-  const [selectedSubstation, setSelectedSubstation] = useState(null);
-  const [voltageFilter, setVoltageFilter] = useState("all");
 
   const onPieEnter = useCallback((_, index) => {
     setActivePieIndex(index);
@@ -471,7 +470,6 @@ export default function PSPDashboard() {
   const loadVoltageProfile = async (dateStr) => {
     try {
       setVoltageLoading(true);
-      setSelectedSubstation(null);
       let res = await API.getPspVoltageProfile(dateStr);
       // If latest doc has no voltage arrays (e.g. today's PSP not yet ingested),
       // fall back to yesterday's data automatically
@@ -785,6 +783,13 @@ export default function PSPDashboard() {
               </div>
             </>
           )}
+        </div>
+
+        {/* VOLTAGE PROFILE COMPACT TILE ROW */}
+        <div className="row g-4 mb-4">
+          <div className="col-12 col-md-4">
+            <VoltageProfileMap voltageData={voltageData} voltageLoading={voltageLoading} />
+          </div>
         </div>
 
         {/* ANALYTICS CHARTS SECTION */}
@@ -1208,56 +1213,56 @@ export default function PSPDashboard() {
                             viewMode === "current"
                               ? (portfolioData?.data || []).map(item => ({
                                   state: item.state,
-                                  thermal: -Math.abs(item.internal_gen.thermal || 0),
-                                  hydro: -Math.abs(item.internal_gen.hydro || 0),
-                                  solar: -Math.abs(item.internal_gen.solar || 0),
-                                  biogas: -Math.abs(item.internal_gen.biogas || 0),
-                                  nuclear: -Math.abs(item.internal_gen.nuclear || 0),
-                                  isgs: Math.abs(item.portfolio.isgs || 0),
-                                  gna: Math.abs(item.portfolio.gna || 0),
-                                  tgna: Math.abs(item.portfolio.tgna || 0),
-                                  idam: Math.abs(item.portfolio.idam || 0),
-                                  rtm: Math.abs(item.portfolio.rtm || 0),
-                                  dsm: Math.abs(item.portfolio.dsm || 0),
-                                  absThermal: item.internal_gen.thermal,
-                                  absHydro: item.internal_gen.hydro,
-                                  absSolar: item.internal_gen.solar,
-                                  absBiogas: item.internal_gen.biogas,
-                                  absNuclear: item.internal_gen.nuclear,
-                                  absIsgs: item.portfolio.isgs,
-                                  absGna: item.portfolio.gna,
-                                  absTgna: item.portfolio.tgna,
-                                  absIdam: item.portfolio.idam,
-                                  absRtm: item.portfolio.rtm,
-                                  absDsm: item.portfolio.dsm,
+                                  thermal: -Math.abs(item.internal_gen?.thermal || 0),
+                                  hydro: -Math.abs(item.internal_gen?.hydro || 0),
+                                  solar: -Math.abs(item.internal_gen?.solar || 0),
+                                  biogas: -Math.abs(item.internal_gen?.biogas || 0),
+                                  nuclear: -Math.abs(item.internal_gen?.nuclear || 0),
+                                  isgs: Math.abs(item.portfolio?.isgs || 0),
+                                  gna: Math.abs(item.portfolio?.gna || 0),
+                                  tgna: Math.abs(item.portfolio?.tgna || 0),
+                                  idam: Math.abs(item.portfolio?.idam || 0),
+                                  rtm: Math.abs(item.portfolio?.rtm || 0),
+                                  dsm: Math.abs(item.portfolio?.dsm || 0),
+                                  absThermal: item.internal_gen?.thermal,
+                                  absHydro: item.internal_gen?.hydro,
+                                  absSolar: item.internal_gen?.solar,
+                                  absBiogas: item.internal_gen?.biogas,
+                                  absNuclear: item.internal_gen?.nuclear,
+                                  absIsgs: item.portfolio?.isgs,
+                                  absGna: item.portfolio?.gna,
+                                  absTgna: item.portfolio?.tgna,
+                                  absIdam: item.portfolio?.idam,
+                                  absRtm: item.portfolio?.rtm,
+                                  absDsm: item.portfolio?.dsm,
                                   maxDemand: item.max_demand,
                                   time: item.time,
                                   loadshed: item.loadshed
                                 }))
                               : (highestRecords.filter(r => r.state !== "ER") || []).map(item => ({
                                   state: item.state,
-                                  thermal: -Math.abs(item.portfolio.thermal || 0),
-                                  hydro: -Math.abs(item.portfolio.hydro || 0),
-                                  solar: -Math.abs(item.portfolio.solar || 0),
-                                  biogas: -Math.abs(item.portfolio.biogas || 0),
-                                  nuclear: -Math.abs(item.portfolio.nuclear || 0),
-                                  isgs: Math.abs(item.portfolio.isgs || 0),
-                                  gna: Math.abs(item.portfolio.gna || 0),
-                                  tgna: Math.abs(item.portfolio.tgna || 0),
-                                  idam: Math.abs(item.portfolio.idam || 0),
-                                  rtm: Math.abs(item.portfolio.rtm || 0),
-                                  dsm: Math.abs(item.portfolio.dsm || 0),
-                                  absThermal: item.portfolio.thermal,
-                                  absHydro: item.portfolio.hydro,
-                                  absSolar: item.portfolio.solar,
-                                  absBiogas: item.portfolio.biogas,
-                                  absNuclear: item.portfolio.nuclear,
-                                  absIsgs: item.portfolio.isgs,
-                                  absGna: item.portfolio.gna,
-                                  absTgna: item.portfolio.tgna,
-                                  absIdam: item.portfolio.idam,
-                                  absRtm: item.portfolio.rtm,
-                                  absDsm: item.portfolio.dsm,
+                                  thermal: -Math.abs(item.portfolio?.thermal || 0),
+                                  hydro: -Math.abs(item.portfolio?.hydro || 0),
+                                  solar: -Math.abs(item.portfolio?.solar || 0),
+                                  biogas: -Math.abs(item.portfolio?.biogas || 0),
+                                  nuclear: -Math.abs(item.portfolio?.nuclear || 0),
+                                  isgs: Math.abs(item.portfolio?.isgs || 0),
+                                  gna: Math.abs(item.portfolio?.gna || 0),
+                                  tgna: Math.abs(item.portfolio?.tgna || 0),
+                                  idam: Math.abs(item.portfolio?.idam || 0),
+                                  rtm: Math.abs(item.portfolio?.rtm || 0),
+                                  dsm: Math.abs(item.portfolio?.dsm || 0),
+                                  absThermal: item.portfolio?.thermal,
+                                  absHydro: item.portfolio?.hydro,
+                                  absSolar: item.portfolio?.solar,
+                                  absBiogas: item.portfolio?.biogas,
+                                  absNuclear: item.portfolio?.nuclear,
+                                  absIsgs: item.portfolio?.isgs,
+                                  absGna: item.portfolio?.gna,
+                                  absTgna: item.portfolio?.tgna,
+                                  absIdam: item.portfolio?.idam,
+                                  absRtm: item.portfolio?.rtm,
+                                  absDsm: item.portfolio?.dsm,
                                   maxDemand: item.max_demand,
                                   time: item.max_demand_time,
                                   loadshed: item.loadshed || 0.0,
@@ -1554,288 +1559,6 @@ export default function PSPDashboard() {
           `}</style>
           </>
         )}
-
-        {/* VOLTAGE PROFILE MAP SECTION */}
-        <div className="row g-4 mb-4">
-          <div className="col-12">
-            <div className="theme-glass-card p-4">
-              {/* Header */}
-              <div className="d-flex align-items-center justify-content-between mb-3 flex-wrap gap-2">
-                <div className="text-start">
-                  <h3 className="h6 fw-bold mb-0 text-dark d-flex align-items-center gap-2">
-                    <Zap size={16} className="text-warning" />
-                    <span>Eastern Region — Voltage Profile</span>
-                  </h3>
-                  <p className="small text-muted mb-0" style={{ fontSize: "0.72rem" }}>
-                    {voltageData?.date
-                      ? `Data for: ${voltageData.date} — Click any substation for detailed breakdown`
-                      : "Substation voltage deviation index & min/max for the day"}
-                  </p>
-                </div>
-                <div className="d-flex align-items-center gap-2 flex-wrap">
-                  {/* Filter by level */}
-                  <select
-                    className="form-select form-select-sm theme-input py-1"
-                    style={{ fontSize: "0.73rem", minWidth: "130px", borderRadius: "8px" }}
-                    value={voltageFilter}
-                    onChange={(e) => { setVoltageFilter(e.target.value); setSelectedSubstation(null); }}
-                  >
-                    <option value="all">All Levels</option>
-                    <option value="400kV">400 kV Only</option>
-                    <option value="765kV">765 kV Only</option>
-                  </select>
-                  {/* Legend */}
-                  <div className="d-flex align-items-center gap-2">
-                    {[
-                      { label: "Normal", color: "#10B981" },
-                      { label: "High", color: "#F59E0B" },
-                      { label: "Low", color: "#EF4444" },
-                      { label: "Offline", color: "#94A3B8" }
-                    ].map(l => (
-                      <span key={l.label} className="d-flex align-items-center gap-1" style={{ fontSize: "0.7rem", color: "#374151", fontWeight: 600 }}>
-                        <span className="rounded-circle d-inline-block" style={{ width: "8px", height: "8px", backgroundColor: l.color }} />
-                        {l.label}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              </div>
-
-              {voltageLoading ? (
-                <div className="d-flex align-items-center justify-content-center" style={{ height: "200px" }}>
-                  <div className="spinner-border text-warning spinner-border-sm me-2" role="status" />
-                  <span className="text-secondary small">Loading Voltage Data…</span>
-                </div>
-              ) : !voltageData?.has_data ? (
-                <div className="d-flex flex-column align-items-center justify-content-center text-center" style={{ height: "200px" }}>
-                  <Info size={32} className="text-secondary mb-2 opacity-50" />
-                  <p className="text-muted small mb-0">No voltage profile data available.</p>
-                </div>
-              ) : (() => {
-                const all400 = voltageData.kv400 || [];
-                const all765 = voltageData.kv765 || [];
-                const visibleStations = [
-                  ...(voltageFilter !== "765kV" ? all400 : []),
-                  ...(voltageFilter !== "400kV" ? all765 : [])
-                ];
-
-                const STATUS_COLOR = {
-                  normal: { bg: "#D1FAE5", border: "#10B981", text: "#065F46", dot: "#10B981" },
-                  high:   { bg: "#FEF3C7", border: "#F59E0B", text: "#92400E", dot: "#F59E0B" },
-                  low:    { bg: "#FEE2E2", border: "#EF4444", text: "#991B1B", dot: "#EF4444" },
-                  offline:{ bg: "#F1F5F9", border: "#94A3B8", text: "#475569", dot: "#94A3B8" }
-                };
-
-                // Summary counts
-                const summary = { normal: 0, high: 0, low: 0, offline: 0 };
-                visibleStations.forEach(s => { summary[s.status] = (summary[s.status] || 0) + 1; });
-                const avgDevIndex = visibleStations.length > 0
-                  ? (visibleStations.reduce((a, s) => a + (s.deviation_index || 0), 0) / visibleStations.length).toFixed(1)
-                  : "—";
-
-                return (
-                  <div>
-                    {/* Summary strip */}
-                    <div className="row g-2 mb-3">
-                      {[
-                        { key: "normal", label: "Normal", icon: "✓" },
-                        { key: "high", label: "High Voltage", icon: "▲" },
-                        { key: "low", label: "Low Voltage", icon: "▼" },
-                        { key: "offline", label: "Offline/No Data", icon: "–" }
-                      ].map(s => (
-                        <div className="col-6 col-sm-3" key={s.key}>
-                          <div
-                            className="p-2 rounded-3 text-center"
-                            style={{
-                              background: STATUS_COLOR[s.key].bg,
-                              border: `1px solid ${STATUS_COLOR[s.key].border}`,
-                              cursor: "pointer"
-                            }}
-                            onClick={() => setVoltageFilter(prev => prev)}
-                          >
-                            <div className="fw-bold" style={{ fontSize: "1.4rem", color: STATUS_COLOR[s.key].dot }}>
-                              {summary[s.key] || 0}
-                            </div>
-                            <div style={{ fontSize: "0.68rem", color: STATUS_COLOR[s.key].text, fontWeight: 600 }}>
-                              {s.icon} {s.label}
-                            </div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-
-                    {/* Station grid */}
-                    <div
-                      className="row g-2 theme-scrollbar"
-                      style={{ maxHeight: "420px", overflowY: "auto" }}
-                    >
-                      {visibleStations.map((station) => {
-                        const sc = STATUS_COLOR[station.status] || STATUS_COLOR.normal;
-                        const isSelected = selectedSubstation?.station_key === station.station_key;
-                        return (
-                          <div className="col-12 col-sm-6 col-lg-4 col-xl-3" key={station.station_key}>
-                            <div
-                              className="p-2 rounded-3 h-100 d-flex flex-column justify-content-between"
-                              style={{
-                                background: isSelected ? sc.dot + "22" : sc.bg,
-                                border: `1.5px solid ${isSelected ? sc.dot : sc.border}`,
-                                cursor: "pointer",
-                                transition: "all 0.18s",
-                                boxShadow: isSelected ? `0 0 0 2px ${sc.dot}55` : "none"
-                              }}
-                              onClick={() => setSelectedSubstation(isSelected ? null : station)}
-                            >
-                              <div className="d-flex align-items-start justify-content-between gap-1">
-                                <div className="flex-grow-1">
-                                  <div className="fw-bold text-dark" style={{ fontSize: "0.72rem", lineHeight: 1.3 }}>
-                                    {station.name}
-                                  </div>
-                                  <div className="d-flex align-items-center gap-1 mt-1">
-                                    <span
-                                      className="badge rounded-pill fw-bold"
-                                      style={{
-                                        fontSize: "0.6rem",
-                                        backgroundColor: sc.bg,
-                                        color: sc.text,
-                                        border: `1px solid ${sc.border}`,
-                                        padding: "2px 6px"
-                                      }}
-                                    >
-                                      {station.level}
-                                    </span>
-                                    <span
-                                      className="badge rounded-pill fw-semibold"
-                                      style={{
-                                        fontSize: "0.6rem",
-                                        backgroundColor: sc.dot,
-                                        color: "#fff",
-                                        padding: "2px 7px",
-                                        textTransform: "capitalize"
-                                      }}
-                                    >
-                                      {station.status}
-                                    </span>
-                                  </div>
-                                </div>
-                                <div className="text-end flex-shrink-0">
-                                  <div style={{ fontSize: "0.8rem", fontWeight: 700, color: sc.text }}>
-                                    {station.deviation_index?.toFixed(0)}%
-                                  </div>
-                                  <div style={{ fontSize: "0.6rem", color: "#6B7280" }}>Dev.Idx</div>
-                                </div>
-                              </div>
-                              <div className="d-flex justify-content-between mt-1" style={{ fontSize: "0.65rem", color: "#374151" }}>
-                                <span>
-                                  <span className="text-danger fw-semibold">↓{station.min_voltage}kV</span>
-                                  <span className="text-muted"> {station.min_time}</span>
-                                </span>
-                                <span>
-                                  <span className="text-warning fw-semibold">↑{station.max_voltage}kV</span>
-                                  <span className="text-muted"> {station.max_time}</span>
-                                </span>
-                              </div>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-
-                    {/* Detail popup for selected substation */}
-                    {selectedSubstation && (() => {
-                      const st = selectedSubstation;
-                      const sc = STATUS_COLOR[st.status] || STATUS_COLOR.normal;
-                      const bands = [
-                        { label: st.volt1, value: st.volt1_value },
-                        { label: st.volt2, value: st.volt2_value },
-                        { label: st.volt3, value: st.volt3_value },
-                        ...(st.volt4 ? [{ label: st.volt4, value: st.volt4_value }] : [])
-                      ].filter(b => b.label && b.label !== "null");
-                      return (
-                        <div
-                          className="mt-3 p-3 rounded-4"
-                          style={{
-                            background: "linear-gradient(135deg, #ffffff 0%, #f9fafb 100%)",
-                            border: `2px solid ${sc.border}`,
-                            boxShadow: `0 4px 24px ${sc.dot}22`
-                          }}
-                        >
-                          <div className="d-flex align-items-start justify-content-between gap-2 mb-3">
-                            <div>
-                              <h6 className="fw-bold mb-0 text-dark" style={{ fontSize: "0.88rem" }}>
-                                {st.name}
-                              </h6>
-                              <span className="badge rounded-pill fw-semibold mt-1" style={{ fontSize: "0.65rem", backgroundColor: sc.dot, color: "#fff" }}>
-                                {st.level} · {st.status.toUpperCase()}
-                              </span>
-                            </div>
-                            <button
-                              className="btn btn-sm"
-                              style={{ fontSize: "0.7rem", padding: "2px 10px", background: "#f1f5f9", borderRadius: "8px" }}
-                              onClick={() => setSelectedSubstation(null)}
-                            >
-                              ✕ Close
-                            </button>
-                          </div>
-
-                          {/* Min/Max row */}
-                          <div className="row g-2 mb-3">
-                            <div className="col-6">
-                              <div className="p-2 rounded-3 text-center" style={{ background: "#FEE2E2", border: "1px solid #EF4444" }}>
-                                <div className="fw-bold" style={{ fontSize: "1.1rem", color: "#991B1B" }}>{st.min_voltage} kV</div>
-                                <div style={{ fontSize: "0.65rem", color: "#991B1B" }}>Min Voltage at {st.min_time}</div>
-                              </div>
-                            </div>
-                            <div className="col-6">
-                              <div className="p-2 rounded-3 text-center" style={{ background: "#FEF3C7", border: "1px solid #F59E0B" }}>
-                                <div className="fw-bold" style={{ fontSize: "1.1rem", color: "#92400E" }}>{st.max_voltage} kV</div>
-                                <div style={{ fontSize: "0.65rem", color: "#92400E" }}>Max Voltage at {st.max_time}</div>
-                              </div>
-                            </div>
-                          </div>
-
-                          {/* Voltage band % time */}
-                          <div className="mb-2">
-                            <div className="fw-bold mb-1" style={{ fontSize: "0.72rem", color: "#374151" }}>Time in Voltage Bands (% of day)</div>
-                            {bands.map((b, i) => (
-                              <div key={i} className="mb-1">
-                                <div className="d-flex justify-content-between mb-1" style={{ fontSize: "0.68rem" }}>
-                                  <span className="text-muted">{b.label}</span>
-                                  <span className="fw-bold text-dark">{b.value?.toFixed(1) ?? 0}%</span>
-                                </div>
-                                <div className="rounded" style={{ height: "6px", background: "#E5E7EB", overflow: "hidden" }}>
-                                  <div
-                                    className="rounded"
-                                    style={{
-                                      height: "100%",
-                                      width: `${Math.min(b.value ?? 0, 100)}%`,
-                                      background: i === 0 ? "#EF4444" : i === 1 ? "#10B981" : i === 2 ? "#F59E0B" : "#6366F1",
-                                      transition: "width 0.5s ease"
-                                    }}
-                                  />
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-
-                          {/* Deviation Index */}
-                          <div className="d-flex align-items-center justify-content-between p-2 rounded-3 mt-2"
-                            style={{ background: sc.bg, border: `1px solid ${sc.border}` }}>
-                            <span style={{ fontSize: "0.72rem", color: sc.text, fontWeight: 700 }}>
-                              Voltage Dev. Index
-                            </span>
-                            <span style={{ fontSize: "1rem", fontWeight: 800, color: sc.dot }}>
-                              {st.deviation_index?.toFixed(1)}%
-                            </span>
-                          </div>
-                        </div>
-                      );
-                    })()}
-                  </div>
-                );
-              })()}
-            </div>
-          </div>
-        </div>
 
         {/* ENERGY CONSUMPTION DETAILS POPUP MODAL */}
         {energyModalOpen && (

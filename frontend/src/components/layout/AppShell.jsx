@@ -5,10 +5,9 @@ export default function AppShell({ children }) {
   return (
     <Box
       sx={{
-        height: "100vh",
+        minHeight: "100vh",
         boxSizing: "border-box",
         background: "#F4F6F8",
-        overflow: "hidden",
         p: 2.5,
         position: "relative",
         display: "flex",
@@ -22,18 +21,9 @@ export default function AppShell({ children }) {
       {/* Main Content Area */}
       <Box
         sx={{
-          flex: 1,
-          overflow: "auto",
           display: "flex",
           flexDirection: "column",
-          "&::-webkit-scrollbar": {
-            width: 8,
-            height: 8,
-          },
-          "&::-webkit-scrollbar-thumb": {
-            background: "#CBD5E1",
-            borderRadius: 999,
-          },
+          gap: 2.5,
         }}
       >
         {children}

@@ -238,6 +238,91 @@ const API = {
     return res.data;
   },
 
+  // =========================================
+  // FREQUENCY REPORT
+  // =========================================
+
+  getFrequencyPlantMapping: async () => {
+    const res = await axios.get(`${BASE_URL}/frequency/plant-mapping`);
+    return res.data;
+  },
+
+  getFrequencyReportData: async (date) => {
+    const res = await axios.get(`${BASE_URL}/frequency/report-data?date=${date}`);
+    return res.data;
+  },
+
+  uploadScadaFile: async (file) => {
+    const form = new FormData();
+    form.append("file", file);
+    const res = await axios.post(`${BASE_URL}/frequency/upload-scada`, form, {
+      headers: { "Content-Type": "multipart/form-data" }
+    });
+    return res.data;
+  },
+
+  saveFrequencyPlantMapping: async (payload) => {
+    const res = await axios.put(`${BASE_URL}/frequency/plant-mapping`, payload, {
+      headers: { "Content-Type": "application/json" }
+    });
+    return res.data;
+  },
+
+  exportFrequencyExcel: async (payload) => {
+    const res = await axios.post(`${BASE_URL}/frequency/export-excel`, payload, {
+      headers: { "Content-Type": "application/json" },
+      responseType: "blob"
+    });
+    return res.data;
+  },
+
+  checkRtgStatus: async (startTime, endTime) => {
+    const res = await axios.get(`${BASE_URL}/frequency/check-rtg-status`, {
+      params: {
+        start_time: startTime,
+        end_time: endTime,
+        _t: Date.now()
+      }
+    });
+    return res.data;
+  },
+
+  processFrequencyReport: async (startTime, endTime, entities, file) => {
+    const form = new FormData();
+    form.append("start_time", startTime);
+    form.append("end_time", endTime);
+    form.append("entities", JSON.stringify(entities));
+    form.append("file", file);
+    const res = await axios.post(`${BASE_URL}/frequency/process-report`, form, {
+      headers: { "Content-Type": "multipart/form-data" }
+    });
+    return res.data;
+  },
+
+  downloadFrequencyDocx: async (payload) => {
+    const res = await axios.post(`${BASE_URL}/frequency/download-docx`, payload, {
+      headers: { "Content-Type": "application/json" },
+      responseType: "blob"
+    });
+    return res.data;
+  },
+
+  downloadFrequencyPdf: async (payload) => {
+    const res = await axios.post(`${BASE_URL}/frequency/download-pdf`, payload, {
+      headers: { "Content-Type": "application/json" },
+      responseType: "blob"
+    });
+    return res.data;
+  },
+
+  downloadFrequencyExcel: async (payload) => {
+    const res = await axios.post(`${BASE_URL}/frequency/download-excel`, payload, {
+      headers: { "Content-Type": "application/json" },
+      responseType: "blob"
+    });
+    return res.data;
+  },
+
 };
 
 export default API;

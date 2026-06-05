@@ -45,10 +45,23 @@ export default function TopNavbar() {
     setPspAnchorEl(null);
   };
 
+  // Menu states for the Report dropdown
+  const [reportAnchorEl, setReportAnchorEl] = useState(null);
+  const reportOpen = Boolean(reportAnchorEl);
+
+  const handleOpenReportMenu = (event) => {
+    setReportAnchorEl(event.currentTarget);
+  };
+
+  const handleCloseReportMenu = () => {
+    setReportAnchorEl(null);
+  };
+
   const handleNavigate = (path) => {
     navigate(path);
     handleCloseMenu();
     handleClosePspMenu();
+    handleCloseReportMenu();
   };
 
   // Determine if RTG tab is active
@@ -60,6 +73,10 @@ export default function TopNavbar() {
   const isPSPActive =
     location.pathname === "/psp-dashboard" ||
     location.pathname === "/psp-admin";
+
+  // Determine if Report tab is active
+  const isReportActive =
+    location.pathname === "/frequency-report";
 
   return (
     <Box
@@ -286,6 +303,72 @@ export default function TopNavbar() {
             }}
           >
             PSP Admin
+          </MenuItem>
+        </Menu>
+
+        {/* Report Dropdown pill */}
+        <Button
+          onClick={handleOpenReportMenu}
+          endIcon={
+            <KeyboardArrowDownRoundedIcon
+              sx={{
+                color: isReportActive ? "#FFF" : "#475569",
+                transition: "transform 0.2s",
+                transform: reportOpen ? "rotate(180deg)" : "none",
+              }}
+            />
+          }
+          sx={{
+            borderRadius: "999px",
+            textTransform: "none",
+            fontSize: 14,
+            fontWeight: 700,
+            px: 2.5,
+            py: 1,
+            minHeight: 40,
+            backgroundColor: isReportActive ? "#03624C" : "transparent",
+            color: isReportActive ? "#FFFFFF" : "#475569",
+            "&:hover": {
+              backgroundColor: isReportActive ? "#17876D" : "#F3F4F6",
+            },
+          }}
+        >
+          Report
+        </Button>
+
+        <Menu
+          anchorEl={reportAnchorEl}
+          open={reportOpen}
+          onClose={handleCloseReportMenu}
+          disableScrollLock
+          PaperProps={{
+            sx: {
+              mt: 1,
+              borderRadius: "16px",
+              boxShadow: "0 10px 40px rgba(15, 23, 42, 0.08)",
+              border: "1px solid #E2E8F0",
+              minWidth: 180,
+              p: 0.5,
+            },
+          }}
+        >
+          <MenuItem
+            onClick={() => handleNavigate("/frequency-report")}
+            sx={{
+              borderRadius: "10px",
+              py: 1,
+              fontSize: 13.5,
+              fontWeight: 700,
+              color: location.pathname === "/frequency-report" ? "#0F4B2D" : "#334155",
+              backgroundColor:
+                location.pathname === "/frequency-report" ? "#E1F5FF" : "transparent",
+              "&:hover": {
+                backgroundColor:
+                  location.pathname === "/frequency-report" ? "#D2ECFA" : "#F8FAFC",
+              },
+            }}
+          >
+            Frequency enet
           </MenuItem>
         </Menu>
 
