@@ -852,10 +852,45 @@ async def process_report(
                 })
             processed_rows.append(row_data)
             
-        # NOTE: Matplotlib plot_image is intentionally skipped here for performance.
-        # Frontend uses interactive Recharts; plot_image is only generated on-demand
-        # via the /download-pdf and /download-docx endpoints which call generate_plot_base64.
-            
+        # Reshape rows to the frontend-expected schema: series nested, statistics nested
+        for row in processed_rows:
+            is_state = row.get("is_state", False)
+            # Build nested series block
+            row["series"] = {
+                "timestamps": row.pop("series_timestamps", []),
+                "frequency":  row.pop("series_frequency", []),
+                "deviation":  row.pop("series_deviation", []),
+                "schedule":   row.pop("series_schedule", []),
+                "actual":     row.pop("series_actual", []),
+                "dc":         row.pop("series_dc", []),
+            }
+            # Build nested statistics block
+            if is_state:
+                row["statistics"] = {
+                    "max_od":               row.pop("max_od", 0.0),
+                    "max_od_time":          row.pop("max_od_time", ""),
+                    "freq_at_max_od":       row.pop("max_od_freq", 50.0),
+                    "od_duration_pct":      row.pop("over_drawal_pct", 0.0),
+                    "helping_duration_pct": row.pop("under_drawal_pct", 0.0),
+                    "under_inj_pct":        None,
+                    "helping_grid_pct":     None,
+                }
+            else:
+                row["statistics"] = {
+                    "max_od":               None,
+                    "max_od_time":          None,
+                    "freq_at_max_od":       None,
+                    "od_duration_pct":      None,
+                    "helping_duration_pct": None,
+                    "under_inj_pct":        row.pop("under_inj_pct", 0.0),
+                    "helping_grid_pct":     row.pop("helping_grid_pct", 0.0),
+                }
+            # Add entity type
+            row["type"] = "state" if is_state else "generator"
+            row["state"] = row.get("state") or (e.get("state_name") or "")
+            row["fuel"]  = row.get("fuel")  or (e.get("fuel_type") or "")
+            row["owner"] = row.get("owner") or (e.get("owner_name") or "")
+
         return {
             "success": True,
             "rows": processed_rows,
@@ -867,6 +902,7 @@ async def process_report(
         traceback.print_exc()
         return {"success": False, "error": str(e)}
 
+
 # ──────────────────────────────────────────────────────────────
 # EXCEL / PDF / WORD DOWNLOADS
 # ──────────────────────────────────────────────────────────────
@@ -874,85 +910,102 @@ async def process_report(
 @router.post("/download-excel")
 async def download_excel(payload: dict):
     rows = payload.get("rows", [])
-    
     wb = openpyxl.Workbook()
-    # Sheet 1: Generator Summary
-    ws_gen = wb.active
-    ws_gen.title = "Generator Summary"
-    
-    HDR_FILL = PatternFill("solid", fgColor="0F172A")
-    HDR_FONT = Font(color="FFFFFF", bold=True, size=10)
-    TITLE_FONT = Font(bold=True, size=12, color="0F172A")
+
+    HDR_FILL   = PatternFill("solid", fgColor="0F172A")
+    HDR_FONT   = Font(color="FFFFFF", bold=True, size=10)
+    TITLE_FONT = Font(bold=True, size=13, color="0F172A")
     center = Alignment(horizontal="center", vertical="center")
     thin = Border(
-        left=Side(style="thin", color="CCCCCC"),
-        right=Side(style="thin", color="CCCCCC"),
-        top=Side(style="thin", color="CCCCCC"),
-        bottom=Side(style="thin", color="CCCCCC"),
+        left=Side(style="thin", color="CCCCCC"), right=Side(style="thin", color="CCCCCC"),
+        top=Side(style="thin", color="CCCCCC"),  bottom=Side(style="thin", color="CCCCCC"),
     )
-    
-    ws_gen.cell(row=1, column=1, value="Generator Deviation Analysis Summary").font = TITLE_FONT
-    ws_gen.row_dimensions[1].height = 25
-    ws_gen.row_dimensions[3].height = 20
-    
-    gen_headers = ["Generator Name", "% Duration (Freq < 49.9 & Dev < 0) [Under Injection]", "% Duration (Freq < 49.9 & Dev > 0) [Helping Grid]"]
-    for ci, h in enumerate(gen_headers, 1):
-        c = ws_gen.cell(row=3, column=ci, value=h)
-        c.fill = HDR_FILL
-        c.font = HDR_FONT
-        c.alignment = center
-        c.border = thin
-        
-    gen_row_idx = 4
-    for r in rows:
-        if not r.get("is_state"):
-            ws_gen.cell(row=gen_row_idx, column=1, value=r.get("plant_name")).border = thin
-            ws_gen.cell(row=gen_row_idx, column=2, value=r.get("under_inj_pct")).border = thin
-            ws_gen.cell(row=gen_row_idx, column=3, value=r.get("helping_grid_pct")).border = thin
-            gen_row_idx += 1
-            
-    # Sheet 2: State Summary
+
+    # ── Sheet 1: Executive Summary ──────────────────────────────
+    ws_exec = wb.active
+    ws_exec.title = "Executive Summary"
+    ws_exec.cell(row=1, column=1, value="Frequency Deviation Compliance Report").font = TITLE_FONT
+    ws_exec.cell(row=2, column=1, value=payload.get("executive_summary", ""))
+    ws_exec.cell(row=4, column=1, value=f"Period: {payload.get('start_time','')} to {payload.get('end_time','')}").font = Font(italic=True)
+
+    # ── Sheet 2: State Summary ──────────────────────────────────
     ws_state = wb.create_sheet(title="State Summary")
-    ws_state.cell(row=1, column=1, value="State Deviation Analysis Summary").font = TITLE_FONT
+    ws_state.cell(row=1, column=1, value="State Drawal Compliance Summary").font = TITLE_FONT
     ws_state.row_dimensions[1].height = 25
     ws_state.row_dimensions[3].height = 20
-    
     state_headers = [
-        "State Name", "Max OD (MW)", "Time of Max OD", "Frequency at Max OD (Hz)", 
-        "% Duration (Freq < 49.9 & Dev > 0) [Over Drawal]", "% Duration (Freq < 49.9 & Dev < 0) [Helping Grid]"
+        "State Name", "Schedule Source", "DC (MW)", "Schedule (MW)", "Actual (MW)",
+        "Deviation (MW)", "% DC", "Max OD (MW)", "Time of Max OD",
+        "Freq at Max OD (Hz)", "OD Duration %", "Helping Grid %", "Reason"
     ]
     for ci, h in enumerate(state_headers, 1):
         c = ws_state.cell(row=3, column=ci, value=h)
-        c.fill = HDR_FILL
-        c.font = HDR_FONT
-        c.alignment = center
-        c.border = thin
-        
+        c.fill = HDR_FILL; c.font = HDR_FONT; c.alignment = center; c.border = thin
     state_row_idx = 4
     for r in rows:
         if r.get("is_state"):
-            ws_state.cell(row=state_row_idx, column=1, value=r.get("plant_name")).border = thin
-            ws_state.cell(row=state_row_idx, column=2, value=r.get("max_od")).border = thin
-            ws_state.cell(row=state_row_idx, column=3, value=r.get("max_od_time")).border = thin
-            ws_state.cell(row=state_row_idx, column=4, value=r.get("max_od_freq")).border = thin
-            ws_state.cell(row=state_row_idx, column=5, value=r.get("over_drawal_pct")).border = thin
-            ws_state.cell(row=state_row_idx, column=6, value=r.get("under_drawal_pct")).border = thin
+            stats = r.get("statistics", {})
+            ws_state.cell(state_row_idx, 1,  r.get("plant_name", "")).border = thin
+            ws_state.cell(state_row_idx, 2,  r.get("sched_src", "")).border = thin
+            ws_state.cell(state_row_idx, 3,  round(r.get("dc", 0) or 0, 2)).border = thin
+            ws_state.cell(state_row_idx, 4,  round(r.get("schedule", 0) or 0, 2)).border = thin
+            ws_state.cell(state_row_idx, 5,  round(r.get("actual", 0) or 0, 2)).border = thin
+            ws_state.cell(state_row_idx, 6,  round(r.get("deviation", 0) or 0, 2)).border = thin
+            ws_state.cell(state_row_idx, 7,  round(r.get("pct_dc", 0) or 0, 2)).border = thin
+            ws_state.cell(state_row_idx, 8,  round(stats.get("max_od", 0) or 0, 2)).border = thin
+            ws_state.cell(state_row_idx, 9,  stats.get("max_od_time", "")).border = thin
+            ws_state.cell(state_row_idx, 10, round(stats.get("freq_at_max_od", 50) or 50, 3)).border = thin
+            ws_state.cell(state_row_idx, 11, round(stats.get("od_duration_pct", 0) or 0, 2)).border = thin
+            ws_state.cell(state_row_idx, 12, round(stats.get("helping_duration_pct", 0) or 0, 2)).border = thin
+            ws_state.cell(state_row_idx, 13, r.get("reason", "")).border = thin
             state_row_idx += 1
-            
-    for ws in [ws_gen, ws_state]:
+
+    # ── Sheet 3: Generator Summary ──────────────────────────────
+    ws_gen = wb.create_sheet(title="Generator Summary")
+    ws_gen.cell(row=1, column=1, value="Generator Deviation Compliance Summary").font = TITLE_FONT
+    ws_gen.row_dimensions[1].height = 25
+    ws_gen.row_dimensions[3].height = 20
+    gen_headers = [
+        "Plant Name", "State", "Fuel", "Schedule Source", "DC (MW)", "Schedule (MW)",
+        "Actual (MW)", "Deviation (MW)", "% DC",
+        "Under Injection % (Freq<49.9)", "Helping Grid % (Freq<49.9)", "Reason"
+    ]
+    for ci, h in enumerate(gen_headers, 1):
+        c = ws_gen.cell(row=3, column=ci, value=h)
+        c.fill = HDR_FILL; c.font = HDR_FONT; c.alignment = center; c.border = thin
+    gen_row_idx = 4
+    for r in rows:
+        if not r.get("is_state"):
+            stats = r.get("statistics", {})
+            ws_gen.cell(gen_row_idx, 1,  r.get("plant_name", "")).border = thin
+            ws_gen.cell(gen_row_idx, 2,  r.get("state", "")).border = thin
+            ws_gen.cell(gen_row_idx, 3,  r.get("fuel", "")).border = thin
+            ws_gen.cell(gen_row_idx, 4,  r.get("sched_src", "")).border = thin
+            ws_gen.cell(gen_row_idx, 5,  round(r.get("dc", 0) or 0, 2)).border = thin
+            ws_gen.cell(gen_row_idx, 6,  round(r.get("schedule", 0) or 0, 2)).border = thin
+            ws_gen.cell(gen_row_idx, 7,  round(r.get("actual", 0) or 0, 2)).border = thin
+            ws_gen.cell(gen_row_idx, 8,  round(r.get("deviation", 0) or 0, 2)).border = thin
+            ws_gen.cell(gen_row_idx, 9,  round(r.get("pct_dc", 0) or 0, 2)).border = thin
+            ws_gen.cell(gen_row_idx, 10, round(stats.get("under_inj_pct", 0) or 0, 2)).border = thin
+            ws_gen.cell(gen_row_idx, 11, round(stats.get("helping_grid_pct", 0) or 0, 2)).border = thin
+            ws_gen.cell(gen_row_idx, 12, r.get("reason", "")).border = thin
+            gen_row_idx += 1
+
+    for ws in [ws_exec, ws_state, ws_gen]:
         for col in ws.columns:
-            max_len = max(len(str(cell.value or '')) for cell in col)
-            col_letter = get_column_letter(col[0].column)
-            ws.column_dimensions[col_letter].width = max(max_len + 3, 12)
-            
+            max_len = max((len(str(cell.value or "")) for cell in col), default=10)
+            ws.column_dimensions[get_column_letter(col[0].column)].width = min(max_len + 4, 40)
+
     buf = io.BytesIO()
     wb.save(buf)
     buf.seek(0)
     return StreamingResponse(
         buf,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": "attachment; filename=deviation_summary_report.xlsx"}
+        headers={"Content-Disposition": "attachment; filename=deviation_compliance_report.xlsx"}
     )
+
+
 
 @router.post("/download-pdf")
 async def download_pdf(payload: dict):
