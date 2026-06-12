@@ -381,7 +381,19 @@ async def update_map_table(
                         row.get("wbes_acronym", ""),
 
                     "rtg_plant_id":
-                        row.get("rtg_plant_id", "")
+                        row.get("rtg_plant_id", ""),
+
+                    "scada_schedule_key":
+                        row.get("scada_schedule_key", ""),
+
+                    "scada_dc_key":
+                        row.get("scada_dc_key", ""),
+
+                    "actual_source":
+                        row.get("actual_source", "RTG"),
+
+                    "type":
+                        row.get("type", "IPP")
                 }
             }
         )

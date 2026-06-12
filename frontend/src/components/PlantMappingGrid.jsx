@@ -26,19 +26,60 @@ const READ_COLS = [
 ];
 
 const EDIT_COLS = [
-  { key: "wbes_name",       label: "WBES Name",      w: 150, type: "text" },
-  { key: "wbes_acronym",    label: "WBES Acronym",   w: 120, type: "text" },
-  { key: "rtg_plant_id",    label: "RTG Plant ID",   w: 120, type: "text" },
-  { key: "scada_key",       label: "SCADA Key",      w: 160, type: "text" },
-  { key: "scada_header",    label: "SCADA Header",   w: 160, type: "text" },
-  { key: "schedule_source", label: "Sched. Source",  w: 120, type: "select",
-    options: ["RTG", "WBES", "Manual"] },
-  { key: "dc_source",       label: "DC Source",      w: 110, type: "select",
-    options: ["RTG", "WBES", "Manual"] },
-  { key: "outage_key",      label: "Outage Key",     w: 130, type: "text" },
+  { key: "wbes_name",          label: "WBES Name",       w: 150, type: "text" },
+  { key: "wbes_acronym",       label: "WBES Acronym",    w: 120, type: "text" },
+  { key: "rtg_plant_id",       label: "RTG Plant ID",    w: 120, type: "text" },
+  { key: "scada_key",          label: "SCADA Actual Key", w: 140, type: "text" },
+  { key: "scada_header",       label: "SCADA Actual Name", w: 160, type: "text" },
+  { key: "scada_schedule_key", label: "SCADA Sched Key",  w: 140, type: "text" },
+  { key: "scada_schedule_header", label: "SCADA Sched Name", w: 160, type: "text" },
+  { key: "scada_dc_key",       label: "SCADA DC Key",     w: 140, type: "text" },
+  { key: "scada_dc_header",    label: "SCADA DC Name",    w: 160, type: "text" },
+  { key: "schedule_source",    label: "Sched. Source",   w: 120, type: "select",
+    options: ["RTG", "WBES", "SCADA", "Manual"] },
+  { key: "dc_source",          label: "DC Source",       w: 110, type: "select",
+    options: ["RTG", "WBES", "SCADA", "Manual"] },
+  { key: "actual_source",      label: "Actual Source",   w: 110, type: "select",
+    options: ["RTG", "SCADA"] },
+  { key: "type",               label: "Plant Type",      w: 100, type: "select",
+    options: ["ISGS", "IPP", "State"] },
 ];
 
-const SOURCE_COLOR = { WBES: "#6366F1", RTG: "#10B981", Manual: "#F59E0B" };
+const SOURCE_COLOR = {
+  WBES: "#6366F1",
+  RTG: "#10B981",
+  SCADA: "#8B5CF6",
+  Manual: "#F59E0B",
+  ISGS: "#0EA5E9",
+  IPP: "#EC4899",
+  State: "#F97316"
+};
+
+const SCADA_KEY_FIELDS = new Set([
+  "scada_key",
+  "scada_schedule_key",
+  "scada_dc_key",
+]);
+
+const normalizeScadaKey = (value) => {
+  if (value === null || value === undefined || value === "") return "";
+  const text = String(value).trim().replace(/\.0$/, "");
+  if (/^\d+$/.test(text) && !text.startsWith("0")) return `0${text}`;
+  return text;
+};
+
+const normalizeMappingRow = (row) => {
+  const next = { ...row };
+  SCADA_KEY_FIELDS.forEach((key) => {
+    next[key] = normalizeScadaKey(next[key]);
+  });
+  ["plant_id", "STAGE_ID", "rtg_plant_id"].forEach((key) => {
+    if (next[key] !== null && next[key] !== undefined) {
+      next[key] = String(next[key]).trim().replace(/\.0$/, "");
+    }
+  });
+  return next;
+};
 
 /* ── Styles ──────────────────────────────────────────────── */
 const cell = {
@@ -96,10 +137,13 @@ export default function PlantMappingGrid({
   /* Sync incoming data → local rows with stable id */
   useEffect(() => {
     setRows(
-      data.map((r, i) => ({
-        ...r,
-        _id: r.plant_id + "_" + (r.STAGE_ID || i),
-      }))
+      data.map((r, i) => {
+        const row = normalizeMappingRow(r);
+        return {
+          ...row,
+          _id: row.plant_id + "_" + (row.STAGE_ID || i),
+        };
+      })
     );
     setDirtyIds(new Set());
     setSavedIds(new Set());
@@ -335,7 +379,13 @@ export default function PlantMappingGrid({
 
         <div style={{ marginLeft: "auto", display: "flex", gap: "8px" }}>
           <button
-            onClick={() => { setRows(data.map((r,i) => ({...r, _id: r.plant_id+"_"+(r.STAGE_ID||i)}))); setDirtyIds(new Set()); }}
+            onClick={() => {
+              setRows(data.map((r, i) => {
+                const row = normalizeMappingRow(r);
+                return { ...row, _id: row.plant_id + "_" + (row.STAGE_ID || i) };
+              }));
+              setDirtyIds(new Set());
+            }}
             disabled={dirtyIds.size === 0}
             style={{
               display: "flex", alignItems: "center", gap: "5px",

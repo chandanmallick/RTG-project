@@ -107,8 +107,8 @@ export default function DatabaseSync() {
       showModernPopup({
         type: "success",
         title: "Database Sync",
-        subtitle:
-          "Latest Changes Loaded",
+        subtitle: "Latest Changes Loaded",
+        description: `Loaded ${res?.changes?.length || 0} unit-level changes from the live RTG portal pipeline.`,
       });
     } catch (err) {
       console.error(err);
@@ -117,6 +117,7 @@ export default function DatabaseSync() {
         type: "error",
         title: "Fetch Failed",
         subtitle: "Unable To Fetch",
+        description: `Error details: ${err.response?.data?.message || err.message || "Failed to load live data updates."}`,
       });
     } finally {
       setLoading(false);
@@ -157,8 +158,8 @@ export default function DatabaseSync() {
         showModernPopup({
           type: "info",
           title: "No Selection",
-          subtitle:
-            "Please Select Records",
+          subtitle: "Please Select Records",
+          description: "Select one or more detected unit modifications from the grid list below to apply changes.",
         });
 
         return;
@@ -180,8 +181,8 @@ export default function DatabaseSync() {
         showModernPopup({
           type: "success",
           title: "Database Updated",
-          subtitle:
-            "Records Successfully Synced",
+          subtitle: "Records Successfully Synced",
+          description: `Committed ${selectedRows.length} unit records to MongoDB database.\nResult: ${res.result?.message || "Upsert completed"}.\nProcessed: ${res.result?.records_processed || selectedRows.length} records.`,
         });
 
         // REMOVE COMMITTED ROWS
@@ -210,6 +211,7 @@ export default function DatabaseSync() {
         type: "error",
         title: "Commit Failed",
         subtitle: "Unable To Save",
+        description: `Error details: ${err.response?.data?.message || err.message || "Failed to save selected unit sync rows."}`,
       });
     } finally {
       setLoading(false);
@@ -235,18 +237,25 @@ export default function DatabaseSync() {
           showModernPopup({
             type: "info",
             title: "Station Mapping",
-            subtitle:
-              "No New Changes",
+            subtitle: "No New Changes",
+            description: "Station mapping collections are currently up-to-date with active MongoDB unit data.",
           });
         } else {
           showModernPopup({
             type: "success",
             title: "Mapping Compare",
             subtitle: `${rows.length} Changes Found`,
+            description: `Detected ${rows.length} new stage structural changes between unit collections and station maps.`,
           });
         }
       } catch (err) {
         console.error(err);
+        showModernPopup({
+          type: "error",
+          title: "Compare Failed",
+          subtitle: "Comparison Error",
+          description: `Error details: ${err.response?.data?.message || err.message || "Unable to run stage structural comparisons."}`,
+        });
       }
     };
 
@@ -264,8 +273,8 @@ export default function DatabaseSync() {
           showModernPopup({
             type: "success",
             title: "Station Mapping",
-            subtitle:
-              "Successfully Updated",
+            subtitle: "Successfully Updated",
+            description: `Successfully updated station mapping records from latest grouped unit data changes.\nProcessed: ${res.result?.updated || 0} stage mappings.`,
           });
 
           setStageData([]);
@@ -278,8 +287,8 @@ export default function DatabaseSync() {
         showModernPopup({
           type: "error",
           title: "Mapping Failed",
-          subtitle:
-            "Unable To Update",
+          subtitle: "Unable To Update",
+          description: `Error details: ${err.response?.data?.message || err.message || "Could not save mapping modifications."}`,
         });
       }
     };
@@ -304,6 +313,7 @@ export default function DatabaseSync() {
           title: "Mapping Saved",
           subtitle:
             "Successfully Updated",
+          description: `Successfully saved ${payload.length} mapping configuration changes to MongoDB database.`,
         });
 
         await fetchMapData();

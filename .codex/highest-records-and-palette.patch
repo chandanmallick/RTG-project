@@ -1,0 +1,99 @@
+*** Begin Patch
+*** Update File: backend/routes/psp_routes.py
+@@
+ def rebuild_highest_records_from_psp_daily():
+     db = MongoService()
+ 
+     import json
+     highest = json.loads(json.dumps(PSP_PEAK_BASELINES))
+     previous_records = {state: None for state in highest}
++
++    def apply_candidate(name, demand, demand_date, demand_time):
++        if demand is None:
++            return
++        try:
++            demand = float(demand)
++        except (TypeError, ValueError):
++            return
++        if not demand_date or demand <= 0:
++            return
++        if demand > highest[name]["max_demand"]:
++            previous_records[name] = {
++                "date": highest[name]["max_demand_date"],
++                "max_demand": highest[name]["max_demand"],
++                "max_demand_time": highest[name]["max_demand_time"],
++                "portfolio": {}
++            }
++            highest[name]["max_demand"] = demand
++            highest[name]["max_demand_date"] = demand_date
++            highest[name]["max_demand_time"] = str(demand_time or "19:00")
++
++    hist_projection = {"date": 1}
++    for state in PSP_PEAK_STATES:
++        prefix = state["hist_prefix"]
++        hist_projection[f"{prefix}_MAX_DEMAND"] = 1
++        hist_projection[f"{prefix}_MAX_DEMAND_TIME"] = 1
++
++    hist_docs = db.db["psp_historical"].find(
++        {"date": {"$exists": True}},
++        hist_projection
++    ).sort("date", 1)
++
++    for hist_doc in hist_docs:
++        curr_str = hist_doc.get("date")
++        if not curr_str:
++            continue
++        for state in PSP_PEAK_STATES:
++            name = state["name"]
++            prefix = state["hist_prefix"]
++            apply_candidate(
++                name,
++                hist_doc.get(f"{prefix}_MAX_DEMAND"),
++                curr_str,
++                hist_doc.get(f"{prefix}_MAX_DEMAND_TIME")
++            )
+@@
+         for state in PSP_PEAK_STATES:
+             name = state["name"]
+             curr_demand = curr_vals.get(name, {}).get("demand", 0.0)
+-            if curr_demand > highest[name]["max_demand"]:
+-                previous_records[name] = {
+-                    "date": highest[name]["max_demand_date"],
+-                    "max_demand": highest[name]["max_demand"],
+-                    "max_demand_time": highest[name]["max_demand_time"],
+-                    "portfolio": {}
+-                }
+-                highest[name]["max_demand"] = curr_demand
+-                highest[name]["max_demand_date"] = curr_str
+-                highest[name]["max_demand_time"] = curr_vals[name]["demand_time"]
++            apply_candidate(name, curr_demand, curr_str, curr_vals[name]["demand_time"])
+@@
+-            "source": "baseline_plus_psp_daily"
++            "source": "baseline_plus_psp_historical_plus_recent_daily"
+         }
+*** Update File: frontend/src/pages/PSPDashboard.jsx
+@@
+-                          <Bar dataKey="thermal" stackId="stack" name="Thermal Gen" fill="#E28743" />
+-                          <Bar dataKey="hydro" stackId="stack" name="Hydro Gen" fill="#00DF81" />
+-                          <Bar dataKey="solar" stackId="stack" name="Solar Gen" fill="#8FA960" />
+-                          <Bar dataKey="biogas" stackId="stack" name="BioGas Gen" fill="#17876D" />
+-                          <Bar dataKey="nuclear" stackId="stack" name="Nuclear Gen" fill="#2CC295" />
++                          <Bar dataKey="thermal" stackId="stack" name="Thermal Gen" fill="#C2410C" />
++                          <Bar dataKey="hydro" stackId="stack" name="Hydro Gen" fill="#0284C7" />
++                          <Bar dataKey="solar" stackId="stack" name="Solar Gen" fill="#EAB308" />
++                          <Bar dataKey="biogas" stackId="stack" name="BioGas Gen" fill="#16A34A" />
++                          <Bar dataKey="nuclear" stackId="stack" name="Nuclear Gen" fill="#DB2777" />
+@@
+-                          <Bar dataKey="isgs" stackId="stack" name="ISGS Drawl" fill="#3B82F6" />
+-                          <Bar dataKey="gna" stackId="stack" name="GNA Schd" fill="#1D4ED8" />
+-                          <Bar dataKey="tgna" stackId="stack" name="TGNA Schd" fill="#60A5FA" />
+-                          <Bar dataKey="idam" stackId="stack" name="iDAM Schd" fill="#8B5CF6" />
+-                          <Bar dataKey="rtm" stackId="stack" name="RTM Drawl" fill="#A78BFA" />
+-                          <Bar dataKey="dsm" stackId="stack" name="DSM (Deviation)" fill="#64748B" />
++                          <Bar dataKey="isgs" stackId="stack" name="ISGS Drawl" fill="#2563EB" />
++                          <Bar dataKey="gna" stackId="stack" name="GNA Schd" fill="#7C3AED" />
++                          <Bar dataKey="tgna" stackId="stack" name="TGNA Schd" fill="#0891B2" />
++                          <Bar dataKey="idam" stackId="stack" name="iDAM Schd" fill="#F97316" />
++                          <Bar dataKey="rtm" stackId="stack" name="RTM Drawl" fill="#0D9488" />
++                          <Bar dataKey="dsm" stackId="stack" name="DSM (Deviation)" fill="#475569" />
+*** End Patch

@@ -7,7 +7,7 @@ export const useSyncData = () => {
   const fetchChanges = async () => {
     setLoading(true);
     // Call your FastAPI /api/check-changes endpoint
-    const res = await fetch(`http://${window.location.hostname}:8001/api/check-changes`);
+    const res = await fetch(`/api/check-changes`);
     const result = await res.json();
     setData(result.changes);
     setLoading(false);
@@ -15,7 +15,7 @@ export const useSyncData = () => {
 
   const commitChanges = async () => {
     setLoading(true);
-    await fetch(`http://${window.location.hostname}:8001/api/commit-push`, {
+    await fetch(`/api/commit-push`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),

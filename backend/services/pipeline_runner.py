@@ -816,7 +816,7 @@ class PipelineRunner:
                     traceback.format_exc()
             )
 
-            raise e
+            return
         
 
     ########################
@@ -1702,4 +1702,4 @@ class PipelineRunner:
                     traceback.format_exc()
             )
 
-            raise e
+            return

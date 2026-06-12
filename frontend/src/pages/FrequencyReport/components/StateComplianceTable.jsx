@@ -9,17 +9,21 @@ import ComplianceChart from "./ComplianceChart";
 import StatisticsCard from "./StatisticsCard";
 
 // Helper to format values
-const fmt = (v, dec = 1) =>
+const fmt = (v, dec = 0) =>
+  !Number.isFinite(Number(v)) ? "-" :
   v === null || v === undefined ? "—" : Number(v).toFixed(dec);
 
 export default function StateComplianceTable({
   rows,
-  expandedRowId,
+  expandedRowIds,
   onToggleExpand,
+  onExpandAll,
+  onCollapseAll,
   onUpdateRowField,
   stateDesc,
   onUpdateStateDesc,
   showSchAct,
+  onEditRawData,
 }) {
   if (rows.length === 0) return null;
 
@@ -28,6 +32,42 @@ export default function StateComplianceTable({
       title="State Drawal Compliance Details"
       subtitle="State drawal schedules and compliance statistics (Click a state to view plot)"
       count={rows.length}
+      actions={
+        <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+          <button
+            type="button"
+            onClick={onExpandAll}
+            style={{
+              border: "1px solid rgba(255,255,255,0.25)",
+              borderRadius: "6px",
+              padding: "4px 9px",
+              background: "rgba(255,255,255,0.14)",
+              color: "#FFFFFF",
+              fontSize: "0.72rem",
+              fontWeight: 800,
+              cursor: "pointer",
+            }}
+          >
+            Open all
+          </button>
+          <button
+            type="button"
+            onClick={onCollapseAll}
+            style={{
+              border: "1px solid rgba(255,255,255,0.25)",
+              borderRadius: "6px",
+              padding: "4px 9px",
+              background: "rgba(255,255,255,0.08)",
+              color: "#FFFFFF",
+              fontSize: "0.72rem",
+              fontWeight: 800,
+              cursor: "pointer",
+            }}
+          >
+            Close all
+          </button>
+        </div>
+      }
     >
       <div
         style={{
@@ -44,7 +84,7 @@ export default function StateComplianceTable({
             borderCollapse: "collapse",
             width: "100%",
             tableLayout: "fixed",
-            minWidth: "1200px",
+            minWidth: "980px",
           }}
         >
           <colgroup>
@@ -52,10 +92,7 @@ export default function StateComplianceTable({
             <col style={{ width: "110px" }} />
             <col style={{ width: "110px" }} />
             <col style={{ width: "110px" }} />
-            <col style={{ width: "110px" }} />
-            <col style={{ width: "110px" }} />
             <col style={{ width: "120px" }} />
-            <col style={{ width: "90px" }} />
             <col style={{ width: "130px" }} />
             <col style={{ width: "150px" }} />
             <col style={{ width: "200px" }} />
@@ -64,24 +101,25 @@ export default function StateComplianceTable({
             <tr style={{ background: "#0F172A", borderBottom: "2px solid #1E293B" }}>
               <th style={{ padding: "12px 10px", fontSize: "0.72rem", color: "#94A3B8", fontWeight: 700, textAlign: "left" }}>State Name</th>
               <th style={{ padding: "12px 10px", fontSize: "0.72rem", color: "#94A3B8", fontWeight: 700, textAlign: "center" }}>Sch.Source</th>
-              <th style={{ padding: "12px 10px", fontSize: "0.72rem", color: "#94A3B8", fontWeight: 700, textAlign: "center" }}>DC Source</th>
-              <th style={{ padding: "12px 10px", fontSize: "0.72rem", color: "#94A3B8", fontWeight: 700, textAlign: "right" }}>DC (MW)</th>
               <th style={{ padding: "12px 10px", fontSize: "0.72rem", color: "#94A3B8", fontWeight: 700, textAlign: "right" }}>Sched (MW)</th>
               <th style={{ padding: "12px 10px", fontSize: "0.72rem", color: "#94A3B8", fontWeight: 700, textAlign: "right" }}>Actual (MW)</th>
               <th style={{ padding: "12px 10px", fontSize: "0.72rem", color: "#94A3B8", fontWeight: 700, textAlign: "right" }}>Deviation (MW)</th>
-              <th style={{ padding: "12px 10px", fontSize: "0.72rem", color: "#94A3B8", fontWeight: 700, textAlign: "right" }}>% DC</th>
-              <th style={{ padding: "12px 10px", fontSize: "0.72rem", color: "#94A3B8", fontWeight: 700, textAlign: "center" }}>Max OD (MW)</th>
-              <th style={{ padding: "12px 10px", fontSize: "0.72rem", color: "#94A3B8", fontWeight: 700, textAlign: "center" }}>OD Time / Freq</th>
+              <th style={{ padding: "12px 10px", fontSize: "0.72rem", color: "#94A3B8", fontWeight: 700, textAlign: "center" }}>Max OD/UD (MW)</th>
+              <th style={{ padding: "12px 10px", fontSize: "0.72rem", color: "#94A3B8", fontWeight: 700, textAlign: "center" }}>Max Time / Freq</th>
               <th style={{ padding: "12px 10px", fontSize: "0.72rem", color: "#94A3B8", fontWeight: 700, textAlign: "left" }}>Reason / Comments</th>
             </tr>
           </thead>
           <tbody>
             {rows.map((row, ri) => {
               const hasActual = row.actual !== null && row.actual !== undefined;
-              const devPos = hasActual && row.deviation >= 0;
-              const pctDC = hasActual && row.pct_dc !== null && row.pct_dc !== undefined;
-              const isExpanded = expandedRowId === row.plant_id;
+              const hasDeviation = row.deviation !== null && row.deviation !== undefined;
+              const devPos = hasDeviation && row.deviation >= 0;
+              const isExpanded = expandedRowIds.includes(row.plant_id);
               const stats = row.statistics || {};
+              const isHigh = row.event_type === "high";
+              const maxStateDev = isHigh ? stats.max_ud : stats.max_od;
+              const maxStateTime = isHigh ? stats.max_ud_time : stats.max_od_time;
+              const maxStateFreq = isHigh ? stats.freq_at_max_ud : stats.freq_at_max_od;
 
               return (
                 <React.Fragment key={row.plant_id}>
@@ -129,50 +167,8 @@ export default function StateComplianceTable({
                         <option value="Manual">Manual</option>
                       </select>
                     </td>
-                    <td style={{ padding: "6px 10px", textAlign: "center" }} onClick={(e) => e.stopPropagation()}>
-                      <select
-                        value={row.dc_src || "RTG"}
-                        onChange={(e) => onUpdateRowField(row.plant_id, "dc_src", e.target.value)}
-                        style={{
-                          fontSize: "0.72rem",
-                          border: "1px solid #CBD5E1",
-                          borderRadius: "6px",
-                          padding: "2px 6px",
-                          background: "#FFFFFF",
-                          color: "#1E293B",
-                          fontWeight: "600",
-                        }}
-                      >
-                        <option value="RTG">RTG</option>
-                        <option value="WBES">WBES</option>
-                        <option value="Manual">Manual</option>
-                      </select>
-                    </td>
                     <td style={{ padding: "6px 10px", textAlign: "right" }} onClick={(e) => e.stopPropagation()}>
-                      {row.dc_src === "Manual" ? (
-                        <input
-                          type="number"
-                          value={row.dc ?? 0}
-                          onChange={(e) =>
-                            onUpdateRowField(row.plant_id, "dc", parseFloat(e.target.value) || 0)
-                          }
-                          style={{
-                            width: "75px",
-                            fontSize: "0.72rem",
-                            border: "1px solid #CBD5E1",
-                            borderRadius: "6px",
-                            padding: "2px 6px",
-                            textAlign: "right",
-                          }}
-                        />
-                      ) : (
-                        <span style={{ fontSize: "0.75rem", color: "#6366F1", fontWeight: 700 }}>
-                          {fmt(row.dc)}
-                        </span>
-                      )}
-                    </td>
-                    <td style={{ padding: "6px 10px", textAlign: "right" }} onClick={(e) => e.stopPropagation()}>
-                      {row.sched_src === "Manual" ? (
+                      {row.sched_src === "Manual" && row.schedule !== null ? (
                         <input
                           type="number"
                           value={row.schedule ?? 0}
@@ -189,7 +185,7 @@ export default function StateComplianceTable({
                           }}
                         />
                       ) : (
-                        <span style={{ fontSize: "0.75rem", color: "#3B82F6", fontWeight: 700 }}>
+                        <span style={{ fontSize: "0.75rem", color: row.schedule !== null ? "#3B82F6" : "#94A3B8", fontWeight: row.schedule !== null ? 700 : 400 }}>
                           {fmt(row.schedule)}
                         </span>
                       )}
@@ -197,10 +193,10 @@ export default function StateComplianceTable({
                     <td style={{ padding: "10px 10px", textAlign: "right", fontSize: "0.75rem", color: hasActual ? "#0F172A" : "#94A3B8", fontWeight: hasActual ? 700 : 400 }}>
                       {hasActual ? fmt(row.actual) : "—"}
                     </td>
-                    <td style={{ padding: "10px 10px", textAlign: "right", fontSize: "0.75rem", fontWeight: 700, color: hasActual ? (devPos ? "#10B981" : "#EF4444") : "#94A3B8" }}>
-                      {hasActual ? (devPos ? "+" : "") + fmt(row.deviation) : "—"}
+                    <td style={{ padding: "10px 10px", textAlign: "right", fontSize: "0.75rem", fontWeight: 700, color: hasDeviation ? (devPos ? "#10B981" : "#EF4444") : "#94A3B8" }}>
+                      {hasDeviation ? (devPos ? "+" : "") + fmt(row.deviation) : "—"}
                     </td>
-                    <td style={{ padding: "10px 10px", textAlign: "right" }}>
+                    {false && <td style={{ padding: "10px 10px", textAlign: "right" }}>
                       {pctDC ? (
                         <span
                           style={{
@@ -217,12 +213,12 @@ export default function StateComplianceTable({
                       ) : (
                         "—"
                       )}
-                    </td>
+                    </td>}
                     <td style={{ padding: "10px 10px", fontSize: "0.74rem", fontWeight: 700, color: "#B91C1C", textAlign: "center" }}>
-                      {stats.max_od !== undefined && stats.max_od !== null ? fmt(stats.max_od) : "—"}
+                      {maxStateDev !== undefined && maxStateDev !== null ? fmt(maxStateDev) : "—"}
                     </td>
                     <td style={{ padding: "10px 10px", fontSize: "0.68rem", color: "#475569", textAlign: "center", fontWeight: "500" }}>
-                      {stats.max_od_time ? `${stats.max_od_time} | ${fmt(stats.freq_at_max_od, 2)}Hz` : "—"}
+                      {maxStateTime ? `${maxStateTime} | ${fmt(maxStateFreq, 3)} Hz` : "—"}
                     </td>
                     <td style={{ padding: "6px 10px" }} onClick={(e) => e.stopPropagation()}>
                       <input
@@ -252,11 +248,42 @@ export default function StateComplianceTable({
                   </tr>
                   {isExpanded && (
                     <tr style={{ background: "#F8FAFC" }}>
-                      <td colSpan="11" style={{ padding: "16px", borderBottom: "1px solid #E2E8F0" }}>
-                        <div style={{ display: "flex", gap: "24px", flexWrap: "wrap", alignItems: "stretch" }}>
-                          <div style={{ flex: "1 1 700px", maxWidth: "100%" }}>
+                      <td colSpan="8" style={{ padding: "8px 10px 12px", borderBottom: "1px solid #E2E8F0" }}>
+                        <div style={{ display: "none", justifyContent: "flex-end", marginBottom: "8px" }}>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onEditRawData(row);
+                            }}
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              gap: "6px",
+                              background: "#03624C",
+                              color: "#FFFFFF",
+                              border: "none",
+                              borderRadius: "6px",
+                              padding: "5px 12px",
+                              fontSize: "0.74rem",
+                              fontWeight: 700,
+                              cursor: "pointer",
+                              boxShadow: "0 2px 4px rgba(3,98,76,0.2)",
+                              transition: "all 0.15s ease",
+                            }}
+                            onMouseEnter={(e) => {
+                              e.currentTarget.style.background = "#024c3b";
+                            }}
+                            onMouseLeave={(e) => {
+                              e.currentTarget.style.background = "#03624C";
+                            }}
+                          >
+                            ⚙️ Edit Raw Database Data
+                          </button>
+                        </div>
+                        <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 224px", gap: "10px", alignItems: "stretch" }}>
+                          <div style={{ minWidth: 0, background: "#FFFFFF", border: "1px solid #E2E8F0", borderRadius: "10px", padding: "4px 6px 0", boxShadow: "0 8px 20px -18px rgba(15,23,42,0.45)" }}>
                             {row.series?.timestamps?.length > 0 ? (
-                              <ComplianceChart row={row} showSchAct={showSchAct} />
+                              <ComplianceChart row={row} showSchAct={showSchAct} height={640} compact />
                             ) : (
                               <div
                                 style={{
@@ -275,8 +302,40 @@ export default function StateComplianceTable({
                               </div>
                             )}
                           </div>
-                          <div style={{ flex: "1 1 300px" }}>
-                            <StatisticsCard row={row} />
+                          <div style={{ width: "224px", display: "flex", flexDirection: "column", gap: "8px" }}>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onEditRawData(row);
+                              }}
+                              style={{
+                                display: "flex",
+                                alignItems: "center",
+                                justifyContent: "center",
+                                gap: "5px",
+                                background: "#03624C",
+                                color: "#FFFFFF",
+                                border: "none",
+                                borderRadius: "7px",
+                                padding: "6px 9px",
+                                fontSize: "0.68rem",
+                                fontWeight: 800,
+                                cursor: "pointer",
+                                boxShadow: "0 2px 4px rgba(3,98,76,0.16)",
+                                transition: "all 0.15s ease",
+                              }}
+                              onMouseEnter={(e) => {
+                                e.currentTarget.style.background = "#024c3b";
+                              }}
+                              onMouseLeave={(e) => {
+                                e.currentTarget.style.background = "#03624C";
+                              }}
+                            >
+                              Edit Raw Data
+                            </button>
+                            {row.schedule !== null && row.deviation !== null && (
+                              <StatisticsCard row={row} compact />
+                            )}
                           </div>
                         </div>
                       </td>

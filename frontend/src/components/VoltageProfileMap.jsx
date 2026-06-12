@@ -1,22 +1,33 @@
-import { useState, useMemo } from "react";
-import { Zap, ChevronRight, X } from "lucide-react";
+import { useEffect, useState, useMemo } from "react";
+import { Zap, ChevronRight, X, Search } from "lucide-react";
 
 /* ─────────────────────────────────────────────
    Geographic transform   viewBox 460 × 490
    Lon: 82°E → 90°E   Lat: 17.5°N → 28°N
 ───────────────────────────────────────────── */
 const MW = 460, MH = 490;
-const gx = (lon) => ((lon - 82) / 8) * MW;
-const gy = (lat) => ((28 - lat) / 10.5) * MH;
+const MAP_BOUNDS = { minLon: 81.2, maxLon: 90.0, minLat: 17.5, maxLat: 28.3 };
+const gx = (lon) => ((lon - MAP_BOUNDS.minLon) / (MAP_BOUNDS.maxLon - MAP_BOUNDS.minLon)) * MW;
+const gy = (lat) => ((MAP_BOUNDS.maxLat - lat) / (MAP_BOUNDS.maxLat - MAP_BOUNDS.minLat)) * MH;
 
 /* ─────────────────────────────────────────────
    Substation geographic positions [lon, lat]
    Keyed by uppercase name substring
 ───────────────────────────────────────────── */
 const GEO = {
+  ALIPURDUAR:   [89.53, 26.49],
+  BANKA:        [86.92, 24.88],
+  BARIPADA:     [86.72, 21.94],
   BERHAMPORE:  [88.25, 24.1],
+  BEHRAMPORE:  [88.25, 24.1],
+  "BIHAR SHARIF": [85.52, 25.2],
+  BODHGAYA:    [84.99, 24.7],
+  BOKARO:      [86.15, 23.67],
+  CHAIBASA:    [85.8,  22.56],
   DURGAPUR:    [87.3,  23.5],
+  FARAKKA:     [87.92, 24.82],
   GODDA:       [87.2,  24.8],
+  GOKARNA:     [88.18, 24.04],
   JAMSHEDPUR:  [86.2,  22.8],
   JEENAT:      [87.5,  23.9],
   JEYPORE:     [82.6,  18.9],
@@ -24,7 +35,11 @@ const GEO = {
   MAITHON:     [86.9,  23.6],
   MIDNAPORE:   [87.3,  22.4],
   MUZAFFARPUR: [85.4,  26.1],
+  "NEW PURNEA": [87.48, 25.78],
   PATNA:       [85.1,  25.6],
+  PURNEA:      [87.48, 25.78],
+  PURNIA:      [87.48, 25.78],
+  PURULIA:     [86.36, 23.33],
   RANGPO:      [88.5,  27.2],
   ROURKELA:    [84.9,  22.2],
   TEESTA:      [88.6,  26.7],
@@ -34,6 +49,8 @@ const GEO = {
   JHARSUGUDA:  [84.1,  21.9],
   RANCHI:      [85.3,  23.4],
   SASARAM:     [84.0,  25.0],
+  STERLITE:    [84.05, 21.9],
+  TALCHER:     [85.22, 20.95],
 };
 
 const resolve = (name) => {
@@ -90,6 +107,54 @@ const STATES = [
   },
 ];
 
+const STATE_GEOJSON_FILES = [
+  { id: "ODISHA", label: "Odisha", file: "Odisha.geojson", lx: gx(84.8), ly: gy(19.8), fill: "rgba(20,184,166,0.13)", stroke: "rgba(20,184,166,0.72)" },
+  { id: "JHARKHAND", label: "Jharkhand", file: "Jharkhand.geojson", lx: gx(85.3), ly: gy(23.7), fill: "rgba(245,158,11,0.13)", stroke: "rgba(245,158,11,0.72)" },
+  { id: "WEST_BENGAL", label: "West Bengal", file: "WestBengal.geojson", lx: gx(88.1), ly: gy(24.0), fill: "rgba(139,92,246,0.13)", stroke: "rgba(139,92,246,0.72)" },
+  { id: "BIHAR", label: "Bihar", file: "Bihar.geojson", lx: gx(85.5), ly: gy(26.2), fill: "rgba(59,130,246,0.13)", stroke: "rgba(59,130,246,0.72)" },
+  { id: "SIKKIM", label: "Sikkim", file: "Sikkim.geojson", lx: gx(88.5), ly: gy(27.5), fill: "rgba(16,185,129,0.2)", stroke: "rgba(16,185,129,0.72)" },
+];
+
+const ringToPath = (ring = []) => {
+  if (!ring.length) return "";
+  return ring
+    .map((coord, idx) => {
+      const [lon, lat] = coord;
+      return `${idx === 0 ? "M" : "L"} ${gx(Number(lon)).toFixed(2)},${gy(Number(lat)).toFixed(2)}`;
+    })
+    .join(" ") + " Z";
+};
+
+const geometryToPath = (geometry) => {
+  if (!geometry) return "";
+  if (geometry.type === "Polygon") {
+    return (geometry.coordinates || []).map(ringToPath).join(" ");
+  }
+  if (geometry.type === "MultiPolygon") {
+    return (geometry.coordinates || [])
+      .map((polygon) => polygon.map(ringToPath).join(" "))
+      .join(" ");
+  }
+  if (geometry.type === "GeometryCollection") {
+    return (geometry.geometries || []).map(geometryToPath).join(" ");
+  }
+  return "";
+};
+
+const geoJsonToPath = (geojson) => {
+  if (!geojson) return "";
+  const features = geojson.type === "FeatureCollection"
+    ? geojson.features || []
+    : geojson.type === "Feature"
+      ? [geojson]
+      : [{ geometry: geojson }];
+
+  return features
+    .map((feature) => geometryToPath(feature.geometry))
+    .filter(Boolean)
+    .join(" ");
+};
+
 /* ─────────────────────────────────────────────
    Status color palette
 ───────────────────────────────────────────── */
@@ -111,6 +176,34 @@ export default function VoltageProfileMap({ voltageData, voltageLoading }) {
   const [open, setOpen]   = useState(false);
   const [sel, setSel]     = useState(null);
   const [lvl, setLvl]     = useState("all");
+  const [query, setQuery] = useState("");
+  const [stateBoundaries, setStateBoundaries] = useState([]);
+
+  useEffect(() => {
+    let active = true;
+
+    Promise.all(
+      STATE_GEOJSON_FILES.map(async (state) => {
+        const res = await fetch(`/geodata/${state.file}`);
+        if (!res.ok) throw new Error(`Failed to load ${state.file}`);
+        const geojson = await res.json();
+        return { ...state, d: geoJsonToPath(geojson) };
+      })
+    )
+      .then((items) => {
+        if (active) setStateBoundaries(items.filter((item) => item.d));
+      })
+      .catch((err) => {
+        console.warn("Falling back to simplified ER state map:", err);
+        if (active) setStateBoundaries([]);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const mapStates = stateBoundaries.length ? stateBoundaries : STATES;
 
   /* Build station list enriched with map coords */
   const stations = useMemo(() => {
@@ -122,7 +215,9 @@ export default function VoltageProfileMap({ voltageData, voltageLoading }) {
     const placed = {};
     return raw
       .map((s) => {
-        const c = resolve(s.name);
+        const c = Number.isFinite(Number(s.lat)) && Number.isFinite(Number(s.lng))
+          ? { x: gx(Number(s.lng)), y: gy(Number(s.lat)) }
+          : resolve(s.name);
         if (!c) return null;
         const key = `${Math.round(c.x / 10)}_${Math.round(c.y / 10)}`;
         const n = placed[key] ?? 0;
@@ -132,10 +227,14 @@ export default function VoltageProfileMap({ voltageData, voltageLoading }) {
       .filter(Boolean);
   }, [voltageData]);
 
-  const visible = useMemo(
-    () => (lvl === "all" ? stations : stations.filter((s) => s.level === lvl)),
-    [stations, lvl]
-  );
+  const visible = useMemo(() => {
+    const needle = query.trim().toUpperCase();
+    return stations.filter((s) => {
+      const matchesLevel = lvl === "all" || s.level === lvl;
+      const haystack = `${s.name || ""} ${s.state || ""} ${s.level || ""}`.toUpperCase();
+      return matchesLevel && (!needle || haystack.includes(needle));
+    });
+  }, [stations, lvl, query]);
 
   const sum = useMemo(() => {
     const o = { normal: 0, high: 0, low: 0, offline: 0, total: 0 };
@@ -290,6 +389,18 @@ export default function VoltageProfileMap({ voltageData, voltageLoading }) {
             }}>
               {sel.status}
             </span>
+            {sel.state && (
+              <span style={{
+                background: "rgba(255,255,255,0.06)",
+                color: "#CBD5E1",
+                borderRadius: "6px",
+                padding: "2px 9px",
+                fontSize: "0.64rem",
+                fontWeight: 700,
+              }}>
+                {sel.state}
+              </span>
+            )}
           </div>
         </div>
 
@@ -354,6 +465,17 @@ export default function VoltageProfileMap({ voltageData, voltageLoading }) {
           <span style={{ color: clr, fontWeight: 800, fontSize: "1.15rem" }}>
             {Number(sel.deviation_index).toFixed(1)}%
           </span>
+        </div>
+
+        <div style={{
+          marginTop: "10px",
+          color: "#64748B",
+          fontSize: "0.66rem",
+          lineHeight: 1.45,
+        }}>
+          Location: {sel.lat && sel.lng ? `${Number(sel.lat).toFixed(3)}, ${Number(sel.lng).toFixed(3)}` : "Unresolved"}
+          <br />
+          Source: {sel.location_source || "Voltage profile"}
         </div>
       </div>
     );
@@ -461,11 +583,11 @@ export default function VoltageProfileMap({ voltageData, voltageLoading }) {
                 <div style={{ color: "#f1f5f9", fontWeight: 700, fontSize: "1rem",
                   display: "flex", alignItems: "center", gap: "8px" }}>
                   <Zap size={15} style={{ color: "#F59E0B" }} />
-                  Eastern Region — Substation Voltage Profile
+                  Eastern Region PSP — Substation Voltage Profile
                 </div>
                 <div style={{ color: "#64748B", fontSize: "0.7rem", marginTop: "2px" }}>
                   Data: {voltageData?.date} &nbsp;·&nbsp; {sum.total} substations &nbsp;·&nbsp;
-                  Click any node for detailed breakdown
+                  {visible.length} visible &nbsp;·&nbsp; Click any node for detailed breakdown
                 </div>
               </div>
               <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
@@ -485,6 +607,33 @@ export default function VoltageProfileMap({ voltageData, voltageLoading }) {
                   <option value="400kV" style={{ background: "#1e293b" }}>400 kV Only</option>
                   <option value="765kV" style={{ background: "#1e293b" }}>765 kV Only</option>
                 </select>
+                <div style={{
+                  height: "31px",
+                  width: "210px",
+                  border: "1px solid rgba(255,255,255,0.12)",
+                  borderRadius: "8px",
+                  background: "rgba(255,255,255,0.06)",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "7px",
+                  padding: "0 9px",
+                }}>
+                  <Search size={13} style={{ color: "#94A3B8", flexShrink: 0 }} />
+                  <input
+                    value={query}
+                    onChange={(e) => { setQuery(e.target.value); setSel(null); }}
+                    placeholder="Search substation/state"
+                    style={{
+                      border: "none",
+                      outline: "none",
+                      background: "transparent",
+                      color: "#E2E8F0",
+                      fontSize: "0.72rem",
+                      minWidth: 0,
+                      width: "100%",
+                    }}
+                  />
+                </div>
                 <button
                   onClick={() => { setOpen(false); setSel(null); }}
                   style={{
@@ -580,12 +729,13 @@ export default function VoltageProfileMap({ voltageData, voltageLoading }) {
                   </text>
 
                   {/* State polygons */}
-                  {STATES.map((st) => (
+                  {mapStates.map((st) => (
                     <g key={st.id}>
                       <path d={st.d}
                         fill={st.fill}
                         stroke={st.stroke}
                         strokeWidth="1.2"
+                        fillRule="evenodd"
                         strokeLinejoin="round" />
                       <text x={st.lx} y={st.ly}
                         fill="rgba(255,255,255,0.42)"
@@ -672,7 +822,7 @@ export default function VoltageProfileMap({ voltageData, voltageLoading }) {
                 fontWeight: 700, textTransform: "uppercase" }}>
                 States:
               </span>
-              {STATES.map((st) => (
+              {mapStates.map((st) => (
                 <div key={st.id} style={{ display: "flex", alignItems: "center", gap: "4px" }}>
                   <div style={{
                     width: "12px", height: "10px",

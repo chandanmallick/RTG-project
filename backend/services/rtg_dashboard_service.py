@@ -73,6 +73,19 @@ def get_legacy_session():
 class RTGDashboardService:
 
     @staticmethod
+    def _mask_config(config):
+
+        masked = dict(config or {})
+
+        for key in ("rtg_password", "password"):
+
+            if key in masked:
+
+                masked[key] = "***"
+
+        return masked
+
+    @staticmethod
     def _current_rtg_date():
 
         if ZoneInfo:
@@ -171,7 +184,10 @@ class RTGDashboardService:
                 "RTG config not found"
             )
         
-        print("RTG CONFIG =", rtg_config)
+        print(
+            "RTG CONFIG =",
+            RTGDashboardService._mask_config(rtg_config)
+        )
 
         print(
             "RTG DASHBOARD CONFIG =",

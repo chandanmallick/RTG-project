@@ -1,317 +1,378 @@
-/**
- * ComplianceChart.jsx
- * Apache ECharts dual-axis chart:
- *   Left axis  : Deviation (MW)
- *   Right axis : Frequency (Hz)
- * markArea shading for LF compliance events.
- */
-import { useRef, useMemo, useCallback, forwardRef, useImperativeHandle } from "react";
+import { useRef, useMemo, useImperativeHandle, forwardRef } from "react";
 import ReactECharts from "echarts-for-react";
 
-/* ── Color palette ─────────────────────────────────────── */
 const COLORS = {
   state: {
-    deviation: "#00DF81",
-    frequency: "#A855F7",
-    overDrawal:  { color: "rgba(234,179,8,0.28)",   label: "Over Drawal (OD)" },
-    helpingGrid: { color: "rgba(6,182,212,0.22)",   label: "Helping Grid" },
+    deviation: "#10B981",
+    frequency: "#8B5CF6",
   },
   generator: {
     deviation: "#EF4444",
-    frequency: "#3B82F6",
-    underInj:    { color: "rgba(249,115,22,0.28)",  label: "Under Injection" },
-    helpingGrid: { color: "rgba(16,185,129,0.22)",  label: "Helping Grid" },
+    frequency: "#2563EB",
   },
 };
 
-/* ── Build markArea data from series ────────────────────── */
-function buildMarkAreas(timestamps, freqs, devs, type) {
-  if (!timestamps?.length) return { primary: [], secondary: [] };
-
-  const primary   = [];  // gold / orange
-  const secondary = [];  // cyan / green
-  let primaryStart = null;
-  let secStart = null;
-
-  for (let i = 0; i < timestamps.length; i++) {
-    const isLF    = freqs[i] < 49.9;
-    const dev     = devs[i];
-    const isPrimary   = isLF && (type === "state" ? dev > 0 : dev < 0);
-    const isSecondary = isLF && (type === "state" ? dev < 0 : dev > 0);
-
-    if (isPrimary) {
-      if (primaryStart === null) primaryStart = i;
-    } else {
-      if (primaryStart !== null) {
-        primary.push([{ xAxis: timestamps[primaryStart] }, { xAxis: timestamps[i - 1] }]);
-        primaryStart = null;
-      }
-    }
-    if (isSecondary) {
-      if (secStart === null) secStart = i;
-    } else {
-      if (secStart !== null) {
-        secondary.push([{ xAxis: timestamps[secStart] }, { xAxis: timestamps[i - 1] }]);
-        secStart = null;
-      }
-    }
-  }
-  if (primaryStart !== null)
-    primary.push([{ xAxis: timestamps[primaryStart] }, { xAxis: timestamps[timestamps.length - 1] }]);
-  if (secStart !== null)
-    secondary.push([{ xAxis: timestamps[secStart] }, { xAxis: timestamps[timestamps.length - 1] }]);
-
-  return { primary, secondary };
-}
-
-/* ── Format x-axis tick ─────────────────────────────────── */
 function fmtTick(ts) {
   if (!ts) return "";
   try {
-    // Input: "2026-06-02 21:30:00"  →  "02/06 21:30"
-    const [date, time] = ts.split(" ");
-    const [y, m, d] = date.split("-");
+    const [, time] = ts.split(" ");
     const [hh, mm] = time.split(":");
-    return `${d}/${m} ${hh}:${mm}`;
-  } catch { return ts; }
+    return `${hh}:${mm}`;
+  } catch {
+    return ts;
+  }
 }
 
-/* ──────────────────────────────────────────────────────────
-   ComplianceChart — forwardRef so parent can call getDataURL
-   ────────────────────────────────────────────────────────── */
+function fmtDate(ts) {
+  if (!ts) return "";
+  try {
+    const [date] = ts.split(" ");
+    const [y, m, d] = date.split("-");
+    const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    return `${d}-${months[Number(m) - 1]}-${y}`;
+  } catch {
+    return ts;
+  }
+}
+
+function eventMeta(eventType, type) {
+  const high = eventType === "high";
+  if (high && type === "state") {
+    return {
+      threshold: 50.05,
+      thresholdText: "50.05 Hz",
+      badge: "HIGH FREQ",
+      isEvent: (f) => f > 50.05,
+      isHelping: (d) => d > 0,
+      helping: { color: "rgba(234,179,8,0.30)", label: "Helping Grid (Gold Shade)" },
+      adverse: { color: "rgba(6,182,212,0.30)", label: "Under Drawal (Cyan Shade)" },
+    };
+  }
+  if (high) {
+    return {
+      threshold: 50.05,
+      thresholdText: "50.05 Hz",
+      badge: "HIGH FREQ",
+      isEvent: (f) => f > 50.05,
+      isHelping: (d) => d < 0,
+      helping: { color: "rgba(16,185,129,0.30)", label: "Helping Grid (Green Shade)" },
+      adverse: { color: "rgba(249,115,22,0.32)", label: "Over Injection (Orange Shade)" },
+    };
+  }
+  return {
+    threshold: 49.9,
+    thresholdText: "49.90 Hz",
+    badge: "LOW FREQ",
+    isEvent: (f) => f < 49.9,
+    isHelping: (d) => (type === "state" ? d < 0 : d > 0),
+    helping: { color: "rgba(16,185,129,0.30)", label: "Helping Grid (Green Shade)" },
+    adverse: {
+      color: "rgba(249,115,22,0.32)",
+      label: type === "state" ? "Over Drawal (Orange Shade)" : "Under Injection (Orange Shade)",
+    },
+  };
+}
+
+const toCleanNumbers = (values = []) =>
+  values.map((v) => (v !== null && v !== undefined && !Number.isNaN(Number(v)) ? Number(v) : null));
+
 const ComplianceChart = forwardRef(function ComplianceChart(
-  { row, showSchAct = false, height = 300 },
+  { row, showSchAct = false, height = 480, compact = false },
   ref
 ) {
   const eRef = useRef(null);
 
-  /* Expose getDataURL to parent for Word export */
   useImperativeHandle(ref, () => ({
     getDataURL: (opts = {}) => {
       const inst = eRef.current?.getEchartsInstance();
       if (!inst) return null;
-      return inst.getDataURL({ type: "png", pixelRatio: 2, backgroundColor: "#0F172A", ...opts });
+      return inst.getDataURL({ type: "png", pixelRatio: 2, backgroundColor: "#FFFFFF", ...opts });
     },
   }));
 
-  const type    = row.type || (row.is_state ? "state" : "generator");
+  const type = row.type || (row.is_state ? "state" : "generator");
+  const eventType = row.event_type || "low";
   const palette = COLORS[type] || COLORS.state;
+  const meta = eventMeta(eventType, type);
 
-  const series  = row.series || {};
+  const series = row.series || {};
   const timestamps = series.timestamps || [];
-  const freqs   = series.frequency  || [];
-  const devs    = series.deviation  || [];
-  const scheds  = series.schedule   || [];
-  const actuals = series.actual     || [];
+  const cleanFreqs = useMemo(() => toCleanNumbers(series.frequency || []), [series.frequency]);
+  const cleanDevs = useMemo(() => toCleanNumbers(series.deviation || []), [series.deviation]);
+  const cleanScheds = useMemo(() => toCleanNumbers(series.schedule || []), [series.schedule]);
+  const cleanActuals = useMemo(() => toCleanNumbers(series.actual || []), [series.actual]);
 
-  /* ── markArea zones ─────────────────────────────────────── */
-  const { primary, secondary } = useMemo(
-    () => buildMarkAreas(timestamps, freqs, devs, type),
-    [timestamps, freqs, devs, type]
+  const hasDeviation = useMemo(
+    () => cleanDevs.length > 0 && cleanDevs.some((v) => v !== null),
+    [cleanDevs]
   );
 
-  /* ── Auto Y-axis range ──────────────────────────────────── */
+  const { helpingData, adverseData } = useMemo(() => {
+    const helping = [];
+    const adverse = [];
+    if (!hasDeviation) return { helpingData: helping, adverseData: adverse };
+
+    timestamps.forEach((_, i) => {
+      const f = cleanFreqs[i];
+      const d = cleanDevs[i];
+      if (f === null || d === null || !meta.isEvent(f)) {
+        helping.push(0);
+        adverse.push(0);
+        return;
+      }
+      if (meta.isHelping(d)) {
+        helping.push(d);
+        adverse.push(0);
+      } else {
+        helping.push(0);
+        adverse.push(d);
+      }
+    });
+
+    return { helpingData: helping, adverseData: adverse };
+  }, [timestamps, cleanFreqs, cleanDevs, meta, hasDeviation]);
+
   const maxDevAbs = useMemo(() => {
-    const vals = [...devs.map(Math.abs)];
-    if (showSchAct) {
-      vals.push(...scheds.map(Math.abs), ...actuals.map(Math.abs));
-    }
-    const peak = Math.max(...vals, 1);
-    if (peak < 10)       return Math.ceil(peak / 3)   * 3;
-    if (peak < 100)      return Math.ceil(peak / 20)  * 20;
-    if (peak < 1000)     return Math.ceil(peak / 100) * 100;
+    const values = hasDeviation
+      ? cleanDevs.filter((v) => v !== null).map(Math.abs)
+      : cleanActuals.filter((v) => v !== null).map(Math.abs);
+    if (showSchAct) values.push(...cleanScheds.filter((v) => v !== null).map(Math.abs));
+    const peak = Math.max(...values, 1);
+    if (peak < 10) return Math.ceil(peak / 3) * 3;
+    if (peak < 100) return Math.ceil(peak / 20) * 20;
+    if (peak < 1000) return Math.ceil(peak / 100) * 100;
     return Math.ceil(peak / 500) * 500;
-  }, [devs, scheds, actuals, showSchAct]);
+  }, [cleanDevs, cleanScheds, cleanActuals, showSchAct, hasDeviation]);
 
-  /* ── Color helpers ──────────────────────────────────────── */
-  const colorPrimary   = type === "state" ? palette.overDrawal   : palette.underInj;
-  const colorSecondary = type === "state" ? palette.helpingGrid  : palette.helpingGrid;
+  const option = useMemo(() => {
+    const dateMarkers = [];
+    let lastDate = "";
+    timestamps.forEach((ts, index) => {
+      const datePart = String(ts || "").split(" ")[0];
+      if (datePart && datePart !== lastDate) {
+        dateMarkers.push({
+          xAxis: ts,
+          label: {
+            show: true,
+            formatter: fmtDate(ts),
+            position: "insideEndTop",
+            color: "#334155",
+            fontSize: 10,
+            fontWeight: 800,
+            backgroundColor: "rgba(255,255,255,0.84)",
+            padding: [2, 4],
+          },
+          lineStyle: { color: "#CBD5E1", type: "dashed", width: 1 },
+        });
+        lastDate = datePart;
+      }
+    });
 
-  /* ── ECharts option ─────────────────────────────────────── */
-  const option = useMemo(() => ({
-    backgroundColor: "#0F172A",
-    animation: false,
-    tooltip: {
-      trigger: "axis",
-      backgroundColor: "rgba(15,23,42,0.97)",
-      borderColor: "rgba(100,116,139,0.35)",
-      borderWidth: 1,
-      padding: [10, 14],
-      textStyle: { color: "#E2E8F0", fontSize: 12 },
-      formatter: (params) => {
-        const ts = params[0]?.axisValue || "";
-        const map = {};
-        params.forEach((p) => { map[p.seriesName] = p.value; });
-        const freq  = map["Frequency (Hz)"];
-        const dev   = map["Deviation (MW)"];
-        const isLF  = freq != null && freq < 49.9;
-        const badge = isLF ? `<span style="background:#EF4444;color:#fff;border-radius:3px;padding:1px 5px;font-size:10px;font-weight:800;margin-left:6px">LOW FREQ</span>` : "";
-        let html = `<div style="border-bottom:1px solid rgba(100,116,139,0.3);padding-bottom:5px;margin-bottom:6px;font-size:11px;color:#94A3B8">${ts}${badge}</div>`;
-        html += `<div style="display:flex;justify-content:space-between;gap:16px;margin-bottom:3px"><span style="color:#94A3B8">Frequency:</span><span style="font-weight:700;color:${palette.frequency}">${freq != null ? freq.toFixed(3) : "—"} Hz</span></div>`;
-        html += `<div style="display:flex;justify-content:space-between;gap:16px;margin-bottom:3px"><span style="color:#94A3B8">Deviation:</span><span style="font-weight:700;color:${dev >= 0 ? palette.deviation : "#EF4444"}">${dev != null ? (dev >= 0 ? "+" : "") + dev.toFixed(1) : "—"} MW</span></div>`;
-        if (map["Schedule (MW)"] != null)
-          html += `<div style="display:flex;justify-content:space-between;gap:16px;margin-bottom:3px"><span style="color:#94A3B8">Schedule:</span><span style="color:#6366F1">${map["Schedule (MW)"].toFixed(1)} MW</span></div>`;
-        if (map["Actual (MW)"] != null)
-          html += `<div style="display:flex;justify-content:space-between;gap:16px"><span style="color:#94A3B8">Actual:</span><span style="color:#EC4899">${map["Actual (MW)"].toFixed(1)} MW</span></div>`;
-        if (isLF) {
-          const label = type === "state"
-            ? (dev > 0 ? "🟡 Over Drawal" : "🔵 Helping Grid")
-            : (dev < 0 ? "🟠 Under Injection" : "🟢 Helping Grid");
-          html += `<div style="margin-top:5px;padding-top:5px;border-top:1px solid rgba(100,116,139,0.3);font-size:10px;color:#94A3B8">${label} during low freq</div>`;
-        }
-        return html;
-      },
-    },
-    legend: {
-      show: true,
-      bottom: 4,
-      textStyle: { color: "#64748B", fontSize: 11 },
-      icon: "roundRect",
-      itemWidth: 16,
-      itemHeight: 4,
-    },
-    grid: { top: 12, right: 56, bottom: 48, left: 60, containLabel: false },
-    dataZoom: [
-      { type: "inside", xAxisIndex: 0, filterMode: "none" },
-      { type: "slider", xAxisIndex: 0, height: 18, bottom: 28, textStyle: { color: "#64748B", fontSize: 9 }, fillerColor: "rgba(52,211,153,0.1)", borderColor: "#334155", handleStyle: { color: "#34D399" } },
-    ],
-    xAxis: {
-      type: "category",
-      data: timestamps,
-      boundaryGap: false,
-      axisLabel: {
-        formatter: fmtTick,
-        color: "#64748B",
-        fontSize: 10,
-        rotate: 25,
-        interval: Math.max(Math.floor(timestamps.length / 12) - 1, 0),
-      },
-      axisLine: { lineStyle: { color: "#334155" } },
-      splitLine: { show: false },
-    },
-    yAxis: [
-      {
-        // Left: Deviation (MW)
-        type: "value",
-        name: "MW",
-        nameTextStyle: { color: "#475569", fontSize: 10, padding: [0, 0, 0, -8] },
-        min: -maxDevAbs,
-        max:  maxDevAbs,
-        interval: maxDevAbs / 3,
-        axisLabel: { color: "#64748B", fontSize: 10 },
-        axisLine: { lineStyle: { color: "#334155" } },
-        splitLine: { lineStyle: { color: "rgba(100,116,139,0.1)", type: "dashed" } },
-        // Zero line
-        markLine: undefined,
-      },
-      {
-        // Right: Frequency (Hz)
-        type: "value",
-        name: "Hz",
-        nameTextStyle: { color: "#475569", fontSize: 10, padding: [0, -8, 0, 0] },
-        min: 49.0,
-        max: 51.0,
-        interval: 0.25,
-        axisLabel: { color: "#94A3B8", fontSize: 10, formatter: (v) => v.toFixed(2) },
-        axisLine: { lineStyle: { color: "#334155" } },
-        splitLine: { show: false },
-      },
-    ],
-    series: [
-      // ── markArea shading (attached to deviation series for correct y-axis) ──
-      {
-        name: colorPrimary.label,
-        type: "line",
-        yAxisIndex: 0,
-        data: [],
-        markArea: {
-          silent: true,
-          itemStyle: { color: colorPrimary.color },
-          data: primary.map(([s, e]) => [s, e]),
-        },
-        legendHoverLink: false,
-        symbol: "none",
-        lineStyle: { width: 0 },
-      },
-      {
-        name: colorSecondary.label,
-        type: "line",
-        yAxisIndex: 0,
-        data: [],
-        markArea: {
-          silent: true,
-          itemStyle: { color: colorSecondary.color },
-          data: secondary.map(([s, e]) => [s, e]),
-        },
-        legendHoverLink: false,
-        symbol: "none",
-        lineStyle: { width: 0 },
-      },
-
-      // ── Deviation line ───────────────────────────────────────
-      {
-        name: "Deviation (MW)",
-        type: "line",
-        yAxisIndex: 0,
-        data: devs,
-        symbol: "none",
-        lineStyle: { color: palette.deviation, width: 2 },
-        areaStyle: { color: { type: "linear", x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: palette.deviation + "40" }, { offset: 1, color: palette.deviation + "00" }] } },
-        markLine: {
-          silent: true,
+    const chartSeries = [
+      ...(hasDeviation ? [
+        {
+          name: meta.helping.label,
+          type: "line",
+          xAxisIndex: 0,
+          yAxisIndex: 0,
+          data: helpingData,
           symbol: "none",
-          lineStyle: { color: "#475569", type: "dashed", width: 1.5 },
-          label: { formatter: "0 MW", position: "end", color: "#475569", fontSize: 9 },
-          data: [{ yAxis: 0 }],
+          itemStyle: { color: meta.helping.color },
+          lineStyle: { width: 0 },
+          areaStyle: { color: meta.helping.color },
+          emphasis: { disabled: true },
+          z: 1,
         },
-        emphasis: { disabled: true },
-        z: 4,
-      },
-
-      // ── Frequency line ───────────────────────────────────────
+        {
+          name: meta.adverse.label,
+          type: "line",
+          xAxisIndex: 0,
+          yAxisIndex: 0,
+          data: adverseData,
+          symbol: "none",
+          itemStyle: { color: meta.adverse.color },
+          lineStyle: { width: 0 },
+          areaStyle: { color: meta.adverse.color },
+          emphasis: { disabled: true },
+          z: 1,
+        },
+        {
+          name: "Deviation (MW)",
+          type: "line",
+          xAxisIndex: 0,
+          yAxisIndex: 0,
+          data: cleanDevs,
+          symbol: "none",
+          itemStyle: { color: palette.deviation },
+          lineStyle: { color: palette.deviation, width: 2.4 },
+          markLine: {
+            silent: true,
+            symbol: "none",
+            lineStyle: { color: "#94A3B8", type: "dashed", width: 1.5 },
+            label: { formatter: "0 MW", position: "end", color: "#475569", fontSize: 9, fontWeight: "bold" },
+            data: [{ yAxis: 0 }, ...dateMarkers],
+          },
+          z: 4,
+        },
+      ] : []),
       {
         name: "Frequency (Hz)",
         type: "line",
+        xAxisIndex: 0,
         yAxisIndex: 1,
-        data: freqs,
+        data: cleanFreqs,
         symbol: "none",
-        lineStyle: { color: palette.frequency, width: 1.5, type: "dashed" },
+        itemStyle: { color: palette.frequency },
+        lineStyle: { color: palette.frequency, width: 2 },
         markLine: {
           silent: true,
           symbol: "none",
-          lineStyle: { color: "#7C3AED", type: "solid", width: 1, opacity: 0.5 },
-          label: { formatter: "50 Hz", position: "end", color: "#7C3AED", fontSize: 9 },
-          data: [{ yAxis: 50.0 }],
+          lineStyle: { color: eventType === "high" ? "#DC2626" : "#F97316", type: "dashed", width: 1.2 },
+          label: { formatter: meta.thresholdText, position: "insideEndTop", color: eventType === "high" ? "#B91C1C" : "#C2410C", fontSize: 9, fontWeight: "bold" },
+          data: [{ yAxis: meta.threshold }],
         },
-        emphasis: { disabled: true },
         z: 3,
       },
-
-      // ── Schedule (on-demand) ─────────────────────────────────
-      ...(showSchAct ? [
-        {
+      {
+        name: `Event Threshold (${meta.thresholdText})`,
+        type: "line",
+        xAxisIndex: 0,
+        yAxisIndex: 1,
+        data: timestamps.map(() => meta.threshold),
+        symbol: "none",
+        silent: true,
+        itemStyle: { color: eventType === "high" ? "#DC2626" : "#F97316" },
+        lineStyle: { color: eventType === "high" ? "#DC2626" : "#F97316", type: "dashed", width: 1.2 },
+        tooltip: { show: false },
+        z: 2,
+      },
+      ...(!hasDeviation || showSchAct ? [
+        ...(cleanScheds.some((v) => v !== null) ? [{
           name: "Schedule (MW)",
           type: "line",
+          xAxisIndex: 0,
           yAxisIndex: 0,
-          data: scheds,
+          data: cleanScheds,
           symbol: "none",
+          itemStyle: { color: "#6366F1" },
           lineStyle: { color: "#6366F1", width: 1.5 },
-          emphasis: { disabled: true },
           z: 2,
-        },
+        }] : []),
         {
           name: "Actual (MW)",
           type: "line",
+          xAxisIndex: 0,
           yAxisIndex: 0,
-          data: actuals,
+          data: cleanActuals,
           symbol: "none",
-          lineStyle: { color: "#EC4899", width: 1.5 },
-          emphasis: { disabled: true },
+          itemStyle: { color: "#EC4899" },
+          lineStyle: { color: "#EC4899", width: hasDeviation ? 1.5 : 2 },
           z: 2,
         },
       ] : []),
-    ],
-  }), [timestamps, devs, freqs, scheds, actuals, showSchAct, palette, maxDevAbs, primary, secondary, type]);
+    ];
+
+    const legendItems = [
+      ...(hasDeviation ? [meta.helping.label, meta.adverse.label] : []),
+      ...(hasDeviation ? ["Deviation (MW)"] : []),
+      "Frequency (Hz)",
+      `Event Threshold (${meta.thresholdText})`,
+      ...(!hasDeviation || showSchAct ? [
+        ...(cleanScheds.some((v) => v !== null) ? ["Schedule (MW)"] : []),
+        "Actual (MW)"
+      ] : [])
+    ];
+
+    return {
+      backgroundColor: "#FFFFFF",
+      animation: false,
+      tooltip: {
+        trigger: "axis",
+        backgroundColor: "rgba(255,255,255,0.98)",
+        borderColor: "#CBD5E1",
+        borderWidth: 1,
+        padding: [10, 14],
+        textStyle: { color: "#1E293B", fontSize: 12 },
+        formatter: (params) => {
+          const ts = params[0]?.axisValue || "";
+          const map = {};
+          params.forEach((p) => { map[p.seriesName] = p.value; });
+          const freq = map["Frequency (Hz)"];
+          const dev = map["Deviation (MW)"];
+          const inEvent = freq != null && meta.isEvent(freq);
+          const badge = inEvent ? `<span style="background:${eventType === "high" ? "#DC2626" : "#F97316"};color:#fff;border-radius:3px;padding:1px 5px;font-size:10px;font-weight:800;margin-left:6px">${meta.badge}</span>` : "";
+          let html = `<div style="border-bottom:1px solid #CBD5E1;padding-bottom:5px;margin-bottom:6px;font-size:11px;color:#64748B">${ts}${badge}</div>`;
+          html += `<div style="display:flex;justify-content:space-between;gap:16px;margin-bottom:3px"><span style="color:#64748B">Frequency:</span><span style="font-weight:700;color:${palette.frequency}">${freq != null ? Number(freq).toFixed(3) : "-"} Hz</span></div>`;
+          if (hasDeviation) {
+            html += `<div style="display:flex;justify-content:space-between;gap:16px;margin-bottom:3px"><span style="color:#64748B">Deviation:</span><span style="font-weight:700;color:${dev >= 0 ? palette.deviation : "#EF4444"}">${dev != null ? (dev >= 0 ? "+" : "") + Number(dev).toFixed(0) : "-"} MW</span></div>`;
+          }
+          if (map["Schedule (MW)"] != null) html += `<div style="display:flex;justify-content:space-between;gap:16px;margin-bottom:3px"><span style="color:#64748B">Schedule:</span><span style="color:#6366F1;font-weight:600">${Number(map["Schedule (MW)"]).toFixed(0)} MW</span></div>`;
+          if (map["Actual (MW)"] != null) html += `<div style="display:flex;justify-content:space-between;gap:16px"><span style="color:#64748B">Actual:</span><span style="color:#EC4899;font-weight:600">${Number(map["Actual (MW)"]).toFixed(0)} MW</span></div>`;
+          if (hasDeviation && inEvent) {
+            html += `<div style="margin-top:5px;padding-top:5px;border-top:1px solid #E2E8F0;font-size:10px;color:#475569;font-weight:600">${meta.isHelping(dev) ? meta.helping.label : meta.adverse.label}</div>`;
+          }
+          return html;
+        },
+      },
+      legend: {
+        show: true,
+        type: "scroll",
+        top: compact ? 4 : 6,
+        left: 56,
+        right: 48,
+        textStyle: { color: "#475569", fontSize: compact ? 10 : 11, fontWeight: "600" },
+        icon: "roundRect",
+        itemWidth: compact ? 18 : 20,
+        itemHeight: 8,
+        pageIconSize: 10,
+        pageTextStyle: { color: "#64748B", fontSize: 10 },
+        selectedMode: true,
+        data: legendItems,
+      },
+      toolbox: {
+        show: true,
+        top: 0,
+        right: 6,
+        itemSize: 15,
+        feature: {
+          saveAsImage: {
+            title: "Download image",
+            name: `${row.name || row.entity || row.state || "frequency_compliance"}_trend`,
+            pixelRatio: 2,
+            backgroundColor: "#FFFFFF",
+          },
+        },
+      },
+      grid: [
+        { top: compact ? 42 : 48, right: 58, bottom: compact ? 52 : 74, left: 56, containLabel: false },
+      ],
+      dataZoom: [
+        { type: "inside", xAxisIndex: 0, filterMode: "none" },
+        {
+          type: "slider",
+          xAxisIndex: 0,
+          height: compact ? 14 : 18,
+          bottom: compact ? 14 : 20,
+          textStyle: { color: "#64748B", fontSize: 9 },
+          fillerColor: "rgba(3,98,76,0.08)",
+          borderColor: "#CBD5E1",
+          handleStyle: { color: "#03624C" },
+          dataBackground: {
+            lineStyle: { color: "#94A3B8" },
+            areaStyle: { color: "rgba(148,163,184,0.18)" },
+          },
+        },
+      ],
+      xAxis: [
+        { type: "category", gridIndex: 0, data: timestamps, boundaryGap: false, axisLabel: { formatter: fmtTick, color: "#64748B", fontSize: compact ? 9 : 10, rotate: 0, margin: compact ? 8 : 12, interval: Math.max(Math.floor(timestamps.length / 9) - 1, 0) }, axisLine: { lineStyle: { color: "#CBD5E1" } }, splitLine: { show: false } },
+      ],
+      yAxis: [
+        { type: "value", gridIndex: 0, name: "MW", min: hasDeviation ? -maxDevAbs : 0, max: maxDevAbs, interval: hasDeviation ? maxDevAbs / 3 : maxDevAbs / 4, axisLabel: { color: "#475569", fontSize: compact ? 9 : 10, formatter: (v) => v.toFixed(0) }, splitLine: { lineStyle: { color: "#E2E8F0" } } },
+        { type: "value", gridIndex: 0, name: "Hz", position: "right", min: 49.4, max: 50.6, interval: 0.2, axisLabel: { color: palette.frequency, fontSize: compact ? 9 : 10, formatter: (v) => v.toFixed(2) }, axisLine: { show: true, lineStyle: { color: palette.frequency } }, splitLine: { show: false } },
+      ],
+      series: chartSeries,
+    };
+  }, [timestamps, cleanDevs, cleanFreqs, cleanScheds, cleanActuals, showSchAct, compact, palette, meta, maxDevAbs, helpingData, adverseData, eventType, hasDeviation, row]);
 
   return (
     <ReactECharts
@@ -319,7 +380,7 @@ const ComplianceChart = forwardRef(function ComplianceChart(
       option={option}
       style={{ height, width: "100%" }}
       opts={{ renderer: "canvas" }}
-      notMerge={true}
+      notMerge
     />
   );
 });

@@ -58,8 +58,6 @@ def run_rtg_dashboard_snapshot_job():
             }
         )
 
-        raise
-
 scheduler.add_job(
 
     PipelineRunner.run_schedule_pipeline,

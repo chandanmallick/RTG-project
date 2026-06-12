@@ -1,0 +1,14 @@
+*** Begin Patch
+*** Update File: frontend/src/pages/PSPDashboard.jsx
+@@
+-                          <Bar dataKey="thermal" stackId="stack" name="Thermal Gen" fill="#E28743" />
+-                          <Bar dataKey="hydro" stackId="stack" name="Hydro Gen" fill="#00DF81" />
+-                          <Bar dataKey="solar" stackId="stack" name="Solar Gen" fill="#8FA960" />
+-                          <Bar dataKey="biogas" stackId="stack" name="BioGas Gen" fill="#17876D" />
+-                          <Bar dataKey="nuclear" stackId="stack" name="Nuclear Gen" fill="#2CC295" />
++                          <Bar dataKey="thermal" stackId="stack" name="Thermal Gen" fill="#4B5563" />
++                          <Bar dataKey="hydro" stackId="stack" name="Hydro Gen" fill="#2563EB" />
++                          <Bar dataKey="solar" stackId="stack" name="Solar Gen" fill="#FACC15" />
++                          <Bar dataKey="biogas" stackId="stack" name="BioGas Gen" fill="#16A34A" />
++                          <Bar dataKey="nuclear" stackId="stack" name="Nuclear Gen" fill="#DB2777" />
+*** End Patch

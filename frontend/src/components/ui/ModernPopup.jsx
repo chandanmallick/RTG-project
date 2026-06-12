@@ -12,6 +12,7 @@ import CheckRoundedIcon from "@mui/icons-material/CheckRounded";
 import ErrorRoundedIcon from "@mui/icons-material/ErrorRounded";
 import InfoRoundedIcon from "@mui/icons-material/InfoRounded";
 import CloseRoundedIcon from "@mui/icons-material/CloseRounded";
+import WarningAmberRoundedIcon from "@mui/icons-material/WarningAmberRounded";
 
 const popupStyles = {
   success: {
@@ -58,14 +59,30 @@ const popupStyles = {
     bgSoft:
       "linear-gradient(180deg,#F1F7F6,#FFFFFF)",
   },
+
+  warning: {
+    icon: <WarningAmberRoundedIcon />,
+
+    gradient:
+      "linear-gradient(135deg,#FBBF24,#F97316)",
+
+    glow: "rgba(249,115,22,0.22)",
+
+    shadow:
+      "0 35px 80px rgba(249,115,22,0.18)",
+
+    bgSoft:
+      "linear-gradient(180deg,#FFF7ED,#FFFFFF)",
+  },
 };
 
 export const showModernPopup = ({
   type = "success",
   title = "",
   subtitle = "",
+  description = "",
 }) => {
-  const config = popupStyles[type];
+  const config = popupStyles[type] || popupStyles.info;
 
   toast.custom(
     (t) => (
@@ -338,20 +355,21 @@ export const showModernPopup = ({
           <Typography
             sx={{
               mt: 2,
-
-              fontSize: 14,
-
-              lineHeight: 1.7,
-
-              color: "#9CA3AF",
-
-              maxWidth: 280,
-
+              fontSize: 13,
+              lineHeight: 1.6,
+              color: "#6B7280",
+              maxWidth: 340,
               mx: "auto",
+              whiteSpace: "pre-line",
+              maxHeight: "150px",
+              overflowY: "auto",
             }}
           >
-            RTG synchronization process
-            completed successfully.
+            {description || (type === "success"
+              ? "RTG synchronization process completed successfully."
+              : type === "error"
+              ? "An error occurred during the sync process."
+              : "No action required.")}
           </Typography>
 
           {/* ACTION */}

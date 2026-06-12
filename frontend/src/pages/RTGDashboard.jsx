@@ -67,7 +67,7 @@ import RefreshRoundedIcon from "@mui/icons-material/RefreshRounded";
 
 import { showModernPopup } from "../components/ui/ModernPopup";
 
-const PIPELINE_API = `http://${window.location.hostname}:8001/api`;
+const PIPELINE_API = "/api";
 
 function PipelineRow({ icon, label, value }) {
   return (

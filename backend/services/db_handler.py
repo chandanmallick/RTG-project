@@ -58,6 +58,13 @@ class MongoService:
         if PSP_COLLECTION not in self.db.list_collection_names():
             self.db.create_collection(PSP_COLLECTION)
 
+        if "frequency_mapping" not in self.db.list_collection_names():
+            self.db.create_collection("frequency_mapping")
+            if "station_mapping" in self.db.list_collection_names():
+                old_docs = list(self.db["station_mapping"].find({}, {"_id": 0}))
+                if old_docs:
+                    self.db["frequency_mapping"].insert_many(old_docs)
+
     # 🔥 UPSERT LOGIC (CORE)
     def upsert_data(self, df: pd.DataFrame):
 
@@ -270,6 +277,16 @@ class MongoService:
             wbes_name = ""
             scada_key = ""
             outage_key = ""
+            wbes_acronym = ""
+            scada_schedule_key = ""
+            scada_dc_key = ""
+            schedule_source = "RTG"
+            dc_source = "RTG"
+            actual_source = "RTG"
+            plant_type = "IPP"
+            rtg_plant_id = ""
+            is_state = False
+            is_frequency = False
 
             if existing:
 
@@ -283,6 +300,46 @@ class MongoService:
 
                 outage_key = existing.get(
                     "outage_key", ""
+                )
+
+                wbes_acronym = existing.get(
+                    "wbes_acronym", ""
+                )
+
+                scada_schedule_key = existing.get(
+                    "scada_schedule_key", ""
+                )
+
+                scada_dc_key = existing.get(
+                    "scada_dc_key", ""
+                )
+
+                schedule_source = existing.get(
+                    "schedule_source", "RTG"
+                )
+
+                dc_source = existing.get(
+                    "dc_source", "RTG"
+                )
+
+                actual_source = existing.get(
+                    "actual_source", "RTG"
+                )
+
+                plant_type = existing.get(
+                    "type", "IPP"
+                )
+
+                rtg_plant_id = existing.get(
+                    "rtg_plant_id", ""
+                )
+
+                is_state = existing.get(
+                    "is_state", False
+                )
+
+                is_frequency = existing.get(
+                    "is_frequency", False
                 )
 
             # ----------------------------------------
@@ -321,7 +378,37 @@ class MongoService:
                     scada_key,
 
                 "outage_key":
-                    outage_key
+                    outage_key,
+
+                "wbes_acronym":
+                    wbes_acronym,
+
+                "scada_schedule_key":
+                    scada_schedule_key,
+
+                "scada_dc_key":
+                    scada_dc_key,
+
+                "schedule_source":
+                    schedule_source,
+
+                "dc_source":
+                    dc_source,
+
+                "actual_source":
+                    actual_source,
+
+                "type":
+                    plant_type,
+
+                "rtg_plant_id":
+                    rtg_plant_id,
+
+                "is_state":
+                    is_state,
+
+                "is_frequency":
+                    is_frequency
             }
 
             self.map_collection.update_one(

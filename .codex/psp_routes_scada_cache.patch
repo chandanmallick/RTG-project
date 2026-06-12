@@ -1,0 +1,220 @@
+diff --git a/backend/routes/psp_routes.py b/backend/routes/psp_routes.py
+index e4ad0d9..7cccd40 100644
+--- a/backend/routes/psp_routes.py
++++ b/backend/routes/psp_routes.py
+@@ -55,7 +55,7 @@ PSP_PEAK_STATES = [
+     {"name": "ER", "hist_prefix": "ER", "daily_demand_name": "REGION", "daily_energy_name": "ER"}
+ ]
+ 
+-PSP_PORTFOLIO_SOURCE_VERSION = "wbes_mapping_no_mock_v4"
++PSP_PORTFOLIO_SOURCE_VERSION = "scada_cache_fallback_v5"
+ 
+ PSP_PORTFOLIO_STATE_CONFIGS = [
+     {"name": "BIHAR", "psp": "BIHAR", "historical_prefix": "BIHAR", "wbes": "BIHAR_STATE",
+@@ -702,7 +702,95 @@ async def get_state_generation_sources(date_str: str = None):
+         "totals": {key: round(value, 3) for key, value in totals.items()},
+     }
+ 
+-def compute_state_portfolio(state: dict, target_date: date, query_time: str, max_demand: float, wbes_data: list, scada_df: pd.DataFrame = None):
++
++
++def psp_safe_float(value):
++    if value is None:
++        return None
++    if isinstance(value, (int, float)):
++        return float(value)
++    try:
++        text = str(value).strip()
++        if text in ["", "None", "null", "-"]:
++            return None
++        return float(text.replace("%", "").strip())
++    except Exception:
++        return None
++
++def psp_block_index(query_time: str, series_len: int):
++    if series_len <= 0:
++        return 0
++    try:
++        hour, minute = [int(part) for part in str(query_time or "").split(":")[:2]]
++    except Exception:
++        hour, minute = 19, 0
++    block_size = max(1, 1440 // series_len)
++    minute_of_day = max(0, min(1439, hour * 60 + minute))
++    return min(minute_of_day // block_size, series_len - 1)
++
++def normalize_psp_identifier(value):
++    if value in [None, ""]:
++        return ""
++    return " ".join(str(value).strip().upper().replace("_", " ").split())
++
++def load_scada_cache_docs(db, target_date: date):
++    try:
++        return list(db.db["frequency_event_raw_data"].find(
++            {
++                "date": target_date.strftime("%Y-%m-%d"),
++                "sources.scada_file.actual": {"$exists": True}
++            },
++            {
++                "_id": 0,
++                "plant_id": 1,
++                "wbes_name": 1,
++                "wbes_acronym": 1,
++                "sources.scada_file.actual": 1,
++            }
++        ))
++    except Exception as e:
++        print(f"Error loading cached SCADA file data for PSP portfolio: {e}")
++        return []
++
++def cached_scada_value(scada_cache_docs: list, identifiers: list, query_time: str):
++    candidates = {
++        normalize_psp_identifier(identifier)
++        for identifier in identifiers
++        if normalize_psp_identifier(identifier)
++    }
++    if not candidates:
++        return None
++
++    for doc in scada_cache_docs or []:
++        doc_identifiers = {
++            normalize_psp_identifier(doc.get("plant_id")),
++            normalize_psp_identifier(doc.get("wbes_name")),
++            normalize_psp_identifier(doc.get("wbes_acronym")),
++        }
++        if not candidates.intersection(doc_identifiers):
++            continue
++        series = (((doc.get("sources") or {}).get("scada_file") or {}).get("actual"))
++        if not series:
++            continue
++        idx = psp_block_index(query_time, len(series))
++        value = psp_safe_float(series[idx] if idx < len(series) else None)
++        if value is not None:
++            return value
++    return None
++
++def scada_component_value(scada_df, scada_cache_docs: list, identifiers: list, row_idx: int, query_time: str):
++    for identifier in identifiers:
++        if scada_df is not None and identifier and identifier in scada_df.columns and row_idx < len(scada_df):
++            value = psp_safe_float(scada_df[identifier][row_idx])
++            if value is not None:
++                return value, "SCADA_FILE"
++
++    value = cached_scada_value(scada_cache_docs, identifiers, query_time)
++    if value is not None:
++        return value, "SCADA_FILE_CACHE"
++    return None, ""
++
++def compute_state_portfolio(state: dict, target_date: date, query_time: str, max_demand: float, wbes_data: list, scada_df: pd.DataFrame = None, scada_cache_docs: list = None):
+     # Parse hour/minute
+     try:
+         hour = int(query_time.split(":")[0])
+@@ -719,18 +807,24 @@ def compute_state_portfolio(state: dict, target_date: date, query_time: str, max
+     nuclear = 0.0
+     total_scada_gen = 0.0
+     own_gen_source = "SCADA_FILE"
++    scada_cache_docs = scada_cache_docs or []
++    row_idx = hour * 60 + minute + 1
++    scada_sources = set()
+     
+-    if scada_df is not None:
+-        row_idx = hour * 60 + minute + 1
+-        if row_idx < len(scada_df):
++    if scada_df is not None or scada_cache_docs:
++        if scada_df is None or row_idx < len(scada_df):
+             cols = state["scada"]
+             # 1. Thermal
+-            if cols.get("thermal") and cols["thermal"] in scada_df.columns:
+-                thermal = float(scada_df[cols["thermal"]][row_idx] or 0)
++            thermal_val, thermal_src = scada_component_value(scada_df, scada_cache_docs, [cols.get("thermal")], row_idx, query_time)
++            if thermal_val is not None:
++                thermal = thermal_val
++                scada_sources.add(thermal_src)
+             
+             # 2. Hydro
+-            if cols.get("hydro") and cols["hydro"] in scada_df.columns:
+-                hydro = float(scada_df[cols["hydro"]][row_idx] or 0)
++            hydro_val, hydro_src = scada_component_value(scada_df, scada_cache_docs, [cols.get("hydro")], row_idx, query_time)
++            if hydro_val is not None:
++                hydro = hydro_val
++                scada_sources.add(hydro_src)
+             
+             # 3. Solar (with fallback check for suffix Int Gen "Solar" or Int Gen Solar)
+             solar_keys = []
+@@ -743,26 +837,38 @@ def compute_state_portfolio(state: dict, target_date: date, query_time: str, max
+             solar_keys.append(f'{state["name"]} Int Gen Solar')
+             solar_keys.append(f'{state["name"]} Int Gen "Solar"')
+             
+-            for sk in solar_keys:
+-                if sk in scada_df.columns:
+-                    solar = float(scada_df[sk][row_idx] or 0)
+-                    break
++            solar_val, solar_src = scada_component_value(scada_df, scada_cache_docs, solar_keys, row_idx, query_time)
++            if solar_val is not None:
++                solar = solar_val
++                scada_sources.add(solar_src)
+             
+             # 4. Others (Biogas)
+-            if cols.get("others") and cols["others"] in scada_df.columns:
+-                biogas = float(scada_df[cols["others"]][row_idx] or 0)
++            biogas_val, biogas_src = scada_component_value(scada_df, scada_cache_docs, [cols.get("others")], row_idx, query_time)
++            if biogas_val is not None:
++                biogas = biogas_val
++                scada_sources.add(biogas_src)
+             
+             # 5. Nuclear
+-            if cols.get("nuclear") and cols["nuclear"] in scada_df.columns:
+-                nuclear = float(scada_df[cols["nuclear"]][row_idx] or 0)
++            nuclear_val, nuclear_src = scada_component_value(scada_df, scada_cache_docs, [cols.get("nuclear")], row_idx, query_time)
++            if nuclear_val is not None:
++                nuclear = nuclear_val
++                scada_sources.add(nuclear_src)
+                 
+             # 6. Total SCADA Gen
+             scada_gen_col = state.get("scada_gen")
+-            if scada_gen_col and scada_gen_col in scada_df.columns:
+-                total_scada_gen = float(scada_df[scada_gen_col][row_idx] or 0)
++            total_val, total_src = scada_component_value(
++                scada_df,
++                scada_cache_docs,
++                [scada_gen_col, state.get("name"), state.get("psp"), state.get("highlight"), *state.get("wbes_candidates", [])],
++                row_idx,
++                query_time,
++            )
++            if total_val is not None:
++                total_scada_gen = total_val
++                own_gen_source = total_src
+             else:
+                 total_scada_gen = thermal + hydro + solar + biogas + nuclear
+-                own_gen_source = "SCADA_COMPONENT_SUM"
++                own_gen_source = "SCADA_COMPONENT_SUM_CACHE" if "SCADA_FILE_CACHE" in scada_sources else "SCADA_COMPONENT_SUM"
+     else:
+         # Fallback using mock proportions
+         mp = state["mock_p"]
+@@ -1008,6 +1114,8 @@ def calculate_and_save_portfolio(target_date: date):
+             except Exception as e:
+                 print(f"Error reading SCADA excel: {e}")
+                 
++    scada_cache_docs = load_scada_cache_docs(db, target_date) if scada_df is None else []
++                
+     # 2. Compute each state's peak portfolio
+     states_data = {}
+     sum_state_max_demand = 0.0
+@@ -1046,7 +1154,7 @@ def calculate_and_save_portfolio(target_date: date):
+         if match:
+             loadshed = abs(float(match.get("MAX_DEMAND_SHORTAGE") or 0.0))
+             
+-        portfolio = compute_state_portfolio(state, target_date, max_demand_time, max_demand, wbes_data, scada_df)
++        portfolio = compute_state_portfolio(state, target_date, max_demand_time, max_demand, wbes_data, scada_df, scada_cache_docs)
+         
+         states_data[state_label] = {
+             "max_demand": round(max_demand, 1),
+@@ -1082,7 +1190,7 @@ def calculate_and_save_portfolio(target_date: date):
+     
+     for state in STATES:
+         state_demand_at_er = states_data[state["name"]]["max_demand"] * scale_factor
+-        p = compute_state_portfolio(state, target_date, er_max_demand_time, state_demand_at_er, wbes_data, scada_df)
++        p = compute_state_portfolio(state, target_date, er_max_demand_time, state_demand_at_er, wbes_data, scada_df, scada_cache_docs)
+         for k in er_portfolio:
+             er_portfolio[k] += p[k]
+             
+

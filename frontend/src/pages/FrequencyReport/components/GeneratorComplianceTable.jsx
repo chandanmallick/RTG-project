@@ -6,20 +6,25 @@ import React, { useState, useMemo } from "react";
 import { ChevronDown, ChevronUp, Search, Zap } from "lucide-react";
 import SectionAccordion from "../../../components/ui/SectionAccordion";
 import ComplianceChart from "./ComplianceChart";
+import CapacityFrequencyChart from "./CapacityFrequencyChart";
 import StatisticsCard from "./StatisticsCard";
 
 // Helper to format values
-const fmt = (v, dec = 1) =>
+const fmt = (v, dec = 0) =>
+  !Number.isFinite(Number(v)) ? "-" :
   v === null || v === undefined ? "—" : Number(v).toFixed(dec);
 
 export default function GeneratorComplianceTable({
   rows,
-  expandedRowId,
+  expandedRowIds,
   onToggleExpand,
+  onExpandAll,
+  onCollapseAll,
   onUpdateRowField,
   genDesc,
   onUpdateGenDesc,
   showSchAct,
+  onEditRawData,
 }) {
   const [searchQuery, setSearchQuery] = useState("");
   const [fuelFilter, setFuelFilter] = useState("ALL_FUELS");
@@ -68,6 +73,38 @@ export default function GeneratorComplianceTable({
       count={filteredRows.length}
       actions={
         <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+          <button
+            type="button"
+            onClick={onExpandAll}
+            style={{
+              border: "1px solid rgba(255,255,255,0.25)",
+              borderRadius: "6px",
+              padding: "4px 9px",
+              background: "rgba(255,255,255,0.14)",
+              color: "#FFFFFF",
+              fontSize: "0.72rem",
+              fontWeight: 800,
+              cursor: "pointer",
+            }}
+          >
+            Open all
+          </button>
+          <button
+            type="button"
+            onClick={onCollapseAll}
+            style={{
+              border: "1px solid rgba(255,255,255,0.25)",
+              borderRadius: "6px",
+              padding: "4px 9px",
+              background: "rgba(255,255,255,0.08)",
+              color: "#FFFFFF",
+              fontSize: "0.72rem",
+              fontWeight: 800,
+              cursor: "pointer",
+            }}
+          >
+            Close all
+          </button>
           {/* Search box */}
           <div style={{ position: "relative", width: "180px" }}>
             <span
@@ -253,9 +290,10 @@ export default function GeneratorComplianceTable({
                   <tbody>
                     {statePlants.map((row, ri) => {
                       const hasActual = row.actual !== null && row.actual !== undefined;
-                      const devPos = hasActual && row.deviation >= 0;
+                      const hasDeviation = row.deviation !== null && row.deviation !== undefined;
+                      const devPos = hasDeviation && row.deviation >= 0;
                       const pctDC = hasActual && row.pct_dc !== null && row.pct_dc !== undefined;
-                      const isExpanded = expandedRowId === row.plant_id;
+                      const isExpanded = expandedRowIds.includes(row.plant_id);
 
                       return (
                         <React.Fragment key={row.plant_id}>
@@ -367,7 +405,7 @@ export default function GeneratorComplianceTable({
                               )}
                             </td>
                             <td style={{ padding: "3px 8px", textAlign: "right" }} onClick={(e) => e.stopPropagation()}>
-                              {row.sched_src === "Manual" ? (
+                              {row.sched_src === "Manual" && row.schedule !== null ? (
                                 <input
                                   type="number"
                                   value={row.schedule ?? 0}
@@ -384,7 +422,7 @@ export default function GeneratorComplianceTable({
                                   }}
                                 />
                               ) : (
-                                <span style={{ fontSize: "0.73rem", color: "#3B82F6", fontWeight: 700 }}>
+                                <span style={{ fontSize: "0.73rem", color: row.schedule !== null ? "#3B82F6" : "#94A3B8", fontWeight: row.schedule !== null ? 700 : 400 }}>
                                   {fmt(row.schedule)}
                                 </span>
                               )}
@@ -392,8 +430,8 @@ export default function GeneratorComplianceTable({
                             <td style={{ padding: "8px 8px", textAlign: "right", fontSize: "0.73rem", color: hasActual ? "#0F172A" : "#94A3B8", fontWeight: hasActual ? 700 : 400 }}>
                               {hasActual ? fmt(row.actual) : "—"}
                             </td>
-                            <td style={{ padding: "8px 8px", textAlign: "right", fontSize: "0.73rem", fontWeight: 700, color: hasActual ? (devPos ? "#10B981" : "#EF4444") : "#94A3B8" }}>
-                              {hasActual ? (devPos ? "+" : "") + fmt(row.deviation) : "—"}
+                            <td style={{ padding: "8px 8px", textAlign: "right", fontSize: "0.73rem", fontWeight: 700, color: hasDeviation ? (devPos ? "#10B981" : "#EF4444") : "#94A3B8" }}>
+                              {hasDeviation ? (devPos ? "+" : "") + fmt(row.deviation) : "—"}
                             </td>
                             <td style={{ padding: "8px 8px", textAlign: "right" }}>
                               {pctDC ? (
@@ -441,11 +479,47 @@ export default function GeneratorComplianceTable({
                           </tr>
                           {isExpanded && (
                             <tr style={{ background: "#F8FAFC" }}>
-                              <td colSpan="12" style={{ padding: "16px", borderBottom: "1px solid #E2E8F0" }}>
-                                <div style={{ display: "flex", gap: "24px", flexWrap: "wrap", alignItems: "stretch" }}>
-                                  <div style={{ flex: "1 1 700px", maxWidth: "100%" }}>
+                              <td colSpan="12" style={{ padding: "8px 10px 12px", borderBottom: "1px solid #E2E8F0" }}>
+                                <div style={{ display: "none", justifyContent: "flex-end", marginBottom: "12px" }}>
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      onEditRawData(row);
+                                    }}
+                                    style={{
+                                      display: "flex",
+                                      alignItems: "center",
+                                      gap: "6px",
+                                      background: "#03624C",
+                                      color: "#FFFFFF",
+                                      border: "none",
+                                      borderRadius: "6px",
+                                      padding: "6px 14px",
+                                      fontSize: "0.74rem",
+                                      fontWeight: 700,
+                                      cursor: "pointer",
+                                      boxShadow: "0 2px 4px rgba(3,98,76,0.2)",
+                                      transition: "all 0.15s ease",
+                                    }}
+                                    onMouseEnter={(e) => {
+                                      e.currentTarget.style.background = "#024c3b";
+                                    }}
+                                    onMouseLeave={(e) => {
+                                      e.currentTarget.style.background = "#03624C";
+                                    }}
+                                  >
+                                    ⚙️ Edit Raw Database Data
+                                  </button>
+                                </div>
+                                <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 224px", gap: "10px", alignItems: "stretch" }}>
+                                  <div style={{ minWidth: 0, background: "#FFFFFF", border: "1px solid #E2E8F0", borderRadius: "10px", padding: "4px 6px 0", boxShadow: "0 8px 20px -18px rgba(15,23,42,0.45)" }}>
                                     {row.series?.timestamps?.length > 0 ? (
-                                      <ComplianceChart row={row} showSchAct={showSchAct} />
+                                      <>
+                                        <ComplianceChart row={row} showSchAct={showSchAct} height={520} compact />
+                                        <div style={{ marginTop: "6px", borderTop: "1px solid #E2E8F0", paddingTop: "6px" }}>
+                                          <CapacityFrequencyChart row={row} height={330} compact />
+                                        </div>
+                                      </>
                                     ) : (
                                       <div
                                         style={{
@@ -464,8 +538,38 @@ export default function GeneratorComplianceTable({
                                       </div>
                                     )}
                                   </div>
-                                  <div style={{ flex: "1 1 300px" }}>
-                                    <StatisticsCard row={row} />
+                                  <div style={{ width: "224px", display: "flex", flexDirection: "column", gap: "8px" }}>
+                                    <button
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        onEditRawData(row);
+                                      }}
+                                      style={{
+                                        display: "flex",
+                                        alignItems: "center",
+                                        justifyContent: "center",
+                                        gap: "5px",
+                                        background: "#03624C",
+                                        color: "#FFFFFF",
+                                        border: "none",
+                                        borderRadius: "7px",
+                                        padding: "6px 9px",
+                                        fontSize: "0.68rem",
+                                        fontWeight: 800,
+                                        cursor: "pointer",
+                                        boxShadow: "0 2px 4px rgba(3,98,76,0.16)",
+                                        transition: "all 0.15s ease",
+                                      }}
+                                      onMouseEnter={(e) => {
+                                        e.currentTarget.style.background = "#024c3b";
+                                      }}
+                                      onMouseLeave={(e) => {
+                                        e.currentTarget.style.background = "#03624C";
+                                      }}
+                                    >
+                                      Edit Raw Data
+                                    </button>
+                                    {row.schedule !== null && row.deviation !== null && <StatisticsCard row={row} compact />}
                                   </div>
                                 </div>
                               </td>

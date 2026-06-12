@@ -35,7 +35,7 @@ import CloseRoundedIcon from "@mui/icons-material/CloseRounded";
 import VisibilityRoundedIcon from "@mui/icons-material/VisibilityRounded";
 
 const API =
-  `http://${window.location.hostname}:8001/api`;
+  "/api";
 
 export default function PipelineMonitor() {
 

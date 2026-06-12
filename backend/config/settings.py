@@ -12,7 +12,7 @@ DB_NAME = "rtg_db"
 
 UNIT_COLLECTION = "units_data"
 
-MAP_COLLECTION = "station_mapping"
+MAP_COLLECTION = "frequency_mapping"
 
 PIPELINE_CONFIG_COLLECTION = "pipeline_config"
 

@@ -1,159 +1,109 @@
-/**
- * StatisticsCard.jsx
- * Dark-themed compliance statistics card for states and generators.
- */
-import React from "react";
-import { Clock, Zap, AlertTriangle, ShieldCheck, ChevronRight } from "lucide-react";
+import { ShieldCheck, Zap } from "lucide-react";
 
-export default function StatisticsCard({ row }) {
+const num = (value, fallback = 0) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+};
+
+const pct = (value) => `${num(value).toFixed(1)}%`;
+const mw = (value) => `${num(value).toFixed(0)} MW`;
+
+export default function StatisticsCard({ row, compact = false }) {
   const isState = row.type === "state" || row.is_state;
+  const isHigh = row.event_type === "high";
   const stats = row.statistics || {};
+  const freqText = isHigh ? "Freq > 50.05" : "Freq < 49.9";
 
   const cardStyle = {
     background: "linear-gradient(135deg, #0F172A 0%, #1E293B 100%)",
     border: "1px solid rgba(100, 116, 139, 0.2)",
-    borderRadius: "14px",
-    padding: "16px",
+    borderRadius: compact ? "10px" : "12px",
+    padding: compact ? "10px" : "12px",
     color: "#F1F5F9",
-    boxShadow: "0 10px 30px -5px rgba(0,0,0,0.3)",
-    height: "100%",
-    display: "flex",
-    flexDirection: "column",
-    justifyContent: "space-between"
+    boxShadow: compact ? "0 6px 16px -10px rgba(0,0,0,0.38)" : "0 8px 22px -8px rgba(0,0,0,0.35)",
+    height: "auto",
   };
-
   const sectionTitleStyle = {
-    fontSize: "0.72rem",
-    fontWeight: "700",
+    fontSize: compact ? "0.62rem" : "0.68rem",
+    fontWeight: 800,
     textTransform: "uppercase",
-    letterSpacing: "0.05em",
     color: "#94A3B8",
     borderBottom: "1px solid rgba(100, 116, 139, 0.2)",
-    paddingBottom: "6px",
-    marginBottom: "12px",
+    paddingBottom: compact ? "4px" : "5px",
+    marginBottom: compact ? "6px" : "8px",
     display: "flex",
     alignItems: "center",
-    gap: "6px"
+    gap: "6px",
   };
-
   const metricBoxStyle = {
     background: "rgba(15, 23, 42, 0.5)",
     border: "1px solid rgba(100, 116, 139, 0.1)",
-    borderRadius: "10px",
-    padding: "10px 12px",
-    marginBottom: "10px"
+    borderRadius: compact ? "8px" : "9px",
+    padding: compact ? "7px 8px" : "8px 10px",
+    marginBottom: compact ? "6px" : "8px",
   };
-
-  const metricLabelStyle = {
-    fontSize: "0.68rem",
-    color: "#94A3B8",
-    fontWeight: "500",
-    marginBottom: "2px"
-  };
-
-  const metricValueStyle = (color) => ({
-    fontSize: "1.1rem",
-    fontWeight: "800",
-    color: color || "#F8FAFC",
-    display: "flex",
-    alignItems: "baseline",
-    gap: "4px"
-  });
-
-  const subTextStyle = {
-    fontSize: "0.65rem",
-    color: "#64748B",
-    marginTop: "2px",
-    fontWeight: "500"
-  };
+  const labelStyle = { fontSize: compact ? "0.61rem" : "0.68rem", color: "#94A3B8", fontWeight: 600, marginBottom: "2px" };
+  const valueStyle = (color) => ({ fontSize: compact ? "0.92rem" : "1rem", fontWeight: 900, color, lineHeight: 1.12 });
+  const subStyle = { fontSize: compact ? "0.58rem" : "0.65rem", color: "#64748B", marginTop: "2px", fontWeight: 600 };
 
   if (isState) {
-    const maxOd = stats.max_od ?? 0;
-    const maxOdTime = stats.max_od_time ?? "—";
-    const freqAtMax = stats.freq_at_max_od ?? 50.0;
-    const odDur = stats.od_duration_pct ?? 0;
-    const helpDur = stats.helping_duration_pct ?? 0;
-
+    const maxValue = isHigh ? stats.max_ud : stats.max_od;
+    const maxTime = isHigh ? stats.max_ud_time : stats.max_od_time;
+    const maxFreq = isHigh ? stats.freq_at_max_ud : stats.freq_at_max_od;
     return (
       <div style={cardStyle}>
-        <div>
-          <div style={sectionTitleStyle}>
-            <Zap size={13} className="text-warning" />
-            Compliance Indicators (State)
-          </div>
-
-          <div style={metricBoxStyle}>
-            <div style={metricLabelStyle}>Peak Over Drawal (OD)</div>
-            <div style={metricValueStyle("#F59E0B")}>
-              {maxOd > 0 ? `+${maxOd.toFixed(1)}` : maxOd.toFixed(1)} <span style={{ fontSize: "0.7rem", fontWeight: "600" }}>MW</span>
+        <div style={sectionTitleStyle}>
+          <Zap size={compact ? 12 : 13} />
+          Compliance Indicators (State)
+        </div>
+        <div style={metricBoxStyle}>
+          <div style={labelStyle}>{isHigh ? "Max Under Drawal (UD)" : "Peak Over Drawal (OD)"}</div>
+          <div style={valueStyle(isHigh ? "#06B6D4" : "#F59E0B")}>{mw(maxValue)}</div>
+          <div style={subStyle}>At {maxTime || "-"} | Freq: {num(maxFreq, 50).toFixed(3)} Hz</div>
+        </div>
+        <div className="row g-2">
+          <div className="col-6">
+            <div style={{ ...metricBoxStyle, marginBottom: 0 }}>
+              <div style={labelStyle}>Dev &gt; 0</div>
+              <div style={valueStyle(isHigh ? "#EAB308" : "#F59E0B")}>{pct(stats.od_duration_pct)}</div>
+              <div style={subStyle}>{freqText} &amp; Dev &gt; 0</div>
             </div>
-            {maxOd > 0 && (
-              <div style={subTextStyle}>
-                At {maxOdTime} | Freq: {freqAtMax.toFixed(3)} Hz
-              </div>
-            )}
           </div>
-
-          <div className="row g-2">
-            <div className="col-6">
-              <div style={{ ...metricBoxStyle, marginBottom: 0 }}>
-                <div style={metricLabelStyle}>OD Duration</div>
-                <div style={metricValueStyle(odDur > 10 ? "#EF4444" : "#F59E0B")}>
-                  {odDur.toFixed(2)}<span style={{ fontSize: "0.7rem", fontWeight: "600" }}>%</span>
-                </div>
-                <div style={subTextStyle}>Freq &lt; 49.9 &amp; Dev &gt; 0</div>
-              </div>
-            </div>
-            <div className="col-6">
-              <div style={{ ...metricBoxStyle, marginBottom: 0 }}>
-                <div style={metricLabelStyle}>Helping Grid</div>
-                <div style={metricValueStyle("#10B981")}>
-                  {helpDur.toFixed(2)}<span style={{ fontSize: "0.7rem", fontWeight: "600" }}>%</span>
-                </div>
-                <div style={subTextStyle}>Freq &lt; 49.9 &amp; Dev &lt; 0</div>
-              </div>
+          <div className="col-6">
+            <div style={{ ...metricBoxStyle, marginBottom: 0 }}>
+              <div style={labelStyle}>Dev &lt; 0</div>
+              <div style={valueStyle(isHigh ? "#06B6D4" : "#10B981")}>{pct(stats.helping_duration_pct)}</div>
+              <div style={subStyle}>{freqText} &amp; Dev &lt; 0</div>
             </div>
           </div>
         </div>
-
-        <div style={{ fontSize: "0.68rem", color: "#64748B", marginTop: "12px", borderTop: "1px solid rgba(100, 116, 139, 0.1)", paddingTop: "8px" }}>
-          Target: Drawal should be limited to Schedule during low frequency events.
+        <div style={{ ...subStyle, borderTop: "1px solid rgba(100, 116, 139, 0.1)", paddingTop: 7, marginTop: 8 }}>
+          {isHigh ? "Target: reduce drawal during high frequency operation." : "Target: limit drawal to schedule during low frequency operation."}
         </div>
       </div>
     );
   }
 
-  // Generator statistics
-  const underInj = stats.under_inj_pct ?? 0;
-  const helpingGrid = stats.helping_grid_pct ?? 0;
-
   return (
     <div style={cardStyle}>
-      <div>
-        <div style={sectionTitleStyle}>
-          <ShieldCheck size={13} className="text-success" />
-          Compliance Indicators (Gen)
-        </div>
-
-        <div style={metricBoxStyle}>
-          <div style={metricLabelStyle}>Under Injection Duration</div>
-          <div style={metricValueStyle(underInj > 5 ? "#EF4444" : "#F97316")}>
-            {underInj.toFixed(2)}<span style={{ fontSize: "0.7rem", fontWeight: "600" }}>%</span>
-          </div>
-          <div style={subTextStyle}>Freq &lt; 49.9 Hz &amp; Dev &lt; 0 MW</div>
-        </div>
-
-        <div style={metricBoxStyle}>
-          <div style={metricLabelStyle}>Helping Grid Duration</div>
-          <div style={metricValueStyle("#10B981")}>
-            {helpingGrid.toFixed(2)}<span style={{ fontSize: "0.7rem", fontWeight: "600" }}>%</span>
-          </div>
-          <div style={subTextStyle}>Freq &lt; 49.9 Hz &amp; Dev &gt; 0 MW</div>
-        </div>
+      <div style={sectionTitleStyle}>
+        <ShieldCheck size={compact ? 12 : 13} />
+        Compliance Indicators (Generator)
       </div>
-
-      <div style={{ fontSize: "0.68rem", color: "#64748B", marginTop: "12px", borderTop: "1px solid rgba(100, 116, 139, 0.1)", paddingTop: "8px" }}>
-        Target: Generator should support grid by avoiding under-injection when frequency is low.
+      <div style={metricBoxStyle}>
+        <div style={labelStyle}>Dev &lt; 0</div>
+        <div style={valueStyle("#10B981")}>{pct(stats.under_inj_pct)}</div>
+        <div style={subStyle}>{freqText} &amp; Dev &lt; 0</div>
+      </div>
+      <div style={metricBoxStyle}>
+        <div style={labelStyle}>Dev &gt; 0</div>
+        <div style={valueStyle(isHigh ? "#F97316" : "#10B981")}>{pct(stats.helping_grid_pct)}</div>
+        <div style={subStyle}>{freqText} &amp; Dev &gt; 0</div>
+      </div>
+      <div style={metricBoxStyle}>
+        <div style={labelStyle}>Cap On Bar Reference</div>
+        <div style={valueStyle("#FBBF24")}>{mw(row.cap_on_bar_55)}</div>
+        <div style={subStyle}>55% of cap on bar. Actual average: {pct(row.avg_capacity_on_bar_pct)}</div>
       </div>
     </div>
   );

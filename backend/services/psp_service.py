@@ -38,10 +38,15 @@ class PSPService:
         session = requests.Session()
         session.mount("https://", LegacySSLAdapter())
 
+        config = PipelineConfigService().get_config("PSP") or {}
+        login_url = config.get("psp_login_url") or PSPService.LOGIN_URL
+        username = config.get("psp_username") or "erldc"
+        password = config.get("psp_password") or "erldc1"
+
         # Login via POST
         headers = {'User-Agent': 'Mozilla/5.0'}
-        payload = {'User_Name': 'erldc', 'password': 'erldc1'}
-        resp = session.post(PSPService.LOGIN_URL, headers=headers, data=payload, verify=False, timeout=30)
+        payload = {'User_Name': username, 'password': password}
+        resp = session.post(login_url, headers=headers, data=payload, verify=False, timeout=30)
         resp.raise_for_status()
 
         return session
@@ -58,7 +63,9 @@ class PSPService:
                 session = PSPService._create_session()
 
             # GET PSP data for the date
-            PSP_Rep_URL = "{}?date={}".format(PSPService.DATA_URL, dt.strftime("%d-%m-%Y"))
+            config = PipelineConfigService().get_config("PSP") or {}
+            psp_data_url = config.get("psp_data_url") or PSPService.DATA_URL
+            PSP_Rep_URL = "{}?date={}".format(psp_data_url, dt.strftime("%d-%m-%Y"))
             resp_rep = session.get(PSP_Rep_URL, verify=False, timeout=30)
             resp_rep.raise_for_status()
 
@@ -129,4 +136,3 @@ class PSPService:
             progress_callback(total_days, completed, "", "COMPLETED")
 
         return completed
-

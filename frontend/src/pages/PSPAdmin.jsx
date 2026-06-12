@@ -35,10 +35,19 @@ export default function PSPAdmin() {
     psp_username: "",
     psp_password: "",
     psp_login_url: "",
-    psp_data_url: ""
+    psp_data_url: "",
+    loadshed_api_url: "",
+    outage_api_url: ""
   });
   const [configLoading, setConfigLoading] = useState(false);
   const [savingConfig, setSavingConfig] = useState(false);
+  const [portfolioMapping, setPortfolioMapping] = useState([]);
+  const [mappingLoading, setMappingLoading] = useState(false);
+  const [savingMapping, setSavingMapping] = useState(false);
+  const [powerSystemDate, setPowerSystemDate] = useState(new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().slice(0, 10));
+  const [powerSystemBaseRows, setPowerSystemBaseRows] = useState([]);
+  const [powerSystemBaseLoading, setPowerSystemBaseLoading] = useState(false);
+  const [savingPowerSystemBase, setSavingPowerSystemBase] = useState(false);
 
   // Sync Progress State
   const [progressData, setProgressData] = useState(null);
@@ -110,6 +119,126 @@ export default function PSPAdmin() {
       });
     } finally {
       setSavingConfig(false);
+    }
+  };
+
+  const loadPortfolioMapping = async () => {
+    try {
+      setMappingLoading(true);
+      const res = await API.getPspPortfolioMapping();
+      if (res.success) {
+        setPortfolioMapping(res.data || []);
+      }
+    } catch (err) {
+      console.error(err);
+      showModernPopup({
+        type: "error",
+        title: "Mapping Load Failed",
+        subtitle: "Unable to load PSP portfolio source mapping"
+      });
+    } finally {
+      setMappingLoading(false);
+    }
+  };
+
+  const updatePortfolioMappingCell = (idx, key, value) => {
+    setPortfolioMapping((prev) =>
+      prev.map((row, rowIdx) => (rowIdx === idx ? { ...row, [key]: value } : row))
+    );
+  };
+
+  const handleSavePortfolioMapping = async () => {
+    try {
+      setSavingMapping(true);
+      const payload = portfolioMapping.map(({ wbes_candidates, ...row }) => row);
+      const res = await API.savePspPortfolioMapping(payload);
+      if (res.success) {
+        showModernPopup({
+          type: "success",
+          title: "Mapping Saved",
+          subtitle: res.message || "PSP portfolio source mapping updated"
+        });
+        await loadPortfolioMapping();
+      } else {
+        showModernPopup({
+          type: "error",
+          title: "Save Failed",
+          subtitle: res.message || "Could not save PSP portfolio mapping"
+        });
+      }
+    } catch (err) {
+      console.error(err);
+      showModernPopup({
+        type: "error",
+        title: "Save Error",
+        subtitle: err.response?.data?.message || "Could not save PSP portfolio mapping"
+      });
+    } finally {
+      setSavingMapping(false);
+    }
+  };
+
+  const loadPowerSystemBase = async (dateStr = powerSystemDate) => {
+    try {
+      setPowerSystemBaseLoading(true);
+      const res = await API.getPspPowerSystemBase(dateStr);
+      if (res.success) {
+        setPowerSystemBaseRows(res.rows || []);
+      }
+    } catch (err) {
+      console.error(err);
+      showModernPopup({
+        type: "error",
+        title: "Base Data Load Failed",
+        subtitle: "Unable to load power system base data"
+      });
+    } finally {
+      setPowerSystemBaseLoading(false);
+    }
+  };
+
+  const updatePowerSystemBaseCell = (idx, key, value) => {
+    setPowerSystemBaseRows((prev) =>
+      prev.map((row, rowIdx) => (rowIdx === idx ? { ...row, [key]: value } : row))
+    );
+  };
+
+  const handleSavePowerSystemBase = async () => {
+    try {
+      setSavingPowerSystemBase(true);
+      const payload = {
+        effective_date: powerSystemDate,
+        rows: powerSystemBaseRows.map((row) => ({
+          state: row.state,
+          ists_inlet_points: Number(row.ists_inlet_points || 0),
+          per_capita_consumption: Number(row.per_capita_consumption || 0),
+          state_gna: Number(row.state_gna || 0)
+        }))
+      };
+      const res = await API.savePspPowerSystemBase(payload);
+      if (res.success) {
+        showModernPopup({
+          type: "success",
+          title: "Base Data Saved",
+          subtitle: res.message || "Power system base data updated"
+        });
+        await loadPowerSystemBase(powerSystemDate);
+      } else {
+        showModernPopup({
+          type: "error",
+          title: "Save Failed",
+          subtitle: res.message || "Could not save power system base data"
+        });
+      }
+    } catch (err) {
+      console.error(err);
+      showModernPopup({
+        type: "error",
+        title: "Save Error",
+        subtitle: err.response?.data?.message || "Could not save power system base data"
+      });
+    } finally {
+      setSavingPowerSystemBase(false);
     }
   };
 
@@ -219,6 +348,8 @@ export default function PSPAdmin() {
     loadStatus();
     checkProgress();
     loadConfig();
+    loadPortfolioMapping();
+    loadPowerSystemBase(powerSystemDate);
   };
 
   // Load status and progress on mount
@@ -251,6 +382,24 @@ export default function PSPAdmin() {
   const totalMissing = statusData.filter((d) => d.status === "MISSING").length;
   const syncSuccessRate =
     statusData.length > 0 ? Math.round((totalFetched / statusData.length) * 100) : 0;
+
+  const portfolioMappingColumns = [
+    ["psp", "PSP Name", 120],
+    ["wbes", "WBES Acronym", 140],
+    ["scada_gen", "Own Gen Total", 150],
+    ["scada_thermal", "Thermal", 150],
+    ["scada_hydro", "Hydro", 140],
+    ["scada_solar", "Solar", 140],
+    ["scada_others", "Others", 160],
+    ["scada_nuclear", "Nuclear", 140],
+    ["highlight", "SCADA Alias", 120],
+  ];
+
+  const powerSystemBaseColumns = [
+    ["ists_inlet_points", "ISTS inlet points", 150],
+    ["per_capita_consumption", "Per capita kWh", 150],
+    ["state_gna", "State GNA", 130],
+  ];
 
   return (
     <AppShell>
@@ -533,6 +682,28 @@ export default function PSPAdmin() {
                         required
                       />
                     </div>
+                    <div className="mb-3">
+                      <label className="form-label small fw-bold text-secondary mb-1">Loadshed API Template</label>
+                      <input
+                        type="text"
+                        className="form-control theme-input py-1.5 w-100"
+                        value={config.loadshed_api_url || ""}
+                        onChange={(e) => setConfig({ ...config, loadshed_api_url: e.target.value })}
+                        placeholder="Use {date_from} and {date_to}"
+                        required
+                      />
+                    </div>
+                    <div className="mb-3">
+                      <label className="form-label small fw-bold text-secondary mb-1">Generation Outage API Template</label>
+                      <input
+                        type="text"
+                        className="form-control theme-input py-1.5 w-100"
+                        value={config.outage_api_url || ""}
+                        onChange={(e) => setConfig({ ...config, outage_api_url: e.target.value })}
+                        placeholder="Use {date}"
+                        required
+                      />
+                    </div>
                     <hr className="my-3 opacity-25" />
                     <h4 className="fw-bold text-dark mb-2" style={{ fontSize: "0.78rem", letterSpacing: "0.03em" }}>
                       WBES / SCHEDULE API SETTINGS
@@ -684,6 +855,171 @@ export default function PSPAdmin() {
               )}
             </div>
           </div>
+        </div>
+
+        <div className="theme-glass-card p-3 mt-3">
+          <div className="d-flex align-items-center justify-content-between gap-2 mb-3 flex-wrap">
+            <div>
+              <h3 className="h6 fw-bold mb-0 text-dark">Power System Base Data</h3>
+              <p className="small text-muted mb-0" style={{ fontSize: "0.72rem" }}>
+                Date-effective ISTS inlet points, per-capita consumption, and State GNA.
+              </p>
+            </div>
+            <div className="d-flex align-items-center gap-2 flex-wrap">
+              <input
+                type="date"
+                className="form-control theme-input py-1"
+                value={powerSystemDate}
+                onChange={(e) => {
+                  setPowerSystemDate(e.target.value);
+                  loadPowerSystemBase(e.target.value);
+                }}
+                style={{ fontSize: "0.75rem", width: "150px" }}
+              />
+              <button
+                className="btn theme-btn-outline theme-btn-mini d-flex align-items-center gap-2"
+                onClick={() => loadPowerSystemBase(powerSystemDate)}
+                disabled={powerSystemBaseLoading}
+              >
+                <RefreshCw size={12} className={powerSystemBaseLoading ? "animate-spin-custom" : ""} />
+                <span>Load</span>
+              </button>
+              <button
+                className="btn theme-btn-primary theme-btn-mini d-flex align-items-center gap-2"
+                onClick={handleSavePowerSystemBase}
+                disabled={savingPowerSystemBase || powerSystemBaseLoading}
+              >
+                {savingPowerSystemBase ? (
+                  <div className="spinner-border spinner-border-sm" role="status"></div>
+                ) : (
+                  <Lock size={12} />
+                )}
+                <span>Save Base Data</span>
+              </button>
+            </div>
+          </div>
+
+          {powerSystemBaseLoading ? (
+            <div className="d-flex justify-content-center align-items-center py-4">
+              <div className="spinner-border text-success spinner-border-sm" role="status"></div>
+            </div>
+          ) : (
+            <div className="table-responsive" style={{ maxHeight: "300px", overflow: "auto" }}>
+              <table className="table table-hover align-middle theme-table mb-0" style={{ minWidth: "760px" }}>
+                <thead>
+                  <tr>
+                    <th style={{ padding: "0.55rem 0.7rem", width: "160px" }}>State</th>
+                    {powerSystemBaseColumns.map(([key, label, width]) => (
+                      <th key={key} style={{ padding: "0.55rem 0.7rem", width: `${width}px` }}>
+                        {label}
+                      </th>
+                    ))}
+                    <th style={{ padding: "0.55rem 0.7rem", width: "140px" }}>Active From</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {powerSystemBaseRows.map((row, idx) => (
+                    <tr key={row.state || idx}>
+                      <td className="fw-bold text-dark" style={{ padding: "0.45rem 0.7rem", fontSize: "0.78rem" }}>
+                        {row.state}
+                      </td>
+                      {powerSystemBaseColumns.map(([key]) => (
+                        <td key={key} style={{ padding: "0.35rem 0.45rem" }}>
+                          <input
+                            type="number"
+                            className="form-control theme-input py-1"
+                            value={row[key] ?? ""}
+                            onChange={(e) => updatePowerSystemBaseCell(idx, key, e.target.value)}
+                            style={{ fontSize: "0.74rem", minHeight: "28px" }}
+                          />
+                        </td>
+                      ))}
+                      <td className="text-secondary" style={{ padding: "0.45rem 0.7rem", fontSize: "0.73rem" }}>
+                        {row.effective_date || "-"}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+
+        <div className="theme-glass-card p-3 mt-3">
+          <div className="d-flex align-items-center justify-content-between gap-2 mb-3 flex-wrap">
+            <div>
+              <h3 className="h6 fw-bold mb-0 text-dark">PSP Portfolio Source Mapping</h3>
+              <p className="small text-muted mb-0" style={{ fontSize: "0.72rem" }}>
+                SCADA own-generation columns and WBES schedule acronyms used for portfolio DSM.
+              </p>
+            </div>
+            <div className="d-flex align-items-center gap-2">
+              <button
+                className="btn theme-btn-outline theme-btn-mini d-flex align-items-center gap-2"
+                onClick={loadPortfolioMapping}
+                disabled={mappingLoading}
+              >
+                <RefreshCw size={12} className={mappingLoading ? "animate-spin-custom" : ""} />
+                <span>Reload</span>
+              </button>
+              <button
+                className="btn theme-btn-primary theme-btn-mini d-flex align-items-center gap-2"
+                onClick={handleSavePortfolioMapping}
+                disabled={savingMapping || mappingLoading}
+              >
+                {savingMapping ? (
+                  <div className="spinner-border spinner-border-sm" role="status"></div>
+                ) : (
+                  <Lock size={12} />
+                )}
+                <span>Save Mapping</span>
+              </button>
+            </div>
+          </div>
+
+          {mappingLoading ? (
+            <div className="d-flex justify-content-center align-items-center py-4">
+              <div className="spinner-border text-success spinner-border-sm" role="status"></div>
+            </div>
+          ) : (
+            <div className="table-responsive" style={{ maxHeight: "340px", overflow: "auto" }}>
+              <table className="table table-hover align-middle theme-table mb-0" style={{ minWidth: "1320px" }}>
+                <thead>
+                  <tr>
+                    <th style={{ padding: "0.55rem 0.7rem", width: "150px" }}>State</th>
+                    {portfolioMappingColumns.map(([key, label, width]) => (
+                      <th key={key} style={{ padding: "0.55rem 0.7rem", width: `${width}px` }}>
+                        {label}
+                      </th>
+                    ))}
+                    <th style={{ padding: "0.55rem 0.7rem", width: "190px" }}>Frequency Map WBES</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {portfolioMapping.map((row, idx) => (
+                    <tr key={row.name || idx}>
+                      <td className="fw-bold text-dark" style={{ padding: "0.45rem 0.7rem", fontSize: "0.78rem" }}>
+                        {row.name}
+                      </td>
+                      {portfolioMappingColumns.map(([key]) => (
+                        <td key={key} style={{ padding: "0.35rem 0.45rem" }}>
+                          <input
+                            className="form-control theme-input py-1"
+                            value={row[key] || ""}
+                            onChange={(e) => updatePortfolioMappingCell(idx, key, e.target.value)}
+                            style={{ fontSize: "0.74rem", minHeight: "28px" }}
+                          />
+                        </td>
+                      ))}
+                      <td className="text-secondary" style={{ padding: "0.45rem 0.7rem", fontSize: "0.73rem" }}>
+                        {(row.wbes_candidates || []).join(", ") || "-"}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       </div>
     </AppShell>

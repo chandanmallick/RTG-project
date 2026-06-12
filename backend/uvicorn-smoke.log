@@ -1,0 +1,42 @@
+PIPELINE CONFIGS = [{'config_type': 'SCHEDULE', 'schedule_url': 'https://gateway.grid-india.in/POSOCO/reports/1.0/WebAccessAPI/GetUtilityExternalSharedData', 'schedule_api_key': '6dc32d47-f46a-45c9-afaf-c6ce73c4ca71', 'schedule_username': 'erldc_internal_prod', 'schedule_password': 'ErldcPr0d@052024', 'rtg_post_url': 'https://rtgapi.grid-india.in/sendData/wbes-data/saveupdatemulti/', 'enabled': True, 'interval_minutes': 5}, {'config_type': 'OUTAGE', 'outage_fetch_url': 'http://10.3.230.130:8001/Codebook/getCurrentTrElementOutagesData', 'rtg_outage_push_url': 'https://rtgapi.grid-india.in/sendData/outage-data/save/', 'enabled': True, 'interval_minutes': 15}, {'config_type': 'RTG', 'rtg_username': 'ERLDC', 'rtg_password': 'Er1dc@#$700033', 'rtg_token_url': 'https://rtgapi.grid-india.in/sendData/api-token-auth/', 'rtg_schedule_url': 'https://rtgapi.grid-india.in/sendData/wbes-data/', 'rtg_scada_url': 'https://rtgapi.grid-india.in/sendData/scada-data/'}, {'rtg_data_url': 'https://rtgapi.grid-india.in/sendData/combined-data-view/?in_region_name=ERLDC&in_fuel_type=THERMAL', 'refresh_interval_min': 15, 'config_type': 'RTG_DASHBOARD'}, {'config_type': 'PSP', 'psp_login_url': 'https://report.erldc.in/POSOCO/Account/Login', 'psp_data_url': 'https://report.erldc.in/POSOCO/PSP/GetPSPData', 'psp_username': 'erldc', 'psp_password': 'erldc1'}]
+RTG CONFIG = {'config_type': 'RTG', 'rtg_username': 'ERLDC', 'rtg_password': '***', 'rtg_token_url': 'https://rtgapi.grid-india.in/sendData/api-token-auth/', 'rtg_schedule_url': 'https://rtgapi.grid-india.in/sendData/wbes-data/', 'rtg_scada_url': 'https://rtgapi.grid-india.in/sendData/scada-data/'}
+RTG DASHBOARD CONFIG = {'rtg_data_url': 'https://rtgapi.grid-india.in/sendData/combined-data-view/?in_region_name=ERLDC&in_fuel_type=THERMAL', 'refresh_interval_min': 15, 'config_type': 'RTG_DASHBOARD'}
+RTG DASHBOARD FETCH URL = https://rtgapi.grid-india.in/sendData/combined-data-view/?in_date=2026-06-11&in_region_name=ERLDC&in_fuel_type=THERMAL
+RTG RESPONSE STATUS = 200
+{
+  "plant_id": "RTG_ER00001",
+  "plant_name": "BARAUNI TPS",
+  "fuel_type": "THERMAL",
+  "region_name": "ERLDC",
+  "state_name": "Bihar",
+  "utility_type": "State",
+  "wbes_acronym": "Not Available",
+  "owner_name": "NTPC",
+  "installed_capacity": 500.0,
+  "effective_capacity": 500.0,
+  "scada_point": "NA",
+  "actual_gen": 179.0,
+  "actual_gen_derived": 0,
+  "schedule": 194.0,
+  "schedule_gen_derived": 0,
+  "dc": 226.0,
+  "dc_derived": 0,
+  "qsold": 0.0,
+  "planned_outage": 0.0,
+  "forced_outage": 250.0,
+  "rsd": 0.0,
+  "fuel_shortage": 0.0,
+  "commercial_issues": 0.0,
+  "partial_outage": 0.0,
+  "variable_cost": 0.0,
+  "reason_partial_outage": "--",
+  "reason_nofull_generation": "--",
+  "actual_last_updated": "2026-06-11 09:53",
+  "schedule_last_updated": "2026-06-11 09:50",
+  "percentage_of_dc": 79.2,
+  "cap_on_bar": 250.0,
+  "unreq_margin": 32.0,
+  "proxy_unreq_margin": 51.0
+}
+CHANDAN RTG RECORD COUNT = 43
+INFO:     127.0.0.1:50344 - "GET / HTTP/1.1" 200 OK

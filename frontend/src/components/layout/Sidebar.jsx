@@ -54,7 +54,7 @@ const menus = [
   },
 
   {
-    label: "Frequency Report",
+    label: "Frequency Event Analysis",
     path: "/frequency-report",
     icon: <BoltRoundedIcon />,
   },

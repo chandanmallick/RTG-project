@@ -4,6 +4,7 @@ import {
   Calendar,
   CheckCircle,
   AlertCircle,
+  AlertTriangle,
   Activity,
   Database,
   Sparkles,
@@ -20,6 +21,8 @@ import {
   ResponsiveContainer,
   AreaChart,
   Area,
+  LineChart,
+  Line,
   BarChart,
   Bar,
   PieChart,
@@ -38,7 +41,10 @@ import API from "../services/api";
 
 // LAYOUT
 import AppShell from "../components/layout/AppShell";
+import PowerExchangeGraphic from "../components/PowerExchangeGraphic";
+import PSPStateGenerationSources from "../components/PSPStateGenerationSources";
 import VoltageProfileMap from "../components/VoltageProfileMap";
+import PSPHighlightsReport from "../components/PSPHighlightsReport";
 
 // Donut chart color palette - vibrant, modern, premium
 const DONUT_COLORS = [
@@ -50,6 +56,44 @@ const DONUT_COLORS = [
   "#2FA98C",  // Mint
   "#AACBC4",  // Pistachio
 ];
+
+const formatIsoLocal = (dateObj) => (
+  `${dateObj.getFullYear()}-${String(dateObj.getMonth() + 1).padStart(2, "0")}-${String(dateObj.getDate()).padStart(2, "0")}`
+);
+
+const toIsoDate = (value) => {
+  if (!value) return "";
+  const parts = String(value).trim().split("-");
+  if (parts.length !== 3) return "";
+  const year = Number(parts[0]);
+  const month = Number(parts[1]) - 1;
+  const day = Number(parts[2]);
+  const dateObj = new Date(year, month, day);
+  if (Number.isNaN(dateObj.getTime())) return "";
+  return formatIsoLocal(dateObj);
+};
+
+const addDays = (dateStr, days) => {
+  const iso = toIsoDate(dateStr);
+  if (!iso) return "";
+  const [year, month, day] = iso.split("-").map(Number);
+  const dateObj = new Date(year, month - 1, day);
+  dateObj.setDate(dateObj.getDate() + days);
+  return formatIsoLocal(dateObj);
+};
+
+const formatDisplayDate = (dateStr) => {
+  if (!dateStr) return "-";
+  const parts = String(dateStr).trim().split("-");
+  if (parts.length !== 3) return dateStr;
+  const dateObj = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+  if (Number.isNaN(dateObj.getTime())) return dateStr;
+  return dateObj.toLocaleDateString("en-GB", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric"
+  }).replace(/ /g, "-");
+};
 
 const renderCustomLabel = (props) => {
   const { cx, cy, midAngle, innerRadius, outerRadius, percent, name, value } = props;
@@ -212,35 +256,35 @@ const CustomTooltip = ({ active, payload }) => {
           </p>
           <div className="d-flex justify-content-between align-items-center mb-1" style={{ color: "#1e293b" }}>
             <span className="d-flex align-items-center gap-2">
-              <span className="rounded-circle d-inline-block" style={{ width: "8px", height: "8px", backgroundColor: "#E28743" }} />
+              <span className="rounded-circle d-inline-block" style={{ width: "8px", height: "8px", backgroundColor: "#9CA3AF" }} />
               Thermal Gen:
             </span>
             <span className="fw-bold">{data.absThermal?.toLocaleString()} MW</span>
           </div>
           <div className="d-flex justify-content-between align-items-center mb-1" style={{ color: "#1e293b" }}>
             <span className="d-flex align-items-center gap-2">
-              <span className="rounded-circle d-inline-block" style={{ width: "8px", height: "8px", backgroundColor: "#00DF81" }} />
+              <span className="rounded-circle d-inline-block" style={{ width: "8px", height: "8px", backgroundColor: "#2563EB" }} />
               Hydro Gen:
             </span>
             <span className="fw-bold">{data.absHydro?.toLocaleString()} MW</span>
           </div>
           <div className="d-flex justify-content-between align-items-center mb-1" style={{ color: "#1e293b" }}>
             <span className="d-flex align-items-center gap-2">
-              <span className="rounded-circle d-inline-block" style={{ width: "8px", height: "8px", backgroundColor: "#8FA960" }} />
+              <span className="rounded-circle d-inline-block" style={{ width: "8px", height: "8px", backgroundColor: "#FACC15" }} />
               Solar Gen:
             </span>
             <span className="fw-bold">{data.absSolar?.toLocaleString()} MW</span>
           </div>
           <div className="d-flex justify-content-between align-items-center mb-1" style={{ color: "#1e293b" }}>
             <span className="d-flex align-items-center gap-2">
-              <span className="rounded-circle d-inline-block" style={{ width: "8px", height: "8px", backgroundColor: "#17876D" }} />
+              <span className="rounded-circle d-inline-block" style={{ width: "8px", height: "8px", backgroundColor: "#16A34A" }} />
               BioGas Gen:
             </span>
             <span className="fw-bold">{data.absBiogas?.toLocaleString()} MW</span>
           </div>
           <div className="d-flex justify-content-between align-items-center mb-2.5" style={{ color: "#1e293b" }}>
             <span className="d-flex align-items-center gap-2">
-              <span className="rounded-circle d-inline-block" style={{ width: "8px", height: "8px", backgroundColor: "#2CC295" }} />
+              <span className="rounded-circle d-inline-block" style={{ width: "8px", height: "8px", backgroundColor: "#DB2777" }} />
               Nuclear Gen:
             </span>
             <span className="fw-bold">{data.absNuclear?.toLocaleString()} MW</span>
@@ -254,35 +298,35 @@ const CustomTooltip = ({ active, payload }) => {
           </p>
           <div className="d-flex justify-content-between align-items-center mb-1" style={{ color: "#1e293b" }}>
             <span className="d-flex align-items-center gap-2">
-              <span className="rounded-circle d-inline-block" style={{ width: "8px", height: "8px", backgroundColor: "#3B82F6" }} />
+              <span className="rounded-circle d-inline-block" style={{ width: "8px", height: "8px", backgroundColor: "#F97316" }} />
               ISGS Drawl:
             </span>
             <span className="fw-bold">{data.absIsgs?.toLocaleString()} MW</span>
           </div>
           <div className="d-flex justify-content-between align-items-center mb-1" style={{ color: "#1e293b" }}>
             <span className="d-flex align-items-center gap-2">
-              <span className="rounded-circle d-inline-block" style={{ width: "8px", height: "8px", backgroundColor: "#1D4ED8" }} />
+              <span className="rounded-circle d-inline-block" style={{ width: "8px", height: "8px", backgroundColor: "#7C3AED" }} />
               GNA Schedule:
             </span>
             <span className="fw-bold">{data.absGna?.toLocaleString()} MW</span>
           </div>
           <div className="d-flex justify-content-between align-items-center mb-1" style={{ color: "#1e293b" }}>
             <span className="d-flex align-items-center gap-2">
-              <span className="rounded-circle d-inline-block" style={{ width: "8px", height: "8px", backgroundColor: "#60A5FA" }} />
+              <span className="rounded-circle d-inline-block" style={{ width: "8px", height: "8px", backgroundColor: "#06B6D4" }} />
               TGNA Schedule:
             </span>
             <span className="fw-bold">{data.absTgna?.toLocaleString()} MW</span>
           </div>
           <div className="d-flex justify-content-between align-items-center mb-1" style={{ color: "#1e293b" }}>
             <span className="d-flex align-items-center gap-2">
-              <span className="rounded-circle d-inline-block" style={{ width: "8px", height: "8px", backgroundColor: "#8B5CF6" }} />
+              <span className="rounded-circle d-inline-block" style={{ width: "8px", height: "8px", backgroundColor: "#EC4899" }} />
               iDAM Schedule:
             </span>
             <span className="fw-bold">{data.absIdam?.toLocaleString()} MW</span>
           </div>
           <div className="d-flex justify-content-between align-items-center mb-1" style={{ color: "#1e293b" }}>
             <span className="d-flex align-items-center gap-2">
-              <span className="rounded-circle d-inline-block" style={{ width: "8px", height: "8px", backgroundColor: "#A78BFA" }} />
+              <span className="rounded-circle d-inline-block" style={{ width: "8px", height: "8px", backgroundColor: "#FACC15" }} />
               RTM Drawl:
             </span>
             <span className="fw-bold">{data.absRtm?.toLocaleString()} MW</span>
@@ -325,8 +369,28 @@ export default function PSPDashboard() {
   const [energyLoading, setEnergyLoading] = useState(true);
   const [energyBreakdownData, setEnergyBreakdownData] = useState(null);
   const [energyBreakdownLoading, setEnergyBreakdownLoading] = useState(true);
+  const [stateGenSourceData, setStateGenSourceData] = useState(null);
+  const [stateGenSourceLoading, setStateGenSourceLoading] = useState(true);
   const [energyModalOpen, setEnergyModalOpen] = useState(false);
+  const [energyTrendModalOpen, setEnergyTrendModalOpen] = useState(false);
+  const [energyTrendRows, setEnergyTrendRows] = useState([]);
+  const [energyTrendLoading, setEnergyTrendLoading] = useState(false);
+  const [energyTrendError, setEnergyTrendError] = useState("");
+  const [energyTrendStart, setEnergyTrendStart] = useState("");
+  const [energyTrendEnd, setEnergyTrendEnd] = useState("");
+  const [selectedEnergyTrendKeys, setSelectedEnergyTrendKeys] = useState([
+    "er",
+    "bihar",
+    "dvc",
+    "jharkhand",
+    "odisha",
+    "sikkim",
+    "west_bengal"
+  ]);
   const [selectedState, setSelectedState] = useState(null);
+  const [stationModalOpen, setStationModalOpen] = useState(false);
+  const [stationModalData, setStationModalData] = useState(null);
+  const [stationModalLoading, setStationModalLoading] = useState(false);
 
   // Popup Modal States
   const [modalOpen, setModalOpen] = useState(false);
@@ -337,8 +401,19 @@ export default function PSPDashboard() {
   const [selectedDate, setSelectedDate] = useState("");
   const [powerPositionData, setPowerPositionData] = useState([]);
   const [powerPositionLoading, setPowerPositionLoading] = useState(true);
+  const [powerSystemData, setPowerSystemData] = useState(null);
+  const [powerSystemLoading, setPowerSystemLoading] = useState(true);
+  const [loadsheddingData, setLoadsheddingData] = useState(null);
+  const [loadsheddingLoading, setLoadsheddingLoading] = useState(true);
+  const [outageChangeData, setOutageChangeData] = useState(null);
+  const [outageChangeLoading, setOutageChangeLoading] = useState(true);
+  const [outageModalOpen, setOutageModalOpen] = useState(false);
+  const [outageModalType, setOutageModalType] = useState("restored");
+  const [exchangeData, setExchangeData] = useState(null);
+  const [exchangeLoading, setExchangeLoading] = useState(true);
   const [voltageData, setVoltageData] = useState(null);
   const [voltageLoading, setVoltageLoading] = useState(true);
+  const [highlightsModalOpen, setHighlightsModalOpen] = useState(false);
 
   const onPieEnter = useCallback((_, index) => {
     setActivePieIndex(index);
@@ -408,6 +483,44 @@ export default function PSPDashboard() {
     }
   };
 
+  const loadEnergyTrend = async (startDate, endDate) => {
+    if (!startDate || !endDate) return;
+    try {
+      setEnergyTrendLoading(true);
+      setEnergyTrendError("");
+      const res = await API.getPspEnergyTrend(startDate, endDate);
+      if (!res.success) throw new Error(res.message || "Unable to load energy trend");
+      setEnergyTrendRows((res.rows || []).map((row) => ({
+        ...row,
+        displayDate: formatDisplayDate(row.date)
+      })));
+    } catch (err) {
+      console.error("Error loading energy trend:", err);
+      setEnergyTrendError("Energy trend data could not be loaded.");
+      setEnergyTrendRows([]);
+    } finally {
+      setEnergyTrendLoading(false);
+    }
+  };
+
+  const openEnergyTrendModal = () => {
+    const end = toIsoDate(energyData?.date || portfolioData?.date || selectedDate || latestDate) || formatIsoLocal(new Date());
+    const start = addDays(end, -6);
+    setEnergyTrendEnd(end);
+    setEnergyTrendStart(start);
+    setEnergyTrendModalOpen(true);
+    loadEnergyTrend(start, end);
+  };
+
+  const toggleEnergyTrendLine = (key) => {
+    setSelectedEnergyTrendKeys((prev) => {
+      if (prev.includes(key)) {
+        return prev.length > 1 ? prev.filter((item) => item !== key) : prev;
+      }
+      return [...prev, key];
+    });
+  };
+
   const loadEnergyBreakdown = async (dateStr) => {
     try {
       setEnergyBreakdownLoading(true);
@@ -419,6 +532,20 @@ export default function PSPDashboard() {
       console.error("Error loading energy breakdown:", err);
     } finally {
       setEnergyBreakdownLoading(false);
+    }
+  };
+
+  const loadStateGenerationSources = async (dateStr) => {
+    try {
+      setStateGenSourceLoading(true);
+      const res = await API.getPspStateGenerationSources(dateStr);
+      if (res.success) {
+        setStateGenSourceData(res);
+      }
+    } catch (err) {
+      console.error("Error loading PSP state generation sources:", err);
+    } finally {
+      setStateGenSourceLoading(false);
     }
   };
 
@@ -450,6 +577,64 @@ export default function PSPDashboard() {
     }
   };
 
+  const loadPowerSystemData = async (dateStr) => {
+    try {
+      setPowerSystemLoading(true);
+      const res = await API.getPspPowerSystemData(dateStr);
+      if (res.success) {
+        setPowerSystemData(res);
+      }
+    } catch (err) {
+      console.error("Error loading power system data:", err);
+    } finally {
+      setPowerSystemLoading(false);
+    }
+  };
+
+  const loadLoadshedding = async (dateStr, refresh = false) => {
+    try {
+      setLoadsheddingLoading(true);
+      const res = await API.getPspLoadshedding(dateStr, refresh);
+      if (res.success) {
+        setLoadsheddingData(res);
+      }
+    } catch (err) {
+      console.error("Error loading loadshedding:", err);
+    } finally {
+      setLoadsheddingLoading(false);
+    }
+  };
+
+  const loadGenerationOutageChanges = async (dateStr, refresh = false) => {
+    try {
+      setOutageChangeLoading(true);
+      const res = await API.getPspGenerationOutageChanges(dateStr, refresh);
+      if (res.success) {
+        setOutageChangeData(res);
+      }
+    } catch (err) {
+      console.error("Error loading generation outage changes:", err);
+    } finally {
+      setOutageChangeLoading(false);
+    }
+  };
+
+  const openGeneratingStationsModal = async (state) => {
+    try {
+      setStationModalOpen(true);
+      setStationModalLoading(true);
+      setStationModalData(null);
+      const res = await API.getPspGeneratingStations(state, powerSystemData?.date || portfolioData?.date || latestDate);
+      if (res.success) {
+        setStationModalData(res);
+      }
+    } catch (err) {
+      console.error("Error loading generating stations:", err);
+    } finally {
+      setStationModalLoading(false);
+    }
+  };
+
   const loadPortfolioData = async (dateStr) => {
     try {
       setPortfolioLoading(true);
@@ -458,7 +643,11 @@ export default function PSPDashboard() {
         setPortfolioData(res);
         loadEnergyData(res.date);
         loadEnergyBreakdown(res.date);
+        loadStateGenerationSources(res.date);
         loadPowerPosition(res.date);
+        loadPowerSystemData(res.date);
+        loadLoadshedding(res.date);
+        loadGenerationOutageChanges(res.date);
       }
     } catch (err) {
       console.error("Error loading portfolio breakdown:", err);
@@ -495,9 +684,28 @@ export default function PSPDashboard() {
     }
   };
 
+  const loadPowerExchange = async (dateStr) => {
+    try {
+      setExchangeLoading(true);
+      const res = await API.getPspPowerExchange(dateStr);
+      if (res.success) {
+        setExchangeData(res);
+      }
+    } catch (err) {
+      console.error("Error loading PSP power exchange:", err);
+    } finally {
+      setExchangeLoading(false);
+    }
+  };
+
   const handleDateChange = (dateStr) => {
     setSelectedDate(dateStr);
     loadPortfolioData(dateStr);
+    loadStateGenerationSources(dateStr);
+    loadPowerSystemData(dateStr);
+    loadLoadshedding(dateStr);
+    loadGenerationOutageChanges(dateStr);
+    loadPowerExchange(dateStr);
     loadVoltageProfile(dateStr);
   };
 
@@ -506,6 +714,11 @@ export default function PSPDashboard() {
     loadAnalytics();
     loadPortfolioData(selectedDate);
     loadHighestRecords();
+    loadStateGenerationSources(selectedDate);
+    loadPowerSystemData(selectedDate);
+    loadLoadshedding(selectedDate);
+    loadGenerationOutageChanges(selectedDate);
+    loadPowerExchange(selectedDate);
     loadVoltageProfile(selectedDate);
   };
 
@@ -514,6 +727,11 @@ export default function PSPDashboard() {
     loadAnalytics();
     loadPortfolioData();
     loadHighestRecords();
+    loadStateGenerationSources();
+    loadPowerSystemData();
+    loadLoadshedding();
+    loadGenerationOutageChanges();
+    loadPowerExchange();
     loadVoltageProfile();
   }, []);
 
@@ -550,15 +768,30 @@ export default function PSPDashboard() {
   const avgAvailability = trendData.length > 0
     ? trendData.reduce((sum, d) => sum + d.availability, 0) / trendData.length
     : 0;
+  const latestEnergyTrendRow = energyTrendRows.length ? energyTrendRows[energyTrendRows.length - 1] : null;
+  const energyTrendLines = [
+    { key: "er", label: "ER Total", color: "#022726", strokeWidth: 3.2 },
+    { key: "bihar", label: "Bihar", color: "#03624C" },
+    { key: "dvc", label: "DVC", color: "#F97316" },
+    { key: "jharkhand", label: "Jharkhand", color: "#7C3AED" },
+    { key: "odisha", label: "Odisha", color: "#2563EB" },
+    { key: "sikkim", label: "Sikkim", color: "#16A34A" },
+    { key: "west_bengal", label: "West Bengal", color: "#DB2777" }
+  ];
+  const visibleEnergyTrendLines = energyTrendLines.filter((line) => selectedEnergyTrendKeys.includes(line.key));
 
   return (
     <AppShell>
-      <div className="container-fluid py-2 theme-page-container">
+      <div className="container-fluid theme-page-container" style={{ padding: "24px" }}>
         {/* BANNER */}
         <div
-          className="theme-glass-card mb-4 p-4 position-relative overflow-hidden border-0 text-white"
+          className="theme-glass-card position-relative overflow-hidden border-0 text-white"
           style={{
-            background: "linear-gradient(135deg, #022726 0%, #03624C 50%, #17876D 100%)"
+            background: "linear-gradient(135deg, #022726 0%, #03624C 50%, #17876D 100%)",
+            minHeight: "90px",
+            marginBottom: "20px",
+            padding: "18px 24px",
+            borderRadius: "18px"
           }}
         >
           <div
@@ -638,8 +871,156 @@ export default function PSPDashboard() {
           </div>
         </div>
 
+        {/* ROW 1: SUMMARY ROW */}
+        <div className="row g-3" style={{ marginBottom: "20px" }}>
+          <div className="col-12 col-lg-3">
+            <div
+              className="theme-glass-card p-4 h-100 d-flex flex-column justify-content-between border border-success-subtle shadow-sm"
+              style={{
+                background: "linear-gradient(135deg, #ffffff 0%, #F1F7F6 100%)",
+                cursor: "pointer",
+                minHeight: "180px",
+                borderRadius: "18px"
+              }}
+              onClick={handleTileClick}
+            >
+              <div>
+                <div className="d-flex align-items-center justify-content-between mb-3">
+                  <span
+                    className="badge rounded-pill bg-success-subtle text-success-emphasis fw-bold px-3 py-1.5 small"
+                    style={{ fontSize: "0.72rem", backgroundColor: "rgba(0, 223, 129, 0.15)" }}
+                  >
+                    LATEST STATUS
+                  </span>
+                  <Activity size={16} className="text-success" />
+                </div>
+                <h3 className="h6 fw-bold mb-1 text-dark">Today's Ingestion Status</h3>
+                <p className="small text-muted mb-3" style={{ fontSize: "0.75rem" }}>
+                  Last PSP fetch and record status.
+                </p>
+              </div>
+
+              <div className="d-flex align-items-end justify-content-between">
+                <div>
+                  <span className="d-block fw-bold text-dark mb-1" style={{ fontSize: "1.05rem" }}>
+                    {latestStatus ? latestStatus.date : yesterdayStr}
+                  </span>
+                  <span className="text-secondary" style={{ fontSize: "0.75rem" }}>
+                    Fetched:{" "}
+                    {latestStatus && latestStatus.fetched_at
+                      ? formatDateTime(latestStatus.fetched_at)
+                      : "Pending"}
+                  </span>
+                  <span className="d-block text-secondary mt-1" style={{ fontSize: "0.72rem" }}>
+                    Records: {latestStatus?.records_count ?? latestStatus?.record_count ?? "-"}
+                  </span>
+                </div>
+                {latestStatus && latestStatus.status === "SUCCESS" ? (
+                  <span className="theme-badge-success fs-7">
+                    <CheckCircle size={12} />
+                    <span>Fetched</span>
+                  </span>
+                ) : (
+                  <span className="theme-badge-missing fs-7">
+                    <AlertCircle size={12} />
+                    <span>Missing</span>
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+
+          <div className="col-12 col-lg-4">
+            <div className="theme-glass-card p-3 h-100 d-flex flex-column" style={{ minHeight: "180px", borderRadius: "18px" }}>
+              <div className="d-flex align-items-center justify-content-between mb-2">
+                <h3 className="h6 fw-bold mb-0 text-dark d-flex align-items-center gap-2">
+                  <PieChartIcon size={16} className="text-success" />
+                  <span>State Energy Consumption</span>
+                </h3>
+                <div className="d-flex align-items-center gap-2">
+                  <button
+                    className="btn btn-sm btn-link p-0 text-success d-flex align-items-center"
+                    onClick={openEnergyTrendModal}
+                    title="View Energy Consumption Trend"
+                  >
+                    <TrendingUp size={16} />
+                  </button>
+                  <button
+                    className="btn btn-sm btn-link p-0 text-success d-flex align-items-center"
+                    onClick={() => setEnergyModalOpen(true)}
+                    title="View Energy Share Details Table"
+                  >
+                    <Info size={16} />
+                  </button>
+                </div>
+              </div>
+              {energyLoading ? (
+                <div className="d-flex align-items-center justify-content-center flex-grow-1">
+                  <div className="spinner-border text-success spinner-border-sm" role="status"></div>
+                </div>
+              ) : !energyData?.states?.length ? (
+                <div className="d-flex align-items-center justify-content-center flex-grow-1 text-muted small">
+                  No energy consumption data available.
+                </div>
+              ) : (
+                <div className="row g-2 align-items-center flex-grow-1">
+                  <div className="col-5">
+                    <div style={{ width: "100%", height: "120px" }}>
+                      <ResponsiveContainer width="100%" height="100%">
+                        <PieChart>
+                          <Tooltip content={<DonutTooltip />} />
+                          <Pie
+                            activeIndex={activePieIndex}
+                            activeShape={renderActiveShape}
+                            data={energyData.states.map(s => ({ name: s.name, value: s.consumption }))}
+                            cx="50%"
+                            cy="50%"
+                            innerRadius={32}
+                            outerRadius={48}
+                            dataKey="value"
+                            onMouseEnter={onPieEnter}
+                            onMouseLeave={() => setActivePieIndex(-1)}
+                          >
+                            {energyData.states.map((entry, index) => (
+                              <Cell key={`summary-cell-${index}`} fill={DONUT_COLORS[index % DONUT_COLORS.length]} />
+                            ))}
+                          </Pie>
+                        </PieChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </div>
+                  <div className="col-7">
+                    <div style={{ maxHeight: "118px", overflowY: "auto", paddingRight: "4px" }} className="theme-scrollbar">
+                      {energyData.states.slice(0, 6).map((state, index) => {
+                        const pct = energyData.total > 0 ? (state.consumption / energyData.total * 100) : 0;
+                        return (
+                          <div key={state.name} className="d-flex align-items-center justify-content-between py-1 border-bottom border-light-subtle">
+                            <div className="d-flex align-items-center gap-2 text-start">
+                              <span
+                                className="rounded-circle d-inline-block"
+                                style={{ width: "7px", height: "7px", backgroundColor: DONUT_COLORS[index % DONUT_COLORS.length] }}
+                              />
+                              <span className="fw-semibold text-dark" style={{ fontSize: "0.68rem" }}>{state.name}</span>
+                            </div>
+                            <span className="fw-bold text-dark" style={{ fontSize: "0.68rem" }}>{pct.toFixed(1)}%</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+          <div className="col-12 col-lg-5">
+            <div className="h-100" style={{ minHeight: "180px" }}>
+              <VoltageProfileMap voltageData={voltageData} voltageLoading={voltageLoading} />
+            </div>
+          </div>
+        </div>
+
         {/* METRICS & TILES ROW */}
-        <div className="row g-4 mb-4">
+        <div className="d-none">
           {/* TILE 1: TODAY'S INGESTION STATUS (CLICKABLE) */}
           <div className="col-12 col-md-4">
             <div
@@ -785,10 +1166,19 @@ export default function PSPDashboard() {
           )}
         </div>
 
-        {/* VOLTAGE PROFILE COMPACT TILE ROW */}
-        <div className="row g-4 mb-4">
-          <div className="col-12 col-md-4">
-            <VoltageProfileMap voltageData={voltageData} voltageLoading={voltageLoading} />
+        {/* ROW 2: OPERATIONAL VIEW */}
+        <div className="row g-3" style={{ marginBottom: "20px" }}>
+          <div className="col-12 col-xl-5">
+            <PowerExchangeGraphic data={exchangeData} loading={exchangeLoading} />
+          </div>
+          <div className="col-12 col-xl-7">
+            <PSPStateGenerationSources data={stateGenSourceData} loading={stateGenSourceLoading} />
+          </div>
+        </div>
+
+        <div className="d-none">
+          <div className="col-12">
+            <PSPStateGenerationSources data={stateGenSourceData} loading={stateGenSourceLoading} />
           </div>
         </div>
 
@@ -812,7 +1202,7 @@ export default function PSPDashboard() {
         ) : (
           /* ACTUAL CHARTS ROW */
           <>
-            <div className="row g-4 mb-4">
+            <div className="d-none">
             {/* CHART 1: DAILY TREND OF DEMAND VS AVAILABILITY */}
             <div className="col-12 col-lg-8">
               <div className="theme-glass-card p-4 h-100">
@@ -923,10 +1313,10 @@ export default function PSPDashboard() {
             </div>
           </div>
 
-          {/* SIDE-BY-SIDE DONUT AND BUTTERFLY CHARTS */}
-          <div className="row g-4 mb-4">
+          {/* ROW 3: ANALYTICS */}
+          <div className="row g-3" style={{ marginBottom: "20px" }}>
             {/* COMPACT STATE ENERGY CONSUMPTION DONUT CHART */}
-            <div className="col-12 col-lg-4">
+            <div className="d-none">
               <div className="theme-glass-card p-4 h-100 d-flex flex-column justify-content-between">
                 <div className="mb-3 d-flex align-items-center justify-content-between">
                   <div className="text-start">
@@ -1139,8 +1529,8 @@ export default function PSPDashboard() {
             </div>
 
             {/* PORTFOLIO & PEAK DEMAND BREAKDOWN */}
-            <div className="col-12 col-lg-8">
-              <div className="theme-glass-card p-4 h-100 d-flex flex-column justify-content-between">
+            <div className="col-12 col-xl-7">
+              <div className="theme-glass-card p-4 h-100 d-flex flex-column justify-content-between" style={{ minHeight: "360px", borderRadius: "18px" }}>
                 <div className="d-flex align-items-start justify-content-between mb-3 flex-wrap gap-2">
                   <div className="text-start">
                     <h3 className="h6 fw-bold mb-0 text-dark d-flex align-items-center gap-2">
@@ -1206,7 +1596,7 @@ export default function PSPDashboard() {
                 ) : (
                   <div className="flex-grow-1">
                     {/* Butterfly chart */}
-                    <div style={{ width: "100%", height: "300px" }}>
+                    <div style={{ width: "100%", height: "260px" }}>
                       <ResponsiveContainer width="100%" height="100%">
                         <BarChart
                           data={
@@ -1296,18 +1686,18 @@ export default function PSPDashboard() {
                           <ReferenceLine x={0} stroke="#022726" strokeWidth={2} />
                           
                           {/* Left Stack (Negative Gen) */}
-                          <Bar dataKey="thermal" stackId="stack" name="Thermal Gen" fill="#E28743" />
-                          <Bar dataKey="hydro" stackId="stack" name="Hydro Gen" fill="#00DF81" />
-                          <Bar dataKey="solar" stackId="stack" name="Solar Gen" fill="#8FA960" />
-                          <Bar dataKey="biogas" stackId="stack" name="BioGas Gen" fill="#17876D" />
-                          <Bar dataKey="nuclear" stackId="stack" name="Nuclear Gen" fill="#2CC295" />
+                          <Bar dataKey="thermal" stackId="stack" name="Thermal Gen" fill="#9CA3AF" />
+                          <Bar dataKey="hydro" stackId="stack" name="Hydro Gen" fill="#2563EB" />
+                          <Bar dataKey="solar" stackId="stack" name="Solar Gen" fill="#FACC15" />
+                          <Bar dataKey="biogas" stackId="stack" name="BioGas Gen" fill="#16A34A" />
+                          <Bar dataKey="nuclear" stackId="stack" name="Nuclear Gen" fill="#DB2777" />
                           
                           {/* Right Stack (Positive import schedules) */}
-                          <Bar dataKey="isgs" stackId="stack" name="ISGS Drawl" fill="#3B82F6" />
-                          <Bar dataKey="gna" stackId="stack" name="GNA Schd" fill="#1D4ED8" />
-                          <Bar dataKey="tgna" stackId="stack" name="TGNA Schd" fill="#60A5FA" />
-                          <Bar dataKey="idam" stackId="stack" name="iDAM Schd" fill="#8B5CF6" />
-                          <Bar dataKey="rtm" stackId="stack" name="RTM Drawl" fill="#A78BFA" />
+                          <Bar dataKey="isgs" stackId="stack" name="ISGS Drawl" fill="#F97316" />
+                          <Bar dataKey="gna" stackId="stack" name="GNA Schd" fill="#7C3AED" />
+                          <Bar dataKey="tgna" stackId="stack" name="TGNA Schd" fill="#06B6D4" />
+                          <Bar dataKey="idam" stackId="stack" name="iDAM Schd" fill="#EC4899" />
+                          <Bar dataKey="rtm" stackId="stack" name="RTM Drawl" fill="#FACC15" />
                           <Bar dataKey="dsm" stackId="stack" name="DSM (Deviation)" fill="#64748B" />
                         </BarChart>
                       </ResponsiveContainer>
@@ -1316,10 +1706,336 @@ export default function PSPDashboard() {
                 )}
               </div>
             </div>
+            <div className="col-12 col-xl-5">
+              <div className="theme-glass-card p-0 h-100 overflow-hidden bg-white" style={{ minHeight: "360px", borderRadius: "18px" }}>
+                <div
+                  className="p-3 text-white d-flex align-items-center justify-content-between"
+                  style={{ background: "linear-gradient(135deg, #022726 0%, #03624C 100%)" }}
+                >
+                  <div className="d-flex align-items-center gap-2">
+                    <Zap size={16} className="text-warning" />
+                    <span className="fw-bold" style={{ fontSize: "0.95rem" }}>
+                      ER Power Position: {portfolioData?.date || latestDate}
+                    </span>
+                  </div>
+                  <div className="d-flex align-items-center gap-2">
+                    <button
+                      type="button"
+                      className="btn btn-sm btn-light py-1 px-2 fw-bold"
+                      onClick={() => setHighlightsModalOpen(true)}
+                      style={{ fontSize: "0.7rem" }}
+                    >
+                      PSP Highlights
+                    </button>
+                    <span className="badge bg-white bg-opacity-20 text-white border border-white border-opacity-10 small">
+                      Max Demand & Energy
+                    </span>
+                  </div>
+                </div>
+                {powerPositionLoading ? (
+                  <div className="d-flex align-items-center justify-content-center py-5">
+                    <div className="spinner-border text-success spinner-border-sm me-2" role="status"></div>
+                    <span className="text-secondary small fw-bold">Loading Power Position Table...</span>
+                  </div>
+                ) : powerPositionData.length === 0 ? (
+                  <div className="text-center py-5 text-muted">
+                    <Info size={24} className="mb-2 text-secondary opacity-50" />
+                    <p className="small mb-0">No power position records available for this date.</p>
+                  </div>
+                ) : (
+                  <div className="table-responsive theme-scrollbar" style={{ maxHeight: "312px", overflow: "auto" }}>
+                    <table className="table table-bordered align-middle mb-0 text-center" style={{ minWidth: "720px", fontSize: "0.68rem" }}>
+                      <thead style={{ position: "sticky", top: 0, zIndex: 2 }}>
+                        <tr className="text-white align-middle" style={{ textTransform: "uppercase", letterSpacing: "0.03em", fontWeight: 800 }}>
+                          <th
+                            style={{ backgroundColor: "#6B1D5F", width: "18%", borderRight: "2px solid rgba(255,255,255,0.2)" }}
+                            rowSpan="2"
+                            className="align-middle"
+                          >
+                            Constituent
+                          </th>
+                          <th style={{ backgroundColor: "#1F7A8C" }} colSpan="3">
+                            Daily Power Position
+                          </th>
+                          <th style={{ backgroundColor: "#D97706" }} colSpan="3">
+                            All Time High
+                          </th>
+                        </tr>
+                        <tr className="text-white align-middle" style={{ fontWeight: 800 }}>
+                          <th style={{ backgroundColor: "#1F7A8C" }}>Max Demand</th>
+                          <th style={{ backgroundColor: "#1F7A8C" }}>Time</th>
+                          <th style={{ backgroundColor: "#1F7A8C" }}>MU/Day</th>
+                          <th style={{ backgroundColor: "#D97706" }}>Demand</th>
+                          <th style={{ backgroundColor: "#D97706" }}>Date</th>
+                          <th style={{ backgroundColor: "#D97706" }}>MU/Day</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {powerPositionData.map((row) => {
+                          const formatDateForTable = (dateStr) => {
+                            if (!dateStr) return "-";
+                            try {
+                              const parts = dateStr.split("-");
+                              const dObj = new Date(parts[0], parts[1] - 1, parts[2]);
+                              return dObj.toLocaleDateString("en-GB", {
+                                day: "2-digit",
+                                month: "short",
+                                year: "2-digit"
+                              }).replace(/ /g, "-");
+                            } catch (e) {
+                              return dateStr;
+                            }
+                          };
+
+                          return (
+                            <tr key={row.constituent} style={{ fontWeight: 800 }}>
+                              <td className="text-start text-white ps-2" style={{ backgroundColor: "#6B1D5F" }}>
+                                {row.constituent === "WEST BENGAL" ? "W. Bengal" : row.constituent}
+                              </td>
+                              <td style={{ backgroundColor: "#FEF9C3" }}>{row.daily_demand?.toLocaleString()}</td>
+                              <td style={{ backgroundColor: "#FEF9C3" }}>{row.daily_demand_time || "-"}</td>
+                              <td style={{ backgroundColor: "#FEF9C3" }}>{row.daily_energy?.toFixed(2)}</td>
+                              <td style={{ backgroundColor: "#E0F2FE" }}>{row.all_time_demand?.toLocaleString()}</td>
+                              <td style={{ backgroundColor: "#E0F2FE" }}>{formatDateForTable(row.all_time_demand_date)}</td>
+                              <td style={{ backgroundColor: "#E0F2FE" }}>{row.all_time_energy?.toFixed(2)}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* POWER SYSTEM DATA TABLE */}
+          <div className="row g-4 mb-4">
+            <div className="col-12">
+              <div className="theme-glass-card p-0 overflow-hidden border border-light-subtle shadow-sm bg-white">
+                <div
+                  className="p-3 text-dark d-flex align-items-center justify-content-between"
+                  style={{ background: "linear-gradient(135deg, #DDEBC7 0%, #F5F8E8 100%)" }}
+                >
+                  <div className="d-flex align-items-center gap-2">
+                    <Database size={18} className="text-success" />
+                    <span className="fw-bold" style={{ fontSize: "1.05rem" }}>
+                      Power System Data: {powerSystemData?.date || portfolioData?.date || latestDate}
+                    </span>
+                  </div>
+                  <span className="badge bg-white text-dark border border-success-subtle small">
+                    Derived + Date-effective base data
+                  </span>
+                </div>
+
+                {powerSystemLoading ? (
+                  <div className="d-flex align-items-center justify-content-center py-5">
+                    <div className="spinner-border text-success spinner-border-sm me-2" role="status"></div>
+                    <span className="text-secondary small fw-bold">Loading Power System Data...</span>
+                  </div>
+                ) : !powerSystemData?.columns?.length ? (
+                  <div className="text-center py-5 text-muted">
+                    <Info size={24} className="mb-2 text-secondary opacity-50" />
+                    <p className="small mb-0">No power system data available for this date.</p>
+                  </div>
+                ) : (
+                  <div className="table-responsive">
+                    <table className="table table-bordered align-middle mb-0 text-center" style={{ minWidth: "980px" }}>
+                      <thead>
+                        <tr style={{ fontSize: "0.76rem" }}>
+                          <th className="text-start" style={{ backgroundColor: "#DDEBC7", width: "260px" }}>
+                            Power system Data
+                          </th>
+                          {powerSystemData.columns.map((col) => (
+                            <th key={col.key} style={{ backgroundColor: "#DDEBC7" }}>
+                              {col.label}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {powerSystemData.rows.map((metric) => {
+                          const formatPowerSystemValue = (value, format) => {
+                            if (format === "date") {
+                              if (!value) return "-";
+                              const parts = String(value).split("-");
+                              if (parts.length !== 3) return value;
+                              return `${parts[2]}-${parts[1]}-${parts[0]}`;
+                            }
+                            const num = Number(value || 0);
+                            if (format === "number2") return num.toFixed(2);
+                            return Math.round(num).toLocaleString();
+                          };
+
+                          return (
+                            <tr key={metric.key} style={{ fontSize: "0.8rem", fontWeight: 700 }}>
+                              <td className="text-start" style={{ backgroundColor: "#F8FAFC" }}>
+                                {metric.label}
+                              </td>
+                              {powerSystemData.columns.map((col) => (
+                                <td key={col.key} style={{ backgroundColor: "#FFFFFF" }}>
+                                  {metric.key === "installed_capacity" ? (
+                                    <button
+                                      type="button"
+                                      className="btn btn-link p-0 fw-bold text-decoration-none"
+                                      onClick={() => openGeneratingStationsModal(col.key)}
+                                      style={{ fontSize: "0.8rem", color: "#03624C" }}
+                                      title={`View generating stations for ${col.label}`}
+                                    >
+                                      {formatPowerSystemValue(powerSystemData.values?.[col.key]?.[metric.key], metric.format)}
+                                    </button>
+                                  ) : (
+                                    formatPowerSystemValue(powerSystemData.values?.[col.key]?.[metric.key], metric.format)
+                                  )}
+                                </td>
+                              ))}
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* LOAD SHEDDING TABLE */}
+          <div className="d-none">
+            <div className="col-12 col-xl-7">
+              <div className="theme-glass-card p-0 overflow-hidden border border-light-subtle shadow-sm bg-white">
+                <div
+                  className="p-3 text-white d-flex align-items-center justify-content-between"
+                  style={{ backgroundColor: "#B0002B" }}
+                >
+                  <div className="d-flex align-items-center gap-2">
+                    <AlertTriangle size={18} />
+                    <span className="fw-bold" style={{ fontSize: "1rem" }}>
+                      Max Load Shedding: {loadsheddingData?.date || powerSystemData?.date || latestDate}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    className="btn btn-sm btn-light py-1 px-2 d-flex align-items-center gap-1"
+                    onClick={() => loadLoadshedding(loadsheddingData?.date || powerSystemData?.date || latestDate, true)}
+                    disabled={loadsheddingLoading}
+                    style={{ fontSize: "0.72rem", fontWeight: 800 }}
+                  >
+                    <RefreshCw size={12} className={loadsheddingLoading ? "animate-spin-custom" : ""} />
+                    Fetch
+                  </button>
+                </div>
+
+                {loadsheddingLoading ? (
+                  <div className="d-flex align-items-center justify-content-center py-4">
+                    <div className="spinner-border text-danger spinner-border-sm me-2" role="status"></div>
+                    <span className="text-secondary small fw-bold">Loading load shedding...</span>
+                  </div>
+                ) : !loadsheddingData?.rows?.length ? (
+                  <div className="text-center py-4 text-muted">
+                    <Info size={22} className="mb-2 text-secondary opacity-50" />
+                    <p className="small mb-0">No load shedding data available.</p>
+                  </div>
+                ) : (
+                  <div className="table-responsive">
+                    <table className="table table-bordered align-middle text-center mb-0" style={{ minWidth: "460px" }}>
+                      <thead>
+                        <tr className="text-white" style={{ backgroundColor: "#B0002B", fontSize: "0.78rem" }}>
+                          <th style={{ width: "52%", backgroundColor: "#B0002B" }}>Constituents</th>
+                          <th style={{ backgroundColor: "#B0002B" }}>Max. Load shedding</th>
+                          <th style={{ backgroundColor: "#B0002B" }}>Time</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {loadsheddingData.rows.map((row) => (
+                          <tr key={row.state} style={{ fontWeight: 800, fontSize: "0.82rem" }}>
+                            <td className="text-white" style={{ backgroundColor: "#B0002B" }}>
+                              {row.state}
+                            </td>
+                            <td style={{ backgroundColor: "#F8B4B4" }}>
+                              {Number(row.max_load_shedding || 0).toLocaleString()}
+                            </td>
+                            <td style={{ backgroundColor: "#F8B4B4" }}>
+                              {row.time || "N/A"}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            </div>
+            <div className="col-12 col-xl-5">
+              <div className="theme-glass-card p-0 overflow-hidden border border-light-subtle shadow-sm bg-white h-100">
+                <div
+                  className="p-3 text-center fw-bold text-dark"
+                  style={{ backgroundColor: "#92D050", fontSize: "0.95rem" }}
+                >
+                  Net generation changes during the day(+/-)
+                </div>
+                {outageChangeLoading ? (
+                  <div className="d-flex align-items-center justify-content-center py-5">
+                    <div className="spinner-border text-success spinner-border-sm me-2" role="status"></div>
+                    <span className="text-secondary small fw-bold">Loading generation changes...</span>
+                  </div>
+                ) : !outageChangeData?.summary ? (
+                  <div className="text-center py-5 text-muted">
+                    <Info size={22} className="mb-2 text-secondary opacity-50" />
+                    <p className="small mb-0">No generation outage change data.</p>
+                  </div>
+                ) : (
+                  <table className="table table-bordered align-middle text-center mb-0" style={{ tableLayout: "fixed" }}>
+                    <thead>
+                      <tr style={{ backgroundColor: "#9DC3E6", fontSize: "0.78rem", fontWeight: 900 }}>
+                        <th>Units brought on Bar (MW) (+ve)</th>
+                        <th>Units went out of Bar (MW) (-ve)</th>
+                        <th>Net generation changes</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr style={{ backgroundColor: "#FFFF00", fontSize: "0.9rem", fontWeight: 900 }}>
+                        <td>
+                          <button
+                            type="button"
+                            className="btn btn-link p-0 fw-bold text-decoration-none text-dark"
+                            onClick={() => { setOutageModalType("restored"); setOutageModalOpen(true); }}
+                          >
+                            {Number(outageChangeData.summary.restored_mw || 0).toLocaleString()}
+                          </button>
+                        </td>
+                        <td>
+                          <button
+                            type="button"
+                            className="btn btn-link p-0 fw-bold text-decoration-none text-dark"
+                            onClick={() => { setOutageModalType("tripped"); setOutageModalOpen(true); }}
+                          >
+                            -{Number(outageChangeData.summary.tripped_mw || 0).toLocaleString()}
+                          </button>
+                        </td>
+                        <td>{Number(outageChangeData.summary.net_mw || 0).toLocaleString()}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                )}
+                <div className="d-flex justify-content-end p-2">
+                  <button
+                    type="button"
+                    className="btn btn-sm theme-btn-outline py-1 px-2 d-flex align-items-center gap-1"
+                    onClick={() => loadGenerationOutageChanges(outageChangeData?.date || powerSystemData?.date || latestDate, true)}
+                    disabled={outageChangeLoading}
+                    style={{ fontSize: "0.72rem" }}
+                  >
+                    <RefreshCw size={12} className={outageChangeLoading ? "animate-spin-custom" : ""} />
+                    Fetch
+                  </button>
+                </div>
+              </div>
+            </div>
           </div>
 
           {/* ER POWER POSITION TABLE REPLICATION */}
-          <div className="row g-4 mb-4">
+          <div className="d-none">
             <div className="col-12">
               <div className="theme-glass-card p-0 overflow-hidden border border-light-subtle shadow-sm bg-white">
                 {/* Table Header Banner */}
@@ -1558,6 +2274,665 @@ export default function PSPDashboard() {
             }
           `}</style>
           </>
+        )}
+
+        <PSPHighlightsReport
+          open={highlightsModalOpen}
+          onClose={() => setHighlightsModalOpen(false)}
+          reportDate={portfolioData?.date || latestDate || selectedDate}
+          powerPositionData={powerPositionData}
+          loadsheddingData={loadsheddingData}
+          outageChangeData={outageChangeData}
+          portfolioData={portfolioData}
+          highestRecords={highestRecords}
+          powerSystemData={powerSystemData}
+        />
+
+        {/* PSP HIGHLIGHTS REPORT MODAL */}
+        {false && highlightsModalOpen && (
+          <div
+            className="modal fade show d-block"
+            style={{
+              backgroundColor: "rgba(2, 39, 38, 0.65)",
+              backdropFilter: "blur(4px)",
+              zIndex: 1050
+            }}
+            tabIndex="-1"
+          >
+            <div className="modal-dialog modal-fullscreen-lg-down modal-xl modal-dialog-centered" style={{ maxWidth: "1180px" }}>
+              <div className="modal-content border-0 overflow-hidden" style={{ borderRadius: "18px", backgroundColor: "#F4F7FA" }}>
+                <div
+                  className="modal-header border-0"
+                  style={{
+                    background: "linear-gradient(135deg, #022726 0%, #03624C 100%)",
+                    padding: "14px 18px"
+                  }}
+                >
+                  <div>
+                    <h5 className="modal-title fw-bold text-white mb-0">PSP Highlights</h5>
+                    <p className="small text-white opacity-75 mb-0">First page operational summary for {getHighlightsDateLabel()}</p>
+                  </div>
+                  <div className="d-flex align-items-center gap-2">
+                    <button
+                      type="button"
+                      className="btn btn-sm btn-light fw-bold"
+                      onClick={downloadHighlightsWord}
+                      disabled={!!highlightExporting}
+                      style={{ fontSize: "0.76rem" }}
+                    >
+                      {highlightExporting === "word" ? "Preparing..." : "Word Download"}
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-sm fw-bold text-dark"
+                      onClick={downloadHighlightsPdf}
+                      disabled={!!highlightExporting}
+                      style={{ backgroundColor: "#00DF81", fontSize: "0.76rem" }}
+                    >
+                      {highlightExporting === "pdf" ? "Preparing..." : "PDF Download"}
+                    </button>
+                    <button
+                      type="button"
+                      className="btn-close btn-close-white ms-2"
+                      onClick={() => setHighlightsModalOpen(false)}
+                      aria-label="Close"
+                    />
+                  </div>
+                </div>
+                <div className="modal-body" style={{ overflow: "auto", padding: "18px", backgroundColor: "#EAF0F4" }}>
+                  <div
+                    ref={highlightsReportRef}
+                    style={{
+                      width: "1040px",
+                      minHeight: "640px",
+                      backgroundColor: "#ffffff",
+                      padding: "22px 24px",
+                      color: "#000",
+                      fontFamily: "Arial, sans-serif",
+                      margin: "0 auto",
+                      border: "1px solid #D8E0E5",
+                      borderRadius: "10px",
+                      boxShadow: "0 18px 45px rgba(15, 23, 42, 0.16)"
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        marginBottom: "12px",
+                        borderBottom: "2px solid #03624C",
+                        paddingBottom: "8px"
+                      }}
+                    >
+                      <div>
+                        <div style={{ fontSize: "18px", fontWeight: 900, color: "#022726", lineHeight: 1.1 }}>
+                          PSP Operational Highlights
+                        </div>
+                        <div style={{ fontSize: "11px", fontWeight: 700, color: "#475569", marginTop: "2px" }}>
+                          Eastern Region power position, load shedding and generation changes
+                        </div>
+                      </div>
+                      <div
+                        style={{
+                          backgroundColor: "#E6F7EF",
+                          border: "1px solid #78C7A4",
+                          color: "#03543F",
+                          padding: "6px 10px",
+                          borderRadius: "6px",
+                          fontSize: "12px",
+                          fontWeight: 900
+                        }}
+                      >
+                        {getHighlightsDateLabel()}
+                      </div>
+                    </div>
+
+                    <div style={{ display: "flex", alignItems: "flex-start", gap: "24px" }}>
+                      <table style={{ borderCollapse: "collapse", width: "760px", tableLayout: "fixed", fontSize: "11px", fontWeight: 800 }}>
+                        <thead>
+                          <tr>
+                            <th colSpan="9" style={{ backgroundColor: "#0066FF", color: "#fff", border: "1px solid #111", padding: "4px", fontSize: "12px" }}>
+                              ER Power Position: {getHighlightsDateLabel()}
+                            </th>
+                          </tr>
+                          <tr style={{ color: "#fff" }}>
+                            <th rowSpan="2" style={{ backgroundColor: "#7A006F", border: "1px solid #111", width: "150px", padding: "4px" }}>
+                              Constituents
+                            </th>
+                            <th colSpan="3" style={{ backgroundColor: "#7A006F", border: "1px solid #111", padding: "4px" }}>
+                              Daily Power Position
+                            </th>
+                            <th colSpan="5" style={{ backgroundColor: "#7A006F", border: "1px solid #111", padding: "4px" }}>
+                              All Time High
+                            </th>
+                          </tr>
+                          <tr style={{ color: "#fff" }}>
+                            {["Max Demand", "Time", "MU/Day", "Demand Met", "Demand Date", "Demand Time", "MU/Day", "Energy Date"].map((heading) => (
+                              <th key={heading} style={{ backgroundColor: "#7A006F", border: "1px solid #111", padding: "4px 3px", lineHeight: 1.15 }}>
+                                {heading}
+                              </th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {powerPositionData.map((row) => {
+                            const formatReportDate = (dateStr) => {
+                              if (!dateStr) return "-";
+                              try {
+                                const parts = dateStr.split("-");
+                                const dObj = new Date(parts[0], parts[1] - 1, parts[2]);
+                                return dObj.toLocaleDateString("en-GB", {
+                                  day: "2-digit",
+                                  month: "short",
+                                  year: "2-digit"
+                                }).replace(/ /g, "-");
+                              } catch (e) {
+                                return dateStr;
+                              }
+                            };
+                            return (
+                              <tr key={`highlight-${row.constituent}`}>
+                                <td style={{ backgroundColor: "#7A006F", color: "#fff", border: "1px solid #111", padding: "3px", textAlign: "center" }}>
+                                  {row.constituent === "WEST BENGAL" ? "W. Bengal" : row.constituent}
+                                </td>
+                                <td style={{ backgroundColor: "#FFFF00", border: "1px solid #111", padding: "3px", textAlign: "center" }}>
+                                  {row.daily_demand?.toLocaleString()}
+                                </td>
+                                <td style={{ backgroundColor: "#FFFF00", border: "1px solid #111", padding: "3px", textAlign: "center" }}>
+                                  {row.daily_demand_time || "-"}
+                                </td>
+                                <td style={{ backgroundColor: "#FFFF00", border: "1px solid #111", padding: "3px", textAlign: "center" }}>
+                                  {row.daily_energy?.toFixed(2)}
+                                </td>
+                                <td style={{ backgroundColor: "#C9FFFF", border: "1px solid #111", padding: "3px", textAlign: "center" }}>
+                                  {row.all_time_demand?.toLocaleString()}
+                                </td>
+                                <td style={{ backgroundColor: "#C9FFFF", border: "1px solid #111", padding: "3px", textAlign: "center" }}>
+                                  {formatReportDate(row.all_time_demand_date)}
+                                </td>
+                                <td style={{ backgroundColor: "#C9FFFF", border: "1px solid #111", padding: "3px", textAlign: "center" }}>
+                                  {row.all_time_demand_time || "-"}
+                                </td>
+                                <td style={{ backgroundColor: "#C9FFFF", border: "1px solid #111", padding: "3px", textAlign: "center" }}>
+                                  {row.all_time_energy?.toFixed(2)}
+                                </td>
+                                <td style={{ backgroundColor: "#C9FFFF", border: "1px solid #111", padding: "3px", textAlign: "center" }}>
+                                  {formatReportDate(row.all_time_energy_date)}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                      <div
+                        style={{
+                          flex: 1,
+                          minHeight: "18px",
+                          backgroundColor: "#FFFF00",
+                          borderTop: "1px solid #FFFF00",
+                          marginTop: "1px"
+                        }}
+                      />
+                    </div>
+
+                    <div style={{ display: "flex", alignItems: "flex-start", gap: "42px", marginTop: "28px" }}>
+                      <table style={{ borderCollapse: "collapse", width: "360px", tableLayout: "fixed", fontSize: "12px", fontWeight: 900 }}>
+                        <thead>
+                          <tr style={{ color: "#fff" }}>
+                            <th style={{ backgroundColor: "#B0002B", border: "1px solid #111", padding: "7px", width: "52%" }}>Constituents</th>
+                            <th style={{ backgroundColor: "#B0002B", border: "1px solid #111", padding: "7px" }}>Max. Load shedding</th>
+                            <th style={{ backgroundColor: "#B0002B", border: "1px solid #111", padding: "7px" }}>Time</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {(loadsheddingData?.rows || []).map((row) => (
+                            <tr key={`highlight-load-${row.state}`}>
+                              <td style={{ backgroundColor: "#B0002B", color: "#fff", border: "1px solid #111", padding: "4px", textAlign: "center" }}>
+                                {row.state}
+                              </td>
+                              <td style={{ backgroundColor: "#F8B4B4", border: "1px solid #111", padding: "4px", textAlign: "center" }}>
+                                {Number(row.max_load_shedding || 0).toLocaleString()}
+                              </td>
+                              <td style={{ backgroundColor: "#F8B4B4", border: "1px solid #111", padding: "4px", textAlign: "center" }}>
+                                {row.time || "N/A"}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+
+                      <table style={{ borderCollapse: "collapse", width: "250px", tableLayout: "fixed", fontSize: "11px", fontWeight: 900 }}>
+                        <thead>
+                          <tr>
+                            <th colSpan="3" style={{ backgroundColor: "#92D050", border: "1px solid #111", padding: "7px", textAlign: "center", fontSize: "12px" }}>
+                              Net generation changes during the day(+/-)
+                            </th>
+                          </tr>
+                          <tr>
+                            <th style={{ backgroundColor: "#9DC3E6", border: "1px solid #111", padding: "5px" }}>
+                              Units brought on Bar (MW) (+ve)
+                            </th>
+                            <th style={{ backgroundColor: "#9DC3E6", border: "1px solid #111", padding: "5px" }}>
+                              Units went out of Bar (MW) (-ve)
+                            </th>
+                            <th style={{ backgroundColor: "#9DC3E6", border: "1px solid #111", padding: "5px" }}>
+                              Net generation changes
+                            </th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          <tr>
+                            <td style={{ backgroundColor: "#FFFF00", border: "1px solid #111", padding: "4px", textAlign: "center" }}>
+                              {Number(outageChangeData?.summary?.restored_mw || 0).toLocaleString()}
+                            </td>
+                            <td style={{ backgroundColor: "#FFFF00", border: "1px solid #111", padding: "4px", textAlign: "center" }}>
+                              -{Number(outageChangeData?.summary?.tripped_mw || 0).toLocaleString()}
+                            </td>
+                            <td style={{ backgroundColor: "#FFFF00", border: "1px solid #111", padding: "4px", textAlign: "center" }}>
+                              {Number(outageChangeData?.summary?.net_mw || 0).toLocaleString()}
+                            </td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* GENERATION OUTAGE CHANGE DETAIL MODAL */}
+        {outageModalOpen && (
+          <div
+            className="modal fade show d-block"
+            style={{
+              backgroundColor: "rgba(2, 39, 38, 0.65)",
+              backdropFilter: "blur(4px)",
+              zIndex: 1050
+            }}
+            tabIndex="-1"
+          >
+            <div className="modal-dialog modal-xl modal-dialog-centered">
+              <div className="modal-content theme-glass-card border-0 p-3" style={{ borderRadius: "20px" }}>
+                <div className="modal-header border-0 pb-0 d-flex justify-content-between align-items-center">
+                  <div>
+                    <h5 className="modal-title fw-bold text-dark">
+                      {outageModalType === "restored" ? "Units Brought on Bar" : "Units Went out of Bar"}
+                    </h5>
+                    <p className="small text-muted mb-0">
+                      {outageChangeData?.date} compared with {outageChangeData?.previous_date}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    className="btn-close"
+                    onClick={() => setOutageModalOpen(false)}
+                    aria-label="Close"
+                    style={{ filter: "invert(0.3)" }}
+                  ></button>
+                </div>
+                <div className="modal-body py-3">
+                  {(() => {
+                    const rows = outageModalType === "restored"
+                      ? (outageChangeData?.restored || [])
+                      : (outageChangeData?.tripped || []);
+                    if (!rows.length) {
+                      return (
+                        <div className="text-center text-muted py-5">
+                          <Info size={24} className="mb-2 text-secondary" />
+                          <p className="mb-0">No units in this list.</p>
+                        </div>
+                      );
+                    }
+                    return (
+                      <div className="table-responsive" style={{ maxHeight: "460px", overflowY: "auto" }}>
+                        <table className="table table-hover align-middle theme-table mb-0">
+                          <thead>
+                            <tr>
+                              <th className="text-start">Unit</th>
+                              <th>Unit No.</th>
+                              <th className="text-end">MW</th>
+                              <th>Location</th>
+                              <th>Owner</th>
+                              <th>Fuel</th>
+                              <th>Outage Type</th>
+                              <th>Outage</th>
+                              <th>Restoration</th>
+                              <th>Tentative Restoration</th>
+                              <th className="text-start">Reason</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {rows.map((row) => (
+                              <tr key={row.id}>
+                                <td className="text-start fw-bold text-dark">{row.element_name || "-"}</td>
+                                <td>{row.unit_number ?? "-"}</td>
+                                <td className="text-end fw-bold">{row.installed_capacity?.toLocaleString()}</td>
+                                <td>{row.location || "-"}</td>
+                                <td>{row.owner_name || "-"}</td>
+                                <td>{row.fuel || "-"}</td>
+                                <td>{row.outage_type || "-"}</td>
+                                <td>{row.outage_date ? `${row.outage_date} ${row.outage_time || ""}` : "-"}</td>
+                                <td>{row.revival_date ? `${row.revival_date} ${row.revival_time || ""}` : "-"}</td>
+                                <td>{row.expected_revival_date ? `${row.expected_revival_date} ${row.expected_revival_time || ""}` : "-"}</td>
+                                <td className="text-start text-secondary">{row.reason || "-"}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    );
+                  })()}
+                </div>
+                <div className="modal-footer border-0 pt-0">
+                  <button type="button" className="btn theme-btn-outline" onClick={() => setOutageModalOpen(false)}>
+                    Close
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* GENERATING STATIONS DETAIL MODAL */}
+        {stationModalOpen && (
+          <div
+            className="modal fade show d-block"
+            style={{
+              backgroundColor: "rgba(2, 39, 38, 0.65)",
+              backdropFilter: "blur(4px)",
+              zIndex: 1050
+            }}
+            tabIndex="-1"
+          >
+            <div className="modal-dialog modal-xl modal-dialog-centered">
+              <div
+                className="modal-content theme-glass-card border-0 p-3"
+                style={{ borderRadius: "20px" }}
+              >
+                <div className="modal-header border-0 pb-0 d-flex justify-content-between align-items-center">
+                  <div>
+                    <h5 className="modal-title fw-bold text-dark">
+                      {stationModalData?.state || "State"} Generating Stations
+                    </h5>
+                    <p className="small text-muted mb-0">
+                      Installed capacity details for {stationModalData?.date || powerSystemData?.date || latestDate}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    className="btn-close"
+                    onClick={() => setStationModalOpen(false)}
+                    aria-label="Close"
+                    style={{ filter: "invert(0.3)" }}
+                  ></button>
+                </div>
+                <div className="modal-body py-3">
+                  {stationModalLoading ? (
+                    <div className="d-flex justify-content-center align-items-center py-5">
+                      <div className="spinner-border text-success spinner-border-sm me-2" role="status"></div>
+                      <span className="text-secondary small fw-bold">Loading generating stations...</span>
+                    </div>
+                  ) : !stationModalData?.rows?.length ? (
+                    <div className="text-center text-muted py-5">
+                      <Info size={24} className="mb-2 text-secondary" />
+                      <p className="mb-0">No generating station details found.</p>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="d-flex align-items-center justify-content-between p-3 mb-3 rounded bg-light border border-light-subtle">
+                        <span className="small text-secondary fw-bold">Total Installed Capacity</span>
+                        <span className="fw-bold text-success" style={{ fontSize: "1.1rem" }}>
+                          {stationModalData.total_installed_capacity?.toLocaleString()} MW
+                        </span>
+                      </div>
+                      <div className="table-responsive" style={{ maxHeight: "460px", overflowY: "auto" }}>
+                        <table className="table table-hover align-middle theme-table mb-0">
+                          <thead>
+                            <tr>
+                              <th className="text-start">Generating Station</th>
+                              <th>Type</th>
+                              <th>Classification</th>
+                              <th className="text-end">Installed MW</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {stationModalData.rows.map((row, idx) => (
+                              <tr key={`${row.constituent_name}-${idx}`}>
+                                <td className="text-start fw-bold text-dark">{row.constituent_name || "-"}</td>
+                                <td>{row.station_type || "-"}</td>
+                                <td>{row.classification || "-"}</td>
+                                <td className="text-end fw-bold">{row.installed_capacity?.toLocaleString()}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </>
+                  )}
+                </div>
+                <div className="modal-footer border-0 pt-0">
+                  <button
+                    type="button"
+                    className="btn theme-btn-outline"
+                    onClick={() => setStationModalOpen(false)}
+                  >
+                    Close
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ENERGY CONSUMPTION TREND POPUP MODAL */}
+        {energyTrendModalOpen && (
+          <div
+            className="modal fade show d-block"
+            style={{
+              backgroundColor: "rgba(2, 39, 38, 0.65)",
+              backdropFilter: "blur(4px)",
+              zIndex: 1050
+            }}
+            tabIndex="-1"
+          >
+            <div className="modal-dialog modal-xl modal-dialog-centered">
+              <div
+                className="modal-content theme-glass-card border-0 p-3"
+                style={{ borderRadius: "22px" }}
+              >
+                <div className="modal-header border-0 pb-2 d-flex justify-content-between align-items-start">
+                  <div>
+                    <h5 className="modal-title fw-bold text-dark d-flex align-items-center gap-2">
+                      <TrendingUp size={18} className="text-success" />
+                      <span>State Energy Consumption Trend</span>
+                    </h5>
+                    <p className="small text-muted mb-0">
+                      {formatDisplayDate(energyTrendStart)} to {formatDisplayDate(energyTrendEnd)} | MU/Day
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    className="btn-close"
+                    onClick={() => setEnergyTrendModalOpen(false)}
+                    aria-label="Close"
+                    style={{ filter: "invert(0.3)" }}
+                  ></button>
+                </div>
+                <div className="modal-body pt-2">
+                  <div className="row g-3 align-items-end mb-3">
+                    <div className="col-12 col-md-3">
+                      <label className="form-label small fw-bold text-secondary mb-1">Start Date</label>
+                      <input
+                        type="date"
+                        className="form-control theme-input"
+                        value={energyTrendStart}
+                        onChange={(event) => setEnergyTrendStart(event.target.value)}
+                      />
+                    </div>
+                    <div className="col-12 col-md-3">
+                      <label className="form-label small fw-bold text-secondary mb-1">End Date</label>
+                      <input
+                        type="date"
+                        className="form-control theme-input"
+                        value={energyTrendEnd}
+                        onChange={(event) => setEnergyTrendEnd(event.target.value)}
+                      />
+                    </div>
+                    <div className="col-12 col-md-2">
+                      <button
+                        type="button"
+                        className="btn theme-btn-action w-100 d-flex align-items-center justify-content-center gap-2"
+                        onClick={() => loadEnergyTrend(energyTrendStart, energyTrendEnd)}
+                        disabled={energyTrendLoading}
+                      >
+                        <RefreshCw size={14} className={energyTrendLoading ? "animate-spin-custom" : ""} />
+                        <span>Apply</span>
+                      </button>
+                    </div>
+                    <div className="col-12 col-md-4">
+                      <div className="p-3 rounded-4 bg-light border border-light-subtle h-100 d-flex align-items-center justify-content-between">
+                        <div>
+                          <span className="text-muted small d-block fw-bold">Latest ER Total</span>
+                          <span className="fw-bold text-success" style={{ fontSize: "1.15rem", color: "#03624C" }}>
+                            {latestEnergyTrendRow ? `${Number(latestEnergyTrendRow.er || 0).toFixed(2)} MU` : "-"}
+                          </span>
+                        </div>
+                        <span className="small text-secondary fw-semibold">
+                          {latestEnergyTrendRow?.displayDate || "-"}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-3">
+                    <div className="d-flex align-items-center gap-2 flex-wrap">
+                      {energyTrendLines.map((line) => {
+                        const checked = selectedEnergyTrendKeys.includes(line.key);
+                        return (
+                          <label
+                            key={line.key}
+                            className="d-flex align-items-center gap-2 px-2 py-1 rounded-pill border border-light-subtle bg-light mb-0"
+                            style={{ cursor: "pointer", fontSize: "0.76rem", fontWeight: 800 }}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() => toggleEnergyTrendLine(line.key)}
+                              style={{ accentColor: line.color }}
+                            />
+                            <span
+                              className="rounded-circle d-inline-block"
+                              style={{ width: "8px", height: "8px", backgroundColor: line.color }}
+                            />
+                            <span className={checked ? "text-dark" : "text-muted"}>{line.label}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                    <div className="d-flex align-items-center gap-2">
+                      <button
+                        type="button"
+                        className="btn btn-sm theme-btn-outline"
+                        onClick={() => setSelectedEnergyTrendKeys(energyTrendLines.map((line) => line.key))}
+                        style={{ fontSize: "0.72rem", padding: "4px 10px" }}
+                      >
+                        All
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-sm theme-btn-outline"
+                        onClick={() => setSelectedEnergyTrendKeys(["er"])}
+                        style={{ fontSize: "0.72rem", padding: "4px 10px" }}
+                      >
+                        ER Only
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="theme-glass-card border border-light-subtle p-3" style={{ minHeight: "430px" }}>
+                    {energyTrendLoading ? (
+                      <div className="d-flex align-items-center justify-content-center" style={{ height: "390px" }}>
+                        <div className="spinner-border text-success spinner-border-sm me-2" role="status"></div>
+                        <span className="text-secondary small fw-bold">Loading energy trend...</span>
+                      </div>
+                    ) : !energyTrendRows.length ? (
+                      <div className="d-flex flex-column align-items-center justify-content-center text-muted" style={{ height: "390px" }}>
+                        <Info size={26} className="mb-2" />
+                        <p className="mb-0 small fw-semibold">{energyTrendError || "No energy trend data found for selected date range."}</p>
+                      </div>
+                    ) : (
+                      <>
+                        <div style={{ width: "100%", height: "340px" }}>
+                          <ResponsiveContainer width="100%" height="100%">
+                            <LineChart data={energyTrendRows} margin={{ top: 12, right: 18, left: 0, bottom: 0 }}>
+                              <CartesianGrid strokeDasharray="3 3" stroke="rgba(170,203,196,0.35)" />
+                              <XAxis
+                                dataKey="displayDate"
+                                tick={{ fontSize: 11, fill: "#475569", fontWeight: 700 }}
+                                axisLine={{ stroke: "#CBD5E1" }}
+                                tickLine={false}
+                              />
+                              <YAxis
+                                tick={{ fontSize: 11, fill: "#475569", fontWeight: 700 }}
+                                axisLine={{ stroke: "#CBD5E1" }}
+                                tickLine={false}
+                                width={52}
+                              />
+                              <Tooltip
+                                formatter={(value, name) => [`${Number(value || 0).toFixed(2)} MU`, name]}
+                                labelStyle={{ fontWeight: 900, color: "#022726" }}
+                                contentStyle={{
+                                  borderRadius: "10px",
+                                  border: "1px solid rgba(2, 39, 38, 0.15)",
+                                  boxShadow: "0 10px 20px rgba(15,23,42,0.12)",
+                                  fontSize: "0.78rem"
+                                }}
+                              />
+                              <Legend
+                                verticalAlign="top"
+                                height={32}
+                                iconType="circle"
+                                wrapperStyle={{ fontSize: "0.75rem", fontWeight: 700 }}
+                              />
+                              {visibleEnergyTrendLines.map((line) => (
+                                <Line
+                                  key={line.key}
+                                  type="monotone"
+                                  dataKey={line.key}
+                                  name={line.label}
+                                  stroke={line.color}
+                                  strokeWidth={line.strokeWidth || 2.4}
+                                  dot={{ r: 2.5, strokeWidth: 1 }}
+                                  activeDot={{ r: 5 }}
+                                />
+                              ))}
+                            </LineChart>
+                          </ResponsiveContainer>
+                        </div>
+                        <div className="row g-2 mt-2">
+                          {visibleEnergyTrendLines.map((line) => (
+                            <div key={line.key} className="col-6 col-md-4 col-lg-2">
+                              <div className="p-2 rounded bg-light border border-light-subtle text-center">
+                                <span className="small fw-bold d-block" style={{ color: line.color }}>
+                                  {line.label}
+                                </span>
+                                <span className="small text-dark fw-bold">
+                                  {Number(latestEnergyTrendRow?.[line.key] || 0).toFixed(2)} MU
+                                </span>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
         )}
 
         {/* ENERGY CONSUMPTION DETAILS POPUP MODAL */}
