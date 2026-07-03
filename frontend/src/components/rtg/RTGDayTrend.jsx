@@ -252,7 +252,7 @@ function TrendTile({
   );
 }
 
-export default function RTGDayTrend({ data = [], onOutageClick }) {
+export default function RTGDayTrend({ data = [], onOutageClick, onUnreqClick }) {
   const latest = data[data.length - 1] || {};
   return (
     <Paper
@@ -296,6 +296,7 @@ export default function RTGDayTrend({ data = [], onOutageClick }) {
             color="#0F4B2D"
             gradientId="unreqTrendFill"
             dark
+            onClick={onUnreqClick}
           />
         </Box>
       ) : (

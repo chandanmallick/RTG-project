@@ -28,6 +28,7 @@ const READ_COLS = [
 const EDIT_COLS = [
   { key: "wbes_name",          label: "WBES Name",       w: 150, type: "text" },
   { key: "wbes_acronym",       label: "WBES Acronym",    w: 120, type: "text" },
+  { key: "crms_utility_name",  label: "CRMS Utility",    w: 130, type: "text" },
   { key: "rtg_plant_id",       label: "RTG Plant ID",    w: 120, type: "text" },
   { key: "scada_key",          label: "SCADA Actual Key", w: 140, type: "text" },
   { key: "scada_header",       label: "SCADA Actual Name", w: 160, type: "text" },

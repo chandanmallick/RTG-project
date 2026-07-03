@@ -72,11 +72,11 @@ export default function StateComplianceTable({
       <div
         style={{
           overflowX: "auto",
-          borderRadius: "12px",
-          border: "1px solid #E2E8F0",
-          boxShadow: "0 4px 6px -1px rgba(0, 0, 0, 0.05)",
+          borderRadius: "14px",
+          border: "1px solid rgba(175, 196, 234, 0.72)",
+          boxShadow: "0 8px 22px rgba(15, 111, 219, 0.055)",
           marginBottom: "16px",
-          background: "#FFFFFF",
+          background: "linear-gradient(180deg, #F8FBFF 0%, #FFFFFF 56px)",
         }}
       >
         <table
@@ -259,7 +259,7 @@ export default function StateComplianceTable({
                               display: "flex",
                               alignItems: "center",
                               gap: "6px",
-                              background: "#03624C",
+                            background: "linear-gradient(135deg, #147CFF 0%, #0F6FDB 100%)",
                               color: "#FFFFFF",
                               border: "none",
                               borderRadius: "6px",
@@ -274,7 +274,7 @@ export default function StateComplianceTable({
                               e.currentTarget.style.background = "#024c3b";
                             }}
                             onMouseLeave={(e) => {
-                              e.currentTarget.style.background = "#03624C";
+                              e.currentTarget.style.background = "#0F6FDB";
                             }}
                           >
                             ⚙️ Edit Raw Database Data
@@ -313,7 +313,7 @@ export default function StateComplianceTable({
                                 alignItems: "center",
                                 justifyContent: "center",
                                 gap: "5px",
-                                background: "#03624C",
+                                background: "linear-gradient(135deg, #147CFF 0%, #0F6FDB 100%)",
                                 color: "#FFFFFF",
                                 border: "none",
                                 borderRadius: "7px",
@@ -328,7 +328,7 @@ export default function StateComplianceTable({
                                 e.currentTarget.style.background = "#024c3b";
                               }}
                               onMouseLeave={(e) => {
-                                e.currentTarget.style.background = "#03624C";
+                                  e.currentTarget.style.background = "#0F6FDB";
                               }}
                             >
                               Edit Raw Data
@@ -336,6 +336,30 @@ export default function StateComplianceTable({
                             {row.schedule !== null && row.deviation !== null && (
                               <StatisticsCard row={row} compact />
                             )}
+                            <div onClick={(e) => e.stopPropagation()}>
+                              <label style={{ display: "block", marginBottom: 4, fontSize: "0.68rem", fontWeight: 900, color: "#334155" }}>
+                                Chart note
+                              </label>
+                              <textarea
+                                value={row.chart_note || ""}
+                                onChange={(e) => onUpdateRowField(row.plant_id, "chart_note", e.target.value)}
+                                placeholder="Add chart-specific note for PDF/Word..."
+                                rows={5}
+                                style={{
+                                  width: "100%",
+                                  minHeight: 96,
+                                  resize: "vertical",
+                                  border: "1px solid #BFD3F8",
+                                  borderRadius: 8,
+                                  padding: "7px 8px",
+                                  fontSize: "0.7rem",
+                                  fontFamily: "inherit",
+                                  color: "#1E293B",
+                                  background: "#FFFFFF",
+                                  outline: "none",
+                                }}
+                              />
+                            </div>
                           </div>
                         </div>
                       </td>
@@ -348,7 +372,7 @@ export default function StateComplianceTable({
         </table>
       </div>
 
-      <div style={{ background: "#F8FAFC", padding: "16px", borderRadius: "12px", border: "1px solid #E2E8F0" }}>
+      <div style={{ background: "linear-gradient(180deg, #F8FBFF 0%, #FFFFFF 56px)", padding: "16px", borderRadius: "14px", border: "1px solid rgba(175, 196, 234, 0.72)", boxShadow: "0 8px 22px rgba(15, 111, 219, 0.055)" }}>
         <label style={{ fontSize: "0.78rem", fontWeight: 700, color: "#1E293B", display: "block", marginBottom: "6px" }}>
           State Drawal Compliance Notes
         </label>

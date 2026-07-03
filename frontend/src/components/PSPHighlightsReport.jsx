@@ -64,7 +64,8 @@ const buildPortfolioLine = (label, state, source, mode, reportDate) => {
   const biogas = sumValues(gen.biogas);
   const nuclear = sumValues(gen.nuclear);
   const wind = sumValues(gen.wind);
-  const ownGen = sumValues(thermal, hydro, solar, biogas, nuclear, wind);
+  const splitOwnGen = sumValues(thermal, hydro, solar, biogas, nuclear, wind);
+  const ownGen = splitOwnGen || sumValues(portfolio.own_gen, source?.own_gen);
   const isgs = sumValues(portfolio.isgs);
   const gna = sumValues(portfolio.gna);
   const tgna = sumValues(portfolio.tgna);

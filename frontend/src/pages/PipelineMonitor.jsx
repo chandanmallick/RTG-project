@@ -30,12 +30,13 @@ import GlassCard from "../components/ui/GlassCard";
 
 import GradientButton from "../components/ui/GradientButton";
 
+import API from "../services/api";
+
 import CloseRoundedIcon from "@mui/icons-material/CloseRounded";
 
 import VisibilityRoundedIcon from "@mui/icons-material/VisibilityRounded";
 
-const API =
-  "/api";
+const API_ROOT = API.apiBaseUrl;
 
 export default function PipelineMonitor() {
 
@@ -64,7 +65,7 @@ export default function PipelineMonitor() {
       setLoading(true);
 
       const res = await axios.get(
-        `${API}/pipeline/status`
+        `${API_ROOT}/pipeline/status`
       );
 
       setPipelines(res.data.data);
@@ -269,7 +270,7 @@ export default function PipelineMonitor() {
 
         await axios.post(
 
-        `${API}/pipeline/run/${type}`
+        `${API_ROOT}/pipeline/run/${type}`
         );
 
         fetchStatus();
@@ -289,7 +290,7 @@ export default function PipelineMonitor() {
 
             const res = await axios.get(
 
-            `${API}/pipeline/logs/${pipeline.pipeline}/${revisionId}`
+            `${API_ROOT}/pipeline/logs/${pipeline.pipeline}/${revisionId}`
             );
 
             setPipelineLogs(

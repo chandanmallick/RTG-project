@@ -20,13 +20,14 @@ export default function GlassCard({
 
         overflow: "hidden",
 
-        borderRadius: "24px",
+        borderRadius: "16px",
 
-        background: "#FFFFFF",
+        background:
+          "linear-gradient(180deg, #F8FBFF 0%, #FFFFFF 56px)",
 
-        border: "1px solid rgba(170, 203, 196, 0.4)",
+        border: "1px solid rgba(175, 196, 234, 0.72)",
 
-        boxShadow: "0 10px 30px rgba(0, 0, 0, 0.02), 0 1px 3px rgba(0, 0, 0, 0.01)",
+        boxShadow: "0 12px 30px rgba(15, 111, 219, 0.07)",
 
         transition:
           "all .35s cubic-bezier(.17,.67,.38,.99)",
@@ -39,7 +40,7 @@ export default function GlassCard({
               "translateY(-4px)",
 
             boxShadow:
-              "0 20px 40px rgba(0,0,0,0.04), 0 1px 3px rgba(0,0,0,0.02)",
+              "0 16px 36px rgba(15, 111, 219, 0.11)",
           },
         }),
 
@@ -124,7 +125,7 @@ export default function GlassCard({
 
             inset: 0,
 
-            borderRadius: "34px",
+            borderRadius: "18px",
 
             padding: "1px",
 

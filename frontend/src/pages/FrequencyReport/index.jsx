@@ -18,7 +18,7 @@ import ExportBar from "./components/ExportBar";
 import ComplianceChart from "./components/ComplianceChart";
 import CapacityFrequencyChart from "./components/CapacityFrequencyChart";
 
-import { Table2, Settings2, FileUp, AlertTriangle, Terminal, X, Save, RefreshCw } from "lucide-react";
+import { Table2, Settings2, FileUp, AlertTriangle, Terminal, X, Save, RefreshCw, Search } from "lucide-react";
 import toast, { Toaster } from "react-hot-toast";
 
 const today = () => new Date().toISOString().slice(0, 10);
@@ -97,6 +97,54 @@ const normalizeEvent = (event = {}) => ({
   event_id: String(event.event_id || event.id || event._id || ""),
 });
 
+const DEFAULT_CRMS_ALIASES = {
+  BIHAR: ["BSPTCL"],
+  ODISHA: ["GRIDCO"],
+  JHARKHAND: ["JUSNL"],
+  "WEST BENGAL": ["WBSETCL"],
+  SIKKIM: ["SIKKIM"],
+  DVC: ["DVC"],
+};
+
+const normalizeCrmsToken = (value) =>
+  String(value || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+
+const splitCrmsAliases = (value) =>
+  String(value || "")
+    .split(/[;,|/]+/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+
+const rowCrmsAliasTokens = (row = {}) => {
+  const configured = splitCrmsAliases(row.crms_utility_name);
+  const names = configured.length ? [...configured] : [];
+
+  if (!configured.length && row.is_state) {
+    const stateText = String(row.state || row.plant_name || "").toUpperCase();
+    Object.entries(DEFAULT_CRMS_ALIASES).forEach(([stateName, aliases]) => {
+      if (stateText === stateName || stateText.includes(stateName)) {
+        names.push(...aliases);
+      }
+    });
+  }
+
+  return new Set(names.map(normalizeCrmsToken).filter(Boolean));
+};
+
+const mapCrmsMessagesToRows = (baseRows = [], messages = []) => {
+  if (!messages.length) {
+    return baseRows.map((row) => ({ ...row, crms_messages: [] }));
+  }
+  return baseRows.map((row) => {
+    const aliasTokens = rowCrmsAliasTokens(row);
+    const matched = messages.filter((message) => {
+      const issuedTokens = (message.issued_to || []).map(normalizeCrmsToken).filter(Boolean);
+      return issuedTokens.some((token) => aliasTokens.has(token));
+    });
+    return { ...row, crms_messages: matched };
+  });
+};
+
 export default function FrequencyReport() {
   const [tab, setTab] = useState("report");
   const [eventType, setEventType] = useState("low");
@@ -106,6 +154,8 @@ export default function FrequencyReport() {
   const [rows, setRows] = useState([]);
   const [mapData, setMapData] = useState([]);
   const [mapLoading, setMapLoading] = useState(false);
+  const [crmsMessages, setCrmsMessages] = useState([]);
+  const [crmsStatus, setCrmsStatus] = useState({ loading: false, error: "", fetched: false });
 
   // RTG Portal Status
   const [rtgStatusOk, setRtgStatusOk] = useState(false);
@@ -136,6 +186,7 @@ export default function FrequencyReport() {
         setShowLogsModal(false);
         setShowUploadDetailsModal(false);
         setRawEditorOpen(false);
+        setPendingExportType(null);
       }
     };
     window.addEventListener("keydown", handleKeyDown);
@@ -146,6 +197,7 @@ export default function FrequencyReport() {
   const [exportingPdf, setExportingPdf] = useState(false);
   const [exportingDocx, setExportingDocx] = useState(false);
   const [exportingExcel, setExportingExcel] = useState(false);
+  const [exportingHtml, setExportingHtml] = useState(false);
 
   // Accordion details / Comments
   const [introDesc, setIntroDesc] = useState(
@@ -160,6 +212,12 @@ export default function FrequencyReport() {
 
   const [showSchAct, setShowSchAct] = useState(false);
   const [expandedRowIds, setExpandedRowIds] = useState([]);
+  const [selectedExportStateIds, setSelectedExportStateIds] = useState([]);
+  const [selectedExportGeneratorIds, setSelectedExportGeneratorIds] = useState([]);
+  const [exportGeneratorFilter, setExportGeneratorFilter] = useState("");
+  const [exportIncludeDeviationPlot, setExportIncludeDeviationPlot] = useState(true);
+  const [exportIncludeScheduleActualPlot, setExportIncludeScheduleActualPlot] = useState(true);
+  const [pendingExportType, setPendingExportType] = useState(null);
 
   // Ref container to collect all ECharts instances for offscreen render/export
   const chartRefs = useRef({});
@@ -665,6 +723,7 @@ export default function FrequencyReport() {
             actual_source: m.actual_source || "RTG",
             type: m.type || (m.is_state ? "State" : "IPP"),
             wbes_name: m.wbes_name || "",
+            crms_utility_name: m.crms_utility_name || "",
             rtg_plant_id: m.rtg_plant_id || "",
             scada_key: m.scada_key || "",
             scada_header: m.scada_header || "",
@@ -675,6 +734,7 @@ export default function FrequencyReport() {
             is_state: m.is_state || false,
             is_frequency: m.is_frequency || false,
             reason: "",
+            chart_note: "",
           }));
         } else {
           return prev.map((r) => {
@@ -687,6 +747,7 @@ export default function FrequencyReport() {
               actual_source: m.actual_source || "RTG",
               type: m.type || (m.is_state ? "State" : "IPP"),
               wbes_name: m.wbes_name || "",
+              crms_utility_name: m.crms_utility_name || "",
               rtg_plant_id: m.rtg_plant_id || "",
               scada_key: m.scada_key || "",
               scada_header: m.scada_header || "",
@@ -798,6 +859,31 @@ export default function FrequencyReport() {
     setEventNameDraft(eventDurationName());
   };
 
+  const loadCrmsMessages = useCallback(async (rangeStart = startTime, rangeEnd = endTime) => {
+    if (!rangeStart || !rangeEnd) return [];
+    setCrmsStatus({ loading: true, error: "", fetched: false });
+    try {
+      const res = await API.getFrequencyCrmsMessages(rangeStart, rangeEnd);
+      if (!res?.success) {
+        const message = res?.error || "CRMS messages could not be loaded.";
+        setCrmsMessages([]);
+        setCrmsStatus({ loading: false, error: message, fetched: true });
+        toast.error(message);
+        return [];
+      }
+      const nextMessages = Array.isArray(res.messages) ? res.messages : [];
+      setCrmsMessages(nextMessages);
+      setCrmsStatus({ loading: false, error: "", fetched: true });
+      return nextMessages;
+    } catch (error) {
+      const message = error?.message || "CRMS messages could not be loaded.";
+      setCrmsMessages([]);
+      setCrmsStatus({ loading: false, error: message, fetched: true });
+      toast.error(message);
+      return [];
+    }
+  }, [startTime, endTime]);
+
   const runSSEReport = async (fileId, fileObject, overrideRows = rows) => {
     const isHistoricalRun = fileId === "database" && !!selectedEventId;
     const selectedEvent = availableEvents.find((item) => item.event_id === selectedEventId);
@@ -860,6 +946,7 @@ export default function FrequencyReport() {
           if (result.success) {
             const normalizedRows = (result.rows || []).map(normalizeReportRow);
             setRows(normalizedRows);
+            loadCrmsMessages(startTime, endTime);
             if (result.event_type) {
               setEventType(result.event_type);
             }
@@ -1122,17 +1209,341 @@ export default function FrequencyReport() {
     });
   });
 
+  const buildInteractiveChartsHtml = (selectedRows) => {
+    const chartRows = selectedRows
+      .filter((row) => row.series?.timestamps?.length > 0 && !row.is_frequency)
+      .map((row) => ({
+        plant_id: row.plant_id,
+        plant_name: row.plant_name || row.entity || row.state || row.plant_id,
+        is_state: !!row.is_state,
+        type: row.type || (row.is_state ? "state" : "generator"),
+        event_type: row.event_type || eventType,
+        series: {
+          timestamps: row.series?.timestamps || [],
+          frequency: row.series?.frequency || [],
+          deviation: row.series?.deviation || [],
+          schedule: row.series?.schedule || [],
+          actual: row.series?.actual || [],
+          dc: row.series?.dc || [],
+        },
+        crms_messages: row.crms_messages || [],
+      }));
+
+    const payload = JSON.stringify({
+      title: eventDurationName(),
+      start_time: startTime,
+      end_time: endTime,
+      includeDeviation: exportIncludeDeviationPlot,
+      includeScheduleActual: exportIncludeScheduleActualPlot,
+      rows: chartRows,
+    }).replace(/<\/script/gi, "<\\/script");
+
+    return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>${eventDurationName()} - Interactive Charts</title>
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+  <style>
+    body { margin: 0; font-family: Inter, Arial, sans-serif; color: #0f172a; background: #f4f8fb; }
+    header { position: sticky; top: 0; z-index: 5; background: #ffffff; border-bottom: 1px solid #d8e4ef; padding: 14px 20px; box-shadow: 0 8px 20px rgba(15, 23, 42, 0.05); }
+    h1 { margin: 0 0 3px; font-size: 18px; font-weight: 900; }
+    .meta { color: #64748b; font-size: 12px; font-weight: 700; }
+    main { padding: 16px; display: grid; gap: 14px; }
+    .card { background: #fff; border: 1px solid #d8e4ef; border-radius: 10px; padding: 12px; box-shadow: 0 8px 24px rgba(15, 23, 42, 0.055); }
+    .card-title { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; margin-bottom: 8px; }
+    .card-title h2 { margin: 0; font-size: 14px; font-weight: 900; }
+    .badge { border-radius: 999px; padding: 3px 8px; font-size: 11px; font-weight: 900; background: #eef2ff; color: #4338ca; }
+    .chart { width: 100%; height: 520px; }
+    .small { height: 380px; }
+    .empty { padding: 28px; text-align: center; color: #64748b; font-weight: 800; background: #fff; border: 1px dashed #b9c9db; border-radius: 10px; }
+    @media print { header { position: static; } .card { break-inside: avoid; box-shadow: none; } }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Interactive Frequency Event Charts</h1>
+    <div class="meta">${startTime} to ${endTime} | Hover chart lines and CRMS pins for details</div>
+  </header>
+  <main id="charts"></main>
+  <script>
+    const report = ${payload};
+    const root = document.getElementById("charts");
+    const clean = (arr) => (Array.isArray(arr) ? arr.map((v) => Number.isFinite(Number(v)) ? Number(v) : null) : []);
+    const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" }[c]));
+    const parseTs = (v) => {
+      const d = new Date(String(v || "").replace(" ", "T"));
+      return Number.isNaN(d.getTime()) ? null : d;
+    };
+    const fmtTime = (ts) => String(ts || "").replace("T", " ");
+    const categoryColors = {
+      "alert": "#FACC15",
+      "emergency": "#F97316",
+      "extreme emergency": "#DC2626",
+      "non-compliance": "#111827",
+      "noncompliance": "#111827",
+    };
+    const categoryOrder = ["Alert", "Emergency", "Extreme Emergency", "Non-compliance"];
+    const crmsCategory = (message) => {
+      const raw = Array.isArray(message.category) ? message.category[0] : message.category;
+      return String(raw || message.violation_type || "Message").trim();
+    };
+    const crmsLegendName = (message) => categoryOrder.find((item) => item.toLowerCase() === crmsCategory(message).toLowerCase()) || crmsCategory(message);
+    const crmsColor = (message) => categoryColors[crmsCategory(message).toLowerCase()] || "#2563EB";
+    const crmsIssueTime = (message) => {
+      const raw = String(message.message_date || message.timestamp || "");
+      const timePart = raw.includes(" ") ? raw.split(" ")[1] : raw.includes("T") ? raw.split("T")[1] : raw;
+      const parts = String(timePart || "").split(":");
+      return parts[0] && parts[1] ? parts[0] + ":" + parts[1] + " hrs" : raw;
+    };
+    const messageSymbol = "path://M4 4h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H9l-5 4v-4H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z";
+    const nearestMarkerData = (row, devs, actuals) => {
+      const timestamps = row.series.timestamps || [];
+      const parsed = timestamps.map(parseTs);
+      const first = parsed.find(Boolean);
+      const last = [...parsed].reverse().find(Boolean);
+      if (!first || !last) return [];
+      return (row.crms_messages || []).map((msg, idx) => {
+        const mt = parseTs(msg.timestamp || msg.message_date);
+        if (!mt || mt < first || mt > last) return null;
+        let nearest = -1;
+        let diff = Infinity;
+        parsed.forEach((ts, i) => {
+          if (!ts) return;
+          const d = Math.abs(ts.getTime() - mt.getTime());
+          if (d < diff) { diff = d; nearest = i; }
+        });
+        if (nearest < 0) return null;
+        const base = devs[nearest] ?? actuals[nearest] ?? 0;
+        return { value: [timestamps[nearest], base + ((idx % 5) - 2) * 8], crms: msg };
+      }).filter(Boolean);
+    };
+    const markerSeriesByCategory = (markers) => {
+      const grouped = new Map();
+      markers.forEach((marker) => {
+        const name = crmsLegendName(marker.crms || {});
+        if (!grouped.has(name)) grouped.set(name, []);
+        grouped.get(name).push(marker);
+      });
+      return Array.from(grouped.entries()).sort(([a], [b]) => {
+        const ai = categoryOrder.indexOf(a);
+        const bi = categoryOrder.indexOf(b);
+        return (ai < 0 ? 999 : ai) - (bi < 0 ? 999 : bi) || a.localeCompare(b);
+      }).map(([name, data]) => ({
+        name,
+        type: "scatter",
+        data,
+        yAxisIndex: 0,
+        symbol: messageSymbol,
+        symbolSize: 30,
+        itemStyle: { color: crmsColor({ category: name }), borderColor: "#fff", borderWidth: 2 },
+        label: { show: false },
+        tooltip: { trigger: "item", formatter: (p) => crmsHtml(p.data?.crms || {}) },
+        z: 20,
+      }));
+    };
+    const crmsHtml = (message) => {
+      const category = crmsCategory(message);
+      const color = crmsColor(message);
+      let html = '<div style="font-size:12px;line-height:1.4;min-width:240px">';
+      html += '<div style="font-weight:900;color:' + color + ';margin-bottom:4px">' + esc(category) + '</div>';
+      html += '<div><span style="color:#64748B">Issue time:</span> ' + esc(crmsIssueTime(message)) + '</div>';
+      if (message.message_no) html += '<div><span style="color:#64748B">Message no:</span> ' + esc(message.message_no) + '</div>';
+      if (message.issued_to && message.issued_to.length) html += '<div><span style="color:#64748B">Issued to:</span> ' + esc(message.issued_to.join(", ")) + '</div>';
+      if (message.issued_by) html += '<div><span style="color:#64748B">Issued by:</span> ' + esc(message.issued_by) + '</div>';
+      if (message.remarks) html += '<div style="margin-top:4px;color:#334155;font-weight:800">' + esc(message.remarks) + '</div>';
+      html += '</div>';
+      return html;
+    };
+    const eventMeta = (row) => {
+      const high = row.event_type === "high";
+      const type = row.is_state ? "state" : "generator";
+      if (high && type === "state") {
+        return {
+          threshold: 50.05,
+          isEvent: (f) => f > 50.05,
+          isHelping: (d) => d > 0,
+          helping: { color: "rgba(234,179,8,0.30)", label: "Helping Grid (Gold Shade)" },
+          adverse: { color: "rgba(6,182,212,0.30)", label: "Under Drawal (Cyan Shade)" },
+        };
+      }
+      if (high) {
+        return {
+          threshold: 50.05,
+          isEvent: (f) => f > 50.05,
+          isHelping: (d) => d < 0,
+          helping: { color: "rgba(16,185,129,0.30)", label: "Helping Grid (Green Shade)" },
+          adverse: { color: "rgba(249,115,22,0.32)", label: "Over Injection (Orange Shade)" },
+        };
+      }
+      return {
+        threshold: 49.9,
+        isEvent: (f) => f < 49.9,
+        isHelping: (d) => (type === "state" ? d < 0 : d > 0),
+        helping: { color: "rgba(16,185,129,0.30)", label: "Helping Grid (Green Shade)" },
+        adverse: { color: "rgba(249,115,22,0.32)", label: type === "state" ? "Over Drawal (Orange Shade)" : "Under Injection (Orange Shade)" },
+      };
+    };
+    const shadedDeviationData = (row, freq, dev) => {
+      const meta = eventMeta(row);
+      const helping = [];
+      const adverse = [];
+      dev.forEach((d, i) => {
+        const f = freq[i];
+        if (f === null || d === null || !meta.isEvent(f)) {
+          helping.push(0);
+          adverse.push(0);
+          return;
+        }
+        if (meta.isHelping(d)) {
+          helping.push(d);
+          adverse.push(0);
+        } else {
+          helping.push(0);
+          adverse.push(d);
+        }
+      });
+      return { meta, helping, adverse };
+    };
+    const makeDeviationOption = (row) => {
+      const timestamps = row.series.timestamps || [];
+      const freq = clean(row.series.frequency);
+      const dev = clean(row.series.deviation);
+      const actual = clean(row.series.actual);
+      const maxAbs = Math.max(50, ...dev.filter((v) => v !== null).map((v) => Math.abs(v)));
+      const shaded = shadedDeviationData(row, freq, dev);
+      const threshold = shaded.meta.threshold;
+      const markers = nearestMarkerData(row, dev, actual);
+      const markerSeries = markerSeriesByCategory(markers);
+      return {
+        animation: false,
+        tooltip: {
+          trigger: "axis",
+          axisPointer: { type: "cross" },
+          backgroundColor: "rgba(255,255,255,0.98)",
+          borderColor: "#CBD5E1",
+          borderWidth: 1,
+          textStyle: { color: "#1E293B", fontSize: 12, fontWeight: 700 },
+          formatter: (params) => {
+            const list = Array.isArray(params) ? params : [params];
+            const ts = list[0]?.axisValue || "";
+            let html = '<div style="border-bottom:1px solid #CBD5E1;padding-bottom:5px;margin-bottom:6px;font-size:11px;color:#64748B">' + esc(fmtTime(ts)) + '</div>';
+            list.forEach((p) => {
+              if (p.data?.crms) {
+                html += '<div style="margin-top:7px;padding-top:7px;border-top:1px solid #CBD5E1">' + crmsHtml(p.data.crms) + '</div>';
+                return;
+              }
+              const val = Array.isArray(p.value) ? p.value[1] : p.value;
+              if (val == null) return;
+              html += '<div><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:' + p.color + ';margin-right:6px"></span>' + esc(p.seriesName) + ': <strong>' + Number(val).toFixed(p.seriesName.includes("Hz") ? 3 : 0) + '</strong></div>';
+            });
+            return html;
+          },
+        },
+        legend: {
+          top: 4,
+          type: "scroll",
+          textStyle: { fontWeight: 800 },
+          data: [
+            shaded.meta.helping.label,
+            shaded.meta.adverse.label,
+            "Deviation (MW)",
+            "Frequency (Hz)",
+            ...markerSeries.map((series) => ({ name: series.name, icon: messageSymbol })),
+          ],
+        },
+        grid: { top: 52, left: 58, right: 62, bottom: 58 },
+        dataZoom: [{ type: "inside" }, { type: "slider", height: 18, bottom: 18 }],
+        xAxis: { type: "category", data: timestamps, boundaryGap: false, axisLabel: { fontWeight: 700 } },
+        yAxis: [
+          { type: "value", name: "MW", min: -maxAbs, max: maxAbs, axisLabel: { fontWeight: 700 } },
+          { type: "value", name: "Hz", min: 49.4, max: 50.6, position: "right", axisLabel: { fontWeight: 800, color: "#7C3AED" } },
+        ],
+        series: [
+          { name: shaded.meta.helping.label, type: "line", data: shaded.helping, yAxisIndex: 0, symbol: "none", lineStyle: { width: 0 }, itemStyle: { color: shaded.meta.helping.color }, areaStyle: { color: shaded.meta.helping.color }, emphasis: { disabled: true }, z: 1 },
+          { name: shaded.meta.adverse.label, type: "line", data: shaded.adverse, yAxisIndex: 0, symbol: "none", lineStyle: { width: 0 }, itemStyle: { color: shaded.meta.adverse.color }, areaStyle: { color: shaded.meta.adverse.color }, emphasis: { disabled: true }, z: 1 },
+          { name: "Deviation (MW)", type: "line", data: dev, yAxisIndex: 0, symbol: "none", lineStyle: { width: 3.2, color: row.is_state ? "#059669" : "#DC2626" }, itemStyle: { color: row.is_state ? "#059669" : "#DC2626" } },
+          { name: "Frequency (Hz)", type: "line", data: freq, yAxisIndex: 1, symbol: "none", lineStyle: { width: 2.8, color: "#7C3AED" }, itemStyle: { color: "#7C3AED" }, markLine: { silent: true, symbol: "none", data: [{ yAxis: threshold }], lineStyle: { color: "#EF4444", type: "dashed", width: 1.4 }, label: { formatter: threshold + " Hz", color: "#DC2626", fontWeight: 900 } } },
+          ...markerSeries,
+        ],
+      };
+    };
+    const makeScheduleOption = (row) => {
+      const timestamps = row.series.timestamps || [];
+      return {
+        animation: false,
+        tooltip: { trigger: "axis", axisPointer: { type: "cross" } },
+        legend: { top: 4, textStyle: { fontWeight: 800 } },
+        grid: { top: 52, left: 58, right: 26, bottom: 58 },
+        dataZoom: [{ type: "inside" }, { type: "slider", height: 18, bottom: 18 }],
+        xAxis: { type: "category", data: timestamps, boundaryGap: false, axisLabel: { fontWeight: 700 } },
+        yAxis: { type: "value", name: "MW", axisLabel: { fontWeight: 700 } },
+        series: [
+          { name: "Schedule (MW)", type: "line", data: clean(row.series.schedule), symbol: "none", lineStyle: { width: 2.8, color: "#4F46E5" }, itemStyle: { color: "#4F46E5" } },
+          { name: "Actual (MW)", type: "line", data: clean(row.series.actual), symbol: "none", lineStyle: { width: 3, color: "#DB2777" }, itemStyle: { color: "#DB2777" } },
+          { name: "DC (MW)", type: "line", data: clean(row.series.dc), symbol: "none", lineStyle: { width: 2.2, color: "#F59E0B" }, itemStyle: { color: "#F59E0B" } },
+        ],
+      };
+    };
+    const addCard = (row, kind, option) => {
+      const card = document.createElement("section");
+      card.className = "card";
+      card.innerHTML = '<div class="card-title"><h2>' + esc(row.plant_name) + '</h2><span class="badge">' + esc(kind) + '</span></div><div class="chart ' + (kind === "Schedule / Actual" ? "small" : "") + '"></div>';
+      root.appendChild(card);
+      const chart = echarts.init(card.querySelector(".chart"));
+      chart.setOption(option);
+      window.addEventListener("resize", () => chart.resize());
+    };
+    if (!report.rows.length) {
+      root.innerHTML = '<div class="empty">No selected chart rows available for this export.</div>';
+    } else {
+      report.rows.forEach((row) => {
+        if (report.includeDeviation) addCard(row, "Deviation / Frequency", makeDeviationOption(row));
+        if (report.includeScheduleActual && !row.is_state) addCard(row, "Schedule / Actual", makeScheduleOption(row));
+      });
+    }
+  </script>
+</body>
+</html>`;
+  };
+
+  const handleExportHtml = async () => {
+    setExportingHtml(true);
+    const expToast = toast.loading("Preparing interactive HTML charts...");
+    try {
+      if (!exportRows.some((row) => !row.is_frequency)) {
+        throw new Error("Select at least one state or generator for HTML export.");
+      }
+      if (!exportIncludeDeviationPlot && !exportIncludeScheduleActualPlot) {
+        throw new Error("Select at least one chart type for HTML export.");
+      }
+      const html = buildInteractiveChartsHtml(exportRows);
+      const blob = new Blob([html], { type: "text/html;charset=utf-8" });
+      await saveBlobToFile(blob, `${eventDurationName()}_interactive_charts.html`);
+      toast.success("Interactive HTML charts downloaded", { id: expToast });
+    } catch (e) {
+      console.error(e);
+      toast.error("Error preparing HTML charts: " + e.message, { id: expToast });
+    } finally {
+      setExportingHtml(false);
+    }
+  };
+
   const handleExportDocx = async () => {
     setExportingDocx(true);
     const expToast = toast.loading("Generating Word document...");
     try {
+      if (!exportRows.some((row) => !row.is_frequency)) {
+        throw new Error("Select at least one state or generator for export.");
+      }
       await waitForHiddenCharts();
       // Gather base64 images from chartRefs for all entities that have series data
-      const updatedRows = rows.map((row) => {
+      const updatedRows = exportRows.map((row) => {
         const ref = chartRefs.current[row.plant_id];
         const capRef = capacityChartRefs.current[row.plant_id];
-        const plot_image = ref ? ref.getDataURL() : null;
-        const capacity_plot_image = capRef ? capRef.getDataURL() : null;
+        const plot_image = exportIncludeDeviationPlot && ref ? ref.getDataURL() : null;
+        const capacity_plot_image = exportIncludeScheduleActualPlot && capRef ? capRef.getDataURL() : null;
         // Strip out metadata prefix for python base64 decoding
         const stripped_image = plot_image ? plot_image.replace(/^data:image\/png;base64,/, "") : null;
         const stripped_capacity_image = capacity_plot_image ? capacity_plot_image.replace(/^data:image\/png;base64,/, "") : null;
@@ -1168,13 +1579,16 @@ export default function FrequencyReport() {
     setExportingPdf(true);
     const expToast = toast.loading("Generating PDF document...");
     try {
+      if (!exportRows.some((row) => !row.is_frequency)) {
+        throw new Error("Select at least one state or generator for export.");
+      }
       await waitForHiddenCharts();
       // Gather base64 images from chartRefs
-      const updatedRows = rows.map((row) => {
+      const updatedRows = exportRows.map((row) => {
         const ref = chartRefs.current[row.plant_id];
         const capRef = capacityChartRefs.current[row.plant_id];
-        const plot_image = ref ? ref.getDataURL() : null;
-        const capacity_plot_image = capRef ? capRef.getDataURL() : null;
+        const plot_image = exportIncludeDeviationPlot && ref ? ref.getDataURL() : null;
+        const capacity_plot_image = exportIncludeScheduleActualPlot && capRef ? capRef.getDataURL() : null;
         const stripped_image = plot_image ? plot_image.replace(/^data:image\/png;base64,/, "") : null;
         const stripped_capacity_image = capacity_plot_image ? capacity_plot_image.replace(/^data:image\/png;base64,/, "") : null;
         return {
@@ -1199,12 +1613,15 @@ export default function FrequencyReport() {
     setExportingExcel(true);
     const expToast = toast.loading("Generating Excel workbook...");
     try {
+      if (!exportRows.some((row) => !row.is_frequency)) {
+        throw new Error("Select at least one state or generator for export.");
+      }
       const payload = {
         executive_summary: introDesc,
         start_time: startTime,
         end_time: endTime,
         event_type: eventType,
-        rows,
+        rows: exportRows,
       };
       const blob = await API.downloadFrequencyExcel(payload);
       await saveBlobToFile(blob, `${eventDurationName()}.xlsx`);
@@ -1217,13 +1634,108 @@ export default function FrequencyReport() {
     }
   };
 
+  const rowsWithCrmsMessages = useMemo(() => {
+    return mapCrmsMessagesToRows(rows, crmsMessages);
+  }, [rows, crmsMessages]);
+
+  const crmsMappedCount = useMemo(() => {
+    return rowsWithCrmsMessages.reduce((sum, row) => sum + (row.crms_messages?.length || 0), 0);
+  }, [rowsWithCrmsMessages]);
+
   const stateRows = useMemo(() => {
-    return rows.filter((r) => r.is_state && !r.is_frequency);
-  }, [rows]);
+    return rowsWithCrmsMessages.filter((r) => r.is_state && !r.is_frequency);
+  }, [rowsWithCrmsMessages]);
 
   const generatorRows = useMemo(() => {
-    return rows.filter((r) => !r.is_state);
-  }, [rows]);
+    return rowsWithCrmsMessages.filter((r) => !r.is_state);
+  }, [rowsWithCrmsMessages]);
+
+  const exportStateOptions = useMemo(() => stateRows.map((row) => ({
+    id: row.plant_id,
+    label: row.plant_name || row.state || row.plant_id,
+  })), [stateRows]);
+
+  const exportGeneratorOptions = useMemo(() => generatorRows.map((row) => ({
+    id: row.plant_id,
+    label: row.plant_name || row.entity || row.plant_id,
+    state: row.state || "ER",
+    fuel: row.fuel || "-",
+  })), [generatorRows]);
+
+  useEffect(() => {
+    setSelectedExportStateIds((prev) => {
+      const valid = new Set(exportStateOptions.map((item) => item.id));
+      const kept = prev.filter((id) => valid.has(id));
+      return kept.length ? kept : exportStateOptions.map((item) => item.id);
+    });
+  }, [exportStateOptions]);
+
+  useEffect(() => {
+    setSelectedExportGeneratorIds((prev) => {
+      const valid = new Set(exportGeneratorOptions.map((item) => item.id));
+      const kept = prev.filter((id) => valid.has(id));
+      return kept.length ? kept : exportGeneratorOptions.map((item) => item.id);
+    });
+  }, [exportGeneratorOptions]);
+
+  const filteredExportGeneratorOptions = useMemo(() => {
+    const needle = exportGeneratorFilter.trim().toLowerCase();
+    if (!needle) return exportGeneratorOptions;
+    return exportGeneratorOptions.filter((item) =>
+      `${item.label} ${item.state} ${item.fuel}`.toLowerCase().includes(needle)
+    );
+  }, [exportGeneratorFilter, exportGeneratorOptions]);
+
+  const exportRows = useMemo(() => {
+    const stateIds = new Set(selectedExportStateIds);
+    const generatorIds = new Set(selectedExportGeneratorIds);
+    return rowsWithCrmsMessages.filter((row) => {
+      if (row.is_frequency) return true;
+      if (row.is_state) return stateIds.has(row.plant_id);
+      return generatorIds.has(row.plant_id);
+    });
+  }, [rowsWithCrmsMessages, selectedExportStateIds, selectedExportGeneratorIds]);
+
+  const exportChartRows = useMemo(() => exportRows.filter((row) => (
+    row.series?.timestamps?.length > 0 &&
+    (exportIncludeDeviationPlot || (!row.is_state && exportIncludeScheduleActualPlot))
+  )), [exportRows, exportIncludeDeviationPlot, exportIncludeScheduleActualPlot]);
+
+  const toggleExportState = (id) => {
+    setSelectedExportStateIds((prev) => (
+      prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]
+    ));
+  };
+
+  const toggleExportGenerator = (id) => {
+    setSelectedExportGeneratorIds((prev) => (
+      prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]
+    ));
+  };
+
+  const openExportSelection = (type) => {
+    setPendingExportType(type);
+  };
+
+  const confirmPendingExport = async () => {
+    const type = pendingExportType;
+    setPendingExportType(null);
+    if (type === "pdf") {
+      await handleExportPdf();
+      return;
+    }
+    if (type === "docx") {
+      await handleExportDocx();
+      return;
+    }
+    if (type === "excel") {
+      await handleExportExcel();
+      return;
+    }
+    if (type === "html") {
+      await handleExportHtml();
+    }
+  };
 
   const toggleRowExpansion = (plantId) => {
     setExpandedRowIds((prev) => (
@@ -1430,8 +1942,11 @@ export default function FrequencyReport() {
         style={{
           display: "flex",
           gap: "8px",
-          marginBottom: "20px",
-          borderBottom: "2px solid #E2E8F0",
+          marginBottom: "16px",
+          padding: "6px",
+          background: "linear-gradient(135deg, #EEF5FF 0%, #F8FBFF 100%)",
+          border: "1px solid rgba(175, 196, 234, 0.82)",
+          borderRadius: "15px 15px 11px 11px",
         }}
       >
         {TABS.map((t) => {
@@ -1445,16 +1960,16 @@ export default function FrequencyReport() {
                 display: "flex",
                 alignItems: "center",
                 gap: "8px",
-                padding: "10px 20px",
-                border: "none",
-                borderBottom: active ? "3px solid #03624C" : "3px solid transparent",
-                marginBottom: "-2px",
-                background: "none",
+                padding: "9px 18px",
+                border: active ? "1px solid #0F6FDB" : "1px solid transparent",
+                borderRadius: "11px",
+                background: active ? "linear-gradient(135deg, #147CFF 0%, #0F6FDB 100%)" : "rgba(255, 255, 255, 0.78)",
                 fontWeight: active ? 800 : 600,
                 fontSize: "0.84rem",
-                color: active ? "#03624C" : "#64748B",
+                color: active ? "#FFFFFF" : "#0B55B8",
                 cursor: "pointer",
                 transition: "all 0.15s ease",
+                boxShadow: active ? "0 8px 18px rgba(15, 111, 219, 0.22)" : "none",
               }}
             >
               <Icon size={14} />
@@ -1469,16 +1984,135 @@ export default function FrequencyReport() {
         <div>
           {scadaLoaded ? (
             <>
+              <div
+                style={{
+                  background: "linear-gradient(180deg, #F8FBFF 0%, #FFFFFF 56px)",
+                  border: "1px solid rgba(175, 196, 234, 0.72)",
+                  borderRadius: "16px",
+                  padding: "14px",
+                  marginBottom: "14px",
+                  boxShadow: "0 8px 22px rgba(15, 111, 219, 0.055)",
+                }}
+              >
+                <div style={{ display: "flex", justifyContent: "space-between", gap: "12px", flexWrap: "wrap", marginBottom: "10px" }}>
+                  <div>
+                    <h3 style={{ fontSize: "0.95rem", fontWeight: 900, color: "#0F172A", margin: 0 }}>
+                      Export Selection
+                    </h3>
+                    <p style={{ fontSize: "0.74rem", color: "#64748B", margin: "2px 0 0" }}>
+                      Choose states, generators and plot types before downloading the report.
+                    </p>
+                  </div>
+                  <div style={{ fontSize: "0.74rem", fontWeight: 800, color: "#0B55B8", alignSelf: "center" }}>
+                    {selectedExportStateIds.length}/{exportStateOptions.length} states | {selectedExportGeneratorIds.length}/{exportGeneratorOptions.length} generators
+                  </div>
+                </div>
+
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: "12px" }}>
+                  <div className="rounded-3 border bg-white p-2">
+                    <div className="d-flex align-items-center justify-content-between mb-2">
+                      <span className="fw-bold text-dark" style={{ fontSize: "0.78rem" }}>States in report</span>
+                      <div className="d-flex gap-1">
+                        <button type="button" className="btn btn-sm theme-btn-outline py-0 px-2" onClick={() => setSelectedExportStateIds(exportStateOptions.map((item) => item.id))}>All</button>
+                        <button type="button" className="btn btn-sm theme-btn-outline py-0 px-2" onClick={() => setSelectedExportStateIds([])}>None</button>
+                      </div>
+                    </div>
+                    <div className="d-flex flex-wrap gap-1">
+                      {exportStateOptions.map((item) => (
+                        <label key={item.id} className="d-flex align-items-center gap-1 rounded-pill border bg-light px-2 py-1 mb-0" style={{ fontSize: "0.72rem", fontWeight: 800, cursor: "pointer" }}>
+                          <input type="checkbox" checked={selectedExportStateIds.includes(item.id)} onChange={() => toggleExportState(item.id)} style={{ accentColor: "#0F6FDB" }} />
+                          {item.label}
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="rounded-3 border bg-white p-2">
+                    <div className="d-flex align-items-center justify-content-between gap-2 mb-2">
+                      <span className="fw-bold text-dark" style={{ fontSize: "0.78rem" }}>Generators in report</span>
+                      <div className="d-flex gap-1">
+                        <button type="button" className="btn btn-sm theme-btn-outline py-0 px-2" onClick={() => setSelectedExportGeneratorIds(exportGeneratorOptions.map((item) => item.id))}>All</button>
+                        <button type="button" className="btn btn-sm theme-btn-outline py-0 px-2" onClick={() => setSelectedExportGeneratorIds([])}>None</button>
+                      </div>
+                    </div>
+                    <div className="position-relative mb-2">
+                      <Search size={13} className="position-absolute text-secondary" style={{ left: 9, top: 9 }} />
+                      <input
+                        className="form-control theme-input py-1"
+                        value={exportGeneratorFilter}
+                        onChange={(event) => setExportGeneratorFilter(event.target.value)}
+                        placeholder="Search generator, state or fuel"
+                        style={{ paddingLeft: 30, fontSize: "0.74rem" }}
+                      />
+                    </div>
+                    <div className="d-flex flex-column gap-1" style={{ maxHeight: 145, overflow: "auto" }}>
+                      {filteredExportGeneratorOptions.map((item) => (
+                        <label key={item.id} className="d-flex align-items-center gap-2 rounded-3 border bg-light px-2 py-1 mb-0" style={{ fontSize: "0.7rem", fontWeight: 800, cursor: "pointer" }}>
+                          <input type="checkbox" checked={selectedExportGeneratorIds.includes(item.id)} onChange={() => toggleExportGenerator(item.id)} style={{ accentColor: "#0F6FDB" }} />
+                          <span className="text-truncate" title={item.label}>{item.label}</span>
+                          <span className="ms-auto text-secondary">{item.state}</span>
+                          <span className="text-muted">{item.fuel}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="rounded-3 border bg-white p-2">
+                    <div className="fw-bold text-dark mb-2" style={{ fontSize: "0.78rem" }}>Plots in report</div>
+                    <label className="d-flex align-items-start gap-2 rounded-3 border bg-light px-2 py-2 mb-2" style={{ cursor: "pointer" }}>
+                      <input type="checkbox" checked={exportIncludeDeviationPlot} onChange={(event) => setExportIncludeDeviationPlot(event.target.checked)} style={{ accentColor: "#0F6FDB", marginTop: 3 }} />
+                      <span>
+                        <span className="d-block fw-bold text-dark" style={{ fontSize: "0.75rem" }}>Deviation and frequency plot</span>
+                        <span className="d-block text-secondary" style={{ fontSize: "0.68rem" }}>State and generator deviation chart.</span>
+                      </span>
+                    </label>
+                    <label className="d-flex align-items-start gap-2 rounded-3 border bg-light px-2 py-2 mb-0" style={{ cursor: "pointer" }}>
+                      <input type="checkbox" checked={exportIncludeScheduleActualPlot} onChange={(event) => setExportIncludeScheduleActualPlot(event.target.checked)} style={{ accentColor: "#0F6FDB", marginTop: 3 }} />
+                      <span>
+                        <span className="d-block fw-bold text-dark" style={{ fontSize: "0.75rem" }}>Generator schedule/actual plot</span>
+                        <span className="d-block text-secondary" style={{ fontSize: "0.68rem" }}>Generation, schedule and capacity chart.</span>
+                      </span>
+                    </label>
+                  </div>
+                </div>
+              </div>
+
               {/* Export Button Panel */}
               <ExportBar
-                onExportPdf={handleExportPdf}
-                onExportDocx={handleExportDocx}
-                onExportExcel={handleExportExcel}
+                onExportHtml={() => openExportSelection("html")}
+                onExportPdf={() => openExportSelection("pdf")}
+                onExportDocx={() => openExportSelection("docx")}
+                onExportExcel={() => openExportSelection("excel")}
+                exportingHtml={exportingHtml}
                 exportingPdf={exportingPdf}
                 exportingDocx={exportingDocx}
                 exportingExcel={exportingExcel}
                 disabled={dataLoading}
               />
+
+              {rows.length > 0 && (
+                <div
+                  className="d-flex align-items-center justify-content-between gap-2 px-3 py-2 mb-3"
+                  style={{
+                    border: "1px solid #BFD3F8",
+                    borderRadius: "10px",
+                    background: "#F7FAFF",
+                    color: "#0F172A",
+                    fontSize: "0.75rem",
+                    fontWeight: 800,
+                  }}
+                >
+                  <span>
+                    CRMS Frequency/Deviation messages:
+                    <strong className="ms-1">{crmsMessages.length}</strong> fetched,
+                    <strong className="ms-1">{crmsMappedCount}</strong> plotted on utility charts
+                  </span>
+                  <button type="button" className="btn btn-sm theme-btn-outline py-0 px-2" onClick={() => loadCrmsMessages(startTime, endTime)} disabled={crmsStatus.loading}>
+                    {crmsStatus.loading ? "Loading..." : "Refresh CRMS"}
+                  </button>
+                  {crmsStatus.error && <span className="text-danger ms-auto">{crmsStatus.error}</span>}
+                </div>
+              )}
 
               {/* Data Source Audit Panel */}
               <DataSourceAuditPanel
@@ -1645,21 +2279,142 @@ export default function FrequencyReport() {
       />
 
       {/* ── HIDDEN CONTAINER FOR RENDERING ALL CHARTS TO DOM ── */}
+      {pendingExportType && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(15, 23, 42, 0.45)",
+            backdropFilter: "blur(5px)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 99999,
+            padding: "20px",
+          }}
+          onClick={() => setPendingExportType(null)}
+        >
+          <div
+            className="theme-glass-card"
+            style={{ width: "min(1080px, 96vw)", maxHeight: "88vh", overflow: "auto", padding: "18px" }}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="d-flex align-items-start justify-content-between gap-3 mb-3">
+              <div>
+                <h3 className="fw-bold text-dark mb-1" style={{ fontSize: "1rem" }}>
+                  Select Report Content Before Download
+                </h3>
+                <p className="text-muted mb-0" style={{ fontSize: "0.76rem" }}>
+                  Download format: <strong>{pendingExportType.toUpperCase()}</strong>. Choose states, generators and plots for this report.
+                </p>
+              </div>
+              <button type="button" className="btn btn-sm theme-btn-outline" onClick={() => setPendingExportType(null)}>
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="d-flex align-items-center justify-content-between gap-2 flex-wrap rounded-3 border bg-light px-3 py-2 mb-3">
+              <span className="fw-bold text-dark" style={{ fontSize: "0.78rem" }}>
+                Selected: {selectedExportStateIds.length}/{exportStateOptions.length} states, {selectedExportGeneratorIds.length}/{exportGeneratorOptions.length} generators
+              </span>
+              <span className="text-secondary fw-bold" style={{ fontSize: "0.72rem" }}>
+                {exportIncludeDeviationPlot ? "Deviation plot" : "No deviation plot"} | {exportIncludeScheduleActualPlot ? "Schedule/actual plot" : "No schedule/actual plot"}
+              </span>
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: "12px" }}>
+              <div className="rounded-3 border bg-white p-2">
+                <div className="d-flex align-items-center justify-content-between mb-2">
+                  <span className="fw-bold text-dark" style={{ fontSize: "0.8rem" }}>States</span>
+                  <div className="d-flex gap-1">
+                    <button type="button" className="btn btn-sm theme-btn-outline py-0 px-2" onClick={() => setSelectedExportStateIds(exportStateOptions.map((item) => item.id))}>All</button>
+                    <button type="button" className="btn btn-sm theme-btn-outline py-0 px-2" onClick={() => setSelectedExportStateIds([])}>None</button>
+                  </div>
+                </div>
+                <div className="d-flex flex-wrap gap-1">
+                  {exportStateOptions.map((item) => (
+                    <label key={`modal-state-${item.id}`} className="d-flex align-items-center gap-1 rounded-pill border bg-light px-2 py-1 mb-0" style={{ fontSize: "0.74rem", fontWeight: 800, cursor: "pointer" }}>
+                      <input type="checkbox" checked={selectedExportStateIds.includes(item.id)} onChange={() => toggleExportState(item.id)} style={{ accentColor: "#0F6FDB" }} />
+                      {item.label}
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              <div className="rounded-3 border bg-white p-2">
+                <div className="d-flex align-items-center justify-content-between gap-2 mb-2">
+                  <span className="fw-bold text-dark" style={{ fontSize: "0.8rem" }}>Generators</span>
+                  <div className="d-flex gap-1">
+                    <button type="button" className="btn btn-sm theme-btn-outline py-0 px-2" onClick={() => setSelectedExportGeneratorIds(exportGeneratorOptions.map((item) => item.id))}>All</button>
+                    <button type="button" className="btn btn-sm theme-btn-outline py-0 px-2" onClick={() => setSelectedExportGeneratorIds([])}>None</button>
+                  </div>
+                </div>
+                <div className="position-relative mb-2">
+                  <Search size={13} className="position-absolute text-secondary" style={{ left: 9, top: 9 }} />
+                  <input
+                    className="form-control theme-input py-1"
+                    value={exportGeneratorFilter}
+                    onChange={(event) => setExportGeneratorFilter(event.target.value)}
+                    placeholder="Search generator, state or fuel"
+                    style={{ paddingLeft: 30, fontSize: "0.74rem" }}
+                  />
+                </div>
+                <div className="d-flex flex-column gap-1" style={{ maxHeight: 240, overflow: "auto" }}>
+                  {filteredExportGeneratorOptions.map((item) => (
+                    <label key={`modal-generator-${item.id}`} className="d-flex align-items-center gap-2 rounded-3 border bg-light px-2 py-1 mb-0" style={{ fontSize: "0.72rem", fontWeight: 800, cursor: "pointer" }}>
+                      <input type="checkbox" checked={selectedExportGeneratorIds.includes(item.id)} onChange={() => toggleExportGenerator(item.id)} style={{ accentColor: "#0F6FDB" }} />
+                      <span className="text-truncate" title={item.label}>{item.label}</span>
+                      <span className="ms-auto text-secondary">{item.state}</span>
+                      <span className="text-muted">{item.fuel}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              <div className="rounded-3 border bg-white p-2">
+                <div className="fw-bold text-dark mb-2" style={{ fontSize: "0.8rem" }}>Plots</div>
+                <label className="d-flex align-items-start gap-2 rounded-3 border bg-light px-2 py-2 mb-2" style={{ cursor: "pointer" }}>
+                  <input type="checkbox" checked={exportIncludeDeviationPlot} onChange={(event) => setExportIncludeDeviationPlot(event.target.checked)} style={{ accentColor: "#0F6FDB", marginTop: 3 }} />
+                  <span>
+                    <span className="d-block fw-bold text-dark" style={{ fontSize: "0.76rem" }}>Deviation and frequency plot</span>
+                    <span className="d-block text-secondary" style={{ fontSize: "0.68rem" }}>State and generator deviation chart.</span>
+                  </span>
+                </label>
+                <label className="d-flex align-items-start gap-2 rounded-3 border bg-light px-2 py-2 mb-0" style={{ cursor: "pointer" }}>
+                  <input type="checkbox" checked={exportIncludeScheduleActualPlot} onChange={(event) => setExportIncludeScheduleActualPlot(event.target.checked)} style={{ accentColor: "#0F6FDB", marginTop: 3 }} />
+                  <span>
+                    <span className="d-block fw-bold text-dark" style={{ fontSize: "0.76rem" }}>Generator schedule/actual plot</span>
+                    <span className="d-block text-secondary" style={{ fontSize: "0.68rem" }}>Generation, schedule and capacity chart.</span>
+                  </span>
+                </label>
+              </div>
+            </div>
+
+            <div className="d-flex justify-content-end gap-2 mt-3">
+              <button type="button" className="btn theme-btn-outline" onClick={() => setPendingExportType(null)}>Cancel</button>
+              <button type="button" className="btn theme-btn-primary" onClick={confirmPendingExport}>
+                Download {pendingExportType.toUpperCase()}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* This ensures we can get base64 data URLs for any collapsed row chart on Word/PDF export */}
       <div
         style={{
           position: "absolute",
           top: "-9999px",
           left: "-9999px",
-          width: "900px",
-          height: "450px",
+          width: "1500px",
+          height: "640px",
           opacity: 0,
           pointerEvents: "none",
         }}
       >
-        {(exportingDocx || exportingPdf) && rows.map((row) => (
+        {(exportingDocx || exportingPdf) && exportChartRows.map((row) => (
           <div key={`hidden-chart-wrapper-${row.plant_id}`}>
-            {row.series?.timestamps?.length > 0 && (
+            {exportIncludeDeviationPlot && row.series?.timestamps?.length > 0 && (
               <ComplianceChart
                 ref={(el) => {
                   if (el) {
@@ -1669,11 +2424,11 @@ export default function FrequencyReport() {
                   }
                 }}
                 row={row}
-                showSchAct={showSchAct}
-                height={400}
+                showSchAct={exportIncludeScheduleActualPlot && row.is_state}
+                height={560}
               />
             )}
-            {!row.is_state && row.series?.timestamps?.length > 0 && (
+            {exportIncludeScheduleActualPlot && !row.is_state && row.series?.timestamps?.length > 0 && (
               <CapacityFrequencyChart
                 ref={(el) => {
                   if (el) {
@@ -1683,7 +2438,7 @@ export default function FrequencyReport() {
                   }
                 }}
                 row={row}
-                height={340}
+                height={430}
               />
             )}
           </div>

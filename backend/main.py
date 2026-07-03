@@ -1,7 +1,13 @@
 # main.py
 
+import os
+import time
+
 from fastapi import FastAPI
+from fastapi import Request
 from fastapi.middleware.cors import CORSMiddleware
+
+from config.settings import RUN_SCHEDULER
 
 from routes.sync_routes import router
 
@@ -24,16 +30,55 @@ urllib3.disable_warnings(
 )
 
 app = FastAPI(
-    title="Power Portal Backend"
+    title=os.getenv(
+        "APP_BACKEND_TITLE",
+        "ASTRO Backend"
+    )
 )
+
+cors_origins_raw = os.getenv(
+    "CORS_ALLOW_ORIGINS",
+    "*"
+)
+
+cors_origins = [
+    origin.strip()
+    for origin in cors_origins_raw.split(",")
+    if origin.strip()
+]
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=cors_origins or ["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+
+    start_time = time.perf_counter()
+
+    response = await call_next(request)
+
+    duration_ms = (
+        time.perf_counter() - start_time
+    ) * 1000
+
+    print(
+        (
+            f"API HIT {request.method} "
+            f"{request.url.path}"
+            f"{'?' + request.url.query if request.url.query else ''} "
+            f"-> {response.status_code} "
+            f"({duration_ms:.1f} ms)"
+        ),
+        flush=True
+    )
+
+    return response
 
 app.include_router(
     router,
@@ -64,7 +109,11 @@ app.include_router(
 @app.on_event("startup")
 async def startup_event():
 
-    scheduler.start()
+    if RUN_SCHEDULER:
+        print("Scheduler enabled: starting background jobs", flush=True)
+        scheduler.start()
+    else:
+        print("Scheduler disabled: RUN_SCHEDULER=false", flush=True)
 
 @app.get("/")
 def root():

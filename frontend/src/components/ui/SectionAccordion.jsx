@@ -29,15 +29,13 @@ export default function SectionAccordion({
         overflow: "hidden",
 
         background:
-          "rgba(255,255,255,0.68)",
-
-        backdropFilter: "blur(22px)",
+          "linear-gradient(180deg, #F8FBFF 0%, #FFFFFF 56px)",
 
         border:
-          "1px solid rgba(255,255,255,0.8)",
+          "1px solid rgba(175, 196, 234, 0.72)",
 
         boxShadow:
-          "0 12px 30px rgba(15,23,42,0.05)",
+          "0 12px 30px rgba(15, 111, 219, 0.07)",
 
         "&:before": {
           display: "none",
@@ -58,7 +56,7 @@ export default function SectionAccordion({
           py: 0.75,
 
           background:
-            "linear-gradient(135deg,#17876D,#03624C)",
+            "linear-gradient(135deg, #147CFF 0%, #0F6FDB 100%)",
 
           color: "#fff",
 
@@ -161,7 +159,7 @@ export default function SectionAccordion({
           p: 1.5,
 
           background:
-            "rgba(241,247,246,0.72)",
+            "linear-gradient(180deg, #F8FBFF 0%, #FFFFFF 100%)",
         }}
       >
         {children}

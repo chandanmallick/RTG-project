@@ -1,0 +1,53 @@
+Scheduler enabled: starting background jobs
+PIPELINE CONFIGS = [{'config_type': 'SCHEDULE', 'schedule_url': 'https://gateway.grid-india.in/POSOCO/reports/1.0/WebAccessAPI/GetUtilityExternalSharedData', 'schedule_api_key': '6dc32d47-f46a-45c9-afaf-c6ce73c4ca71', 'schedule_username': 'erldc_internal_prod', 'schedule_password': 'ErldcPr0d@052024', 'rtg_post_url': 'https://rtgapi.grid-india.in/sendData/wbes-data/saveupdatemulti/', 'enabled': True, 'interval_minutes': 5}, {'config_type': 'OUTAGE', 'outage_fetch_url': 'http://10.3.230.130:8001/Codebook/getCurrentTrElementOutagesData', 'rtg_outage_push_url': 'https://rtgapi.grid-india.in/sendData/outage-data/save/', 'enabled': True, 'interval_minutes': 15, 'generation_outage_history_url': 'https://crms.erldc.in/Codebook/GenOutagesHistoryData'}, {'config_type': 'RTG', 'rtg_username': 'ERLDC', 'rtg_password': 'Er1dc@#$700033', 'rtg_token_url': 'https://rtgapi.grid-india.in/sendData/api-token-auth/', 'rtg_schedule_url': 'https://rtgapi.grid-india.in/sendData/wbes-data/', 'rtg_scada_url': 'https://rtgapi.grid-india.in/sendData/scada-data/'}, {'rtg_data_url': 'https://rtgapi.grid-india.in/sendData/combined-data-view/?in_region_name=ERLDC&in_fuel_type=THERMAL', 'refresh_interval_min': 15, 'config_type': 'RTG_DASHBOARD'}, {'config_type': 'PSP', 'psp_login_url': 'https://report.erldc.in/POSOCO/Account/Login', 'psp_data_url': 'https://report.erldc.in/POSOCO/PSP/GetPSPData', 'psp_username': 'erldc', 'psp_password': 'erldc1', 'curve_er_column': 'T', 'curve_file_dir': '\\\\10.3.95.200\\HTTP-Access\\Control_Room_Report\\curve', 'curve_off_peak_hour': '03:00', 'curve_peak_hour_by_month': '1:19:00,2:19:00,3:20:00,4:20:00,5:20:00,6:20:00,7:20:00,8:20:00,9:20:00,10:19:00,11:19:00,12:19:00', 'curve_sheet_name': '30SEC', 'curve_state_columns': 'V:AA', 'curve_time_column': 'C', 'loadshed_api_url': 'https://report.erldc.in/posoco_api/api/StgHourlyStateData/GetStgHourlyStateDataNRByMonthNLDC/{date_from}/{date_to}/1', 'outage_api_url': 'https://report.erldc.in/POSOCO_API/api/Outage/GetQueryNpmcReportData/{date}', 'wbes_api_key': '6dc32d47-f46a-45c9-afaf-c6ce73c4ca71', 'wbes_password': 'ErldcPr0d@052024', 'wbes_url': 'https://gateway.grid-india.in/POSOCO/reports/1.0/WebAccessAPI/GetUtilityExternalSharedData', 'wbes_username': 'erldc_internal_prod'}]
+RTG CONFIG = {'config_type': 'RTG', 'rtg_username': 'ERLDC', 'rtg_password': '***', 'rtg_token_url': 'https://rtgapi.grid-india.in/sendData/api-token-auth/', 'rtg_schedule_url': 'https://rtgapi.grid-india.in/sendData/wbes-data/', 'rtg_scada_url': 'https://rtgapi.grid-india.in/sendData/scada-data/'}
+RTG DASHBOARD CONFIG = {'rtg_data_url': 'https://rtgapi.grid-india.in/sendData/combined-data-view/?in_region_name=ERLDC&in_fuel_type=THERMAL', 'refresh_interval_min': 15, 'config_type': 'RTG_DASHBOARD'}
+RTG DASHBOARD FETCH URL = https://rtgapi.grid-india.in/sendData/combined-data-view/?in_date=2026-06-17&in_region_name=ERLDC&in_fuel_type=THERMAL
+RTG RESPONSE STATUS = 200
+{
+  "plant_id": "RTG_ER00001",
+  "plant_name": "BARAUNI TPS",
+  "fuel_type": "THERMAL",
+  "region_name": "ERLDC",
+  "state_name": "Bihar",
+  "utility_type": "State",
+  "wbes_acronym": "Not Available",
+  "owner_name": "NTPC",
+  "installed_capacity": 500.0,
+  "effective_capacity": 500.0,
+  "scada_point": "NA",
+  "actual_gen": 343.0,
+  "actual_gen_derived": 0,
+  "schedule": 451.0,
+  "schedule_gen_derived": 0,
+  "dc": 451.0,
+  "dc_derived": 0,
+  "qsold": 0.0,
+  "planned_outage": 0.0,
+  "forced_outage": 0.0,
+  "rsd": 0.0,
+  "fuel_shortage": 0.0,
+  "commercial_issues": 0.0,
+  "partial_outage": 0.0,
+  "variable_cost": 0.0,
+  "reason_partial_outage": "--",
+  "reason_nofull_generation": "--",
+  "actual_last_updated": "2026-06-17 14:48",
+  "schedule_last_updated": "2026-06-17 14:50",
+  "percentage_of_dc": 76.05,
+  "cap_on_bar": 500.0,
+  "unreq_margin": 0.0,
+  "proxy_unreq_margin": 117.0
+}
+CHANDAN RTG RECORD COUNT = 43
+API HIT GET /openapi.json -> 200 (43.9 ms)
+INFO:     127.0.0.1:61207 - "GET /openapi.json HTTP/1.1" 200 OK
+API HIT GET /openapi.json -> 200 (0.8 ms)
+INFO:     127.0.0.1:61236 - "GET /openapi.json HTTP/1.1" 200 OK
+RTG snapshot trend API date_str='2026-06-15'
+fetch_snapshot_trend input date_str='2026-06-15'
+fetch_snapshot_trend target_date=2026-06-15 start_utc=2026-06-14 18:30:00 end_utc=2026-06-15 18:30:00
+fetch_snapshot_trend matched 510 snapshots for 2026-06-15
+fetch_snapshot_trend final snapshot count=510 date=2026-06-15
+API HIT GET /api/rtg-dashboard/trend/snapshot?date_str=2026-06-15 -> 200 (447.5 ms)
+INFO:     127.0.0.1:61238 - "GET /api/rtg-dashboard/trend/snapshot?date_str=2026-06-15 HTTP/1.1" 200 OK

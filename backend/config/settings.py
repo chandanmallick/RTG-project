@@ -1,10 +1,35 @@
+import os
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+
+load_dotenv(Path(__file__).resolve().parents[1] / ".env")
+
+
 # =========================================
 # MONGO CONFIG
 # =========================================
 
-MONGO_URI = "mongodb://10.3.230.60:27017/"
+MONGO_URI = os.getenv(
+    "MONGO_URI",
+    "mongodb://10.3.230.60:27017/"
+)
 
-DB_NAME = "rtg_db"
+DB_NAME = os.getenv(
+    "MONGO_DB_NAME",
+    "rtg_db"
+)
+
+MONGO_SERVER_SELECTION_TIMEOUT_MS = int(os.getenv(
+    "MONGO_SERVER_SELECTION_TIMEOUT_MS",
+    "5000"
+))
+
+RUN_SCHEDULER = os.getenv(
+    "RUN_SCHEDULER",
+    "true"
+).strip().lower() not in {"0", "false", "no", "off"}
 
 # =========================================
 # COLLECTIONS

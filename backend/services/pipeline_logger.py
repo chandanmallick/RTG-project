@@ -10,11 +10,15 @@ class PipelineLogger:
 
     def __init__(self):
 
-        self.db = MongoService().db
+        self.collection = None
 
-        self.collection = (
-            self.db["pipeline_logs"]
-        )
+        try:
+            self.db = MongoService().db
+            self.collection = (
+                self.db["pipeline_logs"]
+            )
+        except Exception as e:
+            print(f"Pipeline logging disabled: {e}")
 
     def log(
 
@@ -38,6 +42,13 @@ class PipelineLogger:
 
         traceback_error=None
     ):
+
+        if self.collection is None:
+            print(
+                f"Pipeline log skipped [{status}] "
+                f"{pipeline_type}/{process_name}: {message}"
+            )
+            return
 
         self.collection.insert_one({
 

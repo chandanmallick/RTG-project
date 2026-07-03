@@ -7,21 +7,19 @@ export default function PremiumTable({
   return (
     <Paper
       sx={{
-        borderRadius: "28px",
+        borderRadius: "16px",
 
         overflow: "auto",
 
         maxHeight,
 
-        background: "rgba(255,255,255,0.72)",
-
-        backdropFilter: "blur(22px)",
+        background: "linear-gradient(180deg, #F8FBFF 0%, #FFFFFF 56px)",
 
         border:
-          "1px solid rgba(255,255,255,0.8)",
+          "1px solid rgba(175, 196, 234, 0.72)",
 
         boxShadow:
-          "0 15px 40px rgba(15,23,42,0.06)",
+          "0 12px 30px rgba(15, 111, 219, 0.07)",
 
         "&::-webkit-scrollbar": {
           width: "10px",
@@ -29,12 +27,12 @@ export default function PremiumTable({
         },
 
         "&::-webkit-scrollbar-thumb": {
-          background: "#AACBC4",
+          background: "#AFC4EA",
           borderRadius: "999px",
         },
 
         "&::-webkit-scrollbar-track": {
-          background: "#F1F7F6",
+          background: "#F7FAFF",
         },
 
         "& .MuiTableCell-head": {
@@ -44,11 +42,9 @@ export default function PremiumTable({
           zIndex: 5,
 
           background:
-            "rgba(248,250,255,0.94)",
+            "#EAF1FF",
 
-          backdropFilter: "blur(14px)",
-
-          color: "#0B453A",
+          color: "#0B55B8",
 
           fontWeight: 800,
 
@@ -62,7 +58,7 @@ export default function PremiumTable({
 
         "& .MuiTableRow-root:hover": {
           background:
-            "rgba(0, 223, 129, 0.03)",
+            "rgba(15, 111, 219, 0.06)",
         },
 
         "& .MuiTableCell-root": {

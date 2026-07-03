@@ -16,6 +16,7 @@ import KeyboardArrowDownRoundedIcon from "@mui/icons-material/KeyboardArrowDownR
 import SearchRoundedIcon from "@mui/icons-material/SearchRounded";
 import MailOutlineRoundedIcon from "@mui/icons-material/MailOutlineRounded";
 import NotificationsNoneRoundedIcon from "@mui/icons-material/NotificationsNoneRounded";
+import BoltRoundedIcon from "@mui/icons-material/BoltRounded";
 
 export default function TopNavbar() {
   const location = useLocation();
@@ -72,11 +73,13 @@ export default function TopNavbar() {
   // Determine if PSP tab is active
   const isPSPActive =
     location.pathname === "/psp-dashboard" ||
-    location.pathname === "/psp-admin";
+    location.pathname === "/psp-admin" ||
+    location.pathname === "/psp-report-checking";
 
   // Determine if Report tab is active
   const isReportActive =
-    location.pathname === "/frequency-report";
+    location.pathname === "/frequency-report" ||
+    location.pathname === "/mis-report";
 
   return (
     <Box
@@ -94,46 +97,44 @@ export default function TopNavbar() {
     >
       {/* LEFT BRAND SECTION */}
       <Box sx={{ display: "flex", alignItems: "center", gap: 1.5 }}>
-        {/* Sage green logo icon */}
         <Box
           sx={{
             width: 40,
             height: 40,
             borderRadius: "14px",
-            background: "#03624C",
+            background: "linear-gradient(135deg, #022726 0%, #03624C 58%, #00DF81 100%)",
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
             boxShadow: "0 4px 12px rgba(3, 98, 76, 0.3)",
           }}
         >
-          {/* Custom vector leaf/energy node logo */}
-          <svg
-            width="22"
-            height="22"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="white"
-            strokeWidth="2.5"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <path d="M11 2a4 4 0 0 0-4 4v5h4V2Z" />
-            <path d="M13 22a4 4 0 0 0 4-4v-5h-4v9Z" />
-            <path d="M2 13a4 4 0 0 0 4 4h5v-4H2Z" />
-            <path d="M22 11a4 4 0 0 0-4-4h-5v4h9Z" />
-          </svg>
+          <BoltRoundedIcon sx={{ color: "#FFFFFF", fontSize: 25, filter: "drop-shadow(0 1px 3px rgba(0,0,0,0.25))" }} />
         </Box>
-        <Typography
-          sx={{
-            fontSize: 20,
-            fontWeight: 850,
-            color: "#0F172A",
-            letterSpacing: "-0.03em",
-          }}
-        >
-          RTG Portal
-        </Typography>
+        <Box>
+          <Typography
+            sx={{
+              fontSize: 20,
+              fontWeight: 900,
+              color: "#0F172A",
+              letterSpacing: "-0.03em",
+              lineHeight: 1,
+            }}
+          >
+            ASTRO
+          </Typography>
+          <Typography
+            sx={{
+              fontSize: 10.5,
+              fontWeight: 800,
+              color: "#64748B",
+              letterSpacing: "0.03em",
+              mt: 0.35,
+            }}
+          >
+            ASsistant Tools for Realtime Operations
+          </Typography>
+        </Box>
       </Box>
 
       {/* MIDDLE NAVIGATION PILLS */}
@@ -304,6 +305,24 @@ export default function TopNavbar() {
           >
             PSP Admin
           </MenuItem>
+          <MenuItem
+            onClick={() => handleNavigate("/psp-report-checking")}
+            sx={{
+              borderRadius: "10px",
+              py: 1,
+              fontSize: 13.5,
+              fontWeight: 700,
+              color: location.pathname === "/psp-report-checking" ? "#0F4B2D" : "#334155",
+              backgroundColor:
+                location.pathname === "/psp-report-checking" ? "#E1F5FF" : "transparent",
+              "&:hover": {
+                backgroundColor:
+                  location.pathname === "/psp-report-checking" ? "#D2ECFA" : "#F8FAFC",
+              },
+            }}
+          >
+            PSP Report Check
+          </MenuItem>
         </Menu>
 
         {/* Report Dropdown pill */}
@@ -368,7 +387,25 @@ export default function TopNavbar() {
               },
             }}
           >
-            Frequency enet
+            Frequency Event Analysis
+          </MenuItem>
+          <MenuItem
+            onClick={() => handleNavigate("/mis-report")}
+            sx={{
+              borderRadius: "10px",
+              py: 1,
+              fontSize: 13.5,
+              fontWeight: 700,
+              color: location.pathname === "/mis-report" ? "#0F4B2D" : "#334155",
+              backgroundColor:
+                location.pathname === "/mis-report" ? "#E1F5FF" : "transparent",
+              "&:hover": {
+                backgroundColor:
+                  location.pathname === "/mis-report" ? "#D2ECFA" : "#F8FAFC",
+              },
+            }}
+          >
+            Generic MIS Report
           </MenuItem>
         </Menu>
 

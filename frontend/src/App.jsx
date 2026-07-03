@@ -9,7 +9,9 @@ import DatabaseSync from "./pages/DatabaseSync";
 import RTGDashboard from "./pages/RTGDashboard";
 import PSPDashboard from "./pages/PSPDashboard";
 import PSPAdmin from "./pages/PSPAdmin";
+import PSPReportChecking from "./pages/PSPReportChecking";
 import FrequencyReport from "./pages/FrequencyReport";
+import MISReport from "./pages/MISReport";
 
 export default function App() {
 
@@ -49,8 +51,18 @@ export default function App() {
         />
 
         <Route
+          path="/psp-report-checking"
+          element={<PSPReportChecking />}
+        />
+
+        <Route
           path="/frequency-report"
           element={<FrequencyReport />}
+        />
+
+        <Route
+          path="/mis-report"
+          element={<MISReport />}
         />
 
       </Routes>

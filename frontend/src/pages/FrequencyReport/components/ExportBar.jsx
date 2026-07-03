@@ -9,9 +9,11 @@ export default function ExportBar({
   onExportPdf,
   onExportDocx,
   onExportExcel,
+  onExportHtml,
   exportingPdf,
   exportingDocx,
   exportingExcel,
+  exportingHtml,
   disabled,
 }) {
   const barStyle = {
@@ -20,10 +22,11 @@ export default function ExportBar({
     alignItems: "center",
     justifyContent: "flex-end",
     padding: "12px 16px",
-    background: "#F8FAFC",
-    borderRadius: "12px",
-    border: "1px solid #E2E8F0",
+    background: "linear-gradient(135deg, #EEF5FF 0%, #F8FBFF 100%)",
+    borderRadius: "14px",
+    border: "1px solid rgba(175, 196, 234, 0.72)",
     marginBottom: "16px",
+    boxShadow: "0 8px 22px rgba(15, 111, 219, 0.055)",
   };
 
   const btnStyle = (bg, hoverBg, textColor) => ({
@@ -32,7 +35,7 @@ export default function ExportBar({
     gap: "8px",
     background: bg,
     border: "none",
-    borderRadius: "8px",
+    borderRadius: "12px",
     padding: "8px 16px",
     fontWeight: "700",
     fontSize: "0.8rem",
@@ -48,6 +51,26 @@ export default function ExportBar({
       <span style={{ fontSize: "0.74rem", color: "#64748B", fontWeight: 600, marginRight: "auto" }}>
         📊 Export final deviation reports:
       </span>
+
+      {/* Excel Sheet */}
+      <button
+        onClick={onExportHtml}
+        disabled={disabled || exportingHtml}
+        style={btnStyle("#7C3AED", "#6D28D9", "#FFFFFF")}
+        onMouseEnter={(e) => {
+          if (!disabled) e.currentTarget.style.background = "#6D28D9";
+        }}
+        onMouseLeave={(e) => {
+          if (!disabled) e.currentTarget.style.background = "#7C3AED";
+        }}
+      >
+        {exportingHtml ? (
+          <Loader2 size={14} className="animate-spin" />
+        ) : (
+          <Download size={14} />
+        )}
+        {exportingHtml ? "Preparing HTML..." : "HTML Charts"}
+      </button>
 
       {/* Excel Sheet */}
       <button

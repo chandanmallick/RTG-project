@@ -15,11 +15,11 @@ export default function ExecutiveSummary({ value, onChange }) {
     >
       <div
         style={{
-          background: "#FFFFFF",
+          background: "linear-gradient(180deg, #F8FBFF 0%, #FFFFFF 56px)",
           padding: "16px",
-          borderRadius: "12px",
-          border: "1px solid #E2E8F0",
-          boxShadow: "0 4px 6px -1px rgba(0, 0, 0, 0.05)",
+          borderRadius: "14px",
+          border: "1px solid rgba(175, 196, 234, 0.72)",
+          boxShadow: "0 8px 22px rgba(15, 111, 219, 0.055)",
         }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "8px" }}>
@@ -34,8 +34,8 @@ export default function ExecutiveSummary({ value, onChange }) {
           rows={5}
           style={{
             width: "100%",
-            border: "1px solid #CBD5E1",
-            borderRadius: "8px",
+            border: "1px solid #AFC4EA",
+            borderRadius: "12px",
             padding: "12px",
             fontSize: "0.78rem",
             color: "#334155",

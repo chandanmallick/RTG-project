@@ -3,12 +3,12 @@ import ReactECharts from "echarts-for-react";
 
 const COLORS = {
   state: {
-    deviation: "#10B981",
-    frequency: "#8B5CF6",
+    deviation: "#059669",
+    frequency: "#7C3AED",
   },
   generator: {
-    deviation: "#EF4444",
-    frequency: "#2563EB",
+    deviation: "#DC2626",
+    frequency: "#1D4ED8",
   },
 };
 
@@ -75,6 +75,68 @@ function eventMeta(eventType, type) {
 
 const toCleanNumbers = (values = []) =>
   values.map((v) => (v !== null && v !== undefined && !Number.isNaN(Number(v)) ? Number(v) : null));
+
+const parseTs = (value) => {
+  if (!value) return null;
+  const parsed = new Date(String(value).replace(" ", "T"));
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+};
+
+const escapeHtml = (value) =>
+  String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+
+const CRMS_CATEGORY_COLORS = {
+  alert: "#FACC15",
+  emergency: "#F97316",
+  "extreme emergency": "#DC2626",
+  "non-compliance": "#111827",
+  noncompliance: "#111827",
+};
+
+const CRMS_CATEGORY_ORDER = ["Alert", "Emergency", "Extreme Emergency", "Non-compliance"];
+const CRMS_MESSAGE_SYMBOL = "path://M4 4h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H9l-5 4v-4H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z";
+
+const crmsCategory = (message = {}) => {
+  const raw = Array.isArray(message.category) ? message.category[0] : message.category;
+  return String(raw || message.violation_type || "Message").trim();
+};
+
+const crmsLegendName = (message = {}) => {
+  const category = crmsCategory(message);
+  const match = CRMS_CATEGORY_ORDER.find((item) => item.toLowerCase() === category.toLowerCase());
+  return match || category || "CRMS Message";
+};
+
+const crmsCategoryColor = (message = {}) => {
+  const key = crmsCategory(message).toLowerCase();
+  return CRMS_CATEGORY_COLORS[key] || "#2563EB";
+};
+
+const crmsIssueTime = (message = {}) => {
+  const raw = String(message.message_date || message.timestamp || "");
+  const timePart = raw.includes(" ") ? raw.split(" ")[1] : raw.includes("T") ? raw.split("T")[1] : raw;
+  const [hh = "", mm = ""] = String(timePart || "").split(":");
+  return hh && mm ? `${hh}:${mm} hrs` : raw;
+};
+
+const crmsTooltipHtml = (message = {}) => {
+  const category = crmsCategory(message);
+  const color = crmsCategoryColor(message);
+  let html = `<div style="font-size:11px;line-height:1.35;min-width:220px">`;
+  html += `<div style="font-weight:900;color:${color};margin-bottom:4px">${escapeHtml(category)}</div>`;
+  html += `<div><span style="color:#64748B">Issue time:</span> ${escapeHtml(crmsIssueTime(message))}</div>`;
+  if (message.message_no) html += `<div><span style="color:#64748B">Message no:</span> ${escapeHtml(message.message_no)}</div>`;
+  if (message.issued_to?.length) html += `<div><span style="color:#64748B">Issued to:</span> ${escapeHtml(message.issued_to.join(", "))}</div>`;
+  if (message.issued_by) html += `<div><span style="color:#64748B">Issued by:</span> ${escapeHtml(message.issued_by)}</div>`;
+  if (message.remarks) html += `<div style="margin-top:4px;color:#334155;font-weight:800">${escapeHtml(message.remarks)}</div>`;
+  html += `</div>`;
+  return html;
+};
 
 const ComplianceChart = forwardRef(function ComplianceChart(
   { row, showSchAct = false, height = 480, compact = false },
@@ -144,6 +206,53 @@ const ComplianceChart = forwardRef(function ComplianceChart(
     return Math.ceil(peak / 500) * 500;
   }, [cleanDevs, cleanScheds, cleanActuals, showSchAct, hasDeviation]);
 
+  const crmsMarkers = useMemo(() => {
+    const messages = Array.isArray(row.crms_messages) ? row.crms_messages : [];
+    if (!messages.length || !timestamps.length) return [];
+    const parsedTimestamps = timestamps.map((ts) => parseTs(ts));
+    const firstTs = parsedTimestamps.find(Boolean);
+    const lastTs = [...parsedTimestamps].reverse().find(Boolean);
+    if (!firstTs || !lastTs) return [];
+
+    return messages
+      .map((message, markerIndex) => {
+        const msgTs = parseTs(message.timestamp || message.message_date);
+        if (!msgTs || msgTs < firstTs || msgTs > lastTs) return null;
+        let nearestIndex = -1;
+        let nearestDiff = Number.POSITIVE_INFINITY;
+        parsedTimestamps.forEach((ts, index) => {
+          if (!ts) return;
+          const diff = Math.abs(ts.getTime() - msgTs.getTime());
+          if (diff < nearestDiff) {
+            nearestDiff = diff;
+            nearestIndex = index;
+          }
+        });
+        if (nearestIndex < 0) return null;
+        const baseValue = cleanDevs[nearestIndex] ?? cleanActuals[nearestIndex] ?? 0;
+        const collisionOffset = ((markerIndex % 5) - 2) * Math.max(maxDevAbs * 0.025, 1);
+        return {
+          value: [timestamps[nearestIndex], baseValue + collisionOffset],
+          crms: message,
+        };
+      })
+      .filter(Boolean);
+  }, [row.crms_messages, timestamps, cleanDevs, cleanActuals, maxDevAbs]);
+
+  const crmsMarkersByCategory = useMemo(() => {
+    const grouped = new Map();
+    crmsMarkers.forEach((marker) => {
+      const name = crmsLegendName(marker.crms);
+      if (!grouped.has(name)) grouped.set(name, []);
+      grouped.get(name).push(marker);
+    });
+    return Array.from(grouped.entries()).sort(([a], [b]) => {
+      const ai = CRMS_CATEGORY_ORDER.indexOf(a);
+      const bi = CRMS_CATEGORY_ORDER.indexOf(b);
+      return (ai < 0 ? 999 : ai) - (bi < 0 ? 999 : bi) || a.localeCompare(b);
+    });
+  }, [crmsMarkers]);
+
   const option = useMemo(() => {
     const dateMarkers = [];
     let lastDate = "";
@@ -204,7 +313,7 @@ const ComplianceChart = forwardRef(function ComplianceChart(
           data: cleanDevs,
           symbol: "none",
           itemStyle: { color: palette.deviation },
-          lineStyle: { color: palette.deviation, width: 2.4 },
+          lineStyle: { color: palette.deviation, width: compact ? 3.2 : 3.6 },
           markLine: {
             silent: true,
             symbol: "none",
@@ -223,7 +332,7 @@ const ComplianceChart = forwardRef(function ComplianceChart(
         data: cleanFreqs,
         symbol: "none",
         itemStyle: { color: palette.frequency },
-        lineStyle: { color: palette.frequency, width: 2 },
+        lineStyle: { color: palette.frequency, width: compact ? 2.8 : 3.2 },
         markLine: {
           silent: true,
           symbol: "none",
@@ -255,7 +364,7 @@ const ComplianceChart = forwardRef(function ComplianceChart(
           data: cleanScheds,
           symbol: "none",
           itemStyle: { color: "#6366F1" },
-          lineStyle: { color: "#6366F1", width: 1.5 },
+          lineStyle: { color: "#4F46E5", width: compact ? 2.4 : 2.8 },
           z: 2,
         }] : []),
         {
@@ -265,11 +374,37 @@ const ComplianceChart = forwardRef(function ComplianceChart(
           yAxisIndex: 0,
           data: cleanActuals,
           symbol: "none",
-          itemStyle: { color: "#EC4899" },
-          lineStyle: { color: "#EC4899", width: hasDeviation ? 1.5 : 2 },
+          itemStyle: { color: "#DB2777" },
+          lineStyle: { color: "#DB2777", width: hasDeviation ? (compact ? 2.4 : 2.8) : (compact ? 3 : 3.4) },
           z: 2,
         },
       ] : []),
+      ...crmsMarkersByCategory.map(([categoryName, markers]) => ({
+        name: categoryName,
+        type: "scatter",
+        xAxisIndex: 0,
+        yAxisIndex: 0,
+        data: markers,
+        symbol: CRMS_MESSAGE_SYMBOL,
+        symbolSize: compact ? 24 : 28,
+        itemStyle: {
+          color: crmsCategoryColor({ category: categoryName }),
+          borderColor: "#FFFFFF",
+          borderWidth: 2.2,
+          shadowColor: "rgba(15, 23, 42, 0.35)",
+          shadowBlur: 8,
+        },
+        label: { show: false },
+        emphasis: {
+          scale: 1.45,
+          itemStyle: { borderColor: "#FACC15", borderWidth: 3 },
+        },
+        tooltip: {
+          trigger: "item",
+          formatter: (params) => crmsTooltipHtml(params.data?.crms || {}),
+        },
+        z: 12,
+      })),
     ];
 
     const legendItems = [
@@ -280,11 +415,13 @@ const ComplianceChart = forwardRef(function ComplianceChart(
       ...(!hasDeviation || showSchAct ? [
         ...(cleanScheds.some((v) => v !== null) ? ["Schedule (MW)"] : []),
         "Actual (MW)"
-      ] : [])
+      ] : []),
+      ...crmsMarkersByCategory.map(([categoryName]) => ({ name: categoryName, icon: CRMS_MESSAGE_SYMBOL }))
     ];
 
     return {
       backgroundColor: "#FFFFFF",
+      textStyle: { fontFamily: "Inter, sans-serif", fontWeight: 700 },
       animation: false,
       tooltip: {
         trigger: "axis",
@@ -292,11 +429,18 @@ const ComplianceChart = forwardRef(function ComplianceChart(
         borderColor: "#CBD5E1",
         borderWidth: 1,
         padding: [10, 14],
-        textStyle: { color: "#1E293B", fontSize: 12 },
+        textStyle: { color: "#1E293B", fontSize: 13, fontWeight: 700 },
         formatter: (params) => {
           const ts = params[0]?.axisValue || "";
           const map = {};
-          params.forEach((p) => { map[p.seriesName] = p.value; });
+          const crmsParams = [];
+          params.forEach((p) => {
+            if (p.data?.crms) {
+              crmsParams.push(p.data.crms);
+              return;
+            }
+            map[p.seriesName] = Array.isArray(p.value) ? p.value[1] : p.value;
+          });
           const freq = map["Frequency (Hz)"];
           const dev = map["Deviation (MW)"];
           const inEvent = freq != null && meta.isEvent(freq);
@@ -311,6 +455,13 @@ const ComplianceChart = forwardRef(function ComplianceChart(
           if (hasDeviation && inEvent) {
             html += `<div style="margin-top:5px;padding-top:5px;border-top:1px solid #E2E8F0;font-size:10px;color:#475569;font-weight:600">${meta.isHelping(dev) ? meta.helping.label : meta.adverse.label}</div>`;
           }
+          if (crmsParams.length) {
+            html += `<div style="margin-top:7px;padding-top:7px;border-top:1px solid #CBD5E1">`;
+            crmsParams.forEach((message) => {
+              html += crmsTooltipHtml(message);
+            });
+            html += `</div>`;
+          }
           return html;
         },
       },
@@ -320,10 +471,9 @@ const ComplianceChart = forwardRef(function ComplianceChart(
         top: compact ? 4 : 6,
         left: 56,
         right: 48,
-        textStyle: { color: "#475569", fontSize: compact ? 10 : 11, fontWeight: "600" },
-        icon: "roundRect",
+        textStyle: { color: "#1F2937", fontSize: compact ? 11 : 12, fontWeight: 800 },
         itemWidth: compact ? 18 : 20,
-        itemHeight: 8,
+        itemHeight: compact ? 12 : 14,
         pageIconSize: 10,
         pageTextStyle: { color: "#64748B", fontSize: 10 },
         selectedMode: true,
@@ -344,7 +494,7 @@ const ComplianceChart = forwardRef(function ComplianceChart(
         },
       },
       grid: [
-        { top: compact ? 42 : 48, right: 58, bottom: compact ? 52 : 74, left: 56, containLabel: false },
+        { top: compact ? 46 : 54, right: 64, bottom: compact ? 54 : 78, left: 62, containLabel: false },
       ],
       dataZoom: [
         { type: "inside", xAxisIndex: 0, filterMode: "none" },
@@ -364,15 +514,15 @@ const ComplianceChart = forwardRef(function ComplianceChart(
         },
       ],
       xAxis: [
-        { type: "category", gridIndex: 0, data: timestamps, boundaryGap: false, axisLabel: { formatter: fmtTick, color: "#64748B", fontSize: compact ? 9 : 10, rotate: 0, margin: compact ? 8 : 12, interval: Math.max(Math.floor(timestamps.length / 9) - 1, 0) }, axisLine: { lineStyle: { color: "#CBD5E1" } }, splitLine: { show: false } },
+        { type: "category", gridIndex: 0, data: timestamps, boundaryGap: false, axisLabel: { formatter: fmtTick, color: "#334155", fontSize: compact ? 10 : 11, fontWeight: 700, rotate: 0, margin: compact ? 8 : 12, interval: Math.max(Math.floor(timestamps.length / 9) - 1, 0) }, axisLine: { lineStyle: { color: "#94A3B8", width: 1.4 } }, splitLine: { show: false } },
       ],
       yAxis: [
-        { type: "value", gridIndex: 0, name: "MW", min: hasDeviation ? -maxDevAbs : 0, max: maxDevAbs, interval: hasDeviation ? maxDevAbs / 3 : maxDevAbs / 4, axisLabel: { color: "#475569", fontSize: compact ? 9 : 10, formatter: (v) => v.toFixed(0) }, splitLine: { lineStyle: { color: "#E2E8F0" } } },
-        { type: "value", gridIndex: 0, name: "Hz", position: "right", min: 49.4, max: 50.6, interval: 0.2, axisLabel: { color: palette.frequency, fontSize: compact ? 9 : 10, formatter: (v) => v.toFixed(2) }, axisLine: { show: true, lineStyle: { color: palette.frequency } }, splitLine: { show: false } },
+        { type: "value", gridIndex: 0, name: "MW", min: hasDeviation ? -maxDevAbs : 0, max: maxDevAbs, interval: hasDeviation ? maxDevAbs / 3 : maxDevAbs / 4, nameTextStyle: { color: "#0F172A", fontWeight: 900, fontSize: compact ? 11 : 12 }, axisLabel: { color: "#334155", fontSize: compact ? 10 : 11, fontWeight: 700, formatter: (v) => v.toFixed(0) }, splitLine: { lineStyle: { color: "#D7E1EA", width: 1.1 } } },
+        { type: "value", gridIndex: 0, name: "Hz", position: "right", min: 49.4, max: 50.6, interval: 0.2, nameTextStyle: { color: palette.frequency, fontWeight: 900, fontSize: compact ? 11 : 12 }, axisLabel: { color: palette.frequency, fontSize: compact ? 10 : 11, fontWeight: 800, formatter: (v) => v.toFixed(2) }, axisLine: { show: true, lineStyle: { color: palette.frequency, width: 1.6 } }, splitLine: { show: false } },
       ],
       series: chartSeries,
     };
-  }, [timestamps, cleanDevs, cleanFreqs, cleanScheds, cleanActuals, showSchAct, compact, palette, meta, maxDevAbs, helpingData, adverseData, eventType, hasDeviation, row]);
+  }, [timestamps, cleanDevs, cleanFreqs, cleanScheds, cleanActuals, showSchAct, compact, palette, meta, maxDevAbs, helpingData, adverseData, eventType, hasDeviation, row, crmsMarkersByCategory]);
 
   return (
     <ReactECharts

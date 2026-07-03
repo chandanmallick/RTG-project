@@ -60,6 +60,18 @@ const menus = [
   },
 
   {
+    label: "Generic MIS Report",
+    path: "/mis-report",
+    icon: <InsightsRoundedIcon />,
+  },
+
+  {
+    label: "PSP Report Check",
+    path: "/psp-report-checking",
+    icon: <InsightsRoundedIcon />,
+  },
+
+  {
     label: "Live Sync",
     path: "/live-sync",
     icon: <SyncRoundedIcon />,
@@ -203,7 +215,7 @@ export default function Sidebar() {
                 lineHeight: 1,
               }}
             >
-              RTG Portal
+              ASTRO
             </Typography>
 
             <Typography
@@ -220,7 +232,7 @@ export default function Sidebar() {
                 textTransform: "uppercase",
               }}
             >
-              Enterprise Console
+              ASsistant Tools
             </Typography>
 
           </Box>
@@ -316,7 +328,7 @@ export default function Sidebar() {
             fontSize: 22,
           }}
         >
-          R
+          A
         </Avatar>
 
         {open && (
@@ -331,7 +343,7 @@ export default function Sidebar() {
                 fontSize: 15,
               }}
             >
-              RTG Admin
+              ASTRO Admin
             </Typography>
 
             <Typography
@@ -344,7 +356,7 @@ export default function Sidebar() {
                 mt: 0.3,
               }}
             >
-              Power System Monitoring
+              Realtime Operations
             </Typography>
 
           </Box>
@@ -555,7 +567,7 @@ export default function Sidebar() {
               fontSize: 14,
             }}
           >
-            RTG Monitoring Suite
+            ASTRO Operations Suite
           </Typography>
 
           <Typography
@@ -570,9 +582,9 @@ export default function Sidebar() {
               lineHeight: 1.6,
             }}
           >
-            Grid monitoring platform with
-            enterprise data orchestration
-            and live operational analytics.
+            ASsistant Tools for Realtime
+            Operations with enterprise data
+            orchestration and live analytics.
           </Typography>
 
         </Box>

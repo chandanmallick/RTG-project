@@ -53,8 +53,8 @@ export default function ReportHeader({
 
   const fieldStyle = {
     height: "36px",
-    border: "1px solid #CBD5E1",
-    borderRadius: "8px",
+    border: "1px solid #AFC4EA",
+    borderRadius: "12px",
     background: "#FFFFFF",
     color: "#0F172A",
     fontSize: "0.78rem",
@@ -65,8 +65,8 @@ export default function ReportHeader({
 
   const iconFieldStyle = {
     height: "36px",
-    border: "1px solid #CBD5E1",
-    borderRadius: "8px",
+    border: "1px solid #AFC4EA",
+    borderRadius: "12px",
     background: "#FFFFFF",
     display: "inline-flex",
     alignItems: "center",
@@ -76,14 +76,14 @@ export default function ReportHeader({
 
   const modeButton = (active) => ({
     height: "34px",
-    border: "none",
-    borderRadius: "8px",
+    border: active ? "1px solid #0F6FDB" : "1px solid transparent",
+    borderRadius: "11px",
     display: "inline-flex",
     alignItems: "center",
     gap: "7px",
     padding: "0 12px",
-    background: active ? "#022726" : "transparent",
-    color: active ? "#FFFFFF" : "#475569",
+    background: active ? "linear-gradient(135deg, #147CFF 0%, #0F6FDB 100%)" : "rgba(255, 255, 255, 0.78)",
+    color: active ? "#FFFFFF" : "#0B55B8",
     fontSize: "0.78rem",
     fontWeight: 850,
     cursor: "pointer",
@@ -101,11 +101,11 @@ export default function ReportHeader({
         initial={{ opacity: 0, y: 6 }}
         animate={{ opacity: 1, y: 0 }}
         style={{
-          background: "linear-gradient(135deg, #ECFDF5 0%, #EFF6FF 48%, #FFF7ED 100%)",
-          border: "1px solid #CFE7DE",
-          borderRadius: "10px",
+          background: "linear-gradient(180deg, #F8FBFF 0%, #FFFFFF 56px)",
+          border: "1px solid rgba(175, 196, 234, 0.72)",
+          borderRadius: "16px",
           padding: "10px 12px",
-          boxShadow: "0 10px 24px -18px rgba(15, 23, 42, 0.35)",
+          boxShadow: "0 12px 30px rgba(15, 111, 219, 0.07)",
         }}
       >
         <div

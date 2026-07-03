@@ -8,7 +8,8 @@ from config.settings import (
     PIPELINE_CONFIG_COLLECTION,
     PIPELINE_LOG_COLLECTION,
     RTG_DASHBOARD_COLLECTION,
-    PSP_COLLECTION
+    PSP_COLLECTION,
+    MONGO_SERVER_SELECTION_TIMEOUT_MS
 )
 
 
@@ -19,7 +20,8 @@ class MongoService:
     def __init__(self):
 
         self.client = MongoClient(
-            MONGO_URI
+            MONGO_URI,
+            serverSelectionTimeoutMS=MONGO_SERVER_SELECTION_TIMEOUT_MS
         )
 
         self.db = self.client[
@@ -54,9 +56,30 @@ class MongoService:
             PSP_COLLECTION
         ]
 
+        self.nldc_psp_demand_collection = self.db[
+            "NLDC_PSP_Demand"
+        ]
+
+        self.india_15_min_demand_collection = self.db[
+            "India_15_Min_Demand"
+        ]
+
+        self.all_state_demand_collection = self.db[
+            "All_State_Demand"
+        ]
+
         # Explicitly create the collection if it doesn't exist yet
         if PSP_COLLECTION not in self.db.list_collection_names():
             self.db.create_collection(PSP_COLLECTION)
+
+        if "NLDC_PSP_Demand" not in self.db.list_collection_names():
+            self.db.create_collection("NLDC_PSP_Demand")
+
+        if "India_15_Min_Demand" not in self.db.list_collection_names():
+            self.db.create_collection("India_15_Min_Demand")
+
+        if "All_State_Demand" not in self.db.list_collection_names():
+            self.db.create_collection("All_State_Demand")
 
         if "frequency_mapping" not in self.db.list_collection_names():
             self.db.create_collection("frequency_mapping")

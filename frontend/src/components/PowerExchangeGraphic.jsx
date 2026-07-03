@@ -1,5 +1,7 @@
-import { useMemo, useState } from "react";
-import { ArrowRightLeft, Info, ListChecks, X } from "lucide-react";
+import { useMemo, useRef, useState } from "react";
+import html2canvas from "html2canvas";
+import { ArrowRightLeft, Download, FileSpreadsheet, Info, ListChecks, RefreshCw, X } from "lucide-react";
+import API from "../services/api";
 
 const COLORS = {
   ER: "#0891B2",
@@ -14,13 +16,13 @@ const COLORS = {
 
 const POS = {
   ER: { x: 430, y: 292, w: 146, h: 112 },
-  NR: { x: 80, y: 52, w: 184, h: 154, labelX: 188, labelY: 114 },
-  WR: { x: 54, y: 370, w: 204, h: 154, labelX: 118, labelY: 448 },
-  SR: { x: 344, y: 588, w: 170, h: 132, labelX: 432, labelY: 688 },
-  NER: { x: 784, y: 362, w: 164, h: 116, labelX: 878, labelY: 414 },
-  NEPAL: { x: 570, y: 62, w: 206, h: 112, labelX: 676, labelY: 112 },
-  BHUTAN: { x: 788, y: 210, w: 138, h: 84, labelX: 854, labelY: 232 },
-  BANGLADESH: { x: 734, y: 536, w: 138, h: 146, labelX: 818, labelY: 554 },
+  NR: { x: 148, y: 80, w: 184, h: 154, labelX: 248, labelY: 148 },
+  WR: { x: 78, y: 298, w: 204, h: 154, labelX: 158, labelY: 378 },
+  SR: { x: 418, y: 558, w: 170, h: 132, labelX: 506, labelY: 654 },
+  NEPAL: { x: 416, y: 38, w: 206, h: 112, labelX: 522, labelY: 90 },
+  BHUTAN: { x: 728, y: 110, w: 138, h: 84, labelX: 794, labelY: 132 },
+  NER: { x: 764, y: 316, w: 164, h: 116, labelX: 858, labelY: 368 },
+  BANGLADESH: { x: 706, y: 520, w: 138, h: 146, labelX: 790, labelY: 540 },
 };
 
 const labelMap = {
@@ -52,6 +54,12 @@ const fmt = (value) => {
 
 const flowDirection = (value) => (Number(value) >= 0 ? "Export by ER" : "Import by ER");
 const flowTone = (value) => (Number(value) >= 0 ? "#047857" : "#DC2626");
+const todayIso = () => new Date().toISOString().slice(0, 10);
+const addDays = (dateStr, days) => {
+  const dt = new Date(`${dateStr}T00:00:00`);
+  dt.setDate(dt.getDate() + days);
+  return dt.toISOString().slice(0, 10);
+};
 
 const FlowText = ({ x, y, schedule, actual, color }) => (
   <g filter="url(#calloutShadow)">
@@ -114,32 +122,15 @@ const ERHub = () => {
   );
 };
 
-const Arrow = ({ from, to, value, color, bend = 0 }) => {
-  const b = POS[to];
-  const exportByEr = Number(value) >= 0;
-  const start = exportByEr ? POS.ER : b;
-  const end = exportByEr ? b : POS.ER;
-  const sx = start.x + start.w / 2;
-  const sy = start.y + start.h / 2;
-  const ex = end.x + end.w / 2;
-  const ey = end.y + end.h / 2;
-  const mx = (sx + ex) / 2 + bend;
-  const my = (sy + ey) / 2 - Math.abs(bend) * 0.25;
-  return (
-    <path
-      d={`M ${sx} ${sy} Q ${mx} ${my} ${ex} ${ey}`}
-      fill="none"
-      stroke={color}
-      strokeWidth="7"
-      strokeLinecap="round"
-      markerEnd={`url(#arrow-${color.replace("#", "")})`}
-      opacity="0.82"
-    />
-  );
-};
-
 export default function PowerExchangeGraphic({ data, loading }) {
   const [detailsOpen, setDetailsOpen] = useState(false);
+  const [rangeOpen, setRangeOpen] = useState(false);
+  const [rangeLoading, setRangeLoading] = useState(false);
+  const [rangeError, setRangeError] = useState("");
+  const [rangeData, setRangeData] = useState(null);
+  const [rangeStartDate, setRangeStartDate] = useState(addDays(todayIso(), -6));
+  const [rangeEndDate, setRangeEndDate] = useState(todayIso());
+  const rangeCaptureRef = useRef(null);
   const inter = data?.interregional || [];
   const trans = data?.transnational || [];
 
@@ -155,6 +146,85 @@ export default function PowerExchangeGraphic({ data, loading }) {
     ...inter.map((item) => ({ ...item, group: "Inter Regional" })),
     ...trans.map((item) => ({ ...item, group: "Transnational" })),
   ];
+
+  const loadRangeSummary = async (start = rangeStartDate, end = rangeEndDate) => {
+    try {
+      setRangeLoading(true);
+      setRangeError("");
+      const res = await API.getPspPowerExchangeRange(start, end);
+      if (!res.success) throw new Error(res.message || "Unable to load exchange range summary");
+      setRangeData(res);
+    } catch (err) {
+      console.error("Error loading power exchange range:", err);
+      setRangeError(err.message || "Unable to load exchange range summary.");
+    } finally {
+      setRangeLoading(false);
+    }
+  };
+
+  const openRangeSummary = () => {
+    const end = data?.date || todayIso();
+    const start = addDays(end, -6);
+    setRangeEndDate(end);
+    setRangeStartDate(start);
+    setRangeOpen(true);
+    loadRangeSummary(start, end);
+  };
+
+  const downloadRangeExcel = () => {
+    const rows = rangeData?.rows || [];
+    const htmlRows = rows.map((row) => `
+      <tr>
+        <td>${row.group || ""}</td>
+        <td>${row.code || ""}</td>
+        <td>${row.name || ""}</td>
+        <td>${row.days || 0}</td>
+        <td>${row.schedule ?? ""}</td>
+        <td>${row.actual ?? ""}</td>
+        <td>${row.difference ?? ""}</td>
+        <td>${row.net_ui ?? ""}</td>
+      </tr>
+    `).join("");
+    const workbook = `
+      <html>
+        <head><meta charset="utf-8" /></head>
+        <body>
+          <table border="1">
+            <tr><th colspan="8">ER Power Exchange Summary ${rangeData?.start_date || rangeStartDate} to ${rangeData?.end_date || rangeEndDate}</th></tr>
+            <tr>
+              <th>Group</th><th>Code</th><th>Name</th><th>Records</th>
+              <th>Schedule Sum</th><th>Actual Sum</th><th>Actual - Schedule</th><th>Net UI</th>
+            </tr>
+            ${htmlRows}
+          </table>
+        </body>
+      </html>
+    `;
+    const blob = new Blob([workbook], { type: "application/vnd.ms-excel;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `ER_Exchange_${rangeData?.start_date || rangeStartDate}_to_${rangeData?.end_date || rangeEndDate}.xls`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
+  const downloadRangeImage = async () => {
+    if (!rangeCaptureRef.current) return;
+    const canvas = await html2canvas(rangeCaptureRef.current, {
+      backgroundColor: "#ffffff",
+      scale: 2,
+      useCORS: true,
+    });
+    const link = document.createElement("a");
+    link.href = canvas.toDataURL("image/png");
+    link.download = `ER_Exchange_${rangeData?.start_date || rangeStartDate}_to_${rangeData?.end_date || rangeEndDate}.png`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
 
   if (loading) {
     return (
@@ -197,6 +267,15 @@ export default function PowerExchangeGraphic({ data, loading }) {
             <ListChecks size={14} />
             Details
           </button>
+          <button
+            type="button"
+            className="btn btn-sm theme-btn-outline d-inline-flex align-items-center gap-1"
+            onClick={openRangeSummary}
+            title="View date-range exchange summary"
+          >
+            <FileSpreadsheet size={14} />
+            Range
+          </button>
           <div className="text-end d-none d-md-block" style={{ fontSize: "0.68rem", color: "#334155", lineHeight: 1.25 }}>
             <div>+VE: Export by ER</div>
             <div>-VE: Import by ER</div>
@@ -206,11 +285,6 @@ export default function PowerExchangeGraphic({ data, loading }) {
 
       <svg viewBox="0 0 1000 740" style={{ width: "100%", height: "500px", display: "block", background: "#F8FAFC", borderRadius: 8 }}>
         <defs>
-          {Object.values(COLORS).map((color) => (
-            <marker key={color} id={`arrow-${color.replace("#", "")}`} markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth">
-              <path d="M2,2 L10,6 L2,10 Z" fill={color} />
-            </marker>
-          ))}
           <filter id="exchangeShadow" x="-20%" y="-20%" width="140%" height="140%">
             <feDropShadow dx="3" dy="4" stdDeviation="2" floodColor="#94A3B8" floodOpacity="0.38" />
           </filter>
@@ -222,23 +296,16 @@ export default function PowerExchangeGraphic({ data, loading }) {
         <rect x="22" y="18" width="290" height="40" rx="20" fill="#FFFFFF" stroke="#DDEFEA" />
         <text x="42" y="44" fill="#0F766E" fontSize="19" fontWeight="900">ER Exchange Position</text>
 
-        {[
-          ["NR", -46], ["WR", -56], ["SR", 26], ["NER", 26],
-          ["NEPAL", -26], ["BHUTAN", 26], ["BANGLADESH", 42],
-        ].map(([code, bend]) => byCode[code] && (
-          <Arrow key={code} from="ER" to={code} value={byCode[code].actual} color={COLORS[code]} bend={bend} />
-        ))}
-
         {allCodes.map((code) => <RegionImage key={code} code={code} active={!!byCode[code]} />)}
         <ERHub />
 
-        {byCode.NR && <FlowText x={178} y={228} schedule={byCode.NR.schedule} actual={byCode.NR.actual} color="#0891B2" />}
-        {byCode.WR && <FlowText x={158} y={324} schedule={byCode.WR.schedule} actual={byCode.WR.actual} color="#F97316" />}
-        {byCode.SR && <FlowText x={428} y={552} schedule={byCode.SR.schedule} actual={byCode.SR.actual} color="#EF4444" />}
-        {byCode.NER && <FlowText x={760} y={494} schedule={byCode.NER.schedule} actual={byCode.NER.actual} color="#D6A700" />}
-        {byCode.NEPAL && <FlowText x={664} y={200} schedule={byCode.NEPAL.schedule} actual={byCode.NEPAL.actual} color="#38BDF8" />}
-        {byCode.BHUTAN && <FlowText x={790} y={314} schedule={byCode.BHUTAN.schedule} actual={byCode.BHUTAN.actual} color="#4B5563" />}
-        {byCode.BANGLADESH && <FlowText x={624} y={518} schedule={byCode.BANGLADESH.schedule} actual={byCode.BANGLADESH.actual} color="#3154D4" />}
+        {byCode.NR && <FlowText x={234} y={246} schedule={byCode.NR.schedule} actual={byCode.NR.actual} color="#0891B2" />}
+        {byCode.WR && <FlowText x={170} y={486} schedule={byCode.WR.schedule} actual={byCode.WR.actual} color="#F97316" />}
+        {byCode.SR && <FlowText x={500} y={488} schedule={byCode.SR.schedule} actual={byCode.SR.actual} color="#EF4444" />}
+        {byCode.NEPAL && <FlowText x={520} y={184} schedule={byCode.NEPAL.schedule} actual={byCode.NEPAL.actual} color="#38BDF8" />}
+        {byCode.BHUTAN && <FlowText x={808} y={220} schedule={byCode.BHUTAN.schedule} actual={byCode.BHUTAN.actual} color="#4B5563" />}
+        {byCode.NER && <FlowText x={802} y={454} schedule={byCode.NER.schedule} actual={byCode.NER.actual} color="#D6A700" />}
+        {byCode.BANGLADESH && <FlowText x={692} y={640} schedule={byCode.BANGLADESH.schedule} actual={byCode.BANGLADESH.actual} color="#3154D4" />}
 
         <g transform="translate(548 672)" filter="url(#calloutShadow)">
           <rect x="0" y="0" width="420" height="52" rx="16" fill="#FFF7D6" stroke="#FBBF24" opacity="0.98" />
@@ -358,6 +425,153 @@ export default function PowerExchangeGraphic({ data, loading }) {
                       </div>
                     </div>
                   ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {rangeOpen && (
+        <div
+          className="modal fade show d-block"
+          tabIndex="-1"
+          role="dialog"
+          style={{ backgroundColor: "rgba(15, 23, 42, 0.52)", backdropFilter: "blur(4px)" }}
+          onClick={() => setRangeOpen(false)}
+        >
+          <div className="modal-dialog modal-xl modal-dialog-centered" onClick={(event) => event.stopPropagation()}>
+            <div className="modal-content theme-glass-card border-0 p-3" style={{ borderRadius: 18 }}>
+              <div className="modal-header border-0 pb-2">
+                <div>
+                  <h5 className="modal-title fw-bold text-dark d-flex align-items-center gap-2">
+                    <ArrowRightLeft size={18} style={{ color: "#03624C" }} />
+                    ER Exchange Date Range Summary
+                  </h5>
+                  <p className="small text-muted mb-0">Summed schedule and actual exchange for selected PSP dates.</p>
+                </div>
+                <button type="button" className="btn btn-sm btn-light rounded-circle" onClick={() => setRangeOpen(false)} aria-label="Close">
+                  <X size={16} />
+                </button>
+              </div>
+
+              <div className="modal-body pt-2">
+                <div className="d-flex align-items-end gap-2 flex-wrap mb-3">
+                  <div>
+                    <label className="form-label small fw-bold text-secondary mb-1">Start Date</label>
+                    <input
+                      type="date"
+                      className="form-control theme-input"
+                      value={rangeStartDate}
+                      onChange={(event) => setRangeStartDate(event.target.value)}
+                    />
+                  </div>
+                  <div>
+                    <label className="form-label small fw-bold text-secondary mb-1">End Date</label>
+                    <input
+                      type="date"
+                      className="form-control theme-input"
+                      value={rangeEndDate}
+                      onChange={(event) => setRangeEndDate(event.target.value)}
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    className="btn theme-btn-primary d-flex align-items-center gap-2"
+                    onClick={() => loadRangeSummary(rangeStartDate, rangeEndDate)}
+                    disabled={rangeLoading}
+                  >
+                    <RefreshCw size={14} className={rangeLoading ? "animate-spin-custom" : ""} />
+                    Load
+                  </button>
+                  <button
+                    type="button"
+                    className="btn theme-btn-outline d-flex align-items-center gap-2"
+                    onClick={downloadRangeImage}
+                    disabled={!rangeData?.rows?.length || rangeLoading}
+                  >
+                    <Download size={14} />
+                    Image
+                  </button>
+                  <button
+                    type="button"
+                    className="btn theme-btn-outline d-flex align-items-center gap-2"
+                    onClick={downloadRangeExcel}
+                    disabled={!rangeData?.rows?.length || rangeLoading}
+                  >
+                    <FileSpreadsheet size={14} />
+                    Excel
+                  </button>
+                </div>
+
+                <div ref={rangeCaptureRef} className="bg-white rounded-3 border p-3">
+                  <div className="d-flex justify-content-between align-items-start gap-3 flex-wrap mb-3">
+                    <div>
+                      <h6 className="fw-bold text-dark mb-1">Power Supply Position: Exchange Summary</h6>
+                      <div className="small text-muted">
+                        {rangeData?.start_date || rangeStartDate} to {rangeData?.end_date || rangeEndDate} | {rangeData?.date_count ?? 0} PSP dates
+                      </div>
+                    </div>
+                    <div className="d-flex gap-2 flex-wrap">
+                      {[
+                        ["IR Sch", rangeData?.totals?.interregional_schedule],
+                        ["IR Act", rangeData?.totals?.interregional_actual],
+                        ["TN Sch", rangeData?.totals?.transnational_schedule],
+                        ["TN Act", rangeData?.totals?.transnational_actual],
+                      ].map(([label, value]) => (
+                        <div key={label} className="rounded-3 border px-3 py-2 text-end" style={{ minWidth: 100, background: "#F8FAFC" }}>
+                          <div className="small text-muted fw-bold" style={{ fontSize: "0.66rem" }}>{label}</div>
+                          <div className="fw-bold text-dark">{fmt(value)}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {rangeLoading ? (
+                    <div className="d-flex align-items-center justify-content-center py-5">
+                      <div className="spinner-border text-success spinner-border-sm me-2" role="status"></div>
+                      <span className="small fw-bold text-secondary">Loading exchange range summary...</span>
+                    </div>
+                  ) : rangeError ? (
+                    <div className="alert alert-warning mb-0">{rangeError}</div>
+                  ) : !rangeData?.rows?.length ? (
+                    <div className="text-center text-muted fw-semibold py-5">No exchange data found for selected range.</div>
+                  ) : (
+                    <div className="table-responsive">
+                      <table className="table table-sm table-hover align-middle mb-0">
+                        <thead>
+                          <tr>
+                            <th>Group</th>
+                            <th>Code</th>
+                            <th>Name</th>
+                            <th className="text-end">Records</th>
+                            <th className="text-end">Schedule Sum</th>
+                            <th className="text-end">Actual Sum</th>
+                            <th className="text-end">Actual - Schedule</th>
+                            <th className="text-end">Net UI</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {rangeData.rows.map((row) => (
+                            <tr key={`${row.group}-${row.code}`}>
+                              <td className="fw-semibold text-secondary">{row.group}</td>
+                              <td>
+                                <span className="badge rounded-pill" style={{ background: `${COLORS[row.code] || "#64748B"}18`, color: COLORS[row.code] || "#475569" }}>
+                                  {row.code}
+                                </span>
+                              </td>
+                              <td className="fw-bold text-dark">{row.name}</td>
+                              <td className="text-end">{row.days}</td>
+                              <td className="text-end font-monospace">{fmt(row.schedule)}</td>
+                              <td className="text-end font-monospace fw-bold">{fmt(row.actual)}</td>
+                              <td className="text-end font-monospace" style={{ color: flowTone(row.difference) }}>{fmt(row.difference)}</td>
+                              <td className="text-end font-monospace">{row.net_ui === null || row.net_ui === undefined ? "-" : fmt(row.net_ui)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>

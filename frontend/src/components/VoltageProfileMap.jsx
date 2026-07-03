@@ -1,5 +1,16 @@
 import { useEffect, useState, useMemo } from "react";
-import { Zap, ChevronRight, X, Search } from "lucide-react";
+import { Zap, ChevronRight, X, Search, TrendingUp, RefreshCw } from "lucide-react";
+import {
+  CartesianGrid,
+  Legend,
+  Line,
+  LineChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
+import API from "../services/api";
 
 /* ─────────────────────────────────────────────
    Geographic transform   viewBox 460 × 490
@@ -169,11 +180,39 @@ const STATUS_LABEL = {
   normal: "Normal", high: "High Voltage", low: "Low Voltage", offline: "Offline",
 };
 
+const todayIso = () => new Date().toISOString().slice(0, 10);
+const addDays = (dateStr, days) => {
+  const dt = new Date(`${dateStr}T00:00:00`);
+  dt.setDate(dt.getDate() + days);
+  return dt.toISOString().slice(0, 10);
+};
+
+const formatDate = (dateStr) => {
+  if (!dateStr) return "-";
+  const dt = new Date(`${dateStr}T00:00:00`);
+  if (Number.isNaN(dt.getTime())) return dateStr;
+  return dt.toLocaleDateString("en-IN", { day: "2-digit", month: "short" });
+};
+
+const formatKv = (value) => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return "-";
+  return parsed.toLocaleString("en-IN", { maximumFractionDigits: 2 });
+};
+
 /* ═══════════════════════════════════════════════
    Component
 ═══════════════════════════════════════════════ */
 export default function VoltageProfileMap({ voltageData, voltageLoading }) {
   const [open, setOpen]   = useState(false);
+  const [trendOpen, setTrendOpen] = useState(false);
+  const [trendLoading, setTrendLoading] = useState(false);
+  const [trendError, setTrendError] = useState("");
+  const [trendData, setTrendData] = useState(null);
+  const [trendStartDate, setTrendStartDate] = useState(addDays(todayIso(), -14));
+  const [trendEndDate, setTrendEndDate] = useState(addDays(todayIso(), -1));
+  const [selectedTrendStations, setSelectedTrendStations] = useState([]);
+  const [trendStationDropdownOpen, setTrendStationDropdownOpen] = useState(false);
   const [sel, setSel]     = useState(null);
   const [lvl, setLvl]     = useState("all");
   const [query, setQuery] = useState("");
@@ -244,6 +283,113 @@ export default function VoltageProfileMap({ voltageData, voltageLoading }) {
     });
     return o;
   }, [stations]);
+
+  const trendStationOptions = useMemo(() => {
+    const fromApi = trendData?.stations || [];
+    if (fromApi.length) return fromApi;
+    return stations
+      .map((station) => ({
+        key: `${station.level}:${station.station_key || station.name}`,
+        name: station.name,
+        level: station.level,
+      }))
+      .sort((a, b) => `${a.level}-${a.name}`.localeCompare(`${b.level}-${b.name}`));
+  }, [stations, trendData]);
+
+  const selectedTrendSet = useMemo(() => new Set(selectedTrendStations), [selectedTrendStations]);
+
+  const trendChart = useMemo(() => {
+    const dateMap = {};
+    const stationMeta = {};
+    (trendData?.rows || []).forEach((row) => {
+      const key = row.station_key;
+      if (selectedTrendSet.size && !selectedTrendSet.has(key)) return;
+      stationMeta[key] = {
+        name: row.name,
+        level: row.level,
+      };
+      dateMap[row.date] = dateMap[row.date] || { date: row.date };
+      dateMap[row.date][`${key}__min`] = row.min_voltage;
+      dateMap[row.date][`${key}__max`] = row.max_voltage;
+    });
+    return {
+      rows: Object.values(dateMap).sort((a, b) => String(a.date).localeCompare(String(b.date))),
+      stations: Object.entries(stationMeta).map(([key, meta]) => ({ key, ...meta })),
+    };
+  }, [selectedTrendSet, trendData]);
+
+  const trendYAxisDomain = useMemo(() => {
+    const values = [];
+    const levels = new Set();
+    trendChart.stations.forEach((station) => levels.add(station.level));
+    trendChart.rows.forEach((row) => {
+      trendChart.stations.forEach((station) => {
+        const minValue = Number(row[`${station.key}__min`]);
+        const maxValue = Number(row[`${station.key}__max`]);
+        if (Number.isFinite(minValue)) values.push(minValue);
+        if (Number.isFinite(maxValue)) values.push(maxValue);
+      });
+    });
+    if (!values.length) return ["auto", "auto"];
+    const dataMin = Math.min(...values);
+    const dataMax = Math.max(...values);
+    if (levels.size === 1) {
+      const level = Array.from(levels)[0];
+      const nominal = level === "765kV" ? 765 : 400;
+      const spread = Math.max(Math.abs(dataMin - nominal), Math.abs(dataMax - nominal), level === "765kV" ? 20 : 10);
+      const padded = Math.ceil((spread + 5) / 5) * 5;
+      return [nominal - padded, nominal + padded];
+    }
+    return [
+      Math.floor((dataMin - 10) / 10) * 10,
+      Math.ceil((dataMax + 10) / 10) * 10,
+    ];
+  }, [trendChart]);
+
+  const trendColors = ["#2563EB", "#DC2626", "#059669", "#D97706", "#7C3AED", "#0891B2", "#DB2777", "#64748B"];
+
+  const toggleTrendStation = (key) => {
+    setSelectedTrendStations((prev) => {
+      if (prev.includes(key)) {
+        return prev.filter((item) => item !== key);
+      }
+      return [...prev, key];
+    });
+  };
+
+  const loadVoltageTrend = async (
+    start = trendStartDate,
+    end = trendEndDate,
+    stationKeys = selectedTrendStations
+  ) => {
+    try {
+      setTrendLoading(true);
+      setTrendError("");
+      const res = await API.getPspVoltageProfileTrend(start, end, stationKeys);
+      if (!res.success) throw new Error(res.message || "Unable to load voltage trend");
+      setTrendData(res);
+      if (!stationKeys.length && res.selected?.length) {
+        setSelectedTrendStations(res.selected);
+      }
+    } catch (err) {
+      console.error("Error loading voltage profile trend:", err);
+      setTrendError(err.message || "Unable to load voltage trend.");
+    } finally {
+      setTrendLoading(false);
+    }
+  };
+
+  const openTrendModal = (event) => {
+    event?.stopPropagation();
+    const end = voltageData?.date || todayIso();
+    const start = addDays(end, -14);
+    const defaults = stations.slice(0, 4).map((station) => `${station.level}:${station.station_key || station.name}`);
+    setTrendEndDate(end);
+    setTrendStartDate(start);
+    setSelectedTrendStations(defaults);
+    setTrendOpen(true);
+    loadVoltageTrend(start, end, defaults);
+  };
 
   const TILE_STATS = [
     { k: "normal",  c: "#10B981", icon: "✓", label: "Normal"  },
@@ -506,7 +652,20 @@ export default function VoltageProfileMap({ voltageData, voltageLoading }) {
               ER Voltage Profile
             </span>
           </div>
-          <ChevronRight size={13} className="text-secondary" />
+          <div className="d-flex align-items-center gap-1">
+            {voltageData?.has_data && (
+              <button
+                type="button"
+                className="btn btn-sm btn-link p-0 d-flex align-items-center"
+                onClick={openTrendModal}
+                title="View max/min voltage trend"
+                style={{ color: "#F59E0B" }}
+              >
+                <TrendingUp size={14} />
+              </button>
+            )}
+            <ChevronRight size={13} className="text-secondary" />
+          </div>
         </div>
 
         {voltageLoading ? (
@@ -591,6 +750,25 @@ export default function VoltageProfileMap({ voltageData, voltageLoading }) {
                 </div>
               </div>
               <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                <button
+                  onClick={openTrendModal}
+                  style={{
+                    background: "rgba(245,158,11,0.14)",
+                    border: "1px solid rgba(245,158,11,0.35)",
+                    color: "#FBBF24",
+                    borderRadius: "8px",
+                    padding: "6px 10px",
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "6px",
+                    fontSize: "0.72rem",
+                    fontWeight: 800,
+                  }}
+                >
+                  <TrendingUp size={13} />
+                  Trend
+                </button>
                 {/* Level filter */}
                 <select
                   value={lvl}
@@ -836,6 +1014,249 @@ export default function VoltageProfileMap({ voltageData, voltageLoading }) {
               ))}
             </div>
 
+          </div>
+        </div>
+      )}
+
+      {trendOpen && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(2,8,24,0.66)",
+            backdropFilter: "blur(6px)",
+            zIndex: 2300,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: "18px",
+          }}
+          onClick={(event) => {
+            if (event.target === event.currentTarget) setTrendOpen(false);
+          }}
+        >
+          <div
+            style={{
+              width: "min(1180px, 96vw)",
+              maxHeight: "90vh",
+              background: "linear-gradient(180deg,#FFFFFF 0%,#F8FAFC 100%)",
+              borderRadius: "22px",
+              overflow: "hidden",
+              boxShadow: "0 30px 80px rgba(15,23,42,0.38)",
+              border: "1px solid rgba(226,232,240,0.9)",
+              display: "flex",
+              flexDirection: "column",
+            }}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div
+              style={{
+                padding: "14px 18px",
+                borderBottom: "1px solid #E2E8F0",
+                display: "flex",
+                alignItems: "flex-start",
+                justifyContent: "space-between",
+                gap: "14px",
+              }}
+            >
+              <div>
+                <h5 className="fw-bold text-dark mb-1 d-flex align-items-center gap-2">
+                  <TrendingUp size={18} style={{ color: "#F59E0B" }} />
+                  Maximum / Minimum Voltage Trend
+                </h5>
+                <div className="small text-muted">
+                  Substation-wise daily min/max voltage from PSP voltage profile.
+                </div>
+              </div>
+              <button
+                type="button"
+                className="btn btn-sm btn-light rounded-circle"
+                onClick={() => setTrendOpen(false)}
+                aria-label="Close"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <div style={{ padding: "14px 18px", borderBottom: "1px solid #E2E8F0" }}>
+              <div className="row g-2 align-items-end">
+                <div className="col-12 col-md-2">
+                  <label className="form-label small fw-bold text-secondary mb-1">Start Date</label>
+                  <input
+                    type="date"
+                    className="form-control theme-input"
+                    value={trendStartDate}
+                    onChange={(event) => setTrendStartDate(event.target.value)}
+                  />
+                </div>
+                <div className="col-12 col-md-2">
+                  <label className="form-label small fw-bold text-secondary mb-1">End Date</label>
+                  <input
+                    type="date"
+                    className="form-control theme-input"
+                    value={trendEndDate}
+                    onChange={(event) => setTrendEndDate(event.target.value)}
+                  />
+                </div>
+                <div className="col-12 col-md-6">
+                  <label className="form-label small fw-bold text-secondary mb-1">Substations</label>
+                  <div className="position-relative">
+                    <button
+                      type="button"
+                      className="form-select theme-input text-start"
+                      onClick={() => setTrendStationDropdownOpen((prev) => !prev)}
+                      style={{ fontSize: "0.76rem", minHeight: "38px" }}
+                    >
+                      {selectedTrendStations.length
+                        ? `${selectedTrendStations.length} substation${selectedTrendStations.length > 1 ? "s" : ""} selected`
+                        : "Select substations"}
+                    </button>
+                    {trendStationDropdownOpen && (
+                      <div
+                        className="position-absolute bg-white border rounded-3 shadow-lg mt-1 w-100"
+                        style={{ zIndex: 2600, maxHeight: "260px", overflow: "hidden" }}
+                      >
+                        <div className="d-flex gap-2 p-2 border-bottom bg-light">
+                          <button
+                            type="button"
+                            className="btn btn-sm theme-btn-outline py-1 flex-fill"
+                            onClick={() => setSelectedTrendStations(trendStationOptions.filter((s) => s.level === "400kV").slice(0, 8).map((s) => s.key))}
+                            style={{ fontSize: "0.68rem" }}
+                          >
+                            400 kV
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn-sm theme-btn-outline py-1 flex-fill"
+                            onClick={() => setSelectedTrendStations(trendStationOptions.filter((s) => s.level === "765kV").slice(0, 8).map((s) => s.key))}
+                            style={{ fontSize: "0.68rem" }}
+                          >
+                            765 kV
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn-sm btn-light py-1 flex-fill"
+                            onClick={() => setSelectedTrendStations([])}
+                            style={{ fontSize: "0.68rem" }}
+                          >
+                            Clear
+                          </button>
+                        </div>
+                        <div style={{ maxHeight: "210px", overflowY: "auto" }}>
+                          {trendStationOptions.map((station) => {
+                            const checked = selectedTrendStations.includes(station.key);
+                            return (
+                              <label
+                                key={station.key}
+                                className="d-flex align-items-center gap-2 px-3 py-2 mb-0 border-bottom border-light-subtle"
+                                style={{ cursor: "pointer", fontSize: "0.75rem" }}
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={checked}
+                                  onChange={() => toggleTrendStation(station.key)}
+                                  style={{ accentColor: "#F59E0B" }}
+                                />
+                                <span className="badge rounded-pill bg-warning-subtle text-warning-emphasis">
+                                  {station.level}
+                                </span>
+                                <span className="text-dark fw-semibold text-truncate">
+                                  {shortName(station.name)}
+                                </span>
+                              </label>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+                <div className="col-12 col-md-2 d-grid gap-2">
+                  <button
+                    type="button"
+                    className="btn theme-btn-primary d-flex align-items-center justify-content-center gap-2"
+                    onClick={() => loadVoltageTrend(trendStartDate, trendEndDate, selectedTrendStations)}
+                    disabled={trendLoading}
+                  >
+                    <RefreshCw size={14} className={trendLoading ? "animate-spin-custom" : ""} />
+                    Load Trend
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-sm theme-btn-outline"
+                    onClick={() => {
+                      const values = trendStationOptions.slice(0, 6).map((station) => station.key);
+                      setSelectedTrendStations(values);
+                      loadVoltageTrend(trendStartDate, trendEndDate, values);
+                    }}
+                  >
+                    Top 6
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div style={{ padding: "14px 18px", minHeight: 0, overflow: "auto" }}>
+              <div className="rounded-3 border bg-white p-2" style={{ height: "500px" }}>
+                {trendLoading ? (
+                  <div className="d-flex align-items-center justify-content-center h-100">
+                    <div className="spinner-border text-warning spinner-border-sm me-2" role="status"></div>
+                    <span className="small fw-bold text-secondary">Loading voltage trend...</span>
+                  </div>
+                ) : trendError ? (
+                  <div className="alert alert-warning mb-0">{trendError}</div>
+                ) : !trendChart.rows.length ? (
+                  <div className="d-flex align-items-center justify-content-center h-100 text-muted fw-semibold">
+                    No voltage trend data found for selected substations.
+                  </div>
+                ) : (
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={trendChart.rows} margin={{ top: 12, right: 24, left: 0, bottom: 8 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
+                      <XAxis dataKey="date" tickFormatter={formatDate} tick={{ fontSize: 11 }} />
+                      <YAxis
+                        domain={trendYAxisDomain}
+                        allowDataOverflow={false}
+                        tick={{ fontSize: 11 }}
+                        tickFormatter={formatKv}
+                      />
+                      <Tooltip
+                        labelFormatter={(label) => `Date: ${formatDate(label)}`}
+                        formatter={(value, name) => [`${formatKv(value)} kV`, name]}
+                      />
+                      <Legend wrapperStyle={{ fontSize: 11 }} />
+                      {trendChart.stations.flatMap((station, index) => {
+                        const color = trendColors[index % trendColors.length];
+                        const label = `${shortName(station.name)} ${station.level}`;
+                        return [
+                          <Line
+                            key={`${station.key}-max`}
+                            type="monotone"
+                            dataKey={`${station.key}__max`}
+                            name={`${label} Max`}
+                            stroke={color}
+                            strokeWidth={2.4}
+                            dot={{ r: 2 }}
+                            connectNulls
+                          />,
+                          <Line
+                            key={`${station.key}-min`}
+                            type="monotone"
+                            dataKey={`${station.key}__min`}
+                            name={`${label} Min`}
+                            stroke={color}
+                            strokeWidth={1.8}
+                            strokeDasharray="5 4"
+                            dot={{ r: 2 }}
+                            connectNulls
+                          />,
+                        ];
+                      })}
+                    </LineChart>
+                  </ResponsiveContainer>
+                )}
+              </div>
+            </div>
           </div>
         </div>
       )}

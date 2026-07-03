@@ -1,8 +1,56 @@
 import axios from "axios";
 
-const BASE_URL = "/api";
+const BASE_URL = import.meta.env.VITE_API_BASE_URL || "/api";
+
+axios.interceptors.request.use((config) => {
+  config.metadata = {
+    startTime: performance.now()
+  };
+
+  const method = (config.method || "GET").toUpperCase();
+  const url = `${config.baseURL || ""}${config.url || ""}`;
+
+  console.log(`[API REQUEST] ${method} ${url}`);
+
+  return config;
+});
+
+axios.interceptors.response.use(
+  (response) => {
+    const startTime = response.config.metadata?.startTime;
+    const durationMs = startTime
+      ? Math.round(performance.now() - startTime)
+      : 0;
+    const method = (response.config.method || "GET").toUpperCase();
+    const url = `${response.config.baseURL || ""}${response.config.url || ""}`;
+
+    console.log(
+      `[API RESPONSE] ${method} ${url} -> ${response.status} (${durationMs} ms)`
+    );
+
+    return response;
+  },
+  (error) => {
+    const config = error.config || {};
+    const startTime = config.metadata?.startTime;
+    const durationMs = startTime
+      ? Math.round(performance.now() - startTime)
+      : 0;
+    const method = (config.method || "GET").toUpperCase();
+    const url = `${config.baseURL || ""}${config.url || ""}`;
+    const status = error.response?.status || "NETWORK";
+
+    console.error(
+      `[API ERROR] ${method} ${url} -> ${status} (${durationMs} ms)`,
+      error
+    );
+
+    return Promise.reject(error);
+  }
+);
 
 const API = {
+  apiBaseUrl: BASE_URL,
 
   // =========================================
   // UNIT DATA PREVIEW
@@ -126,12 +174,37 @@ const API = {
     return res.data;
   },
 
+  getRTGSnapshotTrend: async (dateStr) => {
+
+    const params = new URLSearchParams();
+
+    if (dateStr) {
+      params.append("date_str", dateStr);
+    }
+
+    const query = params.toString();
+
+    const res = await axios.get(
+      `${BASE_URL}/rtg-dashboard/trend/snapshot${query ? `?${query}` : ""}`
+    );
+
+    return res.data;
+  },
+
   getPipelineStatus: async () => {
 
     const res = await axios.get(
       `${BASE_URL}/pipeline/status`
     );
 
+    return res.data;
+  },
+
+  getOutageCategoryRange: async (payload) => {
+    const res = await axios.post(
+      `${BASE_URL}/pipeline/outage/category-range`,
+      payload
+    );
     return res.data;
   },
 
@@ -165,6 +238,129 @@ const API = {
   syncPspDate: async (dateStr) => {
     const res = await axios.post(
       `${BASE_URL}/psp/sync-date/${dateStr}`
+    );
+    return res.data;
+  },
+
+  getNldcDemandStatus: async (startDate, endDate) => {
+    let url = `${BASE_URL}/psp/nldc-demand/status`;
+    if (startDate && endDate) {
+      url += `?start_date=${startDate}&end_date=${endDate}`;
+    }
+    const res = await axios.get(url);
+    return res.data;
+  },
+
+  getNldcDemandSyncProgress: async () => {
+    const res = await axios.get(
+      `${BASE_URL}/psp/nldc-demand/sync-progress`
+    );
+    return res.data;
+  },
+
+  runNldcDemandRange: async (startDate, endDate) => {
+    const res = await axios.post(
+      `${BASE_URL}/psp/nldc-demand/run-range`,
+      {
+        start_date: startDate,
+        end_date: endDate
+      }
+    );
+    return res.data;
+  },
+
+  syncNldcDemandDate: async (dateStr) => {
+    const res = await axios.post(
+      `${BASE_URL}/psp/nldc-demand/sync-date/${dateStr}`
+    );
+    return res.data;
+  },
+
+  getNldcDemandTrend: async (startDate, endDate) => {
+    const params = new URLSearchParams();
+    if (startDate) params.append("start_date", startDate);
+    if (endDate) params.append("end_date", endDate);
+    const query = params.toString();
+    const res = await axios.get(
+      `${BASE_URL}/psp/nldc-demand/trend${query ? `?${query}` : ""}`
+    );
+    return res.data;
+  },
+
+  getIndia15MinDemandStatus: async (startDate, endDate) => {
+    let url = `${BASE_URL}/psp/india-15-min-demand/status`;
+    if (startDate && endDate) {
+      url += `?start_date=${startDate}&end_date=${endDate}`;
+    }
+    const res = await axios.get(url);
+    return res.data;
+  },
+
+  getIndia15MinDemandSyncProgress: async () => {
+    const res = await axios.get(
+      `${BASE_URL}/psp/india-15-min-demand/sync-progress`
+    );
+    return res.data;
+  },
+
+  runIndia15MinDemandRange: async (startDate, endDate) => {
+    const res = await axios.post(
+      `${BASE_URL}/psp/india-15-min-demand/run-range`,
+      {
+        start_date: startDate,
+        end_date: endDate
+      }
+    );
+    return res.data;
+  },
+
+  syncIndia15MinDemandDate: async (dateStr) => {
+    const res = await axios.post(
+      `${BASE_URL}/psp/india-15-min-demand/sync-date/${dateStr}`
+    );
+    return res.data;
+  },
+
+  getIndia15MinGenerationBreakup: async (dateStr) => {
+    const params = new URLSearchParams();
+    if (dateStr) params.append("date_str", dateStr);
+    const query = params.toString();
+    const res = await axios.get(
+      `${BASE_URL}/psp/india-15-min-demand/generation-breakup${query ? `?${query}` : ""}`
+    );
+    return res.data;
+  },
+
+  getAllStateDemandStatus: async (startDate, endDate) => {
+    let url = `${BASE_URL}/psp/all-state-demand/status`;
+    if (startDate && endDate) {
+      url += `?start_date=${startDate}&end_date=${endDate}`;
+    }
+    const res = await axios.get(url);
+    return res.data;
+  },
+
+  getAllStateDemandSyncProgress: async () => {
+    const res = await axios.get(
+      `${BASE_URL}/psp/all-state-demand/sync-progress`
+    );
+    return res.data;
+  },
+
+  runAllStateDemandRange: async (startDate, endDate) => {
+    const res = await axios.post(
+      `${BASE_URL}/psp/all-state-demand/run-range`,
+      {
+        start_date: startDate,
+        end_date: endDate
+      }
+    );
+    return res.data;
+  },
+
+  syncAllStateDemandDate: async (dateStr) => {
+    const res = await axios.post(
+      `${BASE_URL}/psp/all-state-demand/sync-date/${dateStr}`
     );
     return res.data;
   },
@@ -294,6 +490,58 @@ const API = {
     return res.data;
   },
 
+  getPspReportChecking: async (dateStr, includeCurve = false) => {
+    const params = new URLSearchParams();
+    if (dateStr) params.append("date_str", dateStr);
+    if (includeCurve) params.append("include_curve", "true");
+    const query = params.toString();
+    const res = await axios.get(
+      `${BASE_URL}/psp/report-checking${query ? `?${query}` : ""}`
+    );
+    return res.data;
+  },
+
+  refreshPspSources: async (dateStr) => {
+    const params = new URLSearchParams();
+    if (dateStr) params.append("date_str", dateStr);
+    const query = params.toString();
+    const res = await axios.post(
+      `${BASE_URL}/psp/refresh-sources${query ? `?${query}` : ""}`
+    );
+    return res.data;
+  },
+
+  getPspShortageTrend: async (startDate, endDate, state) => {
+    const params = new URLSearchParams();
+    if (startDate) params.append("start_date", startDate);
+    if (endDate) params.append("end_date", endDate);
+    if (state) params.append("state", state);
+    const query = params.toString();
+    const res = await axios.get(
+      `${BASE_URL}/psp/report-checking/shortage-trend${query ? `?${query}` : ""}`
+    );
+    return res.data;
+  },
+
+  getPspFrequencyTrend: async (startDate, endDate) => {
+    const params = new URLSearchParams();
+    if (startDate) params.append("start_date", startDate);
+    if (endDate) params.append("end_date", endDate);
+    const query = params.toString();
+    const res = await axios.get(
+      `${BASE_URL}/psp/report-checking/frequency-trend${query ? `?${query}` : ""}`
+    );
+    return res.data;
+  },
+
+  getPspCurveHeaders: async (dateStr) => {
+    const params = dateStr ? `?date_str=${dateStr}` : '';
+    const res = await axios.get(
+      `${BASE_URL}/psp/portfolio-curve-headers${params}`
+    );
+    return res.data;
+  },
+
   getPspGeneratingStations: async (state, dateStr) => {
     const params = new URLSearchParams();
     if (state) params.append("state", state);
@@ -332,11 +580,62 @@ const API = {
     return res.data;
   },
 
+  getPspVoltageProfileTrend: async (startDate, endDate, stations = []) => {
+    const params = new URLSearchParams();
+    if (startDate) params.append("start_date", startDate);
+    if (endDate) params.append("end_date", endDate);
+    if (stations.length) params.append("stations", stations.join(","));
+    const query = params.toString();
+    const res = await axios.get(
+      `${BASE_URL}/psp/voltage-profile-trend${query ? `?${query}` : ""}`
+    );
+    return res.data;
+  },
+
   getPspPowerExchange: async (dateStr) => {
     const params = dateStr ? `?date_str=${dateStr}` : '';
     const res = await axios.get(
       `${BASE_URL}/psp/power-exchange${params}`
     );
+    return res.data;
+  },
+
+  getPspPowerExchangeRange: async (startDate, endDate) => {
+    const params = new URLSearchParams();
+    if (startDate) params.append("start_date", startDate);
+    if (endDate) params.append("end_date", endDate);
+    const query = params.toString();
+    const res = await axios.get(
+      `${BASE_URL}/psp/power-exchange-range${query ? `?${query}` : ""}`
+    );
+    return res.data;
+  },
+
+  getMisDiurnalCurve: async (payload) => {
+    const res = await axios.post(`${BASE_URL}/psp/mis/diurnal-curve`, payload);
+    return res.data;
+  },
+
+  getMisPspSnapshotOutput: async (payload) => {
+    const res = await axios.post(`${BASE_URL}/psp/mis/psp-snapshot-output`, payload);
+    return res.data;
+  },
+
+  getMisVoltageNames: async (startDate, endDate) => {
+    const params = new URLSearchParams();
+    params.append("start_date", startDate);
+    params.append("end_date", endDate);
+    const res = await axios.get(`${BASE_URL}/psp/mis/voltage-names?${params.toString()}`);
+    return res.data;
+  },
+
+  getMisVoltageProfile: async (payload) => {
+    const res = await axios.post(`${BASE_URL}/psp/mis/voltage-profile`, payload);
+    return res.data;
+  },
+
+  getMisReactorSwitching: async (payload) => {
+    const res = await axios.post(`${BASE_URL}/psp/mis/reactor-switching`, payload);
     return res.data;
   },
 
@@ -364,6 +663,17 @@ const API = {
   saveFrequencyPlantMapping: async (payload) => {
     const res = await axios.put(`${BASE_URL}/frequency/plant-mapping`, payload, {
       headers: { "Content-Type": "application/json" }
+    });
+    return res.data;
+  },
+
+  getFrequencyCrmsMessages: async (startTime, endTime) => {
+    const res = await axios.get(`${BASE_URL}/frequency/crms-messages`, {
+      params: {
+        start_time: startTime,
+        end_time: endTime,
+        _t: Date.now()
+      }
     });
     return res.data;
   },

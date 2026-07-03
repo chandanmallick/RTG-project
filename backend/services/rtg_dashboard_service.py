@@ -442,3 +442,302 @@ class RTGDashboardService:
             })
 
         return trend
+
+    @staticmethod
+    def fetch_snapshot_trend(date_str=None):
+
+        db = MongoService()
+
+        print(
+            f"fetch_snapshot_trend input date_str={date_str!r}",
+            flush=True
+        )
+
+        if date_str:
+
+            target_date = date_str
+
+        elif ZoneInfo:
+
+            target_date = (
+                datetime.now(ZoneInfo("Asia/Kolkata")).date()
+                - timedelta(days=1)
+            ).isoformat()
+
+        else:
+
+            target_date = (
+                datetime.utcnow().date()
+                - timedelta(days=1)
+            ).isoformat()
+
+        def get_day_bounds(day_text):
+
+            target_day = datetime.strptime(
+                day_text,
+                "%Y-%m-%d"
+            ).date()
+
+            if ZoneInfo:
+
+                tz = ZoneInfo("Asia/Kolkata")
+
+                start_utc = datetime.combine(
+                    target_day,
+                    time.min,
+                    tzinfo=tz
+                ).astimezone(
+                    ZoneInfo("UTC")
+                ).replace(tzinfo=None)
+
+                end_utc = datetime.combine(
+                    target_day + timedelta(days=1),
+                    time.min,
+                    tzinfo=tz
+                ).astimezone(
+                    ZoneInfo("UTC")
+                ).replace(tzinfo=None)
+
+            else:
+
+                start_utc = datetime.combine(
+                    target_day,
+                    time.min
+                )
+
+                end_utc = start_utc + timedelta(
+                    days=1
+                )
+
+            return start_utc, end_utc
+
+        start_utc, end_utc = get_day_bounds(target_date)
+
+        print(
+            (
+                "fetch_snapshot_trend target_date="
+                f"{target_date} start_utc={start_utc} "
+                f"end_utc={end_utc}"
+            ),
+            flush=True
+        )
+
+        projection = {
+            "_id": 0,
+            "snapshot_time": 1,
+            "snapshot_date": 1,
+            "data": 1
+        }
+
+        snapshots = list(
+            db.rtg_dashboard_collection.find(
+                {
+                    "$or": [
+                        {
+                            "snapshot_date": target_date
+                        },
+                        {
+                            "snapshot_date": {
+                                "$gte": start_utc,
+                                "$lt": end_utc
+                            }
+                        },
+                        {
+                            "snapshot_time": {
+                                "$gte": start_utc,
+                                "$lt": end_utc
+                            }
+                        }
+                    ]
+                },
+                projection
+            ).sort("snapshot_time", 1)
+        )
+
+        print(
+            (
+                "fetch_snapshot_trend matched "
+                f"{len(snapshots)} snapshots for {target_date}"
+            ),
+            flush=True
+        )
+
+        if not snapshots:
+
+            latest = db.rtg_dashboard_collection.find_one(
+                {},
+                projection,
+                sort=[("snapshot_time", -1)]
+            )
+
+            if latest:
+
+                print(
+                    "fetch_snapshot_trend using latest snapshot fallback",
+                    flush=True
+                )
+
+                latest_snapshot_date = latest.get(
+                    "snapshot_date"
+                )
+
+                latest_snapshot_time = latest.get(
+                    "snapshot_time"
+                )
+
+                if isinstance(latest_snapshot_date, str):
+
+                    target_date = latest_snapshot_date[:10]
+
+                elif latest_snapshot_time and ZoneInfo:
+
+                    target_date = (
+                        latest_snapshot_time
+                        .replace(tzinfo=ZoneInfo("UTC"))
+                        .astimezone(ZoneInfo("Asia/Kolkata"))
+                        .date()
+                        .isoformat()
+                    )
+
+                elif latest_snapshot_time:
+
+                    target_date = (
+                        latest_snapshot_time
+                        .date()
+                        .isoformat()
+                    )
+
+                snapshots = list(
+                    db.rtg_dashboard_collection.find(
+                        {
+                            "snapshot_date":
+                                latest_snapshot_date
+                        },
+                        projection
+                    ).sort("snapshot_time", 1)
+                )
+
+                if not snapshots:
+
+                    latest_start_utc, latest_end_utc = (
+                        get_day_bounds(target_date)
+                    )
+
+                    snapshots = list(
+                        db.rtg_dashboard_collection.find(
+                            {
+                                "snapshot_time": {
+                                    "$gte": latest_start_utc,
+                                    "$lt": latest_end_utc
+                                }
+                            },
+                            projection
+                        ).sort("snapshot_time", 1)
+                    )
+
+        print(
+            (
+                "fetch_snapshot_trend final snapshot count="
+                f"{len(snapshots)} date={target_date}"
+            ),
+            flush=True
+        )
+
+        snapshots = (
+            {
+                "snapshot_time": item.get(
+                    "snapshot_time"
+                ),
+                "snapshot_date": item.get(
+                    "snapshot_date"
+                ),
+                "data": item.get("data", [])
+            }
+            for item in snapshots
+        )
+
+        trend = []
+
+        for snapshot in snapshots:
+
+            rows = snapshot.get("data", [])
+
+            cap_on_bar = sum(
+                RTGDashboardService._to_number(
+                    row.get("cap_on_bar")
+                )
+                for row in rows
+            )
+
+            dc = sum(
+                RTGDashboardService._to_number(
+                    row.get("dc")
+                )
+                for row in rows
+            )
+
+            schedule = sum(
+                RTGDashboardService._to_number(
+                    row.get("schedule")
+                )
+                for row in rows
+            )
+
+            actual_gen = sum(
+                RTGDashboardService._to_number(
+                    row.get("actual_gen")
+                )
+                for row in rows
+            )
+
+            snapshot_time = snapshot.get(
+                "snapshot_time"
+            )
+
+            if ZoneInfo and snapshot_time:
+
+                local_time = (
+                    snapshot_time
+                    .replace(tzinfo=ZoneInfo("UTC"))
+                    .astimezone(
+                        ZoneInfo("Asia/Kolkata")
+                    )
+                )
+
+                display_time = local_time.strftime(
+                    "%H:%M"
+                )
+
+                display_datetime = local_time.isoformat()
+
+            elif snapshot_time:
+
+                display_time = snapshot_time.strftime(
+                    "%H:%M"
+                )
+
+                display_datetime = snapshot_time.isoformat()
+
+            else:
+
+                display_time = ""
+
+                display_datetime = ""
+
+            trend.append({
+                "time": display_time,
+                "snapshot_time": display_datetime,
+                "cap_on_bar": round(cap_on_bar, 2),
+                "dc": round(dc, 2),
+                "schedule": round(schedule, 2),
+                "actual_gen": round(actual_gen, 2),
+                "dc_schedule_difference": round(
+                    dc - schedule,
+                    2
+                )
+            })
+
+        return {
+            "date": target_date,
+            "records": trend
+        }

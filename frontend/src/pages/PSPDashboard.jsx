@@ -34,7 +34,9 @@ import {
   CartesianGrid,
   Sector,
   ReferenceLine,
-  Legend
+  ReferenceDot,
+  Legend,
+  LabelList
 } from "recharts";
 
 import API from "../services/api";
@@ -45,6 +47,8 @@ import PowerExchangeGraphic from "../components/PowerExchangeGraphic";
 import PSPStateGenerationSources from "../components/PSPStateGenerationSources";
 import VoltageProfileMap from "../components/VoltageProfileMap";
 import PSPHighlightsReport from "../components/PSPHighlightsReport";
+import PSPFrequencyCheckTiles from "../components/ui/PSPFrequencyCheckTiles";
+import PSPFrequencyTrendModal from "../components/ui/PSPFrequencyTrendModal";
 
 // Donut chart color palette - vibrant, modern, premium
 const DONUT_COLORS = [
@@ -57,9 +61,75 @@ const DONUT_COLORS = [
   "#AACBC4",  // Pistachio
 ];
 
+const NLDC_DEMAND_LINES = [
+  { key: "ALL INDIA", label: "All India", color: "#022726", strokeWidth: 3.2 },
+  { key: "NR", label: "NR", color: "#2563EB" },
+  { key: "WR", label: "WR", color: "#F97316" },
+  { key: "SR", label: "SR", color: "#7C3AED" },
+  { key: "NER", label: "NER", color: "#16A34A" },
+  { key: "ER", label: "ER", color: "#DB2777" }
+];
+
+const NLDC_DEMAND_COMPONENTS = [
+  { key: "solar", label: "Solar Max", suffix: "__solar", maxKey: "max_solar", yearlyMaxKey: "yearly_max_solar", strokeDasharray: "5 4" },
+  { key: "non_solar", label: "Non-solar Max", suffix: "__non_solar", maxKey: "max_non_solar", yearlyMaxKey: "yearly_max_non_solar", strokeDasharray: "2 3" }
+];
+
+const NLDC_GENERATION_COMPONENTS = [
+  { key: "AI_TH", label: "Thermal", color: "#EF4444" },
+  { key: "AI_HYD", label: "Hydro", color: "#2563EB" },
+  { key: "AI_WIND", label: "Wind", color: "#16A34A" },
+  { key: "AI_SOLAR", label: "Solar", color: "#F59E0B" },
+  { key: "AI_GAS", label: "Gas", color: "#64748B" },
+  { key: "AI_NUC", label: "Nuclear", color: "#7C3AED" },
+  { key: "AI_OTHERS", label: "Others", color: "#94A3B8" },
+  { key: "AI_PSP", label: "Pump", color: "#0F766E" },
+  { key: "AI_BESS", label: "BESS", color: "#DB2777" },
+  { key: "NET_TRANSNATIONAL_EXCHANGE", label: "Transnational Exchange", color: "#8B5CF6" }
+];
+
 const formatIsoLocal = (dateObj) => (
   `${dateObj.getFullYear()}-${String(dateObj.getMonth() + 1).padStart(2, "0")}-${String(dateObj.getDate()).padStart(2, "0")}`
 );
+
+const NldcYearlyMarkerLabel = ({ viewBox, marker }) => {
+  if (!viewBox || !marker) return null;
+  const lane = marker.labelLane || 0;
+  const offsets = [
+    { dx: -58, dy: -42 },
+    { dx: 46, dy: -28 },
+    { dx: -58, dy: 28 },
+    { dx: 46, dy: 42 },
+  ];
+  const { dx, dy } = offsets[lane % offsets.length];
+  const label = marker.labelText || "";
+  const width = Math.max(86, label.length * 6.2 + 14);
+  const height = 28;
+  const x = viewBox.x + dx;
+  const y = viewBox.y + dy;
+  const rectX = dx < 0 ? x - width : x;
+  const textX = rectX + width / 2;
+
+  return (
+    <g>
+      <line x1={viewBox.x} y1={viewBox.y} x2={textX} y2={y + height / 2} stroke={marker.color} strokeWidth={1} strokeOpacity={0.55} />
+      <rect x={rectX} y={y} width={width} height={height} rx={5} fill="#FFFFFF" stroke={marker.color} strokeOpacity={0.8} />
+      <text x={textX} y={y + 11} textAnchor="middle" fill={marker.color} fontSize={9} fontWeight={800}>
+        {marker.labelTitle}
+      </text>
+      <text x={textX} y={y + 22} textAnchor="middle" fill="#334155" fontSize={9} fontWeight={700}>
+        {marker.labelValue}
+      </text>
+    </g>
+  );
+};
+
+const yearsInRange = (startDate, endDate) => {
+  const startYear = Number(String(startDate || "").slice(0, 4));
+  const endYear = Number(String(endDate || "").slice(0, 4));
+  if (!Number.isFinite(startYear) || !Number.isFinite(endYear) || startYear > endYear) return [];
+  return Array.from({ length: endYear - startYear + 1 }, (_, index) => String(startYear + index));
+};
 
 const toIsoDate = (value) => {
   if (!value) return "";
@@ -351,6 +421,7 @@ export default function PSPDashboard() {
   const navigate = useNavigate();
   const [statusData, setStatusData] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [sourceRefreshLoading, setSourceRefreshLoading] = useState(false);
 
   // Real MongoDB Analytics State
   const [analyticsData, setAnalyticsData] = useState(null);
@@ -387,6 +458,27 @@ export default function PSPDashboard() {
     "sikkim",
     "west_bengal"
   ]);
+  const [energyTrendFocusKey, setEnergyTrendFocusKey] = useState("all");
+  const [showEnergyTrendCallouts, setShowEnergyTrendCallouts] = useState(false);
+  const defaultNldcDemandEnd = formatIsoLocal(new Date(Date.now() - 24 * 60 * 60 * 1000));
+  const defaultNldcDemandStart = addDays(defaultNldcDemandEnd, -30);
+  const [nldcDemandRows, setNldcDemandRows] = useState([]);
+  const [nldcDemandRegions, setNldcDemandRegions] = useState([]);
+  const [nldcDemandMode, setNldcDemandMode] = useState("daily");
+  const [nldcDemandLoading, setNldcDemandLoading] = useState(false);
+  const [nldcDemandError, setNldcDemandError] = useState("");
+  const [nldcDemandStartDate, setNldcDemandStartDate] = useState(defaultNldcDemandStart);
+  const [nldcDemandEndDate, setNldcDemandEndDate] = useState(defaultNldcDemandEnd);
+  const [selectedNldcDemandKeys, setSelectedNldcDemandKeys] = useState(["ALL INDIA"]);
+  const [nldcDemandViewMode, setNldcDemandViewMode] = useState("overall");
+  const [selectedNldcDemandComponents, setSelectedNldcDemandComponents] = useState(["solar", "non_solar"]);
+  const [nldcDemandUseSecondaryAxis, setNldcDemandUseSecondaryAxis] = useState(false);
+  const [nldcDataModalOpen, setNldcDataModalOpen] = useState(false);
+  const [nldcGenerationDate, setNldcGenerationDate] = useState(defaultNldcDemandEnd);
+  const [nldcGenerationRows, setNldcGenerationRows] = useState([]);
+  const [nldcGenerationComponents, setNldcGenerationComponents] = useState([]);
+  const [nldcGenerationLoading, setNldcGenerationLoading] = useState(false);
+  const [nldcGenerationError, setNldcGenerationError] = useState("");
   const [selectedState, setSelectedState] = useState(null);
   const [stationModalOpen, setStationModalOpen] = useState(false);
   const [stationModalData, setStationModalData] = useState(null);
@@ -414,6 +506,14 @@ export default function PSPDashboard() {
   const [voltageData, setVoltageData] = useState(null);
   const [voltageLoading, setVoltageLoading] = useState(true);
   const [highlightsModalOpen, setHighlightsModalOpen] = useState(false);
+  const [frequencyCheckData, setFrequencyCheckData] = useState(null);
+  const [frequencyCheckLoading, setFrequencyCheckLoading] = useState(true);
+  const [frequencyTrendOpen, setFrequencyTrendOpen] = useState(false);
+  const [frequencyTrendLoading, setFrequencyTrendLoading] = useState(false);
+  const [frequencyTrendError, setFrequencyTrendError] = useState("");
+  const [frequencyTrend, setFrequencyTrend] = useState(null);
+  const [frequencyTrendStartDate, setFrequencyTrendStartDate] = useState("");
+  const [frequencyTrendEndDate, setFrequencyTrendEndDate] = useState("");
 
   const onPieEnter = useCallback((_, index) => {
     setActivePieIndex(index);
@@ -503,6 +603,87 @@ export default function PSPDashboard() {
     }
   };
 
+  const loadNldcDemandTrend = async (
+    startDate = nldcDemandStartDate,
+    endDate = nldcDemandEndDate
+  ) => {
+    if (!startDate || !endDate) return;
+    try {
+      setNldcDemandLoading(true);
+      setNldcDemandError("");
+      const res = await API.getNldcDemandTrend(startDate, endDate);
+      if (!res.success) {
+        throw new Error(res.message || "Unable to load NLDC demand trend");
+      }
+      setNldcDemandRows(res.rows || []);
+      setNldcDemandRegions(res.regions || []);
+      setNldcDemandMode(res.mode || "daily");
+      setNldcDemandUseSecondaryAxis(Boolean(res.use_secondary_axis));
+    } catch (err) {
+      console.error("Error loading NLDC demand trend:", err);
+      setNldcDemandError(err.message || "NLDC demand trend data could not be loaded.");
+      setNldcDemandRows([]);
+      setNldcDemandRegions([]);
+    } finally {
+      setNldcDemandLoading(false);
+    }
+  };
+
+  const loadNldcGenerationBreakup = async (dateStr = nldcGenerationDate) => {
+    try {
+      setNldcGenerationLoading(true);
+      setNldcGenerationError("");
+      const res = await API.getIndia15MinGenerationBreakup(dateStr);
+      if (!res.success) {
+        throw new Error(res.message || "Unable to load NLDC generation breakup");
+      }
+      setNldcGenerationRows(res.rows || []);
+      setNldcGenerationComponents(res.components || []);
+      if (res.date) {
+        setNldcGenerationDate(res.date);
+      }
+    } catch (err) {
+      console.error("Error loading NLDC generation breakup:", err);
+      setNldcGenerationError(err.message || "NLDC generation breakup could not be loaded.");
+      setNldcGenerationRows([]);
+      setNldcGenerationComponents([]);
+    } finally {
+      setNldcGenerationLoading(false);
+    }
+  };
+
+  const openNldcDataModal = () => {
+    setNldcDataModalOpen(true);
+    loadNldcDemandTrend(nldcDemandStartDate, nldcDemandEndDate);
+    loadNldcGenerationBreakup(nldcGenerationDate);
+  };
+
+  const toggleNldcDemandLine = (key) => {
+    setSelectedNldcDemandKeys((prev) => {
+      if (prev.includes(key)) {
+        return prev.length === 1 ? prev : prev.filter((item) => item !== key);
+      }
+      return [...prev, key];
+    });
+  };
+
+  const selectAllNldcDemandRegions = () => {
+    setSelectedNldcDemandKeys(NLDC_DEMAND_LINES.map((line) => line.key));
+  };
+
+  const selectOnlyAllIndiaDemand = () => {
+    setSelectedNldcDemandKeys(["ALL INDIA"]);
+  };
+
+  const toggleNldcDemandComponent = (key) => {
+    setSelectedNldcDemandComponents((prev) => {
+      if (prev.includes(key)) {
+        return prev.length === 1 ? prev : prev.filter((item) => item !== key);
+      }
+      return [...prev, key];
+    });
+  };
+
   const openEnergyTrendModal = () => {
     const end = toIsoDate(energyData?.date || portfolioData?.date || selectedDate || latestDate) || formatIsoLocal(new Date());
     const start = addDays(end, -6);
@@ -513,12 +694,26 @@ export default function PSPDashboard() {
   };
 
   const toggleEnergyTrendLine = (key) => {
+    setEnergyTrendFocusKey("custom");
     setSelectedEnergyTrendKeys((prev) => {
       if (prev.includes(key)) {
         return prev.length > 1 ? prev.filter((item) => item !== key) : prev;
       }
       return [...prev, key];
     });
+  };
+
+  const handleEnergyTrendFocusChange = (key) => {
+    if (key === "custom") {
+      setEnergyTrendFocusKey("custom");
+      return;
+    }
+    setEnergyTrendFocusKey(key);
+    if (key === "all") {
+      setSelectedEnergyTrendKeys(energyTrendLines.map((line) => line.key));
+      return;
+    }
+    setSelectedEnergyTrendKeys([key]);
   };
 
   const loadEnergyBreakdown = async (dateStr) => {
@@ -698,6 +893,48 @@ export default function PSPDashboard() {
     }
   };
 
+  const loadFrequencyCheck = async (dateStr) => {
+    try {
+      setFrequencyCheckLoading(true);
+      const res = await API.getPspReportChecking(dateStr, false);
+      if (res.success) {
+        setFrequencyCheckData(res.frequency_check || null);
+      }
+    } catch (err) {
+      console.error("Error loading PSP frequency check:", err);
+      setFrequencyCheckData(null);
+    } finally {
+      setFrequencyCheckLoading(false);
+    }
+  };
+
+  const loadFrequencyTrend = async (
+    start = frequencyTrendStartDate,
+    end = frequencyTrendEndDate
+  ) => {
+    try {
+      setFrequencyTrendLoading(true);
+      setFrequencyTrendError("");
+      const res = await API.getPspFrequencyTrend(start, end);
+      if (!res.success) throw new Error(res.message || "Unable to load frequency trend");
+      setFrequencyTrend(res);
+    } catch (err) {
+      console.error("Error loading frequency trend:", err);
+      setFrequencyTrendError(err.message || "Unable to load frequency trend.");
+    } finally {
+      setFrequencyTrendLoading(false);
+    }
+  };
+
+  const openFrequencyTrend = () => {
+    const end = toIsoDate(frequencyCheckData?.date || portfolioData?.date || selectedDate || latestDate) || formatIsoLocal(new Date());
+    const start = addDays(end, -14);
+    setFrequencyTrendEndDate(end);
+    setFrequencyTrendStartDate(start);
+    setFrequencyTrendOpen(true);
+    loadFrequencyTrend(start, end);
+  };
+
   const handleDateChange = (dateStr) => {
     setSelectedDate(dateStr);
     loadPortfolioData(dateStr);
@@ -707,6 +944,7 @@ export default function PSPDashboard() {
     loadGenerationOutageChanges(dateStr);
     loadPowerExchange(dateStr);
     loadVoltageProfile(dateStr);
+    loadFrequencyCheck(dateStr);
   };
 
   const handleRefreshAll = () => {
@@ -720,6 +958,35 @@ export default function PSPDashboard() {
     loadGenerationOutageChanges(selectedDate);
     loadPowerExchange(selectedDate);
     loadVoltageProfile(selectedDate);
+    loadFrequencyCheck(selectedDate);
+  };
+
+  const handleFetchSources = async () => {
+    try {
+      setSourceRefreshLoading(true);
+      const targetDate = selectedDate || latestDate || "";
+      const res = await API.refreshPspSources(targetDate);
+      if (!res.success) {
+        console.warn("PSP source refresh completed with failures:", res.failed || res.results || res.message);
+      }
+      const refreshedDate = res.date || targetDate;
+      setSelectedDate(refreshedDate);
+      loadStatus();
+      loadAnalytics();
+      loadPortfolioData(refreshedDate);
+      loadHighestRecords();
+      loadStateGenerationSources(refreshedDate);
+      loadPowerSystemData(refreshedDate);
+      loadLoadshedding(refreshedDate);
+      loadGenerationOutageChanges(refreshedDate);
+      loadPowerExchange(refreshedDate);
+      loadVoltageProfile(refreshedDate);
+      loadFrequencyCheck(refreshedDate);
+    } catch (err) {
+      console.error("Error refreshing PSP source data:", err);
+    } finally {
+      setSourceRefreshLoading(false);
+    }
   };
 
   useEffect(() => {
@@ -733,6 +1000,8 @@ export default function PSPDashboard() {
     loadGenerationOutageChanges();
     loadPowerExchange();
     loadVoltageProfile();
+    loadFrequencyCheck();
+    loadNldcDemandTrend(defaultNldcDemandStart, defaultNldcDemandEnd);
   }, []);
 
   const formatDateTime = (isoString) => {
@@ -779,6 +1048,81 @@ export default function PSPDashboard() {
     { key: "west_bengal", label: "West Bengal", color: "#DB2777" }
   ];
   const visibleEnergyTrendLines = energyTrendLines.filter((line) => selectedEnergyTrendKeys.includes(line.key));
+  const energyTrendSummaryLine = visibleEnergyTrendLines.length === 1
+    ? visibleEnergyTrendLines[0]
+    : energyTrendLines.find((line) => line.key === "er");
+  const visibleNldcDemandRegionLines = NLDC_DEMAND_LINES.filter((line) => selectedNldcDemandKeys.includes(line.key));
+  const visibleNldcDemandLines = nldcDemandViewMode === "solar"
+    ? visibleNldcDemandRegionLines.flatMap((line) =>
+        NLDC_DEMAND_COMPONENTS
+          .filter((component) => selectedNldcDemandComponents.includes(component.key))
+          .map((component) => ({
+            ...line,
+            componentKey: component.key,
+            componentLabel: component.label,
+            maxKey: component.maxKey,
+            yearlyMaxKey: component.yearlyMaxKey,
+            strokeDasharray: component.strokeDasharray,
+            dataKey: `${line.key}${component.suffix}`,
+            label: `${line.label} ${component.label}`
+          }))
+      )
+    : visibleNldcDemandRegionLines.map((line) => ({
+        ...line,
+        componentKey: "overall",
+        componentLabel: "Overall Max",
+        maxKey: "max",
+        yearlyMaxKey: "yearly_max",
+        dataKey: line.key
+      }));
+  const nldcDemandMaxByKey = Object.fromEntries(
+    (nldcDemandRegions || []).map((region) => [region.key, region])
+  );
+  const nldcDemandHasRegionalSelection = selectedNldcDemandKeys.some((key) => key !== "ALL INDIA");
+  const nldcDemandUseRightAxis =
+    nldcDemandUseSecondaryAxis &&
+    selectedNldcDemandKeys.includes("ALL INDIA") &&
+    nldcDemandHasRegionalSelection;
+  const nldcGenerationSummaryByKey = Object.fromEntries(
+    (nldcGenerationComponents || []).map((component) => [component.key, component])
+  );
+  const visibleNldcGenerationComponents = NLDC_GENERATION_COMPONENTS.filter((component) =>
+    nldcGenerationRows.some((row) => Number(row[component.key] || 0) !== 0)
+  );
+  const nldcDemandYears = yearsInRange(nldcDemandStartDate, nldcDemandEndDate);
+  const nldcDemandYearlyEntries = nldcDemandMode === "yearly"
+    ? visibleNldcDemandLines.flatMap((line) => {
+        const regionMax = nldcDemandMaxByKey[line.key] || {};
+        const byYear = Object.fromEntries((regionMax[line.yearlyMaxKey] || []).filter(Boolean).map((item) => [String(item.year), item]));
+        return nldcDemandYears.map((year) => {
+          const item = byYear[year] || {};
+          return {
+            ...item,
+            year,
+            value: item.value,
+            date: item.date,
+            time: item.time,
+            hasData: Number.isFinite(Number(item.value)),
+            dataKey: line.dataKey,
+            label: line.label,
+            color: line.color,
+            regionKey: line.key,
+          };
+        });
+      }).map((marker, index) => ({
+        ...marker,
+        labelLane: index % 4,
+        labelTitle: `${marker.label} ${marker.year}`,
+        labelValue: marker.hasData ? `${Number(marker.value || 0).toLocaleString("en-IN", { maximumFractionDigits: 0 })} MW` : "No data",
+        labelText: `${marker.label} ${marker.year} ${marker.hasData ? Number(marker.value || 0).toLocaleString("en-IN", { maximumFractionDigits: 0 }) : "No data"}`,
+      }))
+    : [];
+  const nldcDemandYearlyMarkers = nldcDemandYearlyEntries.filter((marker) => marker.hasData);
+  const nldcDemandYearlyCards = nldcDemandYearlyEntries;
+  const formatMw = (value) =>
+    Number(value || 0).toLocaleString("en-IN", {
+      maximumFractionDigits: 0
+    });
 
   return (
     <AppShell>
@@ -861,8 +1205,17 @@ export default function PSPDashboard() {
               )}
               <button
                 className="btn theme-btn-banner-refresh d-flex align-items-center gap-2"
+                onClick={handleFetchSources}
+                disabled={sourceRefreshLoading || loading || analyticsLoading}
+                title="Fetch PSP, loadshed/hourly, outage, portfolio, and curve data from source and cache it"
+              >
+                <Database size={14} className={sourceRefreshLoading ? "animate-spin-custom" : ""} />
+                <span>Fetch Sources</span>
+              </button>
+              <button
+                className="btn theme-btn-banner-refresh d-flex align-items-center gap-2"
                 onClick={handleRefreshAll}
-                disabled={loading || analyticsLoading}
+                disabled={loading || analyticsLoading || sourceRefreshLoading}
               >
                 <RefreshCw size={14} className={loading || analyticsLoading ? "animate-spin-custom" : ""} />
                 <span>Refresh Data</span>
@@ -1018,6 +1371,274 @@ export default function PSPDashboard() {
             </div>
           </div>
         </div>
+
+        {frequencyCheckLoading ? (
+          <div className="theme-glass-card p-3 mb-3">
+            <div className="d-flex align-items-center justify-content-center py-2">
+              <div className="spinner-border text-success spinner-border-sm me-2" role="status"></div>
+              <span className="small fw-bold text-secondary">Loading frequency check...</span>
+            </div>
+          </div>
+        ) : (
+          <PSPFrequencyCheckTiles
+            data={frequencyCheckData}
+            onOpenTrend={openFrequencyTrend}
+          />
+        )}
+
+        <div className="theme-glass-card p-3 mb-3 bg-white" style={{ borderRadius: "18px" }}>
+          <div className="d-flex align-items-center justify-content-between gap-3 flex-wrap">
+            <div>
+              <h3 className="h6 fw-bold mb-1 text-dark d-flex align-items-center gap-2">
+                <TrendingUp size={16} className="text-success" />
+                <span>NLDC Data</span>
+              </h3>
+              <p className="small text-muted mb-0" style={{ fontSize: "0.74rem" }}>
+                Region and India maximum demand trend plus All India 15-minute generation contribution.
+              </p>
+            </div>
+            <button
+              type="button"
+              className="btn theme-btn-action d-flex align-items-center gap-2"
+              onClick={openNldcDataModal}
+            >
+              <TrendingUp size={14} />
+              <span>Open NLDC Data</span>
+            </button>
+          </div>
+        </div>
+
+        {false && (
+        <div className="theme-glass-card p-3 mb-3 bg-white" style={{ borderRadius: "18px" }}>
+          <div className="d-flex align-items-start justify-content-between gap-3 flex-wrap mb-3">
+            <div>
+              <h3 className="h6 fw-bold mb-0 text-dark d-flex align-items-center gap-2">
+                <TrendingUp size={16} className="text-success" />
+                <span>NLDC Region & India Maximum Demand Trend</span>
+              </h3>
+              <p className="small text-muted mb-0" style={{ fontSize: "0.72rem" }}>
+                {nldcDemandMode === "yearly"
+                  ? "Calendar-year maximum demand by selected region."
+                  : "Daily maximum demand met by selected region."}
+              </p>
+            </div>
+
+            <div className="d-flex align-items-end gap-2 flex-wrap">
+              <div>
+                <label className="form-label small fw-bold text-secondary mb-1">Start</label>
+                <input
+                  type="date"
+                  className="form-control theme-input py-1"
+                  value={nldcDemandStartDate}
+                  onChange={(event) => setNldcDemandStartDate(event.target.value)}
+                  style={{ fontSize: "0.75rem", width: "145px" }}
+                />
+              </div>
+              <div>
+                <label className="form-label small fw-bold text-secondary mb-1">End</label>
+                <input
+                  type="date"
+                  className="form-control theme-input py-1"
+                  value={nldcDemandEndDate}
+                  onChange={(event) => setNldcDemandEndDate(event.target.value)}
+                  style={{ fontSize: "0.75rem", width: "145px" }}
+                />
+              </div>
+              <button
+                className="btn theme-btn-outline theme-btn-mini d-flex align-items-center gap-2"
+                onClick={() => loadNldcDemandTrend(nldcDemandStartDate, nldcDemandEndDate)}
+                disabled={nldcDemandLoading}
+                style={{ height: "32px" }}
+              >
+                <RefreshCw size={12} className={nldcDemandLoading ? "animate-spin-custom" : ""} />
+                <span>Load</span>
+              </button>
+            </div>
+          </div>
+
+          <div className="d-flex align-items-center gap-2 flex-wrap mb-3">
+            <div className="d-flex align-items-center gap-1 me-1">
+              <button
+                type="button"
+                className={`btn theme-btn-mini ${nldcDemandViewMode === "overall" ? "theme-btn-primary" : "theme-btn-outline"}`}
+                onClick={() => setNldcDemandViewMode("overall")}
+                style={{ fontSize: "0.72rem" }}
+              >
+                Overall Max
+              </button>
+              <button
+                type="button"
+                className={`btn theme-btn-mini ${nldcDemandViewMode === "solar" ? "theme-btn-primary" : "theme-btn-outline"}`}
+                onClick={() => setNldcDemandViewMode("solar")}
+                style={{ fontSize: "0.72rem" }}
+              >
+                Solar / Non-solar
+              </button>
+            </div>
+            {nldcDemandViewMode === "solar" && (
+              <div className="d-flex align-items-center gap-1 me-1">
+                {NLDC_DEMAND_COMPONENTS.map((component) => {
+                  const checked = selectedNldcDemandComponents.includes(component.key);
+                  return (
+                    <button
+                      type="button"
+                      key={component.key}
+                      className={`btn theme-btn-mini ${checked ? "theme-btn-primary" : "theme-btn-outline"}`}
+                      onClick={() => toggleNldcDemandComponent(component.key)}
+                      style={{ fontSize: "0.72rem" }}
+                    >
+                      {component.label}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+            <button
+              type="button"
+              className="btn theme-btn-outline theme-btn-mini"
+              onClick={selectOnlyAllIndiaDemand}
+              style={{ fontSize: "0.72rem" }}
+            >
+              All India Only
+            </button>
+            <button
+              type="button"
+              className="btn theme-btn-outline theme-btn-mini"
+              onClick={selectAllNldcDemandRegions}
+              style={{ fontSize: "0.72rem" }}
+            >
+              All Regions
+            </button>
+            {NLDC_DEMAND_LINES.map((line) => {
+              const checked = selectedNldcDemandKeys.includes(line.key);
+              return (
+                <button
+                  type="button"
+                  key={line.key}
+                  className={`btn theme-btn-mini ${checked ? "theme-btn-primary" : "theme-btn-outline"}`}
+                  onClick={() => toggleNldcDemandLine(line.key)}
+                  style={{
+                    fontSize: "0.72rem",
+                    borderColor: line.color,
+                    color: checked ? undefined : line.color
+                  }}
+                >
+                  {line.label}
+                </button>
+              );
+            })}
+            {nldcDemandUseRightAxis && (
+              <span className="badge bg-light text-success-emphasis border border-success-subtle ms-auto" style={{ fontSize: "0.68rem" }}>
+                Regions on secondary axis
+              </span>
+            )}
+          </div>
+
+          <div className="row g-2 mb-3">
+            {visibleNldcDemandLines.map((line) => {
+              const regionMax = nldcDemandMaxByKey[line.key] || {};
+              const maxItem = regionMax[line.maxKey] || {};
+              return (
+                <div className="col-12 col-sm-6 col-xl-2" key={`max-${line.dataKey}`}>
+                  <div className="rounded border border-light-subtle p-2 h-100" style={{ background: "#F8FAFC" }}>
+                    <div className="d-flex align-items-center gap-1 mb-1">
+                      <span className="rounded-circle d-inline-block" style={{ width: "7px", height: "7px", backgroundColor: line.color }} />
+                      <span className="fw-bold text-dark" style={{ fontSize: "0.72rem" }}>{line.label}</span>
+                    </div>
+                    <div className="fw-bold text-success-emphasis" style={{ fontSize: "0.94rem" }}>
+                      {maxItem.value ? `${formatMw(maxItem.value)} MW` : "-"}
+                    </div>
+                    <div className="text-muted" style={{ fontSize: "0.68rem" }}>
+                      {[formatDisplayDate(maxItem.date), maxItem.time].filter(Boolean).join(" | ") || "-"}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {nldcDemandLoading ? (
+            <div className="d-flex align-items-center justify-content-center py-5">
+              <div className="spinner-border text-success spinner-border-sm me-2" role="status"></div>
+              <span className="text-secondary small fw-bold">Loading NLDC demand trend...</span>
+            </div>
+          ) : !nldcDemandRows.length ? (
+            <div className="text-center py-5 text-muted">
+              <Info size={26} className="mb-2 text-secondary opacity-50" />
+              <p className="small mb-0">{nldcDemandError || "No NLDC demand records found for this range."}</p>
+            </div>
+          ) : (
+            <div style={{ width: "100%", height: "330px" }}>
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={nldcDemandRows} margin={{ top: 12, right: nldcDemandUseRightAxis ? 34 : 8, left: 0, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(170,203,196,0.22)" />
+                  <XAxis
+                    dataKey="period"
+                    stroke="#0B453A"
+                    style={{ fontSize: "0.7rem" }}
+                    minTickGap={18}
+                  />
+                  <YAxis
+                    yAxisId="left"
+                    stroke="#022726"
+                    style={{ fontSize: "0.7rem" }}
+                    tickFormatter={(value) => `${Math.round(value / 1000)}k`}
+                  />
+                  {nldcDemandUseRightAxis && (
+                    <YAxis
+                      yAxisId="right"
+                      orientation="right"
+                      stroke="#17876D"
+                      style={{ fontSize: "0.7rem" }}
+                      tickFormatter={(value) => `${Math.round(value / 1000)}k`}
+                    />
+                  )}
+                  <Tooltip
+                    content={({ active, payload, label }) => {
+                      if (!active || !payload || !payload.length) return null;
+                      const row = payload[0]?.payload || {};
+                      return (
+                        <div className="theme-chart-tooltip bg-white p-2 border rounded shadow-sm">
+                          <div className="fw-bold text-dark mb-1">{label}</div>
+                          {payload.map((item) => {
+                            const key = item.dataKey;
+                            return (
+                              <div key={key} className="d-flex justify-content-between gap-3" style={{ fontSize: "0.75rem" }}>
+                                <span style={{ color: item.color }}>{item.name}</span>
+                                <span className="fw-bold text-dark">
+                                  {formatMw(item.value)} MW
+                                  <span className="text-muted fw-normal ms-1">
+                                    {row[`${key}_date`] || row.date} {row[`${key}_time`] || ""}
+                                  </span>
+                                </span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      );
+                    }}
+                  />
+                  <Legend verticalAlign="top" height={28} iconType="circle" />
+                  {visibleNldcDemandLines.map((line) => (
+                    <Line
+                      key={line.dataKey}
+                      type="monotone"
+                      dataKey={line.dataKey}
+                      name={line.label}
+                      yAxisId={nldcDemandUseRightAxis && line.key !== "ALL INDIA" ? "right" : "left"}
+                      stroke={line.color}
+                      strokeWidth={line.strokeWidth || 2.2}
+                      strokeDasharray={line.strokeDasharray || (nldcDemandUseRightAxis && line.key !== "ALL INDIA" ? "5 3" : undefined)}
+                      dot={nldcDemandRows.length <= 45}
+                      connectNulls
+                    />
+                  ))}
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          )}
+        </div>
+        )}
 
         {/* METRICS & TILES ROW */}
         <div className="d-none">
@@ -2288,6 +2909,308 @@ export default function PSPDashboard() {
           powerSystemData={powerSystemData}
         />
 
+        {nldcDataModalOpen && (
+          <div
+            className="modal fade show d-block"
+            tabIndex="-1"
+            style={{ backgroundColor: "rgba(2, 39, 38, 0.55)" }}
+            onClick={() => setNldcDataModalOpen(false)}
+          >
+            <div className="modal-dialog modal-fullscreen-lg-down modal-xl modal-dialog-centered" style={{ maxWidth: "1320px" }} onClick={(event) => event.stopPropagation()}>
+              <div className="modal-content theme-glass-card border-0 p-3" style={{ borderRadius: "18px" }}>
+                <div className="modal-header border-0 pb-2 d-flex justify-content-between align-items-start">
+                  <div>
+                    <h5 className="modal-title fw-bold text-dark d-flex align-items-center gap-2 mb-1">
+                      <TrendingUp size={18} className="text-success" />
+                      NLDC Data
+                    </h5>
+                    <p className="small text-muted mb-0">
+                      Maximum demand trend and All India 15-minute generation contribution from Mongo snapshots.
+                    </p>
+                  </div>
+                  <button type="button" className="btn-close" aria-label="Close" onClick={() => setNldcDataModalOpen(false)} />
+                </div>
+
+                <div className="modal-body pt-2" style={{ maxHeight: "82vh", overflowY: "auto" }}>
+                  <div className="rounded border border-light-subtle bg-white p-3 mb-3">
+                    <div className="d-flex align-items-start justify-content-between gap-3 flex-wrap mb-3">
+                      <div>
+                        <h3 className="h6 fw-bold mb-0 text-dark">NLDC Region & India Maximum Demand Trend</h3>
+                        <p className="small text-muted mb-0" style={{ fontSize: "0.72rem" }}>
+                          {nldcDemandMode === "yearly" ? "Daily time series with calendar-year maximum demand callouts." : "Daily maximum demand met by selected region."}
+                        </p>
+                      </div>
+                      <div className="d-flex align-items-end gap-2 flex-wrap">
+                        <div>
+                          <label className="form-label small fw-bold text-secondary mb-1">Start</label>
+                          <input type="date" className="form-control theme-input py-1" value={nldcDemandStartDate} onChange={(event) => setNldcDemandStartDate(event.target.value)} style={{ fontSize: "0.75rem", width: "145px" }} />
+                        </div>
+                        <div>
+                          <label className="form-label small fw-bold text-secondary mb-1">End</label>
+                          <input type="date" className="form-control theme-input py-1" value={nldcDemandEndDate} onChange={(event) => setNldcDemandEndDate(event.target.value)} style={{ fontSize: "0.75rem", width: "145px" }} />
+                        </div>
+                        <button className="btn theme-btn-outline theme-btn-mini d-flex align-items-center gap-2" onClick={() => loadNldcDemandTrend(nldcDemandStartDate, nldcDemandEndDate)} disabled={nldcDemandLoading} style={{ height: "32px" }}>
+                          <RefreshCw size={12} className={nldcDemandLoading ? "animate-spin-custom" : ""} />
+                          <span>Load</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="d-flex align-items-center gap-2 flex-wrap mb-3">
+                      <button type="button" className={`btn theme-btn-mini ${nldcDemandViewMode === "overall" ? "theme-btn-primary" : "theme-btn-outline"}`} onClick={() => setNldcDemandViewMode("overall")} style={{ fontSize: "0.72rem" }}>
+                        Overall Max
+                      </button>
+                      <button type="button" className={`btn theme-btn-mini ${nldcDemandViewMode === "solar" ? "theme-btn-primary" : "theme-btn-outline"}`} onClick={() => setNldcDemandViewMode("solar")} style={{ fontSize: "0.72rem" }}>
+                        Solar / Non-solar
+                      </button>
+                      {nldcDemandViewMode === "solar" && NLDC_DEMAND_COMPONENTS.map((component) => {
+                        const checked = selectedNldcDemandComponents.includes(component.key);
+                        return (
+                          <button type="button" key={component.key} className={`btn theme-btn-mini ${checked ? "theme-btn-primary" : "theme-btn-outline"}`} onClick={() => toggleNldcDemandComponent(component.key)} style={{ fontSize: "0.72rem" }}>
+                            {component.label}
+                          </button>
+                        );
+                      })}
+                      <button type="button" className="btn theme-btn-outline theme-btn-mini" onClick={selectOnlyAllIndiaDemand} style={{ fontSize: "0.72rem" }}>All India Only</button>
+                      <button type="button" className="btn theme-btn-outline theme-btn-mini" onClick={selectAllNldcDemandRegions} style={{ fontSize: "0.72rem" }}>All Regions</button>
+                      {NLDC_DEMAND_LINES.map((line) => {
+                        const checked = selectedNldcDemandKeys.includes(line.key);
+                        return (
+                          <button type="button" key={line.key} className={`btn theme-btn-mini ${checked ? "theme-btn-primary" : "theme-btn-outline"}`} onClick={() => toggleNldcDemandLine(line.key)} style={{ fontSize: "0.72rem", borderColor: line.color, color: checked ? undefined : line.color }}>
+                            {line.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    <div className="row g-2 mb-3">
+                      {visibleNldcDemandLines.map((line) => {
+                        const regionMax = nldcDemandMaxByKey[line.key] || {};
+                        const maxItem = regionMax[line.maxKey] || {};
+                        return (
+                          <div className="col-12 col-sm-6 col-xl-2" key={`modal-max-${line.dataKey}`}>
+                            <div className="rounded border border-light-subtle p-2 h-100" style={{ background: "#F8FAFC" }}>
+                              <div className="d-flex align-items-center gap-1 mb-1">
+                                <span className="rounded-circle d-inline-block" style={{ width: "7px", height: "7px", backgroundColor: line.color }} />
+                                <span className="fw-bold text-dark" style={{ fontSize: "0.72rem" }}>{line.label}</span>
+                              </div>
+                              <div className="fw-bold text-success-emphasis" style={{ fontSize: "0.94rem" }}>{maxItem.value ? `${formatMw(maxItem.value)} MW` : "-"}</div>
+                              <div className="text-muted" style={{ fontSize: "0.68rem" }}>{[formatDisplayDate(maxItem.date), maxItem.time].filter(Boolean).join(" | ") || "-"}</div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    {nldcDemandMode === "yearly" && nldcDemandYearlyCards.length > 0 && (
+                      <div className="rounded border border-success-subtle p-2 mb-3" style={{ background: "#F8FAFC" }}>
+                        <div className="fw-bold text-dark mb-2" style={{ fontSize: "0.74rem" }}>
+                          Yearly Max Callouts
+                        </div>
+                        <div className="d-flex flex-wrap gap-2">
+                          {nldcDemandYearlyCards.map((marker) => (
+                            <div
+                              key={`yearly-card-${marker.dataKey}-${marker.year}`}
+                              className="rounded border border-light-subtle px-2 py-1"
+                              style={{ minWidth: "150px", background: marker.hasData ? "#fff" : "#F8FAFC", opacity: marker.hasData ? 1 : 0.72 }}
+                            >
+                              <div className="d-flex align-items-center gap-1">
+                                <span className="rounded-circle d-inline-block" style={{ width: "7px", height: "7px", backgroundColor: marker.color }} />
+                                <span className="fw-bold text-dark" style={{ fontSize: "0.68rem" }}>
+                                  {marker.label} {marker.year}
+                                </span>
+                              </div>
+                              <div className="fw-bold text-success-emphasis" style={{ fontSize: "0.86rem" }}>
+                                {marker.hasData ? `${formatMw(marker.value)} MW` : "-"}
+                              </div>
+                              <div className="text-muted" style={{ fontSize: "0.65rem" }}>
+                                {marker.hasData ? ([formatDisplayDate(marker.date), marker.time].filter(Boolean).join(" | ") || "-") : "No data in range"}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {nldcDemandLoading ? (
+                      <div className="d-flex align-items-center justify-content-center py-5">
+                        <div className="spinner-border text-success spinner-border-sm me-2" role="status"></div>
+                        <span className="text-secondary small fw-bold">Loading NLDC demand trend...</span>
+                      </div>
+                    ) : !nldcDemandRows.length ? (
+                      <div className="text-center py-5 text-muted">
+                        <Info size={26} className="mb-2 text-secondary opacity-50" />
+                        <p className="small mb-0">{nldcDemandError || "No NLDC demand records found for this range."}</p>
+                      </div>
+                    ) : (
+                      <div style={{ width: "100%", height: "330px" }}>
+                        <ResponsiveContainer width="100%" height="100%">
+                          <LineChart data={nldcDemandRows} margin={{ top: 64, right: nldcDemandUseRightAxis ? 34 : 14, left: 8, bottom: 0 }}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="rgba(170,203,196,0.22)" />
+                            <XAxis dataKey="period" stroke="#0B453A" style={{ fontSize: "0.7rem" }} minTickGap={18} />
+                            <YAxis yAxisId="left" stroke="#022726" style={{ fontSize: "0.7rem" }} tickFormatter={(value) => `${Math.round(value / 1000)}k`} />
+                            {nldcDemandUseRightAxis && <YAxis yAxisId="right" orientation="right" stroke="#17876D" style={{ fontSize: "0.7rem" }} tickFormatter={(value) => `${Math.round(value / 1000)}k`} />}
+                            <Tooltip
+                              content={({ active, payload, label }) => {
+                                if (!active || !payload || !payload.length) return null;
+                                const row = payload[0]?.payload || {};
+                                return (
+                                  <div className="theme-chart-tooltip bg-white p-2 border rounded shadow-sm">
+                                    <div className="fw-bold text-dark mb-1">{label}</div>
+                                    {payload.map((item) => {
+                                      const key = item.dataKey;
+                                      return (
+                                        <div key={key} className="d-flex justify-content-between gap-3" style={{ fontSize: "0.75rem" }}>
+                                          <span style={{ color: item.color }}>{item.name}</span>
+                                          <span className="fw-bold text-dark">{formatMw(item.value)} MW <span className="text-muted fw-normal ms-1">{row[`${key}_date`] || row.date} {row[`${key}_time`] || ""}</span></span>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                );
+                              }}
+                            />
+                            <Legend verticalAlign="top" height={28} iconType="circle" />
+                            {nldcDemandYearlyMarkers.map((marker) => (
+                              <ReferenceDot
+                                key={`yearly-marker-${marker.dataKey}-${marker.year}`}
+                                x={marker.date}
+                                y={marker.value}
+                                yAxisId={nldcDemandUseRightAxis && marker.regionKey !== "ALL INDIA" ? "right" : "left"}
+                                r={4}
+                                fill="#fff"
+                                stroke={marker.color}
+                                strokeWidth={2}
+                                label={<NldcYearlyMarkerLabel marker={marker} />}
+                              />
+                            ))}
+                            {visibleNldcDemandLines.map((line) => (
+                              <Line
+                                key={line.dataKey}
+                                type="monotone"
+                                dataKey={line.dataKey}
+                                name={line.label}
+                                yAxisId={nldcDemandUseRightAxis && line.key !== "ALL INDIA" ? "right" : "left"}
+                                stroke={line.color}
+                                strokeWidth={line.strokeWidth || 2.2}
+                                strokeDasharray={line.strokeDasharray || (nldcDemandUseRightAxis && line.key !== "ALL INDIA" ? "5 3" : undefined)}
+                                dot={nldcDemandRows.length <= 45}
+                                connectNulls
+                              />
+                            ))}
+                          </LineChart>
+                        </ResponsiveContainer>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="rounded border border-light-subtle bg-white p-3">
+                    <div className="d-flex align-items-start justify-content-between gap-3 flex-wrap mb-3">
+                      <div>
+                        <h3 className="h6 fw-bold mb-0 text-dark d-flex align-items-center gap-2">
+                          <Activity size={16} className="text-success" />
+                          <span>All India Demand Contribution</span>
+                        </h3>
+                        <p className="small text-muted mb-0" style={{ fontSize: "0.72rem" }}>
+                          Block-wise generation breakup from India_15_Min_Demand for {formatDisplayDate(nldcGenerationDate)}.
+                        </p>
+                      </div>
+                      <div className="d-flex align-items-end gap-2">
+                        <div>
+                          <label className="form-label small fw-bold text-secondary mb-1">Date</label>
+                          <input type="date" className="form-control theme-input py-1" value={nldcGenerationDate} onChange={(event) => setNldcGenerationDate(event.target.value)} style={{ fontSize: "0.75rem", width: "145px" }} />
+                        </div>
+                        <button className="btn theme-btn-outline theme-btn-mini d-flex align-items-center gap-2" onClick={() => loadNldcGenerationBreakup(nldcGenerationDate)} disabled={nldcGenerationLoading} style={{ height: "32px" }}>
+                          <RefreshCw size={12} className={nldcGenerationLoading ? "animate-spin-custom" : ""} />
+                          <span>Load</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="row g-2 mb-3">
+                      {visibleNldcGenerationComponents.map((component) => {
+                        const summary = nldcGenerationSummaryByKey[component.key] || {};
+                        return (
+                          <div className="col-6 col-md-4 col-xl-2" key={`gen-summary-${component.key}`}>
+                            <div className="rounded border border-light-subtle p-2 h-100" style={{ background: "#F8FAFC" }}>
+                              <div className="d-flex align-items-center gap-1 mb-1">
+                                <span className="rounded-circle d-inline-block" style={{ width: "7px", height: "7px", backgroundColor: component.color }} />
+                                <span className="fw-bold text-dark" style={{ fontSize: "0.7rem" }}>{component.label}</span>
+                              </div>
+                              <div className="fw-bold text-success-emphasis" style={{ fontSize: "0.88rem" }}>{formatMw(summary.max)} MW</div>
+                              <div className="text-muted" style={{ fontSize: "0.66rem" }}>Share {Number(summary.share || 0).toFixed(1)}%</div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    {nldcGenerationLoading ? (
+                      <div className="d-flex align-items-center justify-content-center py-5">
+                        <div className="spinner-border text-success spinner-border-sm me-2" role="status"></div>
+                        <span className="text-secondary small fw-bold">Loading generation contribution...</span>
+                      </div>
+                    ) : !nldcGenerationRows.length ? (
+                      <div className="text-center py-5 text-muted">
+                        <Info size={26} className="mb-2 text-secondary opacity-50" />
+                        <p className="small mb-0">{nldcGenerationError || "No India 15 Min generation rows found for this date."}</p>
+                      </div>
+                    ) : (
+                      <div style={{ width: "100%", height: "360px" }}>
+                        <ResponsiveContainer width="100%" height="100%">
+                          <AreaChart data={nldcGenerationRows} margin={{ top: 12, right: 18, left: 0, bottom: 0 }}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="rgba(170,203,196,0.22)" />
+                            <XAxis dataKey="timestamp" stroke="#0B453A" style={{ fontSize: "0.7rem" }} minTickGap={18} />
+                            <YAxis stroke="#022726" style={{ fontSize: "0.7rem" }} tickFormatter={(value) => `${Math.round(value / 1000)}k`} />
+                            <Tooltip
+                              content={({ active, payload, label }) => {
+                                if (!active || !payload || !payload.length) return null;
+                                const total = payload.reduce((sum, item) => sum + Number(item.value || 0), 0);
+                                return (
+                                  <div className="theme-chart-tooltip bg-white p-2 border rounded shadow-sm" style={{ minWidth: "250px" }}>
+                                    <div className="fw-bold text-dark mb-1">{label}</div>
+                                    {payload.slice().reverse().map((item) => (
+                                      <div key={item.dataKey} className="d-flex justify-content-between gap-3" style={{ fontSize: "0.74rem" }}>
+                                        <span style={{ color: item.color }}>{item.name}</span>
+                                        <span className="fw-bold text-dark">{formatMw(item.value)} MW</span>
+                                      </div>
+                                    ))}
+                                    <div className="border-top mt-1 pt-1 d-flex justify-content-between fw-bold" style={{ fontSize: "0.74rem" }}>
+                                      <span>Total</span>
+                                      <span>{formatMw(total)} MW</span>
+                                    </div>
+                                  </div>
+                                );
+                              }}
+                            />
+                            <Legend verticalAlign="top" height={30} iconType="circle" />
+                            {visibleNldcGenerationComponents.map((component) => (
+                              <Area key={component.key} type="monotone" dataKey={component.key} name={component.label} stackId="generation" stroke={component.color} fill={component.color} fillOpacity={0.72} connectNulls />
+                            ))}
+                          </AreaChart>
+                        </ResponsiveContainer>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        <PSPFrequencyTrendModal
+          open={frequencyTrendOpen}
+          onClose={() => setFrequencyTrendOpen(false)}
+          data={frequencyTrend}
+          loading={frequencyTrendLoading}
+          error={frequencyTrendError}
+          startDate={frequencyTrendStartDate}
+          endDate={frequencyTrendEndDate}
+          onStartDateChange={setFrequencyTrendStartDate}
+          onEndDateChange={setFrequencyTrendEndDate}
+          onLoad={() => loadFrequencyTrend(frequencyTrendStartDate, frequencyTrendEndDate)}
+        />
+
         {/* PSP HIGHLIGHTS REPORT MODAL */}
         {false && highlightsModalOpen && (
           <div
@@ -2763,7 +3686,7 @@ export default function PSPDashboard() {
                 </div>
                 <div className="modal-body pt-2">
                   <div className="row g-3 align-items-end mb-3">
-                    <div className="col-12 col-md-3">
+                    <div className="col-12 col-md-2">
                       <label className="form-label small fw-bold text-secondary mb-1">Start Date</label>
                       <input
                         type="date"
@@ -2772,7 +3695,7 @@ export default function PSPDashboard() {
                         onChange={(event) => setEnergyTrendStart(event.target.value)}
                       />
                     </div>
-                    <div className="col-12 col-md-3">
+                    <div className="col-12 col-md-2">
                       <label className="form-label small fw-bold text-secondary mb-1">End Date</label>
                       <input
                         type="date"
@@ -2780,6 +3703,22 @@ export default function PSPDashboard() {
                         value={energyTrendEnd}
                         onChange={(event) => setEnergyTrendEnd(event.target.value)}
                       />
+                    </div>
+                    <div className="col-12 col-md-3">
+                      <label className="form-label small fw-bold text-secondary mb-1">Trend View</label>
+                      <select
+                        className="form-select theme-input"
+                        value={energyTrendFocusKey}
+                        onChange={(event) => handleEnergyTrendFocusChange(event.target.value)}
+                      >
+                        <option value="all">All States + ER</option>
+                        {energyTrendLines.map((line) => (
+                          <option key={line.key} value={line.key}>
+                            {line.label}
+                          </option>
+                        ))}
+                        <option value="custom" disabled>Custom Selection</option>
+                      </select>
                     </div>
                     <div className="col-12 col-md-2">
                       <button
@@ -2792,12 +3731,16 @@ export default function PSPDashboard() {
                         <span>Apply</span>
                       </button>
                     </div>
-                    <div className="col-12 col-md-4">
+                    <div className="col-12 col-md-3">
                       <div className="p-3 rounded-4 bg-light border border-light-subtle h-100 d-flex align-items-center justify-content-between">
                         <div>
-                          <span className="text-muted small d-block fw-bold">Latest ER Total</span>
-                          <span className="fw-bold text-success" style={{ fontSize: "1.15rem", color: "#03624C" }}>
-                            {latestEnergyTrendRow ? `${Number(latestEnergyTrendRow.er || 0).toFixed(2)} MU` : "-"}
+                          <span className="text-muted small d-block fw-bold">
+                            Latest {energyTrendSummaryLine?.label || "Selected"}
+                          </span>
+                          <span className="fw-bold text-success" style={{ fontSize: "1.15rem", color: energyTrendSummaryLine?.color || "#03624C" }}>
+                            {latestEnergyTrendRow && energyTrendSummaryLine
+                              ? `${Number(latestEnergyTrendRow[energyTrendSummaryLine.key] || 0).toFixed(2)} MU`
+                              : "-"}
                           </span>
                         </div>
                         <span className="small text-secondary fw-semibold">
@@ -2836,7 +3779,7 @@ export default function PSPDashboard() {
                       <button
                         type="button"
                         className="btn btn-sm theme-btn-outline"
-                        onClick={() => setSelectedEnergyTrendKeys(energyTrendLines.map((line) => line.key))}
+                        onClick={() => handleEnergyTrendFocusChange("all")}
                         style={{ fontSize: "0.72rem", padding: "4px 10px" }}
                       >
                         All
@@ -2844,11 +3787,23 @@ export default function PSPDashboard() {
                       <button
                         type="button"
                         className="btn btn-sm theme-btn-outline"
-                        onClick={() => setSelectedEnergyTrendKeys(["er"])}
+                        onClick={() => handleEnergyTrendFocusChange("er")}
                         style={{ fontSize: "0.72rem", padding: "4px 10px" }}
                       >
                         ER Only
                       </button>
+                      <label
+                        className="d-flex align-items-center gap-2 px-2 py-1 rounded-pill border border-light-subtle bg-white mb-0"
+                        style={{ cursor: "pointer", fontSize: "0.72rem", fontWeight: 800 }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={showEnergyTrendCallouts}
+                          onChange={(event) => setShowEnergyTrendCallouts(event.target.checked)}
+                          style={{ accentColor: "#03624C" }}
+                        />
+                        <span>Data call-outs</span>
+                      </label>
                     </div>
                   </div>
 
@@ -2907,7 +3862,22 @@ export default function PSPDashboard() {
                                   strokeWidth={line.strokeWidth || 2.4}
                                   dot={{ r: 2.5, strokeWidth: 1 }}
                                   activeDot={{ r: 5 }}
-                                />
+                                  isAnimationActive={false}
+                                >
+                                  {showEnergyTrendCallouts && (
+                                    <LabelList
+                                      dataKey={line.key}
+                                      position="top"
+                                      offset={8}
+                                      formatter={(value) => Number(value || 0).toFixed(1)}
+                                      style={{
+                                        fill: line.color,
+                                        fontSize: 10,
+                                        fontWeight: 800
+                                      }}
+                                    />
+                                  )}
+                                </Line>
                               ))}
                             </LineChart>
                           </ResponsiveContainer>

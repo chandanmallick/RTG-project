@@ -1,4 +1,5 @@
 from fastapi import APIRouter
+from typing import Optional
 
 from services.db_handler import MongoService
 
@@ -164,6 +165,36 @@ async def get_today_trend():
         return {
             "success": True,
             "data": data
+        }
+
+    except Exception as e:
+
+        return {
+            "success": False,
+            "message": str(e)
+        }
+
+
+@router.get("/trend/snapshot")
+async def get_snapshot_trend(
+    date_str: Optional[str] = None
+):
+
+    print(
+        f"RTG snapshot trend API date_str={date_str!r}",
+        flush=True
+    )
+
+    try:
+
+        data = (
+            RTGDashboardService
+            .fetch_snapshot_trend(date_str)
+        )
+
+        return {
+            "success": True,
+            **data
         }
 
     except Exception as e:

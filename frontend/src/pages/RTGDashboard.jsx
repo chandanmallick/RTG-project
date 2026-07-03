@@ -52,6 +52,7 @@ import RTGCapacityPie from "../components/rtg/RTGCapacityPie";
 import RTGOutagePie from "../components/rtg/RTGOutagePie";
 import CapacityOnBarChart from "../components/rtg/CapacityOnBarChart";
 import RTGDayTrend from "../components/rtg/RTGDayTrend";
+import RTGSnapshotTrend from "../components/rtg/RTGSnapshotTrend";
 
 import {
   ResponsiveContainer,
@@ -67,7 +68,29 @@ import RefreshRoundedIcon from "@mui/icons-material/RefreshRounded";
 
 import { showModernPopup } from "../components/ui/ModernPopup";
 
-const PIPELINE_API = "/api";
+const PIPELINE_API = API.apiBaseUrl;
+
+const getPreviousDateString = () => {
+
+  const date = new Date();
+
+  date.setDate(
+    date.getDate() - 1
+  );
+
+  const year =
+    date.getFullYear();
+
+  const month =
+    String(date.getMonth() + 1)
+      .padStart(2, "0");
+
+  const day =
+    String(date.getDate())
+      .padStart(2, "0");
+
+  return `${year}-${month}-${day}`;
+};
 
 function PipelineRow({ icon, label, value }) {
   return (
@@ -86,6 +109,7 @@ export default function RTGDashboard() {
   useEffect(() => {
     loadData();
     loadTrendData();
+    loadSnapshotTrend();
     loadPipelineStatus();
   }, []);
 
@@ -93,6 +117,15 @@ export default function RTGDashboard() {
 
   const [trendData, setTrendData] =
     useState([]);
+
+  const [snapshotTrendDate, setSnapshotTrendDate] =
+    useState(getPreviousDateString());
+
+  const [snapshotTrendData, setSnapshotTrendData] =
+    useState([]);
+
+  const [snapshotTrendLoading, setSnapshotTrendLoading] =
+    useState(false);
 
   const [loading, setLoading] = useState(false);
 
@@ -261,6 +294,57 @@ export default function RTGDashboard() {
     }
   };
 
+  const loadSnapshotTrend = async (
+    dateStr = snapshotTrendDate
+  ) => {
+
+    try {
+
+      setSnapshotTrendLoading(true);
+
+      const res =
+        await API.getRTGSnapshotTrend(
+          dateStr
+        );
+
+      if (res.success) {
+
+        if (
+          res.date &&
+          res.date !== dateStr
+        ) {
+
+          setSnapshotTrendDate(
+            res.date
+          );
+        }
+
+        setSnapshotTrendData(
+          res.records || []
+        );
+      } else {
+
+        setSnapshotTrendData([]);
+      }
+
+    } catch (err) {
+
+      setSnapshotTrendData([]);
+
+    } finally {
+
+      setSnapshotTrendLoading(false);
+    }
+  };
+
+  const handleSnapshotTrendDateChange = (
+    dateStr
+  ) => {
+
+    setSnapshotTrendDate(dateStr);
+    loadSnapshotTrend(dateStr);
+  };
+
   const loadPipelineStatus = async () => {
     try {
       const res = await API.getPipelineStatus();
@@ -399,6 +483,8 @@ export default function RTGDashboard() {
 
                 await loadTrendData();
 
+                await loadSnapshotTrend();
+
                 await loadPipelineStatus();
             }
 
@@ -487,7 +573,7 @@ export default function RTGDashboard() {
       }))
       .sort(
         (a,b) =>
-          b.unreqPower - a.unreqPower
+          a.unreqPower - b.unreqPower
       );
 
     const outageSummaryRows = filteredData
@@ -1227,6 +1313,9 @@ export default function RTGDashboard() {
             onOutageClick={() =>
               setShowOutageCategoryDialog(true)
             }
+            onUnreqClick={() =>
+              setShowUnreqDialog(true)
+            }
           />
 
         </Grid>
@@ -1635,6 +1724,15 @@ export default function RTGDashboard() {
         </Grid>
 
       </Grid>
+
+      <RTGSnapshotTrend
+        date={snapshotTrendDate}
+        data={snapshotTrendData}
+        loading={snapshotTrendLoading}
+        onDateChange={
+          handleSnapshotTrendDateChange
+        }
+      />
 
       <Dialog
         open={showOutageDialog}

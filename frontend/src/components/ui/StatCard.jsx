@@ -6,7 +6,7 @@ export default function StatCard({
   value,
   subtitle,
   icon,
-  color = "#03624C",
+  color = "#0F6FDB",
   trend,
 }) {
   return (
@@ -24,19 +24,17 @@ export default function StatCard({
 
           overflow: "hidden",
 
-          borderRadius: "28px",
+          borderRadius: "16px",
 
           p: 3,
 
-          background: "rgba(255,255,255,0.82)",
-
-          backdropFilter: "blur(22px)",
+          background: "linear-gradient(180deg, #F8FBFF 0%, #FFFFFF 56px)",
 
           border:
-            "1px solid rgba(255,255,255,0.8)",
+            "1px solid rgba(175, 196, 234, 0.72)",
 
           boxShadow:
-            "0 18px 40px rgba(15,23,42,0.06)",
+            "0 12px 30px rgba(15, 111, 219, 0.07)",
 
           minHeight: 160,
         }}

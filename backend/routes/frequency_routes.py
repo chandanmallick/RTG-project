@@ -9,6 +9,7 @@ import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 from datetime import datetime, timedelta, time
+from xml.sax.saxutils import escape as xml_escape
 import requests
 import pandas as pd
 import numpy as np
@@ -39,6 +40,8 @@ router = APIRouter(
 )
 
 SSE_REPORT_JOBS = {}
+CRMS_MESSAGE_URL = "https://crms.erldc.in/MessageAppUI/getIssuedMessagesApi"
+CRMS_VIOLATION_TYPES = {"frequency", "deviation"}
 
 # ──────────────────────────────────────────────────────────────
 # TYPE-SAFE FORMATTING & METRIC RESOLUTION HELPERS
@@ -382,6 +385,7 @@ async def update_plant_mapping(payload = Body(...)):
             "actual_source":      row.get("actual_source", "RTG"),
             "type":               row.get("type", "IPP"),
             "rtg_plant_id":       clean_mapping_value("rtg_plant_id", row.get("rtg_plant_id", "")),
+            "crms_utility_name":   clean_mapping_value("crms_utility_name", row.get("crms_utility_name", "")),
             "is_state":           row.get("is_state", False),
             "is_frequency":       row.get("is_frequency", False),
             "mapping_updated_at": datetime.utcnow().isoformat(),
@@ -405,6 +409,221 @@ async def update_plant_mapping(payload = Body(...)):
 # ──────────────────────────────────────────────────────────────
 # DATA ACQUISITION & PROCESSING UTILS
 # ──────────────────────────────────────────────────────────────
+
+def parse_crms_message_datetime(value):
+    if value in [None, ""]:
+        return None
+    text = str(value).strip()
+    for fmt in ("%d-%m-%Y %H:%M", "%d-%m-%Y %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%dT%H:%M"):
+        try:
+            return datetime.strptime(text, fmt)
+        except Exception:
+            continue
+    try:
+        return pd.to_datetime(text, dayfirst=True).to_pydatetime()
+    except Exception:
+        return None
+
+
+def normalize_crms_message(item, msg_dt):
+    issued_to = item.get("issuedTo") or item.get("issued_to") or []
+    if isinstance(issued_to, str):
+        issued_to = [part.strip() for part in issued_to.replace(";", ",").split(",") if part.strip()]
+    elif not isinstance(issued_to, list):
+        issued_to = [str(issued_to)] if issued_to else []
+
+    copy_to = item.get("copyTo") or []
+    if isinstance(copy_to, str):
+        copy_to = [part.strip() for part in copy_to.replace(";", ",").split(",") if part.strip()]
+    elif not isinstance(copy_to, list):
+        copy_to = [str(copy_to)] if copy_to else []
+
+    category = item.get("category") or item.get("Category") or item.get("subcategory") or item.get("subCategory") or []
+    if isinstance(category, str):
+        category = [part.strip() for part in category.replace(";", ",").split(",") if part.strip()]
+    elif not isinstance(category, list):
+        category = [str(category)] if category else []
+
+    return {
+        "s_no": item.get("sNo") or item.get("s_no"),
+        "message_no": item.get("messageNo") or item.get("message_no") or "",
+        "message_date": item.get("messageDate") or item.get("message_date") or "",
+        "timestamp": msg_dt.strftime("%Y-%m-%d %H:%M:%S"),
+        "violation_type": item.get("violationType") or item.get("violation_type") or "",
+        "category": category,
+        "issued_to": issued_to,
+        "issued_by": item.get("issuedBy") or item.get("issued_by") or "",
+        "copy_to": copy_to,
+        "remarks": item.get("remarks") or "",
+    }
+
+
+def crms_message_category(message: dict):
+    raw = message.get("category") if isinstance(message, dict) else ""
+    if isinstance(raw, list) and raw:
+        return str(raw[0] or "Message").strip() or "Message"
+    if raw:
+        return str(raw).strip() or "Message"
+    return str((message or {}).get("violation_type") or "Message").strip() or "Message"
+
+
+def crms_message_issue_time(message: dict):
+    raw = str((message or {}).get("message_date") or (message or {}).get("timestamp") or "")
+    time_part = raw.split(" ")[1] if " " in raw else (raw.split("T")[1] if "T" in raw else raw)
+    parts = time_part.split(":")
+    if len(parts) >= 2 and parts[0] and parts[1]:
+        return f"{parts[0]}:{parts[1]} hrs"
+    return raw
+
+
+def crms_message_rows(row: dict):
+    messages = row.get("crms_messages") or []
+    if not isinstance(messages, list):
+        return []
+    result = []
+    for message in messages:
+        if not isinstance(message, dict):
+            continue
+        result.append({
+            "category": crms_message_category(message),
+            "issue_time": crms_message_issue_time(message),
+            "message_no": message.get("message_no") or "",
+            "issued_to": ", ".join(message.get("issued_to") or []),
+        })
+    return result
+
+
+def append_pdf_chart_note(story, row, styles):
+    note = str(row.get("chart_note") or "").strip()
+    if not note:
+        return
+    note_style = ParagraphStyle(
+        "ChartNote",
+        parent=styles["Normal"],
+        fontSize=8,
+        leading=10,
+        textColor=colors.HexColor("#1E293B"),
+        backColor=colors.HexColor("#F8FAFC"),
+        borderColor=colors.HexColor("#CBD5E1"),
+        borderWidth=0.5,
+        borderPadding=5,
+        spaceBefore=6,
+        spaceAfter=4,
+    )
+    story.append(Paragraph(f"<b>Chart Note:</b> {xml_escape(note)}", note_style))
+
+
+def append_docx_chart_note(doc, row):
+    note = str(row.get("chart_note") or "").strip()
+    if not note:
+        return
+    paragraph = doc.add_paragraph()
+    paragraph.add_run("Chart Note: ").bold = True
+    paragraph.add_run(note)
+
+
+def append_pdf_crms_messages(story, row, styles):
+    messages = crms_message_rows(row)
+    if not messages:
+        return
+    small_style = ParagraphStyle("CrmsSmall", parent=styles["Normal"], fontSize=6, leading=7)
+    story.append(Spacer(1, 4))
+    story.append(Paragraph("Issued CRMS Messages", ParagraphStyle(
+        "CrmsHeading",
+        parent=styles["Heading3"],
+        fontSize=8,
+        textColor=colors.HexColor("#0F172A"),
+        spaceAfter=3,
+    )))
+    data = [["Category", "Issue Time", "Msg No", "Issued To"]]
+    for msg in messages:
+        data.append([
+            Paragraph(xml_escape(msg["category"]), small_style),
+            Paragraph(xml_escape(msg["issue_time"]), small_style),
+            Paragraph(xml_escape(msg["message_no"]), small_style),
+            Paragraph(xml_escape(msg["issued_to"]), small_style),
+        ])
+    table = Table(data, colWidths=[70, 60, 120, 260])
+    table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#EAF2FF")),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.HexColor("#0F172A")),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("FONTSIZE", (0, 0), (-1, 0), 6),
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#CBD5E1")),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("BACKGROUND", (0, 1), (-1, -1), colors.white),
+    ]))
+    story.append(table)
+
+
+def append_docx_crms_messages(doc, row):
+    messages = crms_message_rows(row)
+    if not messages:
+        return
+    doc.add_paragraph("Issued CRMS Messages")
+    table = doc.add_table(rows=1, cols=4)
+    table.style = "Light Shading Accent 1"
+    headers = ["Category", "Issue Time", "Msg No", "Issued To"]
+    for idx, header in enumerate(headers):
+        table.rows[0].cells[idx].text = header
+    for msg in messages:
+        cells = table.add_row().cells
+        cells[0].text = msg["category"]
+        cells[1].text = msg["issue_time"]
+        cells[2].text = msg["message_no"]
+        cells[3].text = msg["issued_to"]
+    for table_row in table.rows:
+        for cell in table_row.cells:
+            for paragraph in cell.paragraphs:
+                for run in paragraph.runs:
+                    run.font.size = docx.shared.Pt(7)
+    doc.add_paragraph()
+
+
+@router.get("/crms-messages")
+async def get_crms_frequency_messages(start_time: str = Query(...), end_time: str = Query(...)):
+    try:
+        st = datetime.fromisoformat(start_time.replace("Z", ""))
+        et = datetime.fromisoformat(end_time.replace("Z", ""))
+        if et < st:
+            return {"success": False, "error": "end_time must be after start_time", "messages": []}
+
+        params = {
+            "startDate": st.strftime("%Y-%m-%d"),
+            "endDate": et.strftime("%Y-%m-%d"),
+        }
+        session = get_legacy_session_no_verify()
+        response = session.get(CRMS_MESSAGE_URL, params=params, timeout=30, verify=False)
+        response.raise_for_status()
+        payload = response.json()
+        raw_messages = payload.get("data") if isinstance(payload, dict) else payload
+        if not isinstance(raw_messages, list):
+            raw_messages = []
+
+        messages = []
+        skipped = 0
+        for item in raw_messages:
+            if not isinstance(item, dict):
+                skipped += 1
+                continue
+            violation_type = str(item.get("violationType") or item.get("violation_type") or "").strip()
+            if violation_type.lower() not in CRMS_VIOLATION_TYPES:
+                continue
+            msg_dt = parse_crms_message_datetime(item.get("messageDate") or item.get("message_date"))
+            if msg_dt is None or msg_dt < st or msg_dt > et:
+                continue
+            messages.append(normalize_crms_message(item, msg_dt))
+
+        return {
+            "success": True,
+            "messages": messages,
+            "count": len(messages),
+            "skipped": skipped,
+            "source_url": CRMS_MESSAGE_URL,
+        }
+    except Exception as e:
+        return {"success": False, "error": str(e), "messages": []}
+
 
 def get_legacy_session_no_verify():
     import ssl
@@ -804,6 +1023,7 @@ def build_saved_event_response(db, event_id: str, entity_list: list, start_dt: d
             "sched_src": point.get("schedule_source") or entity.get("sched_src") or entity.get("schedule_source") or "RTG",
             "dc_src": point.get("dc_source") or entity.get("dc_src") or entity.get("dc_source") or "RTG",
             "wbes_name": entity.get("wbes_name", ""),
+            "crms_utility_name": entity.get("crms_utility_name", ""),
             "rtg_plant_id": rtg_pid,
             "scada_key": entity.get("scada_key", ""),
             "scada_header": entity.get("scada_header", ""),
@@ -1763,7 +1983,7 @@ async def export_mapping():
     
     headers = [
         "plant_id", "plant_name", "STAGE_ID", "STAGE_NAME", "wbes_name",
-        "wbes_acronym", "scada_key", "scada_header", "scada_schedule_key",
+        "wbes_acronym", "crms_utility_name", "scada_key", "scada_header", "scada_schedule_key",
         "scada_schedule_header", "scada_dc_key", "scada_dc_header",
         "schedule_source", "dc_source", "actual_source",
         "type", "rtg_plant_id", "is_state", "is_frequency", "stage_installed_capacity"
@@ -2219,6 +2439,7 @@ async def process_report_sse(
                     "actual_source": act_src,
                     "type": plant_type,
                     "wbes_name": wbes_name,
+                    "crms_utility_name": e.get("crms_utility_name", ""),
                     "rtg_plant_id": rtg_pid,
                     "scada_key": e.get("scada_key"),
                     "scada_header": e.get("scada_header"),
@@ -2296,6 +2517,7 @@ async def process_report_sse(
                     }
                 row["type"] = "state" if is_state else "generator"
                 matching_entity = next((item for item in entity_list if item.get("plant_id") == row["plant_id"]), {})
+                row["crms_utility_name"] = row.get("crms_utility_name") or matching_entity.get("crms_utility_name", "")
                 row["state"] = row.get("state") or (matching_entity.get("state_name") or matching_entity.get("state") or "")
                 row["fuel"]  = row.get("fuel")  or (matching_entity.get("fuel_type") or matching_entity.get("fuel") or "")
                 row["owner"] = row.get("owner") or (matching_entity.get("owner_name") or matching_entity.get("owner") or "")
@@ -2602,6 +2824,7 @@ async def process_report(
                 "actual_source": act_src,
                 "type": plant_type,
                 "wbes_name": wbes_name,
+                "crms_utility_name": e.get("crms_utility_name", ""),
                 "rtg_plant_id": rtg_pid,
                 "scada_key": e.get("scada_key"),
                 "scada_header": e.get("scada_header"),
@@ -2668,6 +2891,7 @@ async def process_report(
             # Add entity type
             row["type"] = "state" if is_state else "generator"
             matching_entity = next((item for item in entity_list if item.get("plant_id") == row["plant_id"]), {})
+            row["crms_utility_name"] = row.get("crms_utility_name") or matching_entity.get("crms_utility_name", "")
             row["state"] = row.get("state") or (matching_entity.get("state_name") or matching_entity.get("state") or "")
             row["fuel"]  = row.get("fuel")  or (matching_entity.get("fuel_type") or matching_entity.get("fuel") or "")
             row["owner"] = row.get("owner") or (matching_entity.get("owner_name") or matching_entity.get("owner") or "")
@@ -2826,11 +3050,12 @@ async def download_excel(payload: dict):
 async def download_pdf(payload: dict):
     try:
         rows = payload.get("rows", [])
+        rows = [r for r in rows if r.get("is_state")] + [r for r in rows if not r.get("is_state")]
         event_type = normalize_event_type(payload.get("event_type") or (rows[0].get("event_type") if rows else None))
         cfg = event_config(event_type)
         
         buf = io.BytesIO()
-        doc = SimpleDocTemplate(buf, pagesize=A4, rightMargin=25, leftMargin=25, topMargin=25, bottomMargin=25)
+        doc = SimpleDocTemplate(buf, pagesize=A4, rightMargin=12, leftMargin=12, topMargin=14, bottomMargin=14)
         
         styles = getSampleStyleSheet()
         
@@ -2871,16 +3096,18 @@ async def download_pdf(payload: dict):
                 try:
                     plot_data = base64.b64decode(plot_b64)
                     plot_buf = io.BytesIO(plot_data)
-                    img = Image(plot_buf, width=500, height=225)
+                    img = Image(plot_buf, width=570, height=245)
                     story.append(img)
                 except Exception as img_err:
                     print(f"Skipping invalid PDF plot image for {r.get('plant_name')}: {img_err}")
+            append_pdf_chart_note(story, r, styles)
+            append_pdf_crms_messages(story, r, styles)
 
             if not r.get("is_state") and r.get("capacity_plot_image"):
                 try:
                     plot_data = base64.b64decode(r.get("capacity_plot_image"))
                     plot_buf = io.BytesIO(plot_data)
-                    img = Image(plot_buf, width=500, height=190)
+                    img = Image(plot_buf, width=570, height=220)
                     story.append(Spacer(1, 6))
                     story.append(img)
                 except Exception as img_err:
@@ -2948,8 +3175,15 @@ async def download_docx(payload: dict):
     gen_desc = payload.get("gen_desc", "")
     state_desc = payload.get("state_desc", "")
     rows = payload.get("rows", [])
+    state_rows = [r for r in rows if r.get("is_state")]
+    gen_rows = [r for r in rows if not r.get("is_state")]
     
     doc = Document()
+    for section in doc.sections:
+        section.top_margin = docx.shared.Inches(0.35)
+        section.bottom_margin = docx.shared.Inches(0.35)
+        section.left_margin = docx.shared.Inches(0.35)
+        section.right_margin = docx.shared.Inches(0.35)
     
     title = doc.add_heading("Power System Deviation Analysis Report", level=0)
     title.style.font.color.rgb = docx.shared.RGBColor(2, 39, 38)
@@ -2960,59 +3194,12 @@ async def download_docx(payload: dict):
     if intro_desc:
         doc.add_heading("1. Executive Summary & General Notes", level=1)
         doc.add_paragraph(intro_desc)
-        
-    # Generator Section
-    doc.add_heading("2. Generator Scheduling Compliance Details", level=1)
-    if gen_desc:
-        doc.add_paragraph(gen_desc)
-        
-    gen_rows = [r for r in rows if not r.get("is_state")]
-    if gen_rows:
-        table = doc.add_table(rows=1, cols=3)
-        table.style = 'Light Shading Accent 1'
-        hdr_cells = table.rows[0].cells
-        hdr_cells[0].text = 'Generator Name'
-        hdr_cells[1].text = '% Duration Under Inj (Freq<49.9 & Dev<0)'
-        hdr_cells[2].text = '% Duration Helping Grid (Freq<49.9 & Dev>0)'
-        
-        for r in gen_rows:
-            row_cells = table.add_row().cells
-            row_cells[0].text = str(r.get("plant_name"))
-            under_inj = get_stat(r, 'under_inj_pct')
-            helping_grid = get_stat(r, 'helping_grid_pct')
-            row_cells[1].text = safe_format_pct(under_inj)
-            row_cells[2].text = safe_format_pct(helping_grid)
-            
-        doc.add_paragraph() # spacing
-        for r in gen_rows:
-            doc.add_heading(f"Generator: {r.get('plant_name')}", level=2)
-            
-            plot_b64 = r.get("plot_image")
-            if plot_b64:
-                try:
-                    plot_data = base64.b64decode(plot_b64)
-                    plot_buf = io.BytesIO(plot_data)
-                    doc.add_picture(plot_buf, width=docx.shared.Inches(5.8))
-                except Exception as img_err:
-                    print(f"Skipping invalid DOCX plot image for {r.get('plant_name')}: {img_err}")
-
-            capacity_plot_b64 = r.get("capacity_plot_image")
-            if capacity_plot_b64:
-                try:
-                    plot_data = base64.b64decode(capacity_plot_b64)
-                    plot_buf = io.BytesIO(plot_data)
-                    doc.add_picture(plot_buf, width=docx.shared.Inches(5.8))
-                except Exception as img_err:
-                    print(f"Skipping invalid DOCX capacity plot image for {r.get('plant_name')}: {img_err}")
-                
-            doc.add_paragraph(f"Reason/Comments: {r.get('reason', 'None')}")
             
     # State Section
-    doc.add_heading("3. State Drawal Compliance Details", level=1)
+    doc.add_heading("2. State Drawal Compliance Details", level=1)
     if state_desc:
         doc.add_paragraph(state_desc)
         
-    state_rows = [r for r in rows if r.get("is_state")]
     if state_rows:
         table = doc.add_table(rows=1, cols=6)
         table.style = 'Light Shading Accent 1'
@@ -3049,10 +3236,59 @@ async def download_docx(payload: dict):
                 try:
                     plot_data = base64.b64decode(plot_b64)
                     plot_buf = io.BytesIO(plot_data)
-                    doc.add_picture(plot_buf, width=docx.shared.Inches(5.8))
+                    doc.add_picture(plot_buf, width=docx.shared.Inches(7.6))
                 except Exception as img_err:
                     print(f"Skipping invalid DOCX plot image for {r.get('plant_name')}: {img_err}")
+            append_docx_chart_note(doc, r)
+            append_docx_crms_messages(doc, r)
                 
+            doc.add_paragraph(f"Reason/Comments: {r.get('reason', 'None')}")
+
+    # Generator Section
+    doc.add_heading("3. Generator Scheduling Compliance Details", level=1)
+    if gen_desc:
+        doc.add_paragraph(gen_desc)
+
+    if gen_rows:
+        table = doc.add_table(rows=1, cols=3)
+        table.style = 'Light Shading Accent 1'
+        hdr_cells = table.rows[0].cells
+        hdr_cells[0].text = 'Generator Name'
+        hdr_cells[1].text = '% Duration Under Inj (Freq<49.9 & Dev<0)'
+        hdr_cells[2].text = '% Duration Helping Grid (Freq<49.9 & Dev>0)'
+
+        for r in gen_rows:
+            row_cells = table.add_row().cells
+            row_cells[0].text = str(r.get("plant_name"))
+            under_inj = get_stat(r, 'under_inj_pct')
+            helping_grid = get_stat(r, 'helping_grid_pct')
+            row_cells[1].text = safe_format_pct(under_inj)
+            row_cells[2].text = safe_format_pct(helping_grid)
+
+        doc.add_paragraph()
+        for r in gen_rows:
+            doc.add_heading(f"Generator: {r.get('plant_name')}", level=2)
+
+            plot_b64 = r.get("plot_image")
+            if plot_b64:
+                try:
+                    plot_data = base64.b64decode(plot_b64)
+                    plot_buf = io.BytesIO(plot_data)
+                    doc.add_picture(plot_buf, width=docx.shared.Inches(7.6))
+                except Exception as img_err:
+                    print(f"Skipping invalid DOCX plot image for {r.get('plant_name')}: {img_err}")
+            append_docx_chart_note(doc, r)
+            append_docx_crms_messages(doc, r)
+
+            capacity_plot_b64 = r.get("capacity_plot_image")
+            if capacity_plot_b64:
+                try:
+                    plot_data = base64.b64decode(capacity_plot_b64)
+                    plot_buf = io.BytesIO(plot_data)
+                    doc.add_picture(plot_buf, width=docx.shared.Inches(7.6))
+                except Exception as img_err:
+                    print(f"Skipping invalid DOCX capacity plot image for {r.get('plant_name')}: {img_err}")
+
             doc.add_paragraph(f"Reason/Comments: {r.get('reason', 'None')}")
             
     buf = io.BytesIO()
