@@ -39,10 +39,29 @@ const normalizeScadaKey = (value) => {
   return text;
 };
 
+const formatPlantStageName = (row = {}) => {
+  if (row.is_state) return String(row.plant_name || row.state || row.state_name || "").trim();
+  const plantName = String(row.plant_name || row.STAGE_NAME || row.stage_name || "").trim();
+  const stageName = String(row.stage_name || row.STAGE_NAME || "").trim();
+  const stageId = String(row.stage_id || row.STAGE_ID || "").trim().replace(/\.0$/, "");
+  const stageRaw = stageName || stageId;
+  const stageText = stageRaw ? `St. ${stageRaw.replace(/^st\.?\s*/i, "")}` : "";
+  if (!stageText) return plantName;
+  if (!plantName) return stageText;
+  const plantUpper = plantName.toUpperCase();
+  const stageUpper = stageText.toUpperCase();
+  const rawStageUpper = String(stageRaw).toUpperCase();
+  if (plantUpper === stageUpper || plantUpper.includes(`(${stageUpper})`) || plantUpper.includes(`(${rawStageUpper})`) || plantUpper.includes(`STAGE ${rawStageUpper}`)) {
+    return plantName;
+  }
+  return `${plantName} (${stageText})`;
+};
+
 const normalizeMappingRow = (row) => ({
   ...row,
   plant_id: row.plant_id !== null && row.plant_id !== undefined ? String(row.plant_id).trim().replace(/\.0$/, "") : "",
   STAGE_ID: row.STAGE_ID !== null && row.STAGE_ID !== undefined ? String(row.STAGE_ID).trim().replace(/\.0$/, "") : "",
+  STAGE_NAME: row.STAGE_NAME !== null && row.STAGE_NAME !== undefined ? String(row.STAGE_NAME).trim() : "",
   rtg_plant_id: row.rtg_plant_id !== null && row.rtg_plant_id !== undefined ? String(row.rtg_plant_id).trim().replace(/\.0$/, "") : "",
   scada_key: normalizeScadaKey(row.scada_key),
   scada_schedule_key: normalizeScadaKey(row.scada_schedule_key),
@@ -65,8 +84,15 @@ const normalizeSeries = (series = {}) => ({
 
 const normalizeReportRow = (row = {}) => {
   const statistics = row.statistics || {};
+  const stageName = row.stage_name || row.STAGE_NAME || "";
+  const stageId = row.stage_id || row.STAGE_ID || "";
   return {
     ...row,
+    plant_name: formatPlantStageName({ ...row, stage_name: stageName, stage_id: stageId }),
+    stage_id: stageId,
+    stage_name: stageName,
+    state: row.state || row.state_name || "",
+    type: row.type || (row.is_state ? "state" : ""),
     actual: toNumberOrNull(row.actual),
     schedule: toNumberOrNull(row.schedule),
     dc: toNumberOrNull(row.dc),
@@ -145,6 +171,60 @@ const mapCrmsMessagesToRows = (baseRows = [], messages = []) => {
   });
 };
 
+const generatorSectionLabel = (row = {}) => {
+  const type = String(row.type || "").toUpperCase();
+  const state = String(row.state || "").toUpperCase();
+  if (type === "ISGS") return "ISGS";
+  if (type === "IPP") return "IPP";
+  if (type === "STATE" || type === "STATE_IPP") return `State Generator (${state || "STATE"})`;
+  return "IPP";
+};
+
+const sectionRank = (label = "") => {
+  if (label === "ISGS") return 1;
+  if (label === "IPP") return 2;
+  if (label.startsWith("State Generator")) return 3;
+  return 4;
+};
+
+const finiteSeries = (values = []) => values.map(Number).filter(Number.isFinite);
+const minSeries = (values = []) => {
+  const nums = finiteSeries(values);
+  return nums.length ? Math.min(...nums) : null;
+};
+const maxSeries = (values = []) => {
+  const nums = finiteSeries(values);
+  return nums.length ? Math.max(...nums) : null;
+};
+const minGenerationPct = (row = {}) => {
+  const minGen = minSeries(row.series?.actual || []);
+  const highFreqReference = Number(row.cap_on_bar || 0) * 0.94;
+  return minGen !== null && highFreqReference > 0 ? (minGen / highFreqReference) * 100 : null;
+};
+const fleetMinGenerationPct = (rows = []) => {
+  const maxLen = Math.max(0, ...rows.map((row) => row.series?.actual?.length || 0));
+  let best = null;
+  for (let idx = 0; idx < maxLen; idx += 1) {
+    let actualSum = 0;
+    let referenceSum = 0;
+    rows.forEach((row) => {
+      const actual = Number(row.series?.actual?.[idx]);
+      const highFreqReference = Number(row.cap_on_bar || 0) * 0.94;
+      if (Number.isFinite(actual) && highFreqReference > 0) {
+        actualSum += actual;
+        referenceSum += highFreqReference;
+      }
+    });
+    if (referenceSum > 0) {
+      const pctVal = (actualSum / referenceSum) * 100;
+      best = best === null ? pctVal : Math.min(best, pctVal);
+    }
+  }
+  return best;
+};
+const fmtPctText = (value) => Number.isFinite(Number(value)) ? `${Number(value).toFixed(1)}%` : "-";
+const fmtMwText = (value) => Number.isFinite(Number(value)) ? `${Number(value).toFixed(0)} MW` : "-";
+
 export default function FrequencyReport() {
   const [tab, setTab] = useState("report");
   const [eventType, setEventType] = useState("low");
@@ -209,14 +289,19 @@ export default function FrequencyReport() {
   const [stateDesc, setStateDesc] = useState(
     "State Module: Over drawal (gold shade) and grid helping (cyan shade) compliance durations, along with Maximum Over Drawal (Max OD) magnitude and timestamps during low frequency grid states."
   );
+  const [stateObservation, setStateObservation] = useState("");
+  const [generatorObservation, setGeneratorObservation] = useState("");
 
   const [showSchAct, setShowSchAct] = useState(false);
   const [expandedRowIds, setExpandedRowIds] = useState([]);
   const [selectedExportStateIds, setSelectedExportStateIds] = useState([]);
   const [selectedExportGeneratorIds, setSelectedExportGeneratorIds] = useState([]);
   const [exportGeneratorFilter, setExportGeneratorFilter] = useState("");
+  const [exportFuelFilter, setExportFuelFilter] = useState("ALL_FUELS");
   const [exportIncludeDeviationPlot, setExportIncludeDeviationPlot] = useState(true);
-  const [exportIncludeScheduleActualPlot, setExportIncludeScheduleActualPlot] = useState(true);
+  const [exportIncludeStateScheduleActualPlot, setExportIncludeStateScheduleActualPlot] = useState(false);
+  const [exportIncludeGeneratorScheduleActualPlot, setExportIncludeGeneratorScheduleActualPlot] = useState(true);
+  const [exportReportMode, setExportReportMode] = useState("with_annexure");
   const [pendingExportType, setPendingExportType] = useState(null);
 
   // Ref container to collect all ECharts instances for offscreen render/export
@@ -266,7 +351,7 @@ export default function FrequencyReport() {
       setStartTime(HIGH_FREQ_DEFAULT_START);
       setEndTime(HIGH_FREQ_DEFAULT_END);
       setIntroDesc("This report provides a comprehensive analysis of high frequency operation and power system deviation. Deviations are calculated as Actual minus Scheduled values. Statistical calculations are restricted to High Frequency Operation periods (> 50.05 Hz).");
-      setGenDesc("Generator Module: Over injection and under injection duration are computed during High Frequency periods (> 50.05 Hz). Capacity-on-bar from RTG snapshot is used to assess actual generation against the 55% reference line.");
+      setGenDesc("Generator Module: Over injection and under injection duration are computed during High Frequency periods (> 50.05 Hz). Minimum Generation % Achieved is computed as minimum generation divided by 94% of capacity on bar.");
       setStateDesc("State Module: Over drawal and under drawal duration are computed during High Frequency periods (> 50.05 Hz), along with Maximum Under Drawal (Max UD) magnitude and timestamp.");
     } else {
       setIntroDesc("This report provides a comprehensive analysis of power system frequency and deviation compliance. Deviations are calculated as Actual minus Scheduled values. Statistical calculations are restricted to Low Frequency Operation periods (< 49.9 Hz).");
@@ -334,11 +419,22 @@ export default function FrequencyReport() {
         event_type: eventType,
         start_time: startTime,
         end_time: endTime,
+        report_notes: {
+          executive_summary: introDesc,
+          state_drawal_compliance: stateDesc,
+          generator_scheduling_compliance: genDesc,
+          state_observation: stateObservation,
+          generator_observation: generatorObservation,
+        },
         details: eventDetails,
         data_points: rows.map((row) => ({
           plant_id: row.plant_id,
           plant_name: row.plant_name,
-          type: row.is_state ? "State" : "Generator",
+          stage_id: row.stage_id || row.STAGE_ID || "",
+          stage_name: row.stage_name || row.STAGE_NAME || "",
+          type: row.type || (row.is_state ? "State" : "IPP"),
+          reason: row.reason || "",
+          chart_note: row.chart_note || "",
           actual_source: row.actual_source || "RTG",
           schedule_source: row.sched_src || row.schedule_source || "RTG",
           dc_source: row.dc_src || row.dc_source || "RTG",
@@ -374,7 +470,30 @@ export default function FrequencyReport() {
       console.error(e);
       toast.error("Could not save event: " + e.message, { id: saveToast });
     }
-  }, [endTime, eventDurationName, eventNameDraft, eventType, loadAvailableDates, rows, startTime]);
+  }, [endTime, eventDurationName, eventNameDraft, eventType, genDesc, introDesc, loadAvailableDates, rows, startTime, stateDesc]);
+
+  const handleDeleteEvent = useCallback(async (eventId) => {
+    if (!eventId) return;
+    const confirmed = window.confirm("Delete this historical frequency event? This cannot be undone.");
+    if (!confirmed) return;
+
+    const deleteToast = toast.loading("Deleting event...");
+    try {
+      const res = await API.deleteFrequencyEvent(eventId);
+      if (res?.success) {
+        toast.success("Event deleted", { id: deleteToast });
+        setSelectedEventId("");
+        setEventNameDraft("");
+        setUseDatabase(false);
+        await loadAvailableDates();
+      } else {
+        toast.error(res?.error || "Could not delete event", { id: deleteToast });
+      }
+    } catch (e) {
+      console.error(e);
+      toast.error("Could not delete event: " + e.message, { id: deleteToast });
+    }
+  }, [loadAvailableDates]);
 
   useEffect(() => {
     if (activeCell && rawInputRef.current) {
@@ -708,8 +827,10 @@ export default function FrequencyReport() {
           return mapData.map((m) => ({
             plant_id: m.plant_id,
             stage_id: m.STAGE_ID,
-            plant_name: m.plant_name || m.STAGE_NAME || "",
+            stage_name: m.STAGE_NAME || "",
+            plant_name: formatPlantStageName(m),
             state: m.state_name || "",
+            state_name: m.state_name || "",
             fuel: m.fuel_type || "",
             owner: m.owner_name || "",
             capacity: m.stage_installed_capacity || m.installed_capacity || 0,
@@ -746,6 +867,11 @@ export default function FrequencyReport() {
               dc_src: m.dc_source || "RTG",
               actual_source: m.actual_source || "RTG",
               type: m.type || (m.is_state ? "State" : "IPP"),
+              stage_id: m.STAGE_ID || r.stage_id || "",
+              stage_name: m.STAGE_NAME || r.stage_name || "",
+              plant_name: formatPlantStageName({ ...r, plant_name: m.plant_name || r.plant_name, stage_name: m.STAGE_NAME || r.stage_name, stage_id: m.STAGE_ID || r.stage_id }),
+              state: m.state_name || r.state || "",
+              state_name: m.state_name || r.state_name || "",
               wbes_name: m.wbes_name || "",
               crms_utility_name: m.crms_utility_name || "",
               rtg_plant_id: m.rtg_plant_id || "",
@@ -946,6 +1072,13 @@ export default function FrequencyReport() {
           if (result.success) {
             const normalizedRows = (result.rows || []).map(normalizeReportRow);
             setRows(normalizedRows);
+            if (result.report_notes) {
+              setIntroDesc(result.report_notes.executive_summary || "");
+              setStateDesc(result.report_notes.state_drawal_compliance || "");
+              setGenDesc(result.report_notes.generator_scheduling_compliance || "");
+              setStateObservation(result.report_notes.state_observation || result.report_notes.auto_state_observation || "");
+              setGeneratorObservation(result.report_notes.generator_observation || result.report_notes.auto_generator_observation || "");
+            }
             loadCrmsMessages(startTime, endTime);
             if (result.event_type) {
               setEventType(result.event_type);
@@ -1037,6 +1170,8 @@ export default function FrequencyReport() {
   };
 
   const handleProcessReport = async () => {
+    setStateObservation("");
+    setGeneratorObservation("");
     if (useDatabase) {
       await runSSEReport("database", null);
       return;
@@ -1234,7 +1369,8 @@ export default function FrequencyReport() {
       start_time: startTime,
       end_time: endTime,
       includeDeviation: exportIncludeDeviationPlot,
-      includeScheduleActual: exportIncludeScheduleActualPlot,
+      includeStateScheduleActual: exportIncludeStateScheduleActualPlot,
+      includeGeneratorScheduleActual: exportIncludeGeneratorScheduleActualPlot,
       rows: chartRows,
     }).replace(/<\/script/gi, "<\\/script");
 
@@ -1243,7 +1379,7 @@ export default function FrequencyReport() {
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>${eventDurationName()} - Interactive Charts</title>
+  <title>${eventDurationName()} - Annexure Charts</title>
   <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
   <style>
     body { margin: 0; font-family: Inter, Arial, sans-serif; color: #0f172a; background: #f4f8fb; }
@@ -1258,12 +1394,12 @@ export default function FrequencyReport() {
     .chart { width: 100%; height: 520px; }
     .small { height: 380px; }
     .empty { padding: 28px; text-align: center; color: #64748b; font-weight: 800; background: #fff; border: 1px dashed #b9c9db; border-radius: 10px; }
-    @media print { header { position: static; } .card { break-inside: avoid; box-shadow: none; } }
+    @media print { @page { size: A4 landscape; margin: 10mm; } header { position: static; } .card { break-inside: avoid; box-shadow: none; } }
   </style>
 </head>
 <body>
   <header>
-    <h1>Interactive Frequency Event Charts</h1>
+    <h1>Annexure: Frequency Event Plots</h1>
     <div class="meta">${startTime} to ${endTime} | Hover chart lines and CRMS pins for details</div>
   </header>
   <main id="charts"></main>
@@ -1276,7 +1412,15 @@ export default function FrequencyReport() {
       const d = new Date(String(v || "").replace(" ", "T"));
       return Number.isNaN(d.getTime()) ? null : d;
     };
-    const fmtTime = (ts) => String(ts || "").replace("T", " ");
+    const fmtTime = (ts) => {
+      const raw = String(ts || "").replace("T", " ");
+      const parts = raw.split(" ");
+      if (parts.length < 2) return raw;
+      const date = parts[0].split("-");
+      const time = parts[1].split(":");
+      if (date.length < 3 || time.length < 2) return raw;
+      return date[2] + "-" + date[1] + "-" + date[0].slice(-2) + " " + time[0] + ":" + time[1];
+    };
     const categoryColors = {
       "alert": "#FACC15",
       "emergency": "#F97316",
@@ -1350,7 +1494,6 @@ export default function FrequencyReport() {
       html += '<div style="font-weight:900;color:' + color + ';margin-bottom:4px">' + esc(category) + '</div>';
       html += '<div><span style="color:#64748B">Issue time:</span> ' + esc(crmsIssueTime(message)) + '</div>';
       if (message.message_no) html += '<div><span style="color:#64748B">Message no:</span> ' + esc(message.message_no) + '</div>';
-      if (message.issued_to && message.issued_to.length) html += '<div><span style="color:#64748B">Issued to:</span> ' + esc(message.issued_to.join(", ")) + '</div>';
       if (message.issued_by) html += '<div><span style="color:#64748B">Issued by:</span> ' + esc(message.issued_by) + '</div>';
       if (message.remarks) html += '<div style="margin-top:4px;color:#334155;font-weight:800">' + esc(message.remarks) + '</div>';
       html += '</div>';
@@ -1381,8 +1524,13 @@ export default function FrequencyReport() {
         threshold: 49.9,
         isEvent: (f) => f < 49.9,
         isHelping: (d) => (type === "state" ? d < 0 : d > 0),
-        helping: { color: "rgba(16,185,129,0.30)", label: "Helping Grid (Green Shade)" },
-        adverse: { color: "rgba(249,115,22,0.32)", label: type === "state" ? "Over Drawal (Orange Shade)" : "Under Injection (Orange Shade)" },
+        helping: type === "state"
+          ? { color: "rgba(6,182,212,0.30)", label: "Helping Grid (Cyan Shade)" }
+          : { color: "rgba(16,185,129,0.30)", label: "Helping Grid (Green Shade)" },
+        adverse: {
+          color: type === "state" ? "rgba(234,179,8,0.30)" : "rgba(249,115,22,0.32)",
+          label: type === "state" ? "Over Drawal (Gold Shade)" : "Under Injection (Orange Shade)",
+        },
       };
     };
     const shadedDeviationData = (row, freq, dev) => {
@@ -1414,6 +1562,7 @@ export default function FrequencyReport() {
       const maxAbs = Math.max(50, ...dev.filter((v) => v !== null).map((v) => Math.abs(v)));
       const shaded = shadedDeviationData(row, freq, dev);
       const threshold = shaded.meta.threshold;
+      const freqLineColor = row.is_state ? "#7C3AED" : "#1D4ED8";
       const markers = nearestMarkerData(row, dev, actual);
       const markerSeries = markerSeriesByCategory(markers);
       return {
@@ -1441,8 +1590,16 @@ export default function FrequencyReport() {
             return html;
           },
         },
-        legend: {
+        title: {
+          text: (row.plant_name || "Entity") + ": Frequency (Hz) vs Deviation (MW)",
+          subtext: (row.event_type === "high" ? "High" : "Low") + " Frequency Operation: " + fmtTime(timestamps[0] || "") + " to " + fmtTime(timestamps[timestamps.length - 1] || ""),
+          left: 8,
           top: 4,
+          textStyle: { fontSize: 15, fontWeight: 900, color: "#0F172A" },
+          subtextStyle: { fontSize: 11, fontWeight: 800, color: "#475569" },
+        },
+        legend: {
+          top: 44,
           type: "scroll",
           textStyle: { fontWeight: 800 },
           data: [
@@ -1453,9 +1610,9 @@ export default function FrequencyReport() {
             ...markerSeries.map((series) => ({ name: series.name, icon: messageSymbol })),
           ],
         },
-        grid: { top: 52, left: 58, right: 62, bottom: 58 },
+        grid: { top: 94, left: 58, right: 62, bottom: 58 },
         dataZoom: [{ type: "inside" }, { type: "slider", height: 18, bottom: 18 }],
-        xAxis: { type: "category", data: timestamps, boundaryGap: false, axisLabel: { fontWeight: 700 } },
+        xAxis: { type: "category", data: timestamps, boundaryGap: false, axisLabel: { fontWeight: 700, formatter: fmtTime } },
         yAxis: [
           { type: "value", name: "MW", min: -maxAbs, max: maxAbs, axisLabel: { fontWeight: 700 } },
           { type: "value", name: "Hz", min: 49.4, max: 50.6, position: "right", axisLabel: { fontWeight: 800, color: "#7C3AED" } },
@@ -1464,7 +1621,7 @@ export default function FrequencyReport() {
           { name: shaded.meta.helping.label, type: "line", data: shaded.helping, yAxisIndex: 0, symbol: "none", lineStyle: { width: 0 }, itemStyle: { color: shaded.meta.helping.color }, areaStyle: { color: shaded.meta.helping.color }, emphasis: { disabled: true }, z: 1 },
           { name: shaded.meta.adverse.label, type: "line", data: shaded.adverse, yAxisIndex: 0, symbol: "none", lineStyle: { width: 0 }, itemStyle: { color: shaded.meta.adverse.color }, areaStyle: { color: shaded.meta.adverse.color }, emphasis: { disabled: true }, z: 1 },
           { name: "Deviation (MW)", type: "line", data: dev, yAxisIndex: 0, symbol: "none", lineStyle: { width: 3.2, color: row.is_state ? "#059669" : "#DC2626" }, itemStyle: { color: row.is_state ? "#059669" : "#DC2626" } },
-          { name: "Frequency (Hz)", type: "line", data: freq, yAxisIndex: 1, symbol: "none", lineStyle: { width: 2.8, color: "#7C3AED" }, itemStyle: { color: "#7C3AED" }, markLine: { silent: true, symbol: "none", data: [{ yAxis: threshold }], lineStyle: { color: "#EF4444", type: "dashed", width: 1.4 }, label: { formatter: threshold + " Hz", color: "#DC2626", fontWeight: 900 } } },
+          { name: "Frequency (Hz)", type: "line", data: freq, yAxisIndex: 1, symbol: "none", lineStyle: { width: 2.8, color: freqLineColor }, itemStyle: { color: freqLineColor }, markLine: { silent: true, symbol: "none", data: [{ yAxis: threshold }], lineStyle: { color: "#EF4444", type: "dashed", width: 1.4 }, label: { formatter: threshold + " Hz", color: "#DC2626", fontWeight: 900 } } },
           ...markerSeries,
         ],
       };
@@ -1489,7 +1646,8 @@ export default function FrequencyReport() {
     const addCard = (row, kind, option) => {
       const card = document.createElement("section");
       card.className = "card";
-      card.innerHTML = '<div class="card-title"><h2>' + esc(row.plant_name) + '</h2><span class="badge">' + esc(kind) + '</span></div><div class="chart ' + (kind === "Schedule / Actual" ? "small" : "") + '"></div>';
+      const annexureLabel = row.is_state ? "Annexure 1" : "Annexure 2";
+      card.innerHTML = '<div class="card-title"><h2>' + annexureLabel + ': ' + esc(row.plant_name) + '</h2><span class="badge">' + esc(kind) + '</span></div><div class="chart ' + (kind.includes("Schedule") ? "small" : "") + '"></div>';
       root.appendChild(card);
       const chart = echarts.init(card.querySelector(".chart"));
       chart.setOption(option);
@@ -1499,8 +1657,9 @@ export default function FrequencyReport() {
       root.innerHTML = '<div class="empty">No selected chart rows available for this export.</div>';
     } else {
       report.rows.forEach((row) => {
-        if (report.includeDeviation) addCard(row, "Deviation / Frequency", makeDeviationOption(row));
-        if (report.includeScheduleActual && !row.is_state) addCard(row, "Schedule / Actual", makeScheduleOption(row));
+        if (report.includeDeviation) addCard(row, "Annexure - Deviation / Frequency", makeDeviationOption(row));
+        if (row.is_state && report.includeStateScheduleActual) addCard(row, "Annexure - State Schedule / Actual", makeScheduleOption(row));
+        if (!row.is_state && report.includeGeneratorScheduleActual) addCard(row, "Annexure - Generator Schedule / Actual", makeScheduleOption(row));
       });
     }
   </script>
@@ -1515,13 +1674,13 @@ export default function FrequencyReport() {
       if (!exportRows.some((row) => !row.is_frequency)) {
         throw new Error("Select at least one state or generator for HTML export.");
       }
-      if (!exportIncludeDeviationPlot && !exportIncludeScheduleActualPlot) {
+      if (!exportIncludeDeviationPlot && !exportIncludeStateScheduleActualPlot && !exportIncludeGeneratorScheduleActualPlot) {
         throw new Error("Select at least one chart type for HTML export.");
       }
       const html = buildInteractiveChartsHtml(exportRows);
       const blob = new Blob([html], { type: "text/html;charset=utf-8" });
-      await saveBlobToFile(blob, `${eventDurationName()}_interactive_charts.html`);
-      toast.success("Interactive HTML charts downloaded", { id: expToast });
+      await saveBlobToFile(blob, `${eventDurationName()}_annexure.html`);
+      toast.success("HTML annexure downloaded", { id: expToast });
     } catch (e) {
       console.error(e);
       toast.error("Error preparing HTML charts: " + e.message, { id: expToast });
@@ -1537,13 +1696,15 @@ export default function FrequencyReport() {
       if (!exportRows.some((row) => !row.is_frequency)) {
         throw new Error("Select at least one state or generator for export.");
       }
-      await waitForHiddenCharts();
+      const includeAnnexure = exportReportMode === "with_annexure";
+      if (includeAnnexure) await waitForHiddenCharts();
       // Gather base64 images from chartRefs for all entities that have series data
       const updatedRows = exportRows.map((row) => {
         const ref = chartRefs.current[row.plant_id];
         const capRef = capacityChartRefs.current[row.plant_id];
-        const plot_image = exportIncludeDeviationPlot && ref ? ref.getDataURL() : null;
-        const capacity_plot_image = exportIncludeScheduleActualPlot && capRef ? capRef.getDataURL() : null;
+        const includeScheduleActual = row.is_state ? exportIncludeStateScheduleActualPlot : exportIncludeGeneratorScheduleActualPlot;
+        const plot_image = includeAnnexure && exportIncludeDeviationPlot && ref ? ref.getDataURL() : null;
+        const capacity_plot_image = includeAnnexure && includeScheduleActual && capRef ? capRef.getDataURL() : null;
         // Strip out metadata prefix for python base64 decoding
         const stripped_image = plot_image ? plot_image.replace(/^data:image\/png;base64,/, "") : null;
         const stripped_capacity_image = capacity_plot_image ? capacity_plot_image.replace(/^data:image\/png;base64,/, "") : null;
@@ -1556,9 +1717,11 @@ export default function FrequencyReport() {
 
       const payload = {
         intro_desc: introDesc,
-        gen_desc: genDesc,
-        state_desc: stateDesc,
+        gen_desc: [genDesc, generatorObservation].filter(Boolean).join("\n\n"),
+        state_desc: [stateDesc, stateObservation].filter(Boolean).join("\n\n"),
         event_type: eventType,
+        report_mode: exportReportMode,
+        include_annexure: includeAnnexure,
         rows: updatedRows,
         start_time: startTime,
         end_time: endTime,
@@ -1582,13 +1745,15 @@ export default function FrequencyReport() {
       if (!exportRows.some((row) => !row.is_frequency)) {
         throw new Error("Select at least one state or generator for export.");
       }
-      await waitForHiddenCharts();
+      const includeAnnexure = exportReportMode === "with_annexure";
+      if (includeAnnexure) await waitForHiddenCharts();
       // Gather base64 images from chartRefs
       const updatedRows = exportRows.map((row) => {
         const ref = chartRefs.current[row.plant_id];
         const capRef = capacityChartRefs.current[row.plant_id];
-        const plot_image = exportIncludeDeviationPlot && ref ? ref.getDataURL() : null;
-        const capacity_plot_image = exportIncludeScheduleActualPlot && capRef ? capRef.getDataURL() : null;
+        const includeScheduleActual = row.is_state ? exportIncludeStateScheduleActualPlot : exportIncludeGeneratorScheduleActualPlot;
+        const plot_image = includeAnnexure && exportIncludeDeviationPlot && ref ? ref.getDataURL() : null;
+        const capacity_plot_image = includeAnnexure && includeScheduleActual && capRef ? capRef.getDataURL() : null;
         const stripped_image = plot_image ? plot_image.replace(/^data:image\/png;base64,/, "") : null;
         const stripped_capacity_image = capacity_plot_image ? capacity_plot_image.replace(/^data:image\/png;base64,/, "") : null;
         return {
@@ -1598,7 +1763,17 @@ export default function FrequencyReport() {
         };
       });
 
-      const blob = await API.downloadFrequencyPdf({ rows: updatedRows, event_type: eventType });
+      const blob = await API.downloadFrequencyPdf({
+        rows: updatedRows,
+        event_type: eventType,
+        report_mode: exportReportMode,
+        include_annexure: includeAnnexure,
+        intro_desc: introDesc,
+        gen_desc: [genDesc, generatorObservation].filter(Boolean).join("\n\n"),
+        state_desc: [stateDesc, stateObservation].filter(Boolean).join("\n\n"),
+        start_time: startTime,
+        end_time: endTime,
+      });
       await saveBlobToFile(blob, `${eventDurationName()}.pdf`);
       toast.success("PDF report downloaded", { id: expToast });
     } catch (e) {
@@ -1647,8 +1822,90 @@ export default function FrequencyReport() {
   }, [rowsWithCrmsMessages]);
 
   const generatorRows = useMemo(() => {
-    return rowsWithCrmsMessages.filter((r) => !r.is_state);
+    return rowsWithCrmsMessages.filter((r) => !r.is_state && !r.is_frequency);
   }, [rowsWithCrmsMessages]);
+
+  const autoObservations = useMemo(() => {
+    const isHigh = eventType === "high";
+    const groups = Array.from(new Set(generatorRows.map(generatorSectionLabel)))
+      .sort((a, b) => sectionRank(a) - sectionRank(b) || a.localeCompare(b));
+    const sectionStats = groups.map((label) => {
+      const sectionRows = generatorRows.filter((row) => generatorSectionLabel(row) === label);
+      const minPct = fleetMinGenerationPct(sectionRows);
+      const majorUnderInjection = sectionRows
+        .map((row) => ({ row, minDev: minSeries(row.series?.deviation || []) }))
+        .filter((item) => item.minDev !== null)
+        .sort((a, b) => a.minDev - b.minDev)[0];
+      return {
+        label,
+        count: sectionRows.length,
+        minPct,
+        majorUnderInjection,
+      };
+    });
+
+    const majorViolators = generatorRows
+      .map((row) => ({ row, minPct: minGenerationPct(row) }))
+      .filter((item) => item.minPct !== null)
+      .sort((a, b) => a.minPct - b.minPct)
+      .slice(0, 5);
+    const majorOverInjection = generatorRows
+      .map((row) => ({ row, maxDev: maxSeries(row.series?.deviation || []) }))
+      .filter((item) => item.maxDev !== null)
+      .sort((a, b) => b.maxDev - a.maxDev)
+      .slice(0, 3);
+    const majorUnderDrawal = stateRows
+      .map((row) => ({ row, value: Number(row.statistics?.max_ud) }))
+      .filter((item) => Number.isFinite(item.value))
+      .sort((a, b) => a.value - b.value)
+      .slice(0, 3);
+    const majorOverDrawal = stateRows
+      .map((row) => ({ row, value: Number(row.statistics?.max_od) }))
+      .filter((item) => Number.isFinite(item.value))
+      .sort((a, b) => b.value - a.value)
+      .slice(0, 3);
+
+    const generatorBullets = [];
+    const stateBullets = [];
+    if (isHigh) {
+      sectionStats.forEach((section) => {
+        if (section.minPct !== null) {
+          generatorBullets.push(`${section.label}: fleet minimum generation achieved ${fmtPctText(section.minPct)} of 94% capacity on bar across ${section.count} unit(s).`);
+        }
+      });
+      if (majorViolators.length) {
+        generatorBullets.push(`Major generator MTDL violators: ${majorViolators.map((item) => `${item.row.plant_name} (${fmtPctText(item.minPct)})`).join(", ")}.`);
+      }
+      if (majorOverInjection.length) {
+        generatorBullets.push(`Major over-injection by generator: ${majorOverInjection.map((item) => `${item.row.plant_name} (${fmtMwText(item.maxDev)})`).join(", ")}.`);
+      }
+      if (majorUnderDrawal.length) {
+        stateBullets.push(`Major under-drawal by state: ${majorUnderDrawal.map((item) => `${item.row.plant_name} (${fmtMwText(item.value)})`).join(", ")}.`);
+      }
+    } else {
+      sectionStats.forEach((section) => {
+        if (section.majorUnderInjection) {
+          generatorBullets.push(`Major under-injection in ${section.label}: ${section.majorUnderInjection.row.plant_name} (${fmtMwText(section.majorUnderInjection.minDev)}).`);
+        }
+      });
+      if (majorOverDrawal.length) {
+        stateBullets.push(`Major over-drawal by state: ${majorOverDrawal.map((item) => `${item.row.plant_name} (${fmtMwText(item.value)})`).join(", ")}.`);
+      }
+    }
+
+    return {
+      sectionStats,
+      generatorBullets,
+      stateBullets,
+      generatorText: generatorBullets.join("\n"),
+      stateText: stateBullets.join("\n"),
+    };
+  }, [eventType, generatorRows, stateRows]);
+
+  useEffect(() => {
+    setStateObservation((prev) => prev || autoObservations.stateText || "");
+    setGeneratorObservation((prev) => prev || autoObservations.generatorText || "");
+  }, [autoObservations.stateText, autoObservations.generatorText]);
 
   const exportStateOptions = useMemo(() => stateRows.map((row) => ({
     id: row.plant_id,
@@ -1661,6 +1918,11 @@ export default function FrequencyReport() {
     state: row.state || "ER",
     fuel: row.fuel || "-",
   })), [generatorRows]);
+
+  const exportFuelOptions = useMemo(() => {
+    const fuels = Array.from(new Set(exportGeneratorOptions.map((item) => item.fuel).filter(Boolean))).sort();
+    return ["ALL_FUELS", ...fuels];
+  }, [exportGeneratorOptions]);
 
   useEffect(() => {
     setSelectedExportStateIds((prev) => {
@@ -1680,11 +1942,11 @@ export default function FrequencyReport() {
 
   const filteredExportGeneratorOptions = useMemo(() => {
     const needle = exportGeneratorFilter.trim().toLowerCase();
-    if (!needle) return exportGeneratorOptions;
     return exportGeneratorOptions.filter((item) =>
-      `${item.label} ${item.state} ${item.fuel}`.toLowerCase().includes(needle)
+      (exportFuelFilter === "ALL_FUELS" || item.fuel === exportFuelFilter) &&
+      (!needle || `${item.label} ${item.state} ${item.fuel}`.toLowerCase().includes(needle))
     );
-  }, [exportGeneratorFilter, exportGeneratorOptions]);
+  }, [exportFuelFilter, exportGeneratorFilter, exportGeneratorOptions]);
 
   const exportRows = useMemo(() => {
     const stateIds = new Set(selectedExportStateIds);
@@ -1692,14 +1954,19 @@ export default function FrequencyReport() {
     return rowsWithCrmsMessages.filter((row) => {
       if (row.is_frequency) return true;
       if (row.is_state) return stateIds.has(row.plant_id);
+      if (exportFuelFilter !== "ALL_FUELS" && (row.fuel || "-") !== exportFuelFilter) return false;
       return generatorIds.has(row.plant_id);
     });
-  }, [rowsWithCrmsMessages, selectedExportStateIds, selectedExportGeneratorIds]);
+  }, [rowsWithCrmsMessages, selectedExportStateIds, selectedExportGeneratorIds, exportFuelFilter]);
 
   const exportChartRows = useMemo(() => exportRows.filter((row) => (
     row.series?.timestamps?.length > 0 &&
-    (exportIncludeDeviationPlot || (!row.is_state && exportIncludeScheduleActualPlot))
-  )), [exportRows, exportIncludeDeviationPlot, exportIncludeScheduleActualPlot]);
+    (
+      exportIncludeDeviationPlot ||
+      (row.is_state && exportIncludeStateScheduleActualPlot) ||
+      (!row.is_state && exportIncludeGeneratorScheduleActualPlot)
+    )
+  )), [exportRows, exportIncludeDeviationPlot, exportIncludeStateScheduleActualPlot, exportIncludeGeneratorScheduleActualPlot]);
 
   const toggleExportState = (id) => {
     setSelectedExportStateIds((prev) => (
@@ -1927,6 +2194,7 @@ export default function FrequencyReport() {
         availableEvents={availableEvents}
         selectedEventId={selectedEventId}
         onSelectEvent={handleSelectEvent}
+        onDeleteEvent={handleDeleteEvent}
         eventNameDraft={eventNameDraft}
         setEventNameDraft={setEventNameDraft}
         onCreateEvent={handleCreateEvent}
@@ -2066,8 +2334,15 @@ export default function FrequencyReport() {
                         <span className="d-block text-secondary" style={{ fontSize: "0.68rem" }}>State and generator deviation chart.</span>
                       </span>
                     </label>
+                    <label className="d-flex align-items-start gap-2 rounded-3 border bg-light px-2 py-2 mb-2" style={{ cursor: "pointer" }}>
+                      <input type="checkbox" checked={exportIncludeStateScheduleActualPlot} onChange={(event) => setExportIncludeStateScheduleActualPlot(event.target.checked)} style={{ accentColor: "#0F6FDB", marginTop: 3 }} />
+                      <span>
+                        <span className="d-block fw-bold text-dark" style={{ fontSize: "0.75rem" }}>State schedule/actual plot</span>
+                        <span className="d-block text-secondary" style={{ fontSize: "0.68rem" }}>State drawal, schedule and frequency chart.</span>
+                      </span>
+                    </label>
                     <label className="d-flex align-items-start gap-2 rounded-3 border bg-light px-2 py-2 mb-0" style={{ cursor: "pointer" }}>
-                      <input type="checkbox" checked={exportIncludeScheduleActualPlot} onChange={(event) => setExportIncludeScheduleActualPlot(event.target.checked)} style={{ accentColor: "#0F6FDB", marginTop: 3 }} />
+                      <input type="checkbox" checked={exportIncludeGeneratorScheduleActualPlot} onChange={(event) => setExportIncludeGeneratorScheduleActualPlot(event.target.checked)} style={{ accentColor: "#0F6FDB", marginTop: 3 }} />
                       <span>
                         <span className="d-block fw-bold text-dark" style={{ fontSize: "0.75rem" }}>Generator schedule/actual plot</span>
                         <span className="d-block text-secondary" style={{ fontSize: "0.68rem" }}>Generation, schedule and capacity chart.</span>
@@ -2125,6 +2400,65 @@ export default function FrequencyReport() {
               {/* 1. Executive Summary */}
               <ExecutiveSummary value={introDesc} onChange={setIntroDesc} />
 
+              <div style={{ background: "linear-gradient(180deg, #F8FBFF 0%, #FFFFFF 56px)", padding: "16px", borderRadius: "14px", border: "1px solid rgba(175, 196, 234, 0.72)", boxShadow: "0 8px 22px rgba(15, 111, 219, 0.055)", marginBottom: "16px" }}>
+                <div className="d-flex align-items-center justify-content-between gap-2 mb-2">
+                  <label style={{ fontSize: "0.78rem", fontWeight: 800, color: "#1E293B", display: "block", margin: 0 }}>
+                    State Drawal Compliance Notes & Observation
+                  </label>
+                  <div className="d-flex gap-2">
+                    <button type="button" onClick={() => setStateObservation(autoObservations.stateText || "")} className="btn btn-sm theme-btn-outline py-1 px-2" disabled={!autoObservations.stateText}>
+                      Regenerate
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleCreateEvent()}
+                      className="btn btn-sm theme-btn-outline d-inline-flex align-items-center gap-1 py-1 px-2"
+                      disabled={!rows.length}
+                      title="Save observations, chart notes and current event data"
+                    >
+                      <Save size={13} />
+                      Save Notes
+                    </button>
+                  </div>
+                </div>
+                <textarea
+                  value={stateDesc}
+                  onChange={(e) => setStateDesc(e.target.value)}
+                  rows={3}
+                  style={{
+                    width: "100%",
+                    border: "1px solid #CBD5E1",
+                    borderRadius: "8px",
+                    padding: "8px 12px",
+                    fontSize: "0.78rem",
+                    color: "#334155",
+                    outline: "none",
+                    resize: "vertical",
+                    fontFamily: "inherit",
+                  }}
+                  placeholder="Add summaries or remarks for state drawal compliance..."
+                />
+                <textarea
+                  value={stateObservation}
+                  onChange={(e) => setStateObservation(e.target.value)}
+                  rows={3}
+                  style={{
+                    width: "100%",
+                    border: "1px solid #CBD5E1",
+                    borderRadius: "8px",
+                    padding: "8px 12px",
+                    marginTop: "8px",
+                    fontSize: "0.78rem",
+                    color: "#334155",
+                    outline: "none",
+                    resize: "vertical",
+                    fontFamily: "inherit",
+                    background: "#FFFFFF",
+                  }}
+                  placeholder="Editable state observation for this report section..."
+                />
+              </div>
+
               {/* 2. States Table */}
               <StateComplianceTable
                 rows={stateRows}
@@ -2133,11 +2467,60 @@ export default function FrequencyReport() {
                 onExpandAll={() => expandRows(stateRows)}
                 onCollapseAll={() => collapseRows(stateRows)}
                 onUpdateRowField={updateRowField}
-                stateDesc={stateDesc}
-                onUpdateStateDesc={setStateDesc}
                 showSchAct={showSchAct}
                 onEditRawData={handleOpenRawDataEditor}
               />
+
+              <div style={{ background: "linear-gradient(180deg, #F8FBFF 0%, #FFFFFF 56px)", padding: "16px", borderRadius: "14px", border: "1px solid rgba(175, 196, 234, 0.72)", boxShadow: "0 8px 22px rgba(15, 111, 219, 0.055)", marginBottom: "16px" }}>
+                <div className="d-flex align-items-center justify-content-between gap-2 mb-2">
+                  <label style={{ fontSize: "0.78rem", fontWeight: 800, color: "#1E293B", display: "block", margin: 0 }}>
+                    Generator Section Observations
+                  </label>
+                  <div className="d-flex gap-2">
+                    <button type="button" onClick={() => setGeneratorObservation(autoObservations.generatorText || "")} className="btn btn-sm theme-btn-outline py-1 px-2" disabled={!autoObservations.generatorText}>
+                      Regenerate
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleCreateEvent()}
+                      className="btn btn-sm theme-btn-outline d-inline-flex align-items-center gap-1 py-1 px-2"
+                      disabled={!rows.length}
+                    >
+                      <Save size={13} />
+                      Save Notes
+                    </button>
+                  </div>
+                </div>
+                {eventType === "high" && autoObservations.sectionStats.length > 0 && (
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 8, marginBottom: 10 }}>
+                    {autoObservations.sectionStats.map((section) => (
+                      <div key={section.label} style={{ border: "1px solid #D7E1EA", borderRadius: 10, padding: "9px 10px", background: "#FFFFFF" }}>
+                        <div style={{ color: "#0B55B8", fontSize: "0.7rem", fontWeight: 900 }}>{section.label}</div>
+                        <div style={{ color: "#0F172A", fontSize: "1rem", fontWeight: 950 }}>{fmtPctText(section.minPct)}</div>
+                        <div style={{ color: "#64748B", fontSize: "0.64rem", fontWeight: 750 }}>Fleet minimum generation vs 94% cap on bar ({section.count} units)</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <textarea
+                  value={generatorObservation}
+                  onChange={(e) => setGeneratorObservation(e.target.value)}
+                  rows={4}
+                  style={{
+                    width: "100%",
+                    border: "1px solid #CBD5E1",
+                    borderRadius: "8px",
+                    padding: "8px 12px",
+                    fontSize: "0.78rem",
+                    color: "#334155",
+                    outline: "none",
+                    resize: "vertical",
+                    fontFamily: "inherit",
+                    background: "#FFFFFF",
+                  }}
+                  placeholder="Editable generator observation for this report section..."
+                />
+              </div>
 
               {/* 3. Generators Table */}
               <GeneratorComplianceTable
@@ -2315,10 +2698,10 @@ export default function FrequencyReport() {
 
             <div className="d-flex align-items-center justify-content-between gap-2 flex-wrap rounded-3 border bg-light px-3 py-2 mb-3">
               <span className="fw-bold text-dark" style={{ fontSize: "0.78rem" }}>
-                Selected: {selectedExportStateIds.length}/{exportStateOptions.length} states, {selectedExportGeneratorIds.length}/{exportGeneratorOptions.length} generators
+                Selected: {selectedExportStateIds.length}/{exportStateOptions.length} states, {exportRows.filter((row) => !row.is_state && !row.is_frequency).length}/{exportGeneratorOptions.length} generators
               </span>
               <span className="text-secondary fw-bold" style={{ fontSize: "0.72rem" }}>
-                {exportIncludeDeviationPlot ? "Deviation plot" : "No deviation plot"} | {exportIncludeScheduleActualPlot ? "Schedule/actual plot" : "No schedule/actual plot"}
+                {exportReportMode === "with_annexure" ? "Summary + annexure" : "Summary only"} | {exportIncludeDeviationPlot ? "Deviation plot" : "No deviation plot"} | {exportIncludeStateScheduleActualPlot ? "State schedule/actual" : "No state schedule"} | {exportIncludeGeneratorScheduleActualPlot ? "Generator schedule/actual" : "No generator schedule"}
               </span>
             </div>
 
@@ -2345,19 +2728,31 @@ export default function FrequencyReport() {
                 <div className="d-flex align-items-center justify-content-between gap-2 mb-2">
                   <span className="fw-bold text-dark" style={{ fontSize: "0.8rem" }}>Generators</span>
                   <div className="d-flex gap-1">
-                    <button type="button" className="btn btn-sm theme-btn-outline py-0 px-2" onClick={() => setSelectedExportGeneratorIds(exportGeneratorOptions.map((item) => item.id))}>All</button>
+                    <button type="button" className="btn btn-sm theme-btn-outline py-0 px-2" onClick={() => setSelectedExportGeneratorIds(filteredExportGeneratorOptions.map((item) => item.id))}>All</button>
                     <button type="button" className="btn btn-sm theme-btn-outline py-0 px-2" onClick={() => setSelectedExportGeneratorIds([])}>None</button>
                   </div>
                 </div>
-                <div className="position-relative mb-2">
-                  <Search size={13} className="position-absolute text-secondary" style={{ left: 9, top: 9 }} />
-                  <input
-                    className="form-control theme-input py-1"
-                    value={exportGeneratorFilter}
-                    onChange={(event) => setExportGeneratorFilter(event.target.value)}
-                    placeholder="Search generator, state or fuel"
-                    style={{ paddingLeft: 30, fontSize: "0.74rem" }}
-                  />
+                <div className="d-flex gap-2 mb-2">
+                  <select
+                    className="form-select theme-input py-1"
+                    value={exportFuelFilter}
+                    onChange={(event) => setExportFuelFilter(event.target.value)}
+                    style={{ maxWidth: 150, fontSize: "0.74rem", fontWeight: 800 }}
+                  >
+                    {exportFuelOptions.map((fuel) => (
+                      <option key={fuel} value={fuel}>{fuel === "ALL_FUELS" ? "All fuels" : fuel}</option>
+                    ))}
+                  </select>
+                  <div className="position-relative flex-grow-1">
+                    <Search size={13} className="position-absolute text-secondary" style={{ left: 9, top: 9 }} />
+                    <input
+                      className="form-control theme-input py-1"
+                      value={exportGeneratorFilter}
+                      onChange={(event) => setExportGeneratorFilter(event.target.value)}
+                      placeholder="Search generator, state or fuel"
+                      style={{ paddingLeft: 30, fontSize: "0.74rem" }}
+                    />
+                  </div>
                 </div>
                 <div className="d-flex flex-column gap-1" style={{ maxHeight: 240, overflow: "auto" }}>
                   {filteredExportGeneratorOptions.map((item) => (
@@ -2372,6 +2767,19 @@ export default function FrequencyReport() {
               </div>
 
               <div className="rounded-3 border bg-white p-2">
+                {(pendingExportType === "pdf" || pendingExportType === "docx") && (
+                  <>
+                    <div className="fw-bold text-dark mb-2" style={{ fontSize: "0.8rem" }}>Report layout</div>
+                    <label className="d-flex align-items-center gap-2 rounded-3 border bg-light px-2 py-2 mb-2" style={{ cursor: "pointer" }}>
+                      <input type="radio" checked={exportReportMode === "summary"} onChange={() => setExportReportMode("summary")} style={{ accentColor: "#0F6FDB" }} />
+                      <span className="fw-bold text-dark" style={{ fontSize: "0.76rem" }}>Executive summary only</span>
+                    </label>
+                    <label className="d-flex align-items-center gap-2 rounded-3 border bg-light px-2 py-2 mb-3" style={{ cursor: "pointer" }}>
+                      <input type="radio" checked={exportReportMode === "with_annexure"} onChange={() => setExportReportMode("with_annexure")} style={{ accentColor: "#0F6FDB" }} />
+                      <span className="fw-bold text-dark" style={{ fontSize: "0.76rem" }}>Executive summary with annexure plots</span>
+                    </label>
+                  </>
+                )}
                 <div className="fw-bold text-dark mb-2" style={{ fontSize: "0.8rem" }}>Plots</div>
                 <label className="d-flex align-items-start gap-2 rounded-3 border bg-light px-2 py-2 mb-2" style={{ cursor: "pointer" }}>
                   <input type="checkbox" checked={exportIncludeDeviationPlot} onChange={(event) => setExportIncludeDeviationPlot(event.target.checked)} style={{ accentColor: "#0F6FDB", marginTop: 3 }} />
@@ -2381,7 +2789,14 @@ export default function FrequencyReport() {
                   </span>
                 </label>
                 <label className="d-flex align-items-start gap-2 rounded-3 border bg-light px-2 py-2 mb-0" style={{ cursor: "pointer" }}>
-                  <input type="checkbox" checked={exportIncludeScheduleActualPlot} onChange={(event) => setExportIncludeScheduleActualPlot(event.target.checked)} style={{ accentColor: "#0F6FDB", marginTop: 3 }} />
+                  <input type="checkbox" checked={exportIncludeStateScheduleActualPlot} onChange={(event) => setExportIncludeStateScheduleActualPlot(event.target.checked)} style={{ accentColor: "#0F6FDB", marginTop: 3 }} />
+                  <span>
+                    <span className="d-block fw-bold text-dark" style={{ fontSize: "0.76rem" }}>State schedule/actual plot</span>
+                    <span className="d-block text-secondary" style={{ fontSize: "0.68rem" }}>State drawal, schedule and frequency chart.</span>
+                  </span>
+                </label>
+                <label className="d-flex align-items-start gap-2 rounded-3 border bg-light px-2 py-2 mt-2 mb-0" style={{ cursor: "pointer" }}>
+                  <input type="checkbox" checked={exportIncludeGeneratorScheduleActualPlot} onChange={(event) => setExportIncludeGeneratorScheduleActualPlot(event.target.checked)} style={{ accentColor: "#0F6FDB", marginTop: 3 }} />
                   <span>
                     <span className="d-block fw-bold text-dark" style={{ fontSize: "0.76rem" }}>Generator schedule/actual plot</span>
                     <span className="d-block text-secondary" style={{ fontSize: "0.68rem" }}>Generation, schedule and capacity chart.</span>
@@ -2424,11 +2839,11 @@ export default function FrequencyReport() {
                   }
                 }}
                 row={row}
-                showSchAct={exportIncludeScheduleActualPlot && row.is_state}
+                showSchAct={false}
                 height={560}
               />
             )}
-            {exportIncludeScheduleActualPlot && !row.is_state && row.series?.timestamps?.length > 0 && (
+            {((row.is_state && exportIncludeStateScheduleActualPlot) || (!row.is_state && exportIncludeGeneratorScheduleActualPlot)) && row.series?.timestamps?.length > 0 && (
               <CapacityFrequencyChart
                 ref={(el) => {
                   if (el) {

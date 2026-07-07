@@ -12,6 +12,7 @@ import PSPAdmin from "./pages/PSPAdmin";
 import PSPReportChecking from "./pages/PSPReportChecking";
 import FrequencyReport from "./pages/FrequencyReport";
 import MISReport from "./pages/MISReport";
+import OutageAnalysis from "./pages/OutageAnalysis";
 
 export default function App() {
 
@@ -63,6 +64,11 @@ export default function App() {
         <Route
           path="/mis-report"
           element={<MISReport />}
+        />
+
+        <Route
+          path="/outage-analysis"
+          element={<OutageAnalysis />}
         />
 
       </Routes>

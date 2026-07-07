@@ -13,6 +13,10 @@ export default function StatisticsCard({ row, compact = false }) {
   const isHigh = row.event_type === "high";
   const stats = row.statistics || {};
   const freqText = isHigh ? "Freq > 50.05" : "Freq < 49.9";
+  const actualSeries = Array.isArray(row.series?.actual) ? row.series.actual.map(Number).filter(Number.isFinite) : [];
+  const minActual = actualSeries.length ? Math.min(...actualSeries) : null;
+  const highFreqReference = num(row.cap_on_bar, 0) * 0.94;
+  const minGenerationPct = isHigh && minActual !== null && highFreqReference > 0 ? (minActual / highFreqReference) * 100 : null;
 
   const cardStyle = {
     background: "linear-gradient(135deg, #0F172A 0%, #1E293B 100%)",
@@ -64,14 +68,14 @@ export default function StatisticsCard({ row, compact = false }) {
         <div className="row g-2">
           <div className="col-6">
             <div style={{ ...metricBoxStyle, marginBottom: 0 }}>
-              <div style={labelStyle}>Dev &gt; 0</div>
+              <div style={labelStyle}>{isHigh ? "Over Drawal" : "Dev > 0"}</div>
               <div style={valueStyle(isHigh ? "#EAB308" : "#F59E0B")}>{pct(stats.od_duration_pct)}</div>
               <div style={subStyle}>{freqText} &amp; Dev &gt; 0</div>
             </div>
           </div>
           <div className="col-6">
             <div style={{ ...metricBoxStyle, marginBottom: 0 }}>
-              <div style={labelStyle}>Dev &lt; 0</div>
+              <div style={labelStyle}>{isHigh ? "Under Drawal" : "Under Drawal"}</div>
               <div style={valueStyle(isHigh ? "#06B6D4" : "#10B981")}>{pct(stats.helping_duration_pct)}</div>
               <div style={subStyle}>{freqText} &amp; Dev &lt; 0</div>
             </div>
@@ -91,20 +95,31 @@ export default function StatisticsCard({ row, compact = false }) {
         Compliance Indicators (Generator)
       </div>
       <div style={metricBoxStyle}>
-        <div style={labelStyle}>Dev &lt; 0</div>
+        <div style={labelStyle}>{isHigh ? "Under Injection" : "Under Injection"}</div>
         <div style={valueStyle("#10B981")}>{pct(stats.under_inj_pct)}</div>
         <div style={subStyle}>{freqText} &amp; Dev &lt; 0</div>
       </div>
       <div style={metricBoxStyle}>
-        <div style={labelStyle}>Dev &gt; 0</div>
+        <div style={labelStyle}>{isHigh ? "Over Injection" : "Helping Grid"}</div>
         <div style={valueStyle(isHigh ? "#F97316" : "#10B981")}>{pct(stats.helping_grid_pct)}</div>
         <div style={subStyle}>{freqText} &amp; Dev &gt; 0</div>
       </div>
-      <div style={metricBoxStyle}>
-        <div style={labelStyle}>Cap On Bar Reference</div>
-        <div style={valueStyle("#FBBF24")}>{mw(row.cap_on_bar_55)}</div>
-        <div style={subStyle}>55% of cap on bar. Actual average: {pct(row.avg_capacity_on_bar_pct)}</div>
-      </div>
+      {!isHigh && (
+        <div style={metricBoxStyle}>
+          <div style={labelStyle}>Capacity on Bar</div>
+          <div style={valueStyle("#FBBF24")}>{mw(row.cap_on_bar)}</div>
+          <div style={subStyle}>Actual average: {pct(row.avg_capacity_on_bar_pct)}</div>
+        </div>
+      )}
+      {isHigh && (
+        <div style={metricBoxStyle}>
+          <div style={labelStyle}>Minimum Generation % Achieved</div>
+          <div style={valueStyle(minGenerationPct !== null && minGenerationPct < 100 ? "#F97316" : "#10B981")}>
+            {minGenerationPct !== null ? pct(minGenerationPct) : "-"}
+          </div>
+          <div style={subStyle}>Min generation / (94% x capacity on bar)</div>
+        </div>
+      )}
     </div>
   );
 }

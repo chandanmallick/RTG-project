@@ -639,6 +639,18 @@ const API = {
     return res.data;
   },
 
+  getMisElementNames: async (elementType) => {
+    const params = new URLSearchParams();
+    params.append("element_type", elementType);
+    const res = await axios.get(`${BASE_URL}/psp/mis/element-names?${params.toString()}`);
+    return res.data;
+  },
+
+  getMisOutageAnalysis: async (payload) => {
+    const res = await axios.post(`${BASE_URL}/psp/mis/outage-analysis`, payload);
+    return res.data;
+  },
+
   // =========================================
   // FREQUENCY REPORT
   // =========================================
@@ -789,6 +801,11 @@ const API = {
     const res = await axios.post(`${BASE_URL}/frequency/events`, payload, {
       headers: { "Content-Type": "application/json" }
     });
+    return res.data;
+  },
+
+  deleteFrequencyEvent: async (eventId) => {
+    const res = await axios.delete(`${BASE_URL}/frequency/events/${encodeURIComponent(eventId)}`);
     return res.data;
   },
 

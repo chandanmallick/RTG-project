@@ -15,9 +15,22 @@ const COLORS = {
 function fmtTick(ts) {
   if (!ts) return "";
   try {
-    const [, time] = ts.split(" ");
+    const [date, time] = ts.split(" ");
+    const [y, m, d] = date.split("-");
     const [hh, mm] = time.split(":");
-    return `${hh}:${mm}`;
+    return `${d}-${m}-${String(y).slice(-2)} ${hh}:${mm}`;
+  } catch {
+    return ts;
+  }
+}
+
+function fmtPeriodTs(ts) {
+  if (!ts) return "";
+  try {
+    const [date, time] = ts.split(" ");
+    const [y, m, d] = date.split("-");
+    const [hh, mm] = time.split(":");
+    return `${d}-${m}-${String(y).slice(-2)} ${hh}:${mm}`;
   } catch {
     return ts;
   }
@@ -65,16 +78,38 @@ function eventMeta(eventType, type) {
     badge: "LOW FREQ",
     isEvent: (f) => f < 49.9,
     isHelping: (d) => (type === "state" ? d < 0 : d > 0),
-    helping: { color: "rgba(16,185,129,0.30)", label: "Helping Grid (Green Shade)" },
+    helping: type === "state"
+      ? { color: "rgba(6,182,212,0.30)", label: "Helping Grid (Cyan Shade)" }
+      : { color: "rgba(16,185,129,0.30)", label: "Helping Grid (Green Shade)" },
     adverse: {
-      color: "rgba(249,115,22,0.32)",
-      label: type === "state" ? "Over Drawal (Orange Shade)" : "Under Injection (Orange Shade)",
+      color: type === "state" ? "rgba(234,179,8,0.30)" : "rgba(249,115,22,0.32)",
+      label: type === "state" ? "Over Drawal (Gold Shade)" : "Under Injection (Orange Shade)",
     },
   };
 }
 
 const toCleanNumbers = (values = []) =>
   values.map((v) => (v !== null && v !== undefined && !Number.isNaN(Number(v)) ? Number(v) : null));
+
+const statValue = (row, key) => {
+  const stats = row.statistics || {};
+  return row[key] ?? stats[key] ?? null;
+};
+
+const fmtPct = (value) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? `${parsed.toFixed(1)}%` : "0.0%";
+};
+
+const fmtMw = (value) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? `${parsed.toFixed(0)} MW` : "-";
+};
+
+const fmtHz = (value) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? `${parsed.toFixed(2)} Hz` : "-";
+};
 
 const parseTs = (value) => {
   if (!value) return null;
@@ -152,7 +187,7 @@ const ComplianceChart = forwardRef(function ComplianceChart(
     },
   }));
 
-  const type = row.type || (row.is_state ? "state" : "generator");
+  const type = row.is_state ? "state" : "generator";
   const eventType = row.event_type || "low";
   const palette = COLORS[type] || COLORS.state;
   const meta = eventMeta(eventType, type);
@@ -168,6 +203,44 @@ const ComplianceChart = forwardRef(function ComplianceChart(
     () => cleanDevs.length > 0 && cleanDevs.some((v) => v !== null),
     [cleanDevs]
   );
+
+  const annotationText = useMemo(() => {
+    if (!hasDeviation) return "";
+    if (eventType === "high" && type === "state") {
+      return [
+        "+Ve Dev : Over Drawal (Gold Shade)",
+        `% Duration (Freq>50.05 & Dev>0): ${fmtPct(statValue(row, "od_duration_pct"))}`,
+        "-Ve Dev : Under Drawal (Cyan Shade)",
+        `% Duration (Freq>50.05 & Dev<0): ${fmtPct(statValue(row, "helping_duration_pct"))}`,
+        `Max UD = ${fmtMw(statValue(row, "max_ud"))}`,
+        `(Time: ${statValue(row, "max_ud_time") || "-"} | Freq = ${fmtHz(statValue(row, "freq_at_max_ud"))})`,
+      ].join("\n");
+    }
+    if (eventType === "high") {
+      return [
+        "+Ve Dev : Over Injection (Orange Shade)",
+        `% Duration (Freq>50.05 & Dev>0): ${fmtPct(statValue(row, "helping_grid_pct"))}`,
+        "-Ve Dev : Under Injection (Green Shade)",
+        `% Duration (Freq>50.05 & Dev<0): ${fmtPct(statValue(row, "under_inj_pct"))}`,
+      ].join("\n");
+    }
+    if (type === "state") {
+      return [
+        "+Ve Dev : Over Drawal (Gold Shade)",
+        `% Duration (Freq<49.9 & Dev>0): ${fmtPct(statValue(row, "od_duration_pct"))}`,
+        "-Ve Dev : Under Drawal (Cyan Shade)",
+        `% Duration (Freq<49.9 & Dev<0): ${fmtPct(statValue(row, "helping_duration_pct"))}`,
+        `Max OD = ${fmtMw(statValue(row, "max_od"))}`,
+        `(Time: ${statValue(row, "max_od_time") || "-"} | Freq = ${fmtHz(statValue(row, "freq_at_max_od"))})`,
+      ].join("\n");
+    }
+    return [
+      "+Ve Dev : Over Injection (Green Shade)",
+      `% Duration (Freq<49.9 & Dev>0): ${fmtPct(statValue(row, "helping_grid_pct"))}`,
+      "-Ve Dev : Under Injection (Orange Shade)",
+      `% Duration (Freq<49.9 & Dev<0): ${fmtPct(statValue(row, "under_inj_pct"))}`,
+    ].join("\n");
+  }, [hasDeviation, eventType, type, row]);
 
   const { helpingData, adverseData } = useMemo(() => {
     const helping = [];
@@ -254,6 +327,9 @@ const ComplianceChart = forwardRef(function ComplianceChart(
   }, [crmsMarkers]);
 
   const option = useMemo(() => {
+    const periodText = timestamps.length
+      ? `${fmtPeriodTs(timestamps[0])} to ${fmtPeriodTs(timestamps[timestamps.length - 1])}`
+      : "";
     const dateMarkers = [];
     let lastDate = "";
     timestamps.forEach((ts, index) => {
@@ -468,7 +544,7 @@ const ComplianceChart = forwardRef(function ComplianceChart(
       legend: {
         show: true,
         type: "scroll",
-        top: compact ? 4 : 6,
+        top: compact ? 38 : 44,
         left: 56,
         right: 48,
         textStyle: { color: "#1F2937", fontSize: compact ? 11 : 12, fontWeight: 800 },
@@ -493,9 +569,36 @@ const ComplianceChart = forwardRef(function ComplianceChart(
           },
         },
       },
+      title: {
+        text: `${row.plant_name || row.name || row.entity || row.state || "Entity"}: Frequency (Hz) vs Deviation (MW)`,
+        subtext: `${eventType === "high" ? "High" : "Low"} Frequency Operation${periodText ? `: ${periodText}` : ""}`,
+        left: 10,
+        top: 4,
+        textStyle: { color: "#0F172A", fontSize: compact ? 13 : 15, fontWeight: 900 },
+        subtextStyle: { color: "#475569", fontSize: compact ? 10 : 11, fontWeight: 800 },
+      },
       grid: [
-        { top: compact ? 46 : 54, right: 64, bottom: compact ? 54 : 78, left: 62, containLabel: false },
+        { top: compact ? 82 : 94, right: 64, bottom: compact ? 54 : 78, left: 62, containLabel: false },
       ],
+      graphic: annotationText ? [{
+        type: "text",
+        right: compact ? 72 : 82,
+        top: compact ? 112 : 124,
+        z: 20,
+        style: {
+          text: annotationText,
+          font: `${compact ? 10 : 11}px monospace`,
+          lineHeight: compact ? 14 : 16,
+          fill: "#0F172A",
+          backgroundColor: "rgba(255,255,255,0.92)",
+          borderColor: "#CBD5E1",
+          borderWidth: 1,
+          borderRadius: 6,
+          padding: [8, 10],
+          shadowColor: "rgba(15,23,42,0.12)",
+          shadowBlur: 10,
+        },
+      }] : [],
       dataZoom: [
         { type: "inside", xAxisIndex: 0, filterMode: "none" },
         {
@@ -514,7 +617,7 @@ const ComplianceChart = forwardRef(function ComplianceChart(
         },
       ],
       xAxis: [
-        { type: "category", gridIndex: 0, data: timestamps, boundaryGap: false, axisLabel: { formatter: fmtTick, color: "#334155", fontSize: compact ? 10 : 11, fontWeight: 700, rotate: 0, margin: compact ? 8 : 12, interval: Math.max(Math.floor(timestamps.length / 9) - 1, 0) }, axisLine: { lineStyle: { color: "#94A3B8", width: 1.4 } }, splitLine: { show: false } },
+        { type: "category", gridIndex: 0, data: timestamps, boundaryGap: false, axisLabel: { formatter: fmtTick, color: "#334155", fontSize: compact ? 9 : 10, fontWeight: 700, rotate: 0, margin: compact ? 8 : 12, interval: Math.max(Math.floor(timestamps.length / 6) - 1, 0) }, axisLine: { lineStyle: { color: "#94A3B8", width: 1.4 } }, splitLine: { show: false } },
       ],
       yAxis: [
         { type: "value", gridIndex: 0, name: "MW", min: hasDeviation ? -maxDevAbs : 0, max: maxDevAbs, interval: hasDeviation ? maxDevAbs / 3 : maxDevAbs / 4, nameTextStyle: { color: "#0F172A", fontWeight: 900, fontSize: compact ? 11 : 12 }, axisLabel: { color: "#334155", fontSize: compact ? 10 : 11, fontWeight: 700, formatter: (v) => v.toFixed(0) }, splitLine: { lineStyle: { color: "#D7E1EA", width: 1.1 } } },
@@ -522,7 +625,7 @@ const ComplianceChart = forwardRef(function ComplianceChart(
       ],
       series: chartSeries,
     };
-  }, [timestamps, cleanDevs, cleanFreqs, cleanScheds, cleanActuals, showSchAct, compact, palette, meta, maxDevAbs, helpingData, adverseData, eventType, hasDeviation, row, crmsMarkersByCategory]);
+  }, [timestamps, cleanDevs, cleanFreqs, cleanScheds, cleanActuals, showSchAct, compact, palette, meta, maxDevAbs, helpingData, adverseData, eventType, hasDeviation, row, crmsMarkersByCategory, annotationText]);
 
   return (
     <ReactECharts

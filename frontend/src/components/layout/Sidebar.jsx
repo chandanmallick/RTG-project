@@ -66,6 +66,12 @@ const menus = [
   },
 
   {
+    label: "S/D Analysis",
+    path: "/outage-analysis",
+    icon: <BoltRoundedIcon />,
+  },
+
+  {
     label: "PSP Report Check",
     path: "/psp-report-checking",
     icon: <InsightsRoundedIcon />,

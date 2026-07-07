@@ -13,6 +13,8 @@ import queue
 import subprocess
 import sys
 import json
+import re
+from collections import Counter, defaultdict
 from services.psp_service import LegacySSLAdapter
 from openpyxl import load_workbook
 from openpyxl.utils import column_index_from_string
@@ -174,6 +176,17 @@ class MisReactorSwitchingRequest(BaseModel):
     start_date: str
     end_date: str
     stations: list[str] = []
+
+class MisOutageAnalysisRequest(BaseModel):
+    start_date: str
+    end_date: str
+    element_names: list[str] = []
+    entity_names: list[str] = []
+    outage_types: list[str] = []
+    excluded_outage_types: list[str] = []
+    requesting_entities: list[str] = []
+    owners: list[str] = []
+    reason_query: str = ""
 
 def update_sync_progress(total: int, completed: int, current_date: str, status: str, error_msg: str = None):
     try:
@@ -5452,6 +5465,7 @@ async def get_mis_diurnal_curve(req: DiurnalCurveRequest):
 
 MIS_VOLTAGE_API_BASE_URL = "http://10.3.230.62:5010"
 MIS_REACTOR_SWITCHING_URL = "https://crms.erldc.in/Codebook/TrElementOutageHistoryData"
+MIS_ELEMENT_NAMES_URL = "https://crms.erldc.in/Codebook/getElementNamesbyType"
 
 def normalize_mis_voltage_datetime(value: str):
     text = str(value or "").strip().replace("T", " ")
@@ -5463,7 +5477,7 @@ def normalize_mis_voltage_datetime(value: str):
 
 def parse_mis_voltage_datetime(value: str):
     text = str(value or "").strip()
-    for fmt in ("%d-%m-%Y %H:%M:%S", "%d-%m-%Y %H:%M", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M"):
+    for fmt in ("%d-%m-%Y %H:%M:%S", "%d-%m-%Y %H:%M", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d", "%d-%m-%Y"):
         try:
             return datetime.strptime(text, fmt)
         except ValueError:
@@ -5520,6 +5534,255 @@ def fetch_reactor_switching_raw_rows(start_date: str, end_date: str):
         data = data.get("data") or data.get("rows") or []
     return data if isinstance(data, list) else [], response.url
 
+def fetch_mis_element_names(element_type: str):
+    params = {"elementType": str(element_type or "").strip(), "_": int(datetime.now().timestamp() * 1000)}
+    session = requests.Session()
+    session.mount("https://", LegacySSLAdapter())
+    response = session.get(
+        MIS_ELEMENT_NAMES_URL,
+        params=params,
+        headers={
+            "Accept": "application/json, text/javascript, */*; q=0.01",
+            "User-Agent": "Mozilla/5.0",
+            "X-Requested-With": "XMLHttpRequest",
+        },
+        timeout=120,
+    )
+    response.raise_for_status()
+    text = response.text or ""
+    try:
+        data = response.json()
+    except ValueError:
+        matches = re.findall(r'"entityElementName"\s*:\s*"([^"]+)"', text)
+        data = [{"entityElementName": name} for name in matches]
+    if isinstance(data, dict):
+        data = data.get("data") or data.get("rows") or []
+    rows = []
+    seen = set()
+    for item in data if isinstance(data, list) else []:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("entityElementName") or item.get("ELEMENTNAME") or item.get("name") or "").strip()
+        if not name:
+            continue
+        key = normalize_check_key(name)
+        if key in seen:
+            continue
+        seen.add(key)
+        rows.append({"id": item.get("id"), "name": name})
+    rows.sort(key=lambda item: item["name"])
+    return rows, response.url
+
+OUTAGE_REASON_STOPWORDS = {
+    "THE", "AND", "FOR", "FROM", "WITH", "DUE", "TO", "OF", "IN", "AT", "ON", "BY", "IS", "WAS",
+    "ARE", "BE", "AS", "END", "LINE", "KV", "PH", "PHASE", "KM", "KA", "FAULT", "TRIPPED",
+    "OUTAGE", "SHUTDOWN", "WORK", "REASON", "DETAILS", "ZONE", "RECEIVED", "RELAY", "FD", "FC",
+}
+
+OUTAGE_CATEGORY_RULES = [
+    ("Voltage Regulation", ("VOLTAGE REGULATION", "H/T ON VOLTAGE", "LOW VOLTAGE", "OVER VOLTAGE", "OVERVOLTAGE")),
+    ("Physical Regulation", ("PHYSICAL REGULATION", "H/T ON PHYSICAL")),
+    ("Protection / Tripping", ("PROTECTION", "TRIP", "TRIPPED", "AUTO TRIP", "A/R SUCCESS", "FAULT", "RELAY", "DISTANCE PROTECTION", "BUS BAR")),
+    ("Emergency / Equipment Attention", ("EMERGENCY", "HOTSPOT", "HOT SPOT", "SF6", "OIL LEAK", "FIRE", "FLASHOVER", "DECAP", "CRACK", "BURST", "ALARM")),
+    ("Planned / Maintenance", ("OCC SHUTDOWN", "NON-OCC", "PLANNED", "MAINTENANCE", "AMP", "TESTING", "TREE", "PRUNING", "INSULATOR", "OPGW", "METER", "FIRMWARE")),
+    ("System Requirement", ("SYSTEM REQUIREMENT", "LOADING", "OVERLOADING", "POWER ORDER", "CONTROL FLOW", "NORMALLY KEPT OPEN")),
+]
+
+def classify_outage_reason(reason: str, outage_type: str, entity_name: str):
+    combined = normalize_check_key(f"{outage_type} {reason} {entity_name}")
+    if "GENERATOR" in combined or entity_name and normalize_check_key(entity_name) == "GENERATING UNIT":
+        if "PLANNED" in combined:
+            return "Generator Planned"
+        return "Generator Forced"
+    for category, needles in OUTAGE_CATEGORY_RULES:
+        if any(needle in combined for needle in needles):
+            return category
+    return "Other"
+
+def outage_duration_bucket(hours):
+    if hours is None:
+        return "Unknown"
+    if hours < 1:
+        return "< 1 hr"
+    if hours < 6:
+        return "1-6 hr"
+    if hours < 24:
+        return "6-24 hr"
+    if hours < 72:
+        return "1-3 days"
+    return "> 3 days"
+
+def format_outage_duration(hours):
+    if hours is None:
+        return "-"
+    if hours < 1:
+        return f"{round(hours * 60)} min"
+    if hours < 24:
+        return f"{hours:.1f} hr"
+    days = int(hours // 24)
+    rem = hours - (days * 24)
+    return f"{days}d {rem:.1f}h"
+
+def summarize_outage_group(rows, key):
+    buckets = defaultdict(lambda: {"count": 0, "open_count": 0, "total_duration_hours": 0.0, "durations": []})
+    for row in rows:
+        name = row.get(key) or "Unspecified"
+        item = buckets[name]
+        item["count"] += 1
+        if row.get("status") == "Open":
+            item["open_count"] += 1
+        duration = row.get("duration_hours")
+        if isinstance(duration, (int, float)):
+            item["total_duration_hours"] += duration
+            item["durations"].append(duration)
+    summary = []
+    for name, item in buckets.items():
+        durations = item.pop("durations")
+        count = item["count"]
+        item["name"] = name
+        item["avg_duration_hours"] = round(sum(durations) / len(durations), 2) if durations else None
+        item["max_duration_hours"] = round(max(durations), 2) if durations else None
+        item["total_duration_hours"] = round(item["total_duration_hours"], 2)
+        item["share_percent"] = 0
+        summary.append(item)
+    total = max(1, len(rows))
+    for item in summary:
+        item["share_percent"] = round((item["count"] / total) * 100, 1)
+    return sorted(summary, key=lambda item: (-item["count"], item["name"]))[:20]
+
+def analyze_outage_rows(raw_rows, req: MisOutageAnalysisRequest):
+    start_dt = parse_mis_voltage_datetime(normalize_mis_voltage_datetime(req.start_date))
+    end_dt = parse_mis_voltage_datetime(normalize_mis_voltage_datetime(req.end_date))
+    if start_dt and len(normalize_mis_voltage_datetime(req.start_date)) <= 10:
+        start_dt = datetime.combine(start_dt.date(), datetime.min.time())
+    if end_dt:
+        end_dt = datetime.combine(end_dt.date(), datetime.max.time()) if len(normalize_mis_voltage_datetime(req.end_date)) <= 10 else end_dt
+    now_dt = datetime.now()
+    analysis_dt = now_dt
+
+    entity_filter = {normalize_check_key(item) for item in req.entity_names if str(item or "").strip()}
+    element_filter = {normalize_check_key(item) for item in req.element_names if str(item or "").strip()}
+    type_filter = {normalize_check_key(item) for item in req.outage_types if str(item or "").strip()}
+    excluded_type_filter = {normalize_check_key(item) for item in req.excluded_outage_types if str(item or "").strip()}
+    requesting_filter = {normalize_check_key(item) for item in req.requesting_entities if str(item or "").strip()}
+    owner_filter = {normalize_check_key(item) for item in req.owners if str(item or "").strip()}
+    reason_query = normalize_check_key(req.reason_query)
+
+    rows = []
+    entity_options = set()
+    outage_type_options = set()
+    requesting_options = set()
+    owner_options = set()
+    keyword_counter = Counter()
+
+    for item in raw_rows:
+        if not isinstance(item, dict):
+            continue
+        element_name = str(item.get("ELEMENTNAME") or item.get("ELEMENT_NAME") or "").strip()
+        entity_name = str(item.get("ENTITY_NAME") or "").strip()
+        outage_type = str(item.get("OUTAGE_TYPE") or "").strip()
+        reason = str(item.get("REASON") or "").strip()
+        requesting_entity = str(item.get("RequestingEntity") or "").strip()
+        owner = str(item.get("owner") or "").strip()
+        outage_dt = parse_mis_voltage_datetime(item.get("OUTAGE_DATE_TIME"))
+        revived_dt = parse_mis_voltage_datetime(item.get("REVIVED_DATE_TIME"))
+
+        if excluded_type_filter and normalize_check_key(outage_type) in excluded_type_filter:
+            continue
+
+        if entity_name:
+            entity_options.add(entity_name)
+        if outage_type:
+            outage_type_options.add(outage_type)
+        if requesting_entity:
+            requesting_options.add(requesting_entity)
+        for owner_part in [part.strip() for part in owner.split(",") if part.strip()]:
+            owner_options.add(owner_part)
+
+        if not outage_dt:
+            continue
+        if start_dt and revived_dt and revived_dt < start_dt:
+            continue
+        if end_dt and outage_dt > end_dt:
+            continue
+
+        if element_filter and normalize_check_key(element_name) not in element_filter:
+            continue
+        if entity_filter and normalize_check_key(entity_name) not in entity_filter:
+            continue
+        if type_filter and normalize_check_key(outage_type) not in type_filter:
+            continue
+        if requesting_filter and normalize_check_key(requesting_entity) not in requesting_filter:
+            continue
+        if owner_filter:
+            owner_keys = {normalize_check_key(part) for part in owner.split(",") if part.strip()}
+            if not owner_keys.intersection(owner_filter):
+                continue
+        search_blob = normalize_check_key(f"{element_name} {entity_name} {outage_type} {reason} {requesting_entity} {owner}")
+        if reason_query and reason_query not in search_blob:
+            continue
+
+        duration_end = revived_dt or analysis_dt
+        duration_hours = max(0.0, round((duration_end - outage_dt).total_seconds() / 3600, 2))
+        category = classify_outage_reason(reason, outage_type, entity_name)
+        bucket = outage_duration_bucket(duration_hours)
+        for word in re.findall(r"[A-Z0-9]{3,}", normalize_check_key(reason)):
+            if word not in OUTAGE_REASON_STOPWORDS and not word.isdigit():
+                keyword_counter[word] += 1
+
+        rows.append({
+            "element_name": element_name,
+            "entity_name": entity_name or "Unspecified",
+            "outage_type": outage_type or "Unspecified",
+            "reason": reason,
+            "reason_category": category,
+            "requesting_entity": requesting_entity or "Unspecified",
+            "owner": owner or "Unspecified",
+            "outage_time": outage_dt.strftime("%Y-%m-%d %H:%M"),
+            "revived_time": revived_dt.strftime("%Y-%m-%d %H:%M") if revived_dt else "",
+            "status": "Closed" if revived_dt else "Open",
+            "duration_hours": duration_hours,
+            "duration_label": format_outage_duration(duration_hours),
+            "duration_bucket": bucket,
+        })
+
+    rows.sort(key=lambda row: row["outage_time"], reverse=True)
+    durations = [row["duration_hours"] for row in rows if isinstance(row.get("duration_hours"), (int, float))]
+    category_summary = summarize_outage_group(rows, "reason_category")
+    outage_type_summary = summarize_outage_group(rows, "outage_type")
+    keyword_summary = [{"keyword": word, "count": count} for word, count in keyword_counter.most_common(20)]
+    return {
+        "success": True,
+        "start_date": normalize_mis_voltage_datetime(req.start_date),
+        "end_date": normalize_mis_voltage_datetime(req.end_date),
+        "total_rows": len(raw_rows),
+        "filtered_rows": len(rows),
+        "excluded_outage_types": req.excluded_outage_types,
+        "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "summary": {
+            "events": len(rows),
+            "open": sum(1 for row in rows if row["status"] == "Open"),
+            "closed": sum(1 for row in rows if row["status"] == "Closed"),
+            "avg_duration_hours": round(sum(durations) / len(durations), 2) if durations else None,
+            "max_duration_hours": round(max(durations), 2) if durations else None,
+            "total_duration_hours": round(sum(durations), 2) if durations else 0,
+        },
+        "category_summary": category_summary,
+        "entity_summary": summarize_outage_group(rows, "entity_name"),
+        "outage_type_summary": outage_type_summary,
+        "duration_summary": summarize_outage_group(rows, "duration_bucket"),
+        "requesting_entity_summary": summarize_outage_group(rows, "requesting_entity"),
+        "owner_summary": summarize_outage_group(rows, "owner"),
+        "keyword_summary": keyword_summary,
+        "filter_options": {
+            "entity_names": sorted(entity_options),
+            "outage_types": sorted(outage_type_options),
+            "requesting_entities": sorted(requesting_options),
+            "owners": sorted(owner_options),
+        },
+        "rows": rows,
+    }
+
 @router.get("/mis/voltage-names")
 async def get_mis_voltage_names(start_date: str, end_date: str):
     try:
@@ -5544,6 +5807,24 @@ async def get_mis_voltage_names(start_date: str, end_date: str):
             "count": len(stations),
             "stations": stations,
             "source_url": response.url,
+        }
+    except Exception as exc:
+        traceback.print_exc()
+        return {"success": False, "message": str(exc)}
+
+@router.get("/mis/element-names")
+async def get_mis_element_names(element_type: str):
+    try:
+        element_type_text = str(element_type or "").strip()
+        if not element_type_text:
+            return {"success": False, "message": "Select an element type."}
+        rows, source_url = fetch_mis_element_names(element_type_text)
+        return {
+            "success": True,
+            "element_type": element_type_text,
+            "count": len(rows),
+            "elements": rows,
+            "source_url": source_url,
         }
     except Exception as exc:
         traceback.print_exc()
@@ -5711,6 +5992,17 @@ async def get_mis_reactor_switching(req: MisReactorSwitchingRequest):
                 "stations": len(stations),
             },
         }
+    except Exception as exc:
+        traceback.print_exc()
+        return {"success": False, "message": str(exc)}
+
+@router.post("/mis/outage-analysis")
+async def get_mis_outage_analysis(req: MisOutageAnalysisRequest):
+    try:
+        raw_rows, source_url = fetch_reactor_switching_raw_rows(req.start_date, req.end_date)
+        result = analyze_outage_rows(raw_rows, req)
+        result["source_url"] = source_url
+        return result
     except Exception as exc:
         traceback.print_exc()
         return {"success": False, "message": str(exc)}

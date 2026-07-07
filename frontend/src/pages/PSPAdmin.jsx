@@ -22,6 +22,7 @@ import API from "../services/api";
 
 // LAYOUT
 import AppShell from "../components/layout/AppShell";
+import CalendarInput from "../components/ui/CalendarInput";
 
 // POPUP
 import { showModernPopup } from "../components/ui/ModernPopup";
@@ -1072,22 +1073,8 @@ export default function PSPAdmin() {
                       Ingest report files sequentially for a custom date range.
                     </p>
                     <div className="mb-2">
-                      <label className="form-label small fw-bold text-secondary mb-1">Start Date</label>
-                      <input
-                        type="date"
-                        className="form-control theme-input py-1 w-100"
-                        value={startDate}
-                        onChange={(e) => setStartDate(e.target.value)}
-                      />
-                    </div>
-                    <div className="mb-2">
-                      <label className="form-label small fw-bold text-secondary mb-1">End Date</label>
-                      <input
-                        type="date"
-                        className="form-control theme-input py-1 w-100"
-                        value={endDate}
-                        onChange={(e) => setEndDate(e.target.value)}
-                      />
+                      <label className="form-label small fw-bold text-secondary mb-1">Date Range</label>
+                      <CalendarInput mode="range" className="form-control theme-input py-1 w-100" value={startDate} endValue={endDate} onRangeChange={(start, end) => { setStartDate(start); setEndDate(end); }} />
                     </div>
                     <button
                       className="btn theme-btn-action w-100 py-2 d-flex align-items-center justify-content-center gap-2"
@@ -1220,12 +1207,7 @@ export default function PSPAdmin() {
                     </p>
                     <div className="mb-2">
                       <label className="form-label small fw-bold text-secondary mb-1">Target Date</label>
-                      <input
-                        type="date"
-                        className="form-control theme-input py-1 w-100"
-                        value={singleDate}
-                        onChange={(e) => setSingleDate(e.target.value)}
-                      />
+                      <CalendarInput className="form-control theme-input py-1 w-100" value={singleDate} onChange={setSingleDate} />
                     </div>
                     <button
                       className="btn theme-btn-outline w-100 py-2 d-flex align-items-center justify-content-center gap-2"
@@ -1853,13 +1835,12 @@ export default function PSPAdmin() {
               </p>
             </div>
             <div className="d-flex align-items-center gap-2 flex-wrap">
-              <input
-                type="date"
+              <CalendarInput
                 className="form-control theme-input py-1"
                 value={powerSystemDate}
-                onChange={(e) => {
-                  setPowerSystemDate(e.target.value);
-                  loadPowerSystemBase(e.target.value);
+                onChange={(value) => {
+                  setPowerSystemDate(value);
+                  loadPowerSystemBase(value);
                 }}
                 style={{ fontSize: "0.75rem", width: "150px" }}
               />

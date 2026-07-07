@@ -11,6 +11,7 @@ import {
   YAxis,
 } from "recharts";
 import API from "../services/api";
+import CalendarInput from "./ui/CalendarInput";
 
 /* ─────────────────────────────────────────────
    Geographic transform   viewBox 460 × 490
@@ -1080,22 +1081,17 @@ export default function VoltageProfileMap({ voltageData, voltageLoading }) {
 
             <div style={{ padding: "14px 18px", borderBottom: "1px solid #E2E8F0" }}>
               <div className="row g-2 align-items-end">
-                <div className="col-12 col-md-2">
-                  <label className="form-label small fw-bold text-secondary mb-1">Start Date</label>
-                  <input
-                    type="date"
+                <div className="col-12 col-md-4">
+                  <label className="form-label small fw-bold text-secondary mb-1">Date Range</label>
+                  <CalendarInput
+                    mode="range"
                     className="form-control theme-input"
                     value={trendStartDate}
-                    onChange={(event) => setTrendStartDate(event.target.value)}
-                  />
-                </div>
-                <div className="col-12 col-md-2">
-                  <label className="form-label small fw-bold text-secondary mb-1">End Date</label>
-                  <input
-                    type="date"
-                    className="form-control theme-input"
-                    value={trendEndDate}
-                    onChange={(event) => setTrendEndDate(event.target.value)}
+                    endValue={trendEndDate}
+                    onRangeChange={(start, end) => {
+                      setTrendStartDate(start);
+                      setTrendEndDate(end);
+                    }}
                   />
                 </div>
                 <div className="col-12 col-md-6">

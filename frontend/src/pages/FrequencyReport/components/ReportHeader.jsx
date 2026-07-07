@@ -15,7 +15,9 @@ import {
   Play,
   Plus,
   Terminal,
+  Trash2,
 } from "lucide-react";
+import CalendarInput from "../../../components/ui/CalendarInput";
 
 export default function ReportHeader({
   startTime,
@@ -38,6 +40,7 @@ export default function ReportHeader({
   availableEvents = [],
   selectedEventId = "",
   onSelectEvent = () => {},
+  onDeleteEvent = () => {},
   useDatabase = false,
   setUseDatabase = () => {},
 }) {
@@ -167,36 +170,59 @@ export default function ReportHeader({
 
           <div style={{ display: "flex", alignItems: "center", gap: "8px", minWidth: 0, overflow: "hidden" }}>
             {isHistorical ? (
-              <select
-                value={selectedEventId}
-                onChange={(e) => onSelectEvent(e.target.value)}
-                style={{ ...fieldStyle, width: "min(420px, 100%)" }}
-              >
-                <option value="">{savedEvents.length ? "Select saved event" : "No saved events found"}</option>
-                {savedEvents.map((event) => (
-                  <option key={event.event_id} value={event.event_id}>
-                    {event.name || "Low_Freq_duration"}
-                  </option>
-                ))}
-              </select>
+              <>
+                <select
+                  value={selectedEventId}
+                  onChange={(e) => onSelectEvent(e.target.value)}
+                  style={{ ...fieldStyle, width: "min(420px, 100%)" }}
+                >
+                  <option value="">{savedEvents.length ? "Select saved event" : "No saved events found"}</option>
+                  {savedEvents.map((event) => (
+                    <option key={event.event_id} value={event.event_id}>
+                      {event.name || "Low_Freq_duration"}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  onClick={() => onDeleteEvent(selectedEventId)}
+                  disabled={!selectedEventId}
+                  title="Delete selected historical event"
+                  style={{
+                    height: "36px",
+                    width: "36px",
+                    border: "1px solid #CBD5E1",
+                    borderRadius: "12px",
+                    background: selectedEventId ? "#FEE2E2" : "#F8FAFC",
+                    color: selectedEventId ? "#B91C1C" : "#94A3B8",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    cursor: selectedEventId ? "pointer" : "not-allowed",
+                    padding: 0,
+                  }}
+                >
+                  <Trash2 size={16} />
+                </button>
+              </>
             ) : (
               <>
                 <label style={iconFieldStyle}>
                   <CalendarDays size={15} style={{ color: "#03624C" }} />
-                  <input
-                    type="datetime-local"
+                  <CalendarInput
+                    includeTime
                     value={startTime}
-                    onChange={(e) => setStartTime(e.target.value)}
-                    style={{ border: "none", outline: "none", color: "#0F172A", fontSize: "0.76rem" }}
+                    onChange={setStartTime}
+                    style={{ border: "none", minHeight: 26, outline: "none", color: "#0F172A", fontSize: "0.76rem", padding: 0 }}
                   />
                 </label>
                 <label style={iconFieldStyle}>
                   <Clock3 size={15} style={{ color: "#03624C" }} />
-                  <input
-                    type="datetime-local"
+                  <CalendarInput
+                    includeTime
                     value={endTime}
-                    onChange={(e) => setEndTime(e.target.value)}
-                    style={{ border: "none", outline: "none", color: "#0F172A", fontSize: "0.76rem" }}
+                    onChange={setEndTime}
+                    style={{ border: "none", minHeight: 26, outline: "none", color: "#0F172A", fontSize: "0.76rem", padding: 0 }}
                   />
                 </label>
                 <button

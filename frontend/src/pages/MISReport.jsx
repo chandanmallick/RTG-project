@@ -16,6 +16,7 @@ import {
 import { BarChart3, ChevronDown, Download, FileSpreadsheet, Plus, RefreshCw, Trash2 } from "lucide-react";
 
 import AppShell from "../components/layout/AppShell";
+import CalendarInput from "../components/ui/CalendarInput";
 import API from "../services/api";
 
 const todayIso = () => new Date().toISOString().slice(0, 10);
@@ -1056,13 +1057,9 @@ export default function MISReport() {
           </div>
 
           <div className="row g-2 align-items-end">
-            <div className="col-6 col-lg-2">
-              <label className="form-label small fw-bold text-secondary mb-1">From</label>
-              <input type="date" className="form-control theme-input py-1" value={snapshotStartDate} onChange={(event) => setSnapshotStartDate(event.target.value)} />
-            </div>
-            <div className="col-6 col-lg-2">
-              <label className="form-label small fw-bold text-secondary mb-1">To</label>
-              <input type="date" className="form-control theme-input py-1" value={snapshotEndDate} onChange={(event) => setSnapshotEndDate(event.target.value)} />
+            <div className="col-12 col-lg-4">
+              <label className="form-label small fw-bold text-secondary mb-1">Date Range</label>
+              <CalendarInput mode="range" className="form-control theme-input py-1" value={snapshotStartDate} endValue={snapshotEndDate} onRangeChange={(start, end) => { setSnapshotStartDate(start); setSnapshotEndDate(end); }} />
             </div>
             <div className="col-12 col-lg-2">
               <button
@@ -1095,13 +1092,9 @@ export default function MISReport() {
                     <div className="fw-bold text-secondary" style={{ fontSize: "0.72rem" }}>Compare {index + 1}</div>
                     <div className="text-muted" style={{ fontSize: "0.68rem" }}>{formatRangeLabel(range)}</div>
                   </div>
-                  <div className="col-6 col-lg-2">
-                    <label className="form-label small fw-bold text-secondary mb-1">From</label>
-                    <input type="date" className="form-control theme-input" value={range.start_date} onChange={(event) => updateSnapshotCompareRange(range.id, { start_date: event.target.value })} />
-                  </div>
-                  <div className="col-6 col-lg-2">
-                    <label className="form-label small fw-bold text-secondary mb-1">To</label>
-                    <input type="date" className="form-control theme-input" value={range.end_date} onChange={(event) => updateSnapshotCompareRange(range.id, { end_date: event.target.value })} />
+                  <div className="col-12 col-lg-4">
+                    <label className="form-label small fw-bold text-secondary mb-1">Range</label>
+                    <CalendarInput mode="range" className="form-control theme-input" value={range.start_date} endValue={range.end_date} onRangeChange={(start, end) => updateSnapshotCompareRange(range.id, { start_date: start, end_date: end })} />
                   </div>
                   <div className="col-12 col-lg-auto">
                     <button
@@ -1311,13 +1304,9 @@ export default function MISReport() {
           </div>
 
           <div className="row g-2 align-items-end">
-            <div className="col-6 col-lg-2">
-              <label className="form-label small fw-bold text-secondary mb-1">From</label>
-              <input type="date" className="form-control theme-input" value={outageStartDate} onChange={(event) => setOutageStartDate(event.target.value)} />
-            </div>
-            <div className="col-6 col-lg-2">
-              <label className="form-label small fw-bold text-secondary mb-1">To</label>
-              <input type="date" className="form-control theme-input" value={outageEndDate} onChange={(event) => setOutageEndDate(event.target.value)} />
+            <div className="col-12 col-lg-4">
+              <label className="form-label small fw-bold text-secondary mb-1">Date Range</label>
+              <CalendarInput mode="range" className="form-control theme-input" value={outageStartDate} endValue={outageEndDate} onRangeChange={(start, end) => { setOutageStartDate(start); setOutageEndDate(end); }} />
             </div>
             <div className="col-12 col-lg-2">
               <button
@@ -1344,13 +1333,9 @@ export default function MISReport() {
                     <div className="fw-bold text-secondary" style={{ fontSize: "0.72rem" }}>Compare {index + 1}</div>
                     <div className="text-muted" style={{ fontSize: "0.68rem" }}>{formatRangeLabel(range)}</div>
                   </div>
-                  <div className="col-6 col-lg-2">
-                    <label className="form-label small fw-bold text-secondary mb-1">From</label>
-                    <input type="date" className="form-control theme-input" value={range.start_date} onChange={(event) => updateOutageCompareRange(range.id, { start_date: event.target.value })} />
-                  </div>
-                  <div className="col-6 col-lg-2">
-                    <label className="form-label small fw-bold text-secondary mb-1">To</label>
-                    <input type="date" className="form-control theme-input" value={range.end_date} onChange={(event) => updateOutageCompareRange(range.id, { end_date: event.target.value })} />
+                  <div className="col-12 col-lg-4">
+                    <label className="form-label small fw-bold text-secondary mb-1">Range</label>
+                    <CalendarInput mode="range" className="form-control theme-input" value={range.start_date} endValue={range.end_date} onRangeChange={(start, end) => updateOutageCompareRange(range.id, { start_date: start, end_date: end })} />
                   </div>
                   <div className="col-12 col-lg-auto">
                     <button type="button" className="btn btn-sm btn-light border d-flex align-items-center gap-1" onClick={() => setOutageCompareRanges((prev) => prev.filter((item) => item.id !== range.id))}>
@@ -1468,11 +1453,11 @@ export default function MISReport() {
                 </div>
                 <div className="col-6">
                   <label className="form-label fw-bold text-secondary mb-1" style={{ fontSize: "0.66rem" }}>From</label>
-                  <input type="datetime-local" className="form-control theme-input py-1" value={voltageStartDateTime} onChange={(event) => setVoltageStartDateTime(event.target.value)} style={{ fontSize: "0.72rem" }} />
+                  <CalendarInput includeTime className="form-control theme-input py-1" value={voltageStartDateTime} onChange={setVoltageStartDateTime} style={{ fontSize: "0.72rem" }} />
                 </div>
                 <div className="col-6">
                   <label className="form-label fw-bold text-secondary mb-1" style={{ fontSize: "0.66rem" }}>To</label>
-                  <input type="datetime-local" className="form-control theme-input py-1" value={voltageEndDateTime} onChange={(event) => setVoltageEndDateTime(event.target.value)} style={{ fontSize: "0.72rem" }} />
+                  <CalendarInput includeTime className="form-control theme-input py-1" value={voltageEndDateTime} onChange={setVoltageEndDateTime} style={{ fontSize: "0.72rem" }} />
                 </div>
                 <div className="col-4">
                   <label className="form-label fw-bold text-secondary mb-1" style={{ fontSize: "0.66rem" }}>Interval</label>
@@ -1735,11 +1720,8 @@ export default function MISReport() {
                       </button>
                     </div>
                     <div className="row g-2">
-                      <div className="col-6">
-                        <input type="date" className="form-control theme-input" value={range.start_date} onChange={(event) => updateRange(range.id, { start_date: event.target.value })} />
-                      </div>
-                      <div className="col-6">
-                        <input type="date" className="form-control theme-input" value={range.end_date} onChange={(event) => updateRange(range.id, { end_date: event.target.value })} />
+                      <div className="col-12">
+                        <CalendarInput mode="range" className="form-control theme-input" value={range.start_date} endValue={range.end_date} onRangeChange={(start, end) => updateRange(range.id, { start_date: start, end_date: end })} />
                       </div>
                       <div className="col-12">
                         <select className="form-select theme-input" value={range.curve_type} onChange={(event) => updateRange(range.id, { curve_type: event.target.value })}>

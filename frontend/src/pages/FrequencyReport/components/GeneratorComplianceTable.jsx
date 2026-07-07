@@ -14,6 +14,22 @@ const fmt = (v, dec = 0) =>
   !Number.isFinite(Number(v)) ? "-" :
   v === null || v === undefined ? "—" : Number(v).toFixed(dec);
 
+const generatorCategory = (row = {}) => {
+  const type = String(row.type || "").toUpperCase();
+  const state = String(row.state || row.state_name || "").toUpperCase();
+  if (type === "ISGS") return "ISGS";
+  if (type === "IPP") return "IPP";
+  if (type === "STATE" || type === "STATE_IPP") return `State Generator (${state || "STATE"})`;
+  return "IPP";
+};
+
+const categoryRank = (label = "") => {
+  if (label === "ISGS") return 1;
+  if (label === "IPP") return 2;
+  if (label.startsWith("State Generator")) return 3;
+  return 4;
+};
+
 export default function GeneratorComplianceTable({
   rows,
   expandedRowIds,
@@ -42,7 +58,8 @@ export default function GeneratorComplianceTable({
   const stateOptions = useMemo(() => {
     const states = new Set();
     rows.forEach((r) => {
-      if (r.state) states.add(r.state.toUpperCase());
+      const state = r.state || r.state_name;
+      if (state) states.add(String(state).toUpperCase());
     });
     return ["ALL_STATES", ...Array.from(states).sort()];
   }, [rows]);
@@ -58,18 +75,21 @@ export default function GeneratorComplianceTable({
 
       const matchesState =
         stateFilter === "ALL_STATES" ||
-        (r.state && r.state.toUpperCase() === stateFilter);
+        ((r.state || r.state_name) && String(r.state || r.state_name).toUpperCase() === stateFilter);
 
       return matchesSearch && matchesFuel && matchesState;
     });
   }, [rows, searchQuery, fuelFilter, stateFilter]);
 
-  const statesGroupList = ["BIHAR", "JHARKHAND", "ODISHA", "WEST BENGAL", "SIKKIM", "DVC", "ER"];
+  const generatorGroupList = useMemo(() => {
+    const labels = Array.from(new Set(filteredRows.map(generatorCategory)));
+    return labels.sort((a, b) => categoryRank(a) - categoryRank(b) || a.localeCompare(b));
+  }, [filteredRows]);
 
   return (
     <SectionAccordion
       title="Generator Compliance Details"
-      subtitle="Unit-wise scheduling compliance details grouped by state (Click a generator to view plot)"
+      subtitle="Unit-wise scheduling compliance details sorted by ISGS, IPP and State Generator group"
       count={filteredRows.length}
       actions={
         <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
@@ -203,23 +223,15 @@ export default function GeneratorComplianceTable({
           No generators match the selected filters or no data loaded.
         </div>
       ) : (
-        statesGroupList.map((st) => {
-          const statePlants = filteredRows.filter((p) => {
-            const pState = (p.state || "").toUpperCase();
-            if (st === "ER") {
-              return (
-                pState === "ER" ||
-                pState === "BHUTAN" ||
-                !["BIHAR", "JHARKHAND", "ODISHA", "WEST BENGAL", "SIKKIM", "DVC"].includes(pState)
-              );
-            }
-            return pState === st;
-          });
+        generatorGroupList.map((groupLabel) => {
+          const statePlants = filteredRows
+            .filter((p) => generatorCategory(p) === groupLabel)
+            .sort((a, b) => String(a.state || a.state_name || "").localeCompare(String(b.state || b.state_name || "")) || String(a.plant_name || "").localeCompare(String(b.plant_name || "")));
 
           if (statePlants.length === 0) return null;
 
           return (
-            <div key={st} style={{ marginBottom: "20px" }}>
+            <div key={groupLabel} style={{ marginBottom: "20px" }}>
               <h4
                 style={{
                   fontSize: "0.82rem",
@@ -235,7 +247,7 @@ export default function GeneratorComplianceTable({
                 <span
                   style={{ width: "6px", height: "6px", borderRadius: "50%", background: "#10B981" }}
                 ></span>
-                {st === "ER" ? "EASTERN REGION & OTHERS (ER)" : `${st} STATE COMPLIANCE`}
+                {groupLabel.toUpperCase()}
                 <span style={{ fontSize: "0.7rem", color: "#64748B", fontWeight: 500 }}>
                   ({statePlants.length} plants)
                 </span>
@@ -320,7 +332,10 @@ export default function GeneratorComplianceTable({
                                 ) : (
                                   <ChevronDown size={13} className="text-secondary" />
                                 )}
-                                {row.plant_name}
+                                <span>{row.plant_name}</span>
+                              </div>
+                              <div style={{ marginLeft: 18, marginTop: 2, color: "#64748B", fontSize: "0.62rem", fontWeight: 800 }}>
+                                ({String(row.type || "IPP").toUpperCase()}{row.state ? ` | ${String(row.state).toUpperCase()}` : ""})
                               </div>
                             </td>
                             <td style={{ padding: "8px 8px", fontSize: "0.71rem", color: "#475569", fontWeight: "500" }}>

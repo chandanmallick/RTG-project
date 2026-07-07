@@ -2,6 +2,7 @@ import { useMemo, useRef, useState } from "react";
 import html2canvas from "html2canvas";
 import { ArrowRightLeft, Download, FileSpreadsheet, Info, ListChecks, RefreshCw, X } from "lucide-react";
 import API from "../services/api";
+import CalendarInput from "./ui/CalendarInput";
 
 const COLORS = {
   ER: "#0891B2",
@@ -457,22 +458,17 @@ export default function PowerExchangeGraphic({ data, loading }) {
 
               <div className="modal-body pt-2">
                 <div className="d-flex align-items-end gap-2 flex-wrap mb-3">
-                  <div>
-                    <label className="form-label small fw-bold text-secondary mb-1">Start Date</label>
-                    <input
-                      type="date"
+                  <div style={{ minWidth: "240px" }}>
+                    <label className="form-label small fw-bold text-secondary mb-1">Date Range</label>
+                    <CalendarInput
+                      mode="range"
                       className="form-control theme-input"
                       value={rangeStartDate}
-                      onChange={(event) => setRangeStartDate(event.target.value)}
-                    />
-                  </div>
-                  <div>
-                    <label className="form-label small fw-bold text-secondary mb-1">End Date</label>
-                    <input
-                      type="date"
-                      className="form-control theme-input"
-                      value={rangeEndDate}
-                      onChange={(event) => setRangeEndDate(event.target.value)}
+                      endValue={rangeEndDate}
+                      onRangeChange={(start, end) => {
+                        setRangeStartDate(start);
+                        setRangeEndDate(end);
+                      }}
                     />
                   </div>
                   <button

@@ -29,18 +29,28 @@ const CapacityFrequencyChart = forwardRef(function CapacityFrequencyChart({ row,
   const actuals = useMemo(() => clean(row.series?.actual || []), [row.series?.actual]);
   const schedules = useMemo(() => clean(row.series?.schedule || []), [row.series?.schedule]);
   const freqs = useMemo(() => clean(row.series?.frequency || []), [row.series?.frequency]);
+  const isState = row.type === "state" || row.is_state;
   const capOnBar = Number(row.cap_on_bar || 0);
-  const cap55 = Number(row.cap_on_bar_55 || (capOnBar ? capOnBar * 0.55 : 0));
   const hasSchedule = schedules.some((v) => v !== null && Number.isFinite(Number(v)));
   const isLowFrequency = (row.event_type || "low") !== "high";
+  const highFreqReference = capOnBar * 0.94;
   const modeLabel = isLowFrequency ? "Low Frequency" : "High Frequency";
   const threshold = isLowFrequency ? 49.9 : 50.05;
   const thresholdText = isLowFrequency ? "49.90 Hz" : "50.05 Hz";
+  const minActual = useMemo(() => {
+    const nums = actuals.filter((v) => v !== null && Number.isFinite(Number(v)));
+    return nums.length ? Math.min(...nums) : null;
+  }, [actuals]);
+  const minGenerationPct = !isLowFrequency && minActual !== null && highFreqReference > 0 ? (minActual / highFreqReference) * 100 : null;
+  const hasMinGenerationNote = !isState && !isLowFrequency && minActual !== null;
+  const minGenerationSubtext = hasMinGenerationNote
+    ? `Min Gen: ${minActual.toFixed(0)} MW | 94% Cap on Bar: ${highFreqReference ? highFreqReference.toFixed(0) : "-"} MW | Min Gen %: ${minGenerationPct !== null ? minGenerationPct.toFixed(1) : "-"}%`
+    : "";
   const maxMw = Math.max(
     ...actuals.filter((v) => v !== null),
     ...schedules.filter((v) => v !== null),
-    capOnBar,
-    cap55,
+    !isLowFrequency ? 0 : capOnBar,
+    hasMinGenerationNote ? highFreqReference : 0,
     1
   );
   const yMax = maxMw < 1000 ? Math.ceil(maxMw / 100) * 100 : Math.ceil(maxMw / 500) * 500;
@@ -48,7 +58,7 @@ const CapacityFrequencyChart = forwardRef(function CapacityFrequencyChart({ row,
   const option = useMemo(() => {
     const series = [
       {
-        name: "Actual Generation (MW)",
+        name: isState ? "Actual Drawal (MW)" : "Actual Generation (MW)",
         type: "line",
         data: actuals,
         symbol: "none",
@@ -68,7 +78,7 @@ const CapacityFrequencyChart = forwardRef(function CapacityFrequencyChart({ row,
         yAxisIndex: 0,
         z: 3,
       }] : []),
-      {
+      ...(!isState && isLowFrequency ? [{
         name: "Capacity on Bar (MW)",
         type: "line",
         data: timestamps.map(() => capOnBar || null),
@@ -77,30 +87,7 @@ const CapacityFrequencyChart = forwardRef(function CapacityFrequencyChart({ row,
         lineStyle: { color: "#0F172A", width: compact ? 2.3 : 2.6, type: "dotted" },
         yAxisIndex: 0,
         z: 2,
-      },
-      {
-        name: "55% Cap On Bar",
-        type: "line",
-        data: timestamps.map(() => cap55 || null),
-        symbol: "none",
-        itemStyle: { color: "#F97316" },
-        lineStyle: { color: "#F97316", width: isLowFrequency ? 2.8 : 3.2, type: "dashed" },
-        yAxisIndex: 0,
-        markLine: {
-          silent: true,
-          symbol: "none",
-          lineStyle: { color: "#F59E0B", width: isLowFrequency ? 1.6 : 2.2, type: "dashed" },
-          label: {
-            formatter: "55% of Cap on Bar",
-            color: "#B45309",
-            fontWeight: 800,
-            backgroundColor: "rgba(255,247,237,0.92)",
-            padding: [2, 5],
-          },
-          data: cap55 ? [{ yAxis: cap55 }] : [],
-        },
-        z: 2,
-      },
+      }] : []),
       {
         name: "Frequency (Hz)",
         type: "line",
@@ -130,10 +117,12 @@ const CapacityFrequencyChart = forwardRef(function CapacityFrequencyChart({ row,
     textStyle: { fontFamily: "Inter, sans-serif", fontWeight: 700 },
     animation: false,
     title: {
-      text: `${row.plant_name}: ${modeLabel} Generation vs Capacity on Bar`,
+      text: `${row.plant_name}: ${modeLabel} ${isState ? "Drawal vs Schedule" : isLowFrequency ? "Generation vs Capacity on Bar" : "Generation vs Schedule"}`,
+      subtext: minGenerationSubtext,
       left: 10,
       top: compact ? 2 : 6,
       textStyle: { fontSize: compact ? 13 : 15, fontWeight: 900, color: "#0F172A" },
+      subtextStyle: { fontSize: compact ? 10 : 11, fontWeight: 800, color: "#B45309", lineHeight: 16 },
     },
     tooltip: {
       trigger: "axis",
@@ -144,7 +133,7 @@ const CapacityFrequencyChart = forwardRef(function CapacityFrequencyChart({ row,
     },
     legend: {
       type: "scroll",
-      top: compact ? 24 : 30,
+      top: hasMinGenerationNote ? (compact ? 42 : 50) : (compact ? 24 : 30),
       left: 12,
       right: 12,
       textStyle: { color: "#1F2937", fontSize: compact ? 11 : 12, fontWeight: 800 },
@@ -155,7 +144,7 @@ const CapacityFrequencyChart = forwardRef(function CapacityFrequencyChart({ row,
       pageTextStyle: { color: "#64748B", fontSize: 10 },
       data: series.map((item) => item.name),
     },
-    grid: { top: compact ? 70 : 84, right: 60, bottom: compact ? 50 : 72, left: 64 },
+    grid: { top: hasMinGenerationNote ? (compact ? 88 : 106) : (compact ? 70 : 84), right: 60, bottom: compact ? 50 : 72, left: 64 },
     dataZoom: [
       { type: "inside", filterMode: "none" },
       { type: "slider", height: compact ? 13 : 16, bottom: compact ? 12 : 24, textStyle: { color: "#64748B", fontSize: 9 }, fillerColor: "rgba(37,99,235,0.08)", borderColor: "#CBD5E1" },
@@ -191,7 +180,7 @@ const CapacityFrequencyChart = forwardRef(function CapacityFrequencyChart({ row,
     ],
     series,
   });
-  }, [actuals, cap55, capOnBar, freqs, hasSchedule, isLowFrequency, compact, modeLabel, row.plant_name, schedules, threshold, thresholdText, timestamps, yMax]);
+  }, [actuals, capOnBar, freqs, hasMinGenerationNote, hasSchedule, isLowFrequency, compact, minGenerationPct, minGenerationSubtext, modeLabel, row.plant_name, schedules, threshold, thresholdText, timestamps, yMax, isState]);
 
   return <ReactECharts ref={eRef} option={option} style={{ height, width: "100%" }} opts={{ renderer: "canvas" }} notMerge />;
 });

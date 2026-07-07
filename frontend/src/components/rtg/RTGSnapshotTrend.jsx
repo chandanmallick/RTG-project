@@ -1,7 +1,6 @@
 import {
   Box,
   Paper,
-  TextField,
   Typography
 } from "@mui/material";
 
@@ -17,7 +16,7 @@ import {
   YAxis
 } from "recharts";
 
-import CalendarMonthRoundedIcon from "@mui/icons-material/CalendarMonthRounded";
+import CalendarInput from "../ui/CalendarInput";
 
 const formatMW = (value) =>
   Number(value || 0).toLocaleString(
@@ -169,38 +168,19 @@ export default function RTGSnapshotTrend({
           </Typography>
         </Box>
 
-        <TextField
-          type="date"
-          size="small"
-          value={date || ""}
-          onChange={(event) =>
-            onDateChange?.(
-              event.target.value
-            )
-          }
-          InputProps={{
-            startAdornment: (
-              <CalendarMonthRoundedIcon
-                sx={{
-                  mr: 1,
-                  fontSize: 18,
-                  color: "#03624C"
-                }}
-              />
-            )
-          }}
-          sx={{
-            minWidth: {
-              xs: "100%",
-              sm: 190
-            },
-            "& .MuiOutlinedInput-root": {
-              borderRadius: "14px",
+        <Box sx={{ minWidth: { xs: "100%", sm: 190 } }}>
+          <CalendarInput
+            value={date || ""}
+            onChange={(value) => onDateChange?.(value)}
+            style={{
+              minHeight: 40,
+              borderRadius: 14,
+              padding: "0 12px",
               background: "#FFFFFF",
-              fontWeight: 800
-            }
-          }}
-        />
+              fontWeight: 800,
+            }}
+          />
+        </Box>
       </Box>
 
       <Box

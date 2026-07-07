@@ -9,6 +9,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
+import CalendarInput from "./CalendarInput";
 
 const formatDate = (dateStr) => {
   if (!dateStr) return "-";
@@ -57,13 +58,18 @@ export default function PSPFrequencyTrendModal({
 
           <div className="modal-body pt-2">
             <div className="d-flex align-items-end gap-2 flex-wrap mb-3">
-              <div>
-                <label className="form-label small fw-bold text-secondary mb-1">Start Date</label>
-                <input type="date" className="form-control theme-input" value={startDate} onChange={(event) => onStartDateChange(event.target.value)} />
-              </div>
-              <div>
-                <label className="form-label small fw-bold text-secondary mb-1">End Date</label>
-                <input type="date" className="form-control theme-input" value={endDate} onChange={(event) => onEndDateChange(event.target.value)} />
+              <div style={{ minWidth: "240px" }}>
+                <label className="form-label small fw-bold text-secondary mb-1">Date Range</label>
+                <CalendarInput
+                  mode="range"
+                  className="form-control theme-input"
+                  value={startDate}
+                  endValue={endDate}
+                  onRangeChange={(start, end) => {
+                    onStartDateChange(start);
+                    onEndDateChange(end);
+                  }}
+                />
               </div>
               <button type="button" className="btn theme-btn-primary d-flex align-items-center gap-2" onClick={onLoad} disabled={loading}>
                 <RefreshCw size={14} className={loading ? "animate-spin-custom" : ""} />

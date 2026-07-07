@@ -22,9 +22,11 @@ import matplotlib.dates as mdates
 
 from docx import Document
 import docx.shared
+from docx.enum.section import WD_ORIENT, WD_SECTION
+from docx.enum.text import WD_ALIGN_PARAGRAPH
 
-from reportlab.lib.pagesizes import A4
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image, PageBreak, Table, TableStyle
+from reportlab.lib.pagesizes import A4, landscape, portrait
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image, PageBreak, Table, TableStyle, BaseDocTemplate, PageTemplate, Frame, NextPageTemplate
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib import colors
 
@@ -84,10 +86,20 @@ def safe_format_pct(val):
         return "—"
     return f"{f_val:.1f}%"
 
+def report_entity_label(row):
+    name = str(row.get("plant_name") or "").strip()
+    if row.get("is_state"):
+        return name
+    type_text = str(row.get("type") or "").strip().upper()
+    state_text = str(row.get("state") or "").strip().upper()
+    bracket = " | ".join([part for part in [type_text, state_text] if part])
+    return f"{name} ({bracket})" if bracket else name
+
 def get_stat(row, key):
     stats = row.get("statistics", {}) or {}
     aliases = {
         "max_od_freq": ["freq_at_max_od", "max_od_freq", "max_od_freq_str"],
+        "max_ud_freq": ["freq_at_max_ud", "max_ud_freq", "max_ud_freq_str"],
         "over_drawal_pct": ["od_duration_pct", "over_drawal_pct"],
         "under_drawal_pct": ["helping_duration_pct", "under_drawal_pct"],
     }
@@ -195,9 +207,160 @@ def lookup_capacity_on_bar(db, entity_list, date_strings):
                 result[rtg_pid] = cap
     return result
 
+def get_rtg_cap_on_bar_url():
+    db = MongoService()
+    record = db.pipeline_config_collection.find_one({"config_type": "RTG"})
+    if record and "rtg_cap_on_bar_url" in record:
+        return record["rtg_cap_on_bar_url"]
+
+    default_url = "https://rtgapi.grid-india.in/sendData/cap-on-bar/"
+    db.pipeline_config_collection.update_one(
+        {"config_type": "RTG"},
+        {"$set": {"rtg_cap_on_bar_url": default_url}},
+        upsert=True
+    )
+    return default_url
+
+def extract_cap_on_bar_value(payload):
+    if isinstance(payload, (int, float, str)):
+        return safe_float(payload)
+    if isinstance(payload, dict):
+        for key in ["cap_on_bar", "capacity_on_bar", "capOnBar", "on_bar", "onbar", "value", "data"]:
+            if key not in payload:
+                continue
+            value = payload.get(key)
+            if isinstance(value, list):
+                vals = [extract_cap_on_bar_value(item) for item in value]
+                vals = [v for v in vals if v is not None]
+                return sum(vals) if vals else None
+            parsed = extract_cap_on_bar_value(value)
+            if parsed is not None:
+                return parsed
+        return None
+    if isinstance(payload, list):
+        vals = [extract_cap_on_bar_value(item) for item in payload]
+        vals = [v for v in vals if v is not None]
+        return sum(vals) if vals else None
+    return None
+
+def fetch_rtg_cap_on_bar_raw(date_str: str, plant_id: str, db=None):
+    db = db or MongoService()
+    if not plant_id:
+        return None
+
+    try:
+        cached = get_event_raw_data(db, date_str, plant_id=plant_id)
+        cached_cap = (((cached or {}).get("sources", {}) or {}).get("rtg", {}) or {}).get("cap_on_bar")
+        parsed_cached = safe_float(cached_cap)
+        if parsed_cached is not None:
+            return parsed_cached
+    except Exception as cache_err:
+        print(f"Error checking cache for RTG cap-on-bar {plant_id}: {cache_err}")
+
+    rtg_cfg = db.pipeline_config_collection.find_one({"config_type": "RTG"})
+    if not rtg_cfg:
+        return None
+
+    from services.token_service import TokenService
+    try:
+        token = TokenService.get_token(
+            rtg_cfg["rtg_token_url"],
+            rtg_cfg["rtg_username"],
+            rtg_cfg["rtg_password"]
+        )
+    except Exception as e:
+        print("Error generating RTG token for cap-on-bar:", e)
+        return None
+
+    base_url = get_rtg_cap_on_bar_url()
+    if not base_url.endswith("/"):
+        base_url += "/"
+    url = f"{base_url}{date_str}/{plant_id}/"
+    headers = {"Authorization": f"Token {token}", "Content-Type": "application/json"}
+
+    try:
+        session = get_legacy_session_no_verify()
+        res = session.get(url, headers=headers, timeout=6)
+        if res.status_code != 200:
+            log_api_hit("RTG_CAP_ON_BAR", date_str, plant_id, url, "failed", res.status_code, f"Response: {res.text[:200]}")
+            return None
+        cap = extract_cap_on_bar_value(res.json())
+        if cap is not None:
+            merge_event_raw_data(
+                db,
+                date_str,
+                plant_id=plant_id,
+                set_fields={
+                    "sources.rtg.cap_on_bar": cap,
+                    "sources.rtg.cap_on_bar_fetched_at": datetime.utcnow().isoformat(),
+                },
+            )
+            log_api_hit("RTG_CAP_ON_BAR", date_str, plant_id, url, "success", 200, data_count=1, data_saved=True)
+        return cap
+    except Exception as e:
+        print(f"Error fetching RTG cap-on-bar for {plant_id} on {date_str}:", e)
+        log_api_hit("RTG_CAP_ON_BAR", date_str, plant_id, url, "failed", 0, str(e))
+        return None
+
+def lookup_rtg_capacity_on_bar(db, entity_list, date_strings):
+    result = lookup_capacity_on_bar(db, entity_list, date_strings)
+    if not date_strings:
+        return result
+
+    for e in entity_list or []:
+        if e.get("is_state") or e.get("is_frequency"):
+            continue
+        pid = str(e.get("plant_id") or "").strip()
+        rtg_pid = str(e.get("rtg_plant_id") or pid).strip()
+        if not rtg_pid or result.get(rtg_pid) is not None or result.get(pid) is not None:
+            continue
+
+        for d in date_strings:
+            cap = fetch_rtg_cap_on_bar_raw(d, rtg_pid, db=db)
+            if cap is not None:
+                result[rtg_pid] = cap
+                if pid:
+                    result[pid] = cap
+                break
+    return result
+
+def format_report_plant_name(entity, point=None):
+    point = point or {}
+    if entity.get("is_state") or point.get("is_state"):
+        return str(point.get("plant_name") or entity.get("plant_name") or entity.get("state") or entity.get("state_name") or "").strip()
+    plant_name = str(point.get("plant_name") or entity.get("plant_name") or "").strip()
+    stage_name = str(point.get("stage_name") or point.get("STAGE_NAME") or entity.get("stage_name") or entity.get("STAGE_NAME") or "").strip()
+    stage_id = str(point.get("stage_id") or point.get("STAGE_ID") or entity.get("stage_id") or entity.get("STAGE_ID") or "").strip().replace(".0", "")
+    stage_label = stage_name or stage_id
+    stage_text = f"St. {stage_label[4:].strip() if stage_label.lower().startswith('st. ') else stage_label}" if stage_label else ""
+    plant_upper = plant_name.upper()
+    raw_stage_upper = stage_label.upper() if stage_label else ""
+    if stage_text and stage_text.upper() != plant_upper and f"({stage_text.upper()})" not in plant_upper and f"({raw_stage_upper})" not in plant_upper and f"STAGE {raw_stage_upper}" not in plant_upper:
+        return f"{plant_name} ({stage_text})" if plant_name else stage_text
+    return plant_name or stage_text
+
+def lookup_unit_fuel_name(db, plant_id):
+    if not plant_id:
+        return ""
+    plant_id_text = str(plant_id).replace(".0", "")
+    plant_id_values = [plant_id, str(plant_id), plant_id_text]
+    if plant_id_text.isdigit():
+        plant_id_values.append(int(plant_id_text))
+    doc = db.unit_collection.find_one(
+        {"plant_id": {"$in": plant_id_values}},
+        {"_id": 0, "FuelName": 1, "fuel_type": 1, "Station_Type_Name": 1}
+    )
+    return (doc or {}).get("FuelName") or (doc or {}).get("fuel_type") or (doc or {}).get("Station_Type_Name") or ""
+
+def cap_on_bar_reference(cap_on_bar, event_type):
+    cap = safe_float(cap_on_bar)
+    if cap is None:
+        return None
+    return cap * 0.94 if normalize_event_type(event_type) == "high" else None
+
 def compute_frequency_statistics(scada_freqs, scada_dts, entity_dev, is_state, event_type):
     cfg = event_config(event_type)
-    total_count = len(scada_freqs)
+    event_count = 0
     pos_count = 0
     neg_count = 0
     state_extreme_val = cfg["state_max_initial"]
@@ -215,19 +378,23 @@ def compute_frequency_statistics(scada_freqs, scada_dts, entity_dev, is_state, e
 
     for idx, freq in enumerate(scada_freqs):
         dev_val = entity_dev[idx]
-        if cfg["is_event_freq"](freq):
-            if dev_val > 0:
-                pos_count += 1
-            elif dev_val < 0:
-                neg_count += 1
+        if not cfg["is_event_freq"](freq):
+            continue
+
+        event_count += 1
+        if dev_val > 0:
+            pos_count += 1
+        elif dev_val < 0:
+            neg_count += 1
+
         if is_state and cfg["state_max_compare"](dev_val, state_extreme_val):
             state_extreme_val = dev_val
             state_extreme_time = scada_dts[idx]
             state_extreme_freq = freq
 
     return {
-        "positive_pct": (pos_count / total_count * 100) if total_count > 0 else 0.0,
-        "negative_pct": (neg_count / total_count * 100) if total_count > 0 else 0.0,
+        "positive_pct": (pos_count / event_count * 100) if event_count > 0 else 0.0,
+        "negative_pct": (neg_count / event_count * 100) if event_count > 0 else 0.0,
         "state_extreme": state_extreme_val if state_extreme_time is not None else None,
         "state_extreme_time": state_extreme_time.strftime('%d-%m-%y %H:%M') if state_extreme_time is not None else "",
         "state_extreme_freq": state_extreme_freq if state_extreme_time is not None else None,
@@ -488,7 +655,6 @@ def crms_message_rows(row: dict):
             "category": crms_message_category(message),
             "issue_time": crms_message_issue_time(message),
             "message_no": message.get("message_no") or "",
-            "issued_to": ", ".join(message.get("issued_to") or []),
         })
     return result
 
@@ -535,15 +701,14 @@ def append_pdf_crms_messages(story, row, styles):
         textColor=colors.HexColor("#0F172A"),
         spaceAfter=3,
     )))
-    data = [["Category", "Issue Time", "Msg No", "Issued To"]]
+    data = [["Category", "Issue Time", "Msg No"]]
     for msg in messages:
         data.append([
             Paragraph(xml_escape(msg["category"]), small_style),
             Paragraph(xml_escape(msg["issue_time"]), small_style),
             Paragraph(xml_escape(msg["message_no"]), small_style),
-            Paragraph(xml_escape(msg["issued_to"]), small_style),
         ])
-    table = Table(data, colWidths=[70, 60, 120, 260])
+    table = Table(data, colWidths=[80, 70, 130])
     table.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#EAF2FF")),
         ("TEXTCOLOR", (0, 0), (-1, 0), colors.HexColor("#0F172A")),
@@ -556,14 +721,56 @@ def append_pdf_crms_messages(story, row, styles):
     story.append(table)
 
 
+def append_pdf_annexure_writeup_crms(story, row, styles):
+    note = str(row.get("chart_note") or "").strip() or "-"
+    messages = crms_message_rows(row)
+    small_style = ParagraphStyle("AnnexureSmall", parent=styles["Normal"], fontSize=6, leading=7)
+    heading_style = ParagraphStyle("AnnexureHeading", parent=styles["Normal"], fontSize=6.5, leading=8, textColor=colors.HexColor("#0F172A"))
+
+    note_table = Table([
+        [Paragraph("<b>Observation</b>", heading_style)],
+        [Paragraph(xml_escape(note), small_style)],
+    ], colWidths=[270])
+    note_table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#EAF2FF")),
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#CBD5E1")),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+    ]))
+
+    crms_data = [[Paragraph("<b>Category</b>", small_style), Paragraph("<b>Issue Time</b>", small_style), Paragraph("<b>Msg No</b>", small_style)]]
+    if messages:
+        for msg in messages:
+            crms_data.append([
+                Paragraph(xml_escape(msg["category"]), small_style),
+                Paragraph(xml_escape(msg["issue_time"]), small_style),
+                Paragraph(xml_escape(msg["message_no"]), small_style),
+            ])
+    else:
+        crms_data.append([Paragraph("-", small_style), Paragraph("-", small_style), Paragraph("-", small_style)])
+    crms_table = Table(crms_data, colWidths=[80, 70, 120])
+    crms_table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#EAF2FF")),
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#CBD5E1")),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+    ]))
+
+    wrapper = Table([[note_table, crms_table]], colWidths=[285, 285])
+    wrapper.setStyle(TableStyle([
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 0),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+    ]))
+    story.append(wrapper)
+
+
 def append_docx_crms_messages(doc, row):
     messages = crms_message_rows(row)
     if not messages:
         return
     doc.add_paragraph("Issued CRMS Messages")
-    table = doc.add_table(rows=1, cols=4)
+    table = doc.add_table(rows=1, cols=3)
     table.style = "Light Shading Accent 1"
-    headers = ["Category", "Issue Time", "Msg No", "Issued To"]
+    headers = ["Category", "Issue Time", "Msg No"]
     for idx, header in enumerate(headers):
         table.rows[0].cells[idx].text = header
     for msg in messages:
@@ -571,13 +778,44 @@ def append_docx_crms_messages(doc, row):
         cells[0].text = msg["category"]
         cells[1].text = msg["issue_time"]
         cells[2].text = msg["message_no"]
-        cells[3].text = msg["issued_to"]
     for table_row in table.rows:
         for cell in table_row.cells:
             for paragraph in cell.paragraphs:
                 for run in paragraph.runs:
                     run.font.size = docx.shared.Pt(7)
     doc.add_paragraph()
+
+
+def append_docx_annexure_writeup_crms(doc, row):
+    note = str(row.get("chart_note") or "").strip() or "-"
+    messages = crms_message_rows(row)
+
+    wrapper = doc.add_table(rows=1, cols=2)
+    wrapper.style = "Table Grid"
+    left, right = wrapper.rows[0].cells
+    left.width = docx.shared.Inches(5.0)
+    right.width = docx.shared.Inches(5.0)
+
+    left.paragraphs[0].text = "Observation"
+    left.paragraphs[0].runs[0].bold = True
+    left.add_paragraph(note)
+
+    right.paragraphs[0].text = "Issued CRMS Messages"
+    right.paragraphs[0].runs[0].bold = True
+    if messages:
+        for msg in messages:
+            right.add_paragraph(
+                f"{msg['category']} | {msg['issue_time']} | {msg['message_no']}",
+                style=None,
+            )
+    else:
+        right.add_paragraph("-")
+
+    for table_row in wrapper.rows:
+        for cell in table_row.cells:
+            for paragraph in cell.paragraphs:
+                for run in paragraph.runs:
+                    run.font.size = docx.shared.Pt(7)
 
 
 @router.get("/crms-messages")
@@ -763,6 +1001,42 @@ def get_scada_file_series_for_timestamp(db, dt_value: datetime, plant_id: str, w
     normalized = normalize_series(series)
     return normalized[block_index_for_time(dt_value, len(normalized))]
 
+def detect_data_frequency(db, start_dt: datetime, end_dt: datetime):
+    """Detect the actual frequency of data from the database.
+    Returns '1min' for 1-minute intervals or '15min' for 15-minute intervals."""
+    dates = get_unique_date_strings(start_dt, end_dt)
+    if not dates:
+        return '15min'  # Default fallback
+    
+    # Check the first available raw data to determine frequency
+    for date_str in dates:
+        raw_doc = db.db[RAW_DATA_COLLECTION].find_one({"date": date_str})
+        if not raw_doc:
+            continue
+        
+        sources = raw_doc.get("sources", {}) or {}
+        # Check SCADA frequency source
+        scada_freq = (sources.get("scada", {}) or {}).get("actual")
+        if scada_freq:
+            series_len = len(scada_freq) if isinstance(scada_freq, list) else 0
+            # If series has 1440 values, it's 1min data. Otherwise default to 15min
+            if series_len == 1440:
+                return '1min'
+            elif series_len == 96:
+                return '15min'
+        
+        # Check SCADA file data as fallback
+        scada_file = sources.get("scada_file", {}) or {}
+        for field_data in scada_file.values():
+            if isinstance(field_data, list):
+                series_len = len(field_data)
+                if series_len == 1440:
+                    return '1min'
+                elif series_len == 96:
+                    return '15min'
+    
+    return '15min'  # Default fallback
+
 def build_database_scada_frame(db, start_dt: datetime, end_dt: datetime, entity_list: list, event_id: Optional[str] = None):
     if event_id:
         event_doc = db.db[EVENT_COLLECTION].find_one({"event_id": event_id}, {"_id": 0})
@@ -820,7 +1094,8 @@ def build_database_scada_frame(db, start_dt: datetime, end_dt: datetime, entity_
                         col_counter += 1
                 return pd.DataFrame(df_data_dict), headers, keys, 0, 1, None
 
-    scada_dts = pd.date_range(start=start_dt, end=end_dt, freq='15min').tolist()
+    detected_freq = detect_data_frequency(db, start_dt, end_dt)
+    scada_dts = pd.date_range(start=start_dt, end=end_dt, freq=detected_freq).tolist()
     if not scada_dts:
         return None, None, None, None, None, "No timestamps were generated for the selected event range."
 
@@ -952,7 +1227,7 @@ def build_saved_event_response(db, event_id: str, entity_list: list, start_dt: d
     rows = []
     event_type = normalize_event_type(event_doc.get("event_type"))
     date_strings = get_unique_date_strings(start_dt, end_dt)
-    cap_on_bar_by_id = lookup_capacity_on_bar(db, entity_list or event_points, date_strings)
+    cap_on_bar_by_id = lookup_rtg_capacity_on_bar(db, entity_list or event_points, date_strings)
 
     source_entities = entity_list or event_points
 
@@ -964,7 +1239,7 @@ def build_saved_event_response(db, event_id: str, entity_list: list, start_dt: d
         if not point:
             missing_sources.append({
                 "plant_id": pid,
-                "plant_name": entity.get("plant_name") or entity.get("STAGE_NAME") or "",
+                "plant_name": format_report_plant_name(entity),
                 "missing": ["actual", "schedule", "dc"],
             })
             continue
@@ -1001,19 +1276,21 @@ def build_saved_event_response(db, event_id: str, entity_list: list, start_dt: d
         if missing:
             missing_sources.append({
                 "plant_id": pid,
-                "plant_name": point.get("plant_name") or entity.get("plant_name") or entity.get("STAGE_NAME") or "",
+                "plant_name": format_report_plant_name(entity, point),
                 "missing": missing,
             })
 
         summary = point.get("summary") or {}
         rtg_pid = entity.get("rtg_plant_id") or pid
         cap_on_bar = summary.get("cap_on_bar") or point.get("cap_on_bar") or cap_on_bar_by_id.get(rtg_pid) or cap_on_bar_by_id.get(pid)
-        cap_55 = summary.get("cap_on_bar_55") or ((safe_float(cap_on_bar) or 0) * 0.55 if safe_float(cap_on_bar) is not None else None)
+        cap_55 = summary.get("cap_on_bar_55") or cap_on_bar_reference(cap_on_bar, event_type)
         rows.append({
             "plant_id": pid,
-            "plant_name": point.get("plant_name") or entity.get("plant_name") or entity.get("STAGE_NAME") or "",
-            "is_state": (point.get("type") == "State") or entity.get("is_state", False),
-            "type": "state" if ((point.get("type") == "State") or entity.get("is_state", False)) else "generator",
+            "plant_name": format_report_plant_name(entity, point),
+            "stage_id": point.get("stage_id") or point.get("STAGE_ID") or entity.get("stage_id") or entity.get("STAGE_ID") or "",
+            "stage_name": point.get("stage_name") or point.get("STAGE_NAME") or entity.get("stage_name") or entity.get("STAGE_NAME") or "",
+            "is_state": (str(point.get("type") or "").lower() == "state") or entity.get("is_state", False),
+            "type": point.get("type") or entity.get("type") or ("State" if entity.get("is_state", False) else "IPP"),
             "event_type": event_type,
             "capacity": entity.get("stage_installed_capacity") or entity.get("capacity") or 0.0,
             "cap_on_bar": cap_on_bar,
@@ -1032,7 +1309,8 @@ def build_saved_event_response(db, event_id: str, entity_list: list, start_dt: d
             "scada_dc_key": entity.get("scada_dc_key", ""),
             "scada_dc_header": entity.get("scada_dc_header", ""),
             "state": entity.get("state_name") or entity.get("state") or "",
-            "fuel": entity.get("fuel_type") or entity.get("fuel") or "",
+            "state_name": entity.get("state_name") or entity.get("state") or "",
+            "fuel": lookup_unit_fuel_name(db, pid) or entity.get("fuel_type") or entity.get("fuel") or "",
             "owner": entity.get("owner_name") or entity.get("owner") or "",
             "actual": summary.get("actual"),
             "schedule": summary.get("schedule"),
@@ -1042,7 +1320,8 @@ def build_saved_event_response(db, event_id: str, entity_list: list, start_dt: d
             "statistics": summary.get("statistics") or {},
             "series": filtered_series,
             "source_status": build_source_status(db, pid, entity.get("wbes_name", ""), start_dt, end_dt),
-            "reason": "Loaded from saved Mongo event.",
+            "reason": point.get("reason", ""),
+            "chart_note": point.get("chart_note", ""),
         })
 
     return {
@@ -1053,6 +1332,7 @@ def build_saved_event_response(db, event_id: str, entity_list: list, start_dt: d
         "event_id": event_id,
         "event_name": event_doc.get("name"),
         "event_type": event_type,
+        "report_notes": event_doc.get("report_notes") or {},
         "from_saved_event": True,
         "missing_sources": missing_sources,
         "logs": [
@@ -1763,12 +2043,11 @@ def resolve_plant_data_series(
 
         actual_val = 0.0
         actual_src = "Missing"
-        if act_src == "SCADA":
-            if scada_act_series is not None:
-                actual_val = at_index(scada_act_series, idx)
-                actual_src = "SCADA File"
-            else:
-                actual_src = "SCADA File (Missing Column)"
+        if scada_act_series is not None:
+            actual_val = at_index(scada_act_series, idx)
+            actual_src = "SCADA File"
+        elif act_src == "SCADA":
+            actual_src = "SCADA File (Missing Column)"
         elif act_src == "RTG":
             rtg_scada = (
                 rtg_scada_cache.get((yyyy_mm_dd, rtg_pid))
@@ -1778,33 +2057,23 @@ def resolve_plant_data_series(
                 block_size = max(1, 1440 // len(rtg_scada))
                 actual_val = at_index(rtg_scada, idx, minute_of_day // block_size)
                 actual_src = "RTG Portal"
-            elif scada_act_series is not None:
-                actual_val = at_index(scada_act_series, idx)
-                actual_src = "SCADA File (RTG fallback)"
             else:
                 actual_src = "Missing (RTG & SCADA unavailable)"
-        elif scada_act_series is not None:
-            actual_val = at_index(scada_act_series, idx)
-            actual_src = "SCADA File (fallback)"
 
         sched_val = None
         sched_src_log = "Missing"
         if sched_src == "Manual":
             sched_val = safe_float(e.get("schedule")) or 0.0
             sched_src_log = "Manual"
+        elif scada_sch_series is not None:
+            sched_val = at_index(scada_sch_series, idx)
+            sched_src_log = "SCADA File"
         elif sched_src == "SCADA":
-            if scada_sch_series is not None:
-                sched_val = at_index(scada_sch_series, idx)
-                sched_src_log = "SCADA File"
-            else:
-                sched_src_log = "SCADA File (Missing Column)"
+            sched_src_log = "SCADA File (Missing Column)"
         elif sched_src in ["WBES", "RTG"]:
             if has_values(aligned_sch):
                 sched_val = at_index(aligned_sch, idx, cache_idx)
                 sched_src_log = f"{sched_src} Portal"
-            elif scada_sch_series is not None:
-                sched_val = at_index(scada_sch_series, idx)
-                sched_src_log = f"SCADA File ({sched_src} fallback)"
             else:
                 sched_src_log = f"Missing ({sched_src} & SCADA unavailable)"
 
@@ -1813,19 +2082,15 @@ def resolve_plant_data_series(
         if dc_src == "Manual":
             dc_val = safe_float(e.get("dc")) or 0.0
             dc_src_log = "Manual"
+        elif scada_dc_series is not None:
+            dc_val = at_index(scada_dc_series, idx)
+            dc_src_log = "SCADA File"
         elif dc_src == "SCADA":
-            if scada_dc_series is not None:
-                dc_val = at_index(scada_dc_series, idx)
-                dc_src_log = "SCADA File"
-            else:
-                dc_src_log = "SCADA File (Missing Column)"
+            dc_src_log = "SCADA File (Missing Column)"
         elif dc_src in ["WBES", "RTG"]:
             if has_values(aligned_dc):
                 dc_val = at_index(aligned_dc, idx, cache_idx)
                 dc_src_log = f"{dc_src} Portal"
-            elif scada_dc_series is not None:
-                dc_val = at_index(scada_dc_series, idx)
-                dc_src_log = f"SCADA File ({dc_src} fallback)"
             else:
                 dc_src_log = f"Missing ({dc_src} & SCADA unavailable)"
 
@@ -1920,13 +2185,13 @@ def generate_plot_base64(row_data: dict, start_time: datetime, end_time: datetim
         # Low frequency operation shading (< 49.9 Hz)
         freq_low = freqs < 49.9
         if is_state:
-            # Over Drawal (Orange): Freq < 49.9 & Dev > 0 (Detoriating)
-            orange_fill = freq_low & (devs > 0)
-            # Helping Grid (Green): Freq < 49.9 & Dev < 0 (Helping)
-            green_fill = freq_low & (devs < 0)
+            # Over Drawal (Gold): Freq < 49.9 & Dev > 0
+            gold_fill = freq_low & (devs > 0)
+            # Under Drawal / Helping Grid (Cyan): Freq < 49.9 & Dev < 0
+            cyan_fill = freq_low & (devs < 0)
             
-            ax1.fill_between(times, 0, devs, where=orange_fill, color='#F97316', alpha=0.35, label='Over Drawal (Orange Shade)')
-            ax1.fill_between(times, 0, devs, where=green_fill, color='#10B981', alpha=0.35, label='Under Drawal (Green Shade)')
+            ax1.fill_between(times, 0, devs, where=gold_fill, color='#EAB308', alpha=0.35, label='Over Drawal (Gold Shade)')
+            ax1.fill_between(times, 0, devs, where=cyan_fill, color='#06B6D4', alpha=0.35, label='Under Drawal (Cyan Shade)')
         else:
             # Under Injection (Orange): Freq < 49.9 & Dev < 0 (Detoriating)
             orange_fill = freq_low & (devs < 0)
@@ -1937,16 +2202,17 @@ def generate_plot_base64(row_data: dict, start_time: datetime, end_time: datetim
             ax1.fill_between(times, 0, devs, where=green_fill, color='#10B981', alpha=0.35, label='Over Injection (Green Shade)')
             
     period_str = f"{start_time.strftime('%d-%m-%y %H:%M')} to {end_time.strftime('%d-%m-%y %H:%M')}"
-    plt.title(f"{pname.strip()}: Frequency (Hz) vs Deviation (MW)\nLow Frequency Operation: {period_str}", 
+    event_label = "High Frequency Operation" if normalize_event_type(row_data.get("event_type")) == "high" else "Low Frequency Operation"
+    plt.title(f"{pname.strip()}: Frequency (Hz) vs Deviation (MW)\n{event_label}: {period_str}", 
               fontweight='bold', fontsize=11, pad=12)
               
     if not has_dev:
         ann_text = "Schedule data not available;\nDeviation compliance not computed."
     elif is_state:
         ann_text = (
-            f"+Ve Dev : Over Drawal (Orange Shade)\n"
+            f"+Ve Dev : Over Drawal (Gold Shade)\n"
             f"% Duration (Freq<49.9 & Dev>0): {safe_float(row_data.get('over_drawal_pct')) or 0.0:.1f}%\n\n"
-            f"-Ve Dev : Under Drawal (Green Shade)\n"
+            f"-Ve Dev : Under Drawal (Cyan Shade)\n"
             f"% Duration (Freq<49.9 & Dev<0): {safe_float(row_data.get('under_drawal_pct')) or 0.0:.1f}%\n\n"
             f"Max OD = {safe_float(row_data.get('max_od')) or 0.0:.0f} MW\n"
             f"Time: {row_data.get('max_od_time') or '—'}\n"
@@ -2181,16 +2447,15 @@ async def process_report_sse(
             
             db = MongoService()
 
+            saved_event_doc = None
             if file_id == "database":
                 if event_id:
-                    saved_response, saved_error = build_saved_event_response(db, event_id, entity_list, st, et)
-                    if saved_error:
-                        yield "data: " + json.dumps({"success": False, "error": saved_error}) + "\n\n"
+                    saved_event_doc = db.db[EVENT_COLLECTION].find_one({"event_id": event_id}, {"_id": 0, "data_points": 0})
+                    if not saved_event_doc:
+                        yield "data: " + json.dumps({"success": False, "error": f"Saved event not found for id {event_id}."}) + "\n\n"
                         return
-                    yield "data: " + json.dumps({"step": 2, "message": "Loaded saved historical event from Mongo."}) + "\n\n"
-                    yield "data: " + json.dumps({"complete": True, "result": saved_response}) + "\n\n"
-                    return
-                df_filtered, headers, keys, dt_col, freq_col, db_error = build_database_scada_frame(db, st, et, entity_list, event_id=event_id)
+                    yield "data: " + json.dumps({"step": 2, "message": "Saved event found. Rebuilding rows from cached SCADA file data."}) + "\n\n"
+                df_filtered, headers, keys, dt_col, freq_col, db_error = build_database_scada_frame(db, st, et, entity_list, event_id=None)
                 if db_error:
                     yield "data: " + json.dumps({"success": False, "error": db_error}) + "\n\n"
                     return
@@ -2222,7 +2487,7 @@ async def process_report_sse(
                 return
 
             unique_dates = get_unique_date_strings(st, et)
-            cap_on_bar_by_id = lookup_capacity_on_bar(db, entity_list, unique_dates)
+            cap_on_bar_by_id = lookup_rtg_capacity_on_bar(db, entity_list, unique_dates)
 
             
             yield "data: " + json.dumps({"step": 2, "message": "Checking MongoDB cache for existing actuals and schedules..."}) + "\n\n"
@@ -2327,7 +2592,7 @@ async def process_report_sse(
 
             for e in entity_list:
                 pid = e.get("plant_id")
-                pname = e.get("plant_name") or e.get("STAGE_NAME") or ""
+                pname = format_report_plant_name(e)
                 is_state = e.get("is_state", False)
                 is_freq = e.get("is_frequency", False)
                 if is_freq: continue
@@ -2417,12 +2682,17 @@ async def process_report_sse(
                 avg_act = (sum(entity_act) / len(entity_act)) if (entity_act and len(entity_act) > 0) else 0.0
                 avg_dev = (avg_act - avg_sched) if (avg_sched is not None) else None
                 cap_on_bar = cap_on_bar_by_id.get(rtg_pid) or cap_on_bar_by_id.get(pid)
-                cap_55 = (cap_on_bar * 0.55) if cap_on_bar is not None else None
+                cap_55 = cap_on_bar_reference(cap_on_bar, cfg["event_type"])
                 avg_capacity_pct = (avg_act / cap_on_bar * 100) if (cap_on_bar and cap_on_bar > 0) else None
+                if not is_state and cfg["event_type"] == "high" and cap_on_bar is None:
+                    cap_msg = "Capacity on bar not available from RTG cap-on-bar API."
+                    reason_val = f"{reason_val}. {cap_msg}" if reason_val and cap_msg not in reason_val else (reason_val or cap_msg)
                 
                 row_data = {
                     "plant_id": pid,
                     "plant_name": pname,
+                    "stage_id": e.get("stage_id") or e.get("STAGE_ID", ""),
+                    "stage_name": e.get("stage_name") or e.get("STAGE_NAME", ""),
                     "is_state": is_state,
                     "event_type": cfg["event_type"],
                     "capacity": e.get("stage_installed_capacity") or e.get("capacity") or 0.0,
@@ -2436,7 +2706,7 @@ async def process_report_sse(
                     "pct_dc": (avg_act / avg_dc * 100) if (avg_dc is not None and avg_dc > 0) else None,
                     "sched_src": sched_src,
                     "dc_src": dc_src,
-                    "actual_source": act_src,
+                    "actual_source": actual_log_src,
                     "type": plant_type,
                     "wbes_name": wbes_name,
                     "crms_utility_name": e.get("crms_utility_name", ""),
@@ -2519,7 +2789,7 @@ async def process_report_sse(
                 matching_entity = next((item for item in entity_list if item.get("plant_id") == row["plant_id"]), {})
                 row["crms_utility_name"] = row.get("crms_utility_name") or matching_entity.get("crms_utility_name", "")
                 row["state"] = row.get("state") or (matching_entity.get("state_name") or matching_entity.get("state") or "")
-                row["fuel"]  = row.get("fuel")  or (matching_entity.get("fuel_type") or matching_entity.get("fuel") or "")
+                row["fuel"]  = lookup_unit_fuel_name(db, row.get("plant_id")) or row.get("fuel")  or (matching_entity.get("fuel_type") or matching_entity.get("fuel") or "")
                 row["owner"] = row.get("owner") or (matching_entity.get("owner_name") or matching_entity.get("owner") or "")
 
             yield "data: " + json.dumps({"step": 6, "message": "Preparing compliance report response..."}) + "\n\n"
@@ -2536,7 +2806,11 @@ async def process_report_sse(
                 "rows": processed_rows,
                 "start_time": start_time,
                 "end_time": end_time,
-                "logs": logs
+                "logs": logs,
+                "event_id": event_id or None,
+                "event_name": (saved_event_doc or {}).get("name") if saved_event_doc else None,
+                "report_notes": (saved_event_doc or {}).get("report_notes") or {},
+                "from_saved_event": bool(saved_event_doc),
             }
             yield "data: " + json.dumps({"complete": True, "result": response_data}) + "\n\n"
         except Exception as ex:
@@ -2679,11 +2953,12 @@ async def process_report(
         
         matched_cols = match_scada_columns(entity_list, headers, keys)
         timestamp_to_idx = {t: idx for idx, t in enumerate(dt_index)}
+        cap_on_bar_by_id = lookup_rtg_capacity_on_bar(db, entity_list, unique_dates)
         processed_rows = []
 
         for e in entity_list:
             pid = e.get("plant_id")
-            pname = e.get("plant_name") or e.get("STAGE_NAME") or ""
+            pname = format_report_plant_name(e)
             is_state = e.get("is_state", False)
             is_freq = e.get("is_frequency", False)
             if is_freq: continue
@@ -2808,12 +3083,19 @@ async def process_report(
             avg_dc = (sum(entity_dc) / len(entity_dc)) if (entity_dc and len(entity_dc) > 0) else None
             avg_act = (sum(entity_act) / len(entity_act)) if (entity_act and len(entity_act) > 0) else 0.0
             avg_dev = (avg_act - avg_sched) if (avg_sched is not None) else None
+            cap_on_bar = cap_on_bar_by_id.get(rtg_pid) or cap_on_bar_by_id.get(pid)
+            cap_55 = cap_on_bar_reference(cap_on_bar, "low")
             
             row_data = {
                 "plant_id": pid,
                 "plant_name": pname,
                 "is_state": is_state,
+                "stage_id": e.get("stage_id") or e.get("STAGE_ID", ""),
+                "stage_name": e.get("stage_name") or e.get("STAGE_NAME", ""),
                 "capacity": e.get("stage_installed_capacity") or e.get("capacity") or 0.0,
+                "cap_on_bar": cap_on_bar,
+                "cap_on_bar_55": cap_55,
+                "avg_capacity_on_bar_pct": (avg_act / cap_on_bar * 100) if (cap_on_bar and cap_on_bar > 0) else None,
                 "schedule": avg_sched,
                 "dc": avg_dc,
                 "actual": avg_act,
@@ -2821,7 +3103,7 @@ async def process_report(
                 "pct_dc": (avg_act / avg_dc * 100) if (avg_dc is not None and avg_dc > 0) else None,
                 "sched_src": sched_src,
                 "dc_src": dc_src,
-                "actual_source": act_src,
+                "actual_source": actual_log_src,
                 "type": plant_type,
                 "wbes_name": wbes_name,
                 "crms_utility_name": e.get("crms_utility_name", ""),
@@ -2893,7 +3175,7 @@ async def process_report(
             matching_entity = next((item for item in entity_list if item.get("plant_id") == row["plant_id"]), {})
             row["crms_utility_name"] = row.get("crms_utility_name") or matching_entity.get("crms_utility_name", "")
             row["state"] = row.get("state") or (matching_entity.get("state_name") or matching_entity.get("state") or "")
-            row["fuel"]  = row.get("fuel")  or (matching_entity.get("fuel_type") or matching_entity.get("fuel") or "")
+            row["fuel"]  = lookup_unit_fuel_name(db, row.get("plant_id")) or row.get("fuel")  or (matching_entity.get("fuel_type") or matching_entity.get("fuel") or "")
             row["owner"] = row.get("owner") or (matching_entity.get("owner_name") or matching_entity.get("owner") or "")
 
         return {
@@ -2947,13 +3229,24 @@ async def download_excel(payload: dict):
     ws_state.cell(row=1, column=1, value="State Drawal Compliance Summary").font = TITLE_FONT
     ws_state.row_dimensions[1].height = 25
     ws_state.row_dimensions[3].height = 20
+    if event_type == "high":
+        state_pos_header = "% Duration Freq>50.05 & Dev>0 (Over Drawal)"
+        state_neg_header = "% Duration Freq>50.05 & Dev<0 (Under Drawal)"
+        gen_neg_header = "% Duration Freq>50.05 & Dev<0 (Under Injection)"
+        gen_pos_header = "% Duration Freq>50.05 & Dev>0 (Over Injection)"
+    else:
+        state_pos_header = "% Duration Freq<49.9 & Dev>0 (Over Drawal)"
+        state_neg_header = "% Duration Freq<49.9 & Dev<0 (Helping Grid)"
+        gen_neg_header = "% Duration Freq<49.9 & Dev<0 (Under Injection)"
+        gen_pos_header = "% Duration Freq<49.9 & Dev>0 (Helping Grid)"
+
     state_headers = [
         "State Name", "Schedule Source", "DC (MW)", "Schedule (MW)", "Actual (MW)",
         "Deviation (MW)", "% DC", "Max UD (MW)" if event_type == "high" else "Max OD (MW)",
         "Time of Max UD" if event_type == "high" else "Time of Max OD",
         "Freq at Max UD (Hz)" if event_type == "high" else "Freq at Max OD (Hz)",
-        f"% Duration {cfg['threshold_label']} & Dev>0",
-        f"% Duration {cfg['threshold_label']} & Dev<0",
+        state_pos_header,
+        state_neg_header,
         "Reason"
     ]
     for ci, h in enumerate(state_headers, 1):
@@ -2996,8 +3289,8 @@ async def download_excel(payload: dict):
     ws_gen.row_dimensions[3].height = 20
     gen_headers = [
         "Plant Name", "State", "Fuel", "Schedule Source", "DC (MW)", "Schedule (MW)",
-        "Actual (MW)", "Deviation (MW)", "% DC", "Cap On Bar (MW)", "55% Cap On Bar (MW)", "Actual % Cap On Bar",
-        f"% Duration {cfg['threshold_label']} & Dev<0", f"% Duration {cfg['threshold_label']} & Dev>0", "Reason"
+        "Actual (MW)", "Deviation (MW)", "% DC", "Cap On Bar (MW)", "94% Cap On Bar (MW)", "Actual % Cap On Bar",
+        gen_neg_header, gen_pos_header, "Reason"
     ]
     for ci, h in enumerate(gen_headers, 1):
         c = ws_gen.cell(row=3, column=ci, value=h)
@@ -3013,7 +3306,7 @@ async def download_excel(payload: dict):
         under_inj_val = get_stat(r, "under_inj_pct")
         helping_grid_val = get_stat(r, "helping_grid_pct")
         
-        ws_gen.cell(gen_row_idx, 1,  r.get("plant_name", "")).border = thin
+        ws_gen.cell(gen_row_idx, 1,  report_entity_label(r)).border = thin
         ws_gen.cell(gen_row_idx, 2,  r.get("state", "")).border = thin
         ws_gen.cell(gen_row_idx, 3,  r.get("fuel", "")).border = thin
         ws_gen.cell(gen_row_idx, 4,  r.get("sched_src", "")).border = thin
@@ -3052,6 +3345,115 @@ async def download_pdf(payload: dict):
         rows = payload.get("rows", [])
         rows = [r for r in rows if r.get("is_state")] + [r for r in rows if not r.get("is_state")]
         event_type = normalize_event_type(payload.get("event_type") or (rows[0].get("event_type") if rows else None))
+        include_annexure = bool(payload.get("include_annexure", True))
+
+        buf = io.BytesIO()
+        portrait_size = portrait(A4)
+        landscape_size = landscape(A4)
+        doc = BaseDocTemplate(buf, pagesize=portrait_size, rightMargin=18, leftMargin=18, topMargin=18, bottomMargin=18)
+        doc.addPageTemplates([
+            PageTemplate(id="portrait", pagesize=portrait_size, frames=[
+                Frame(18, 18, portrait_size[0] - 36, portrait_size[1] - 36, id="portrait-frame")
+            ]),
+            PageTemplate(id="landscape", pagesize=landscape_size, frames=[
+                Frame(18, 18, landscape_size[0] - 36, landscape_size[1] - 36, id="landscape-frame")
+            ]),
+        ])
+
+        styles = getSampleStyleSheet()
+        title_style = ParagraphStyle("ReportTitle", parent=styles["Heading1"], fontSize=17, textColor=colors.HexColor("#022726"), spaceAfter=12, alignment=1)
+        section_style = ParagraphStyle("SectionHeading", parent=styles["Heading2"], fontSize=11, textColor=colors.HexColor("#03624C"), spaceBefore=9, spaceAfter=7)
+        text_style = ParagraphStyle("NormalText", parent=styles["Normal"], fontSize=8.5, leading=11, spaceAfter=7)
+        small_style = ParagraphStyle("SmallText", parent=styles["Normal"], fontSize=7, leading=9, textColor=colors.HexColor("#475569"))
+        table_style = TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0F172A")),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("FONTSIZE", (0, 0), (-1, 0), 7),
+            ("FONTSIZE", (0, 1), (-1, -1), 6.5),
+            ("BACKGROUND", (0, 1), (-1, -1), colors.HexColor("#F8FAFC")),
+            ("GRID", (0, 0), (-1, -1), 0.6, colors.HexColor("#CBD5E1")),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("LEFTPADDING", (0, 0), (-1, -1), 4),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+        ])
+
+        state_rows = [r for r in rows if r.get("is_state")]
+        gen_rows = [r for r in rows if not r.get("is_state")]
+        story = [
+            NextPageTemplate("portrait"),
+            Paragraph("POWER SYSTEM DEVIATION ANALYSIS REPORT", title_style),
+            Paragraph(f"Generated on {datetime.now().strftime('%d-%m-%Y %H:%M')}", text_style),
+        ]
+        if payload.get("start_time") or payload.get("end_time"):
+            story.append(Paragraph(f"Report Date Range: {xml_escape(str(payload.get('start_time', '')))} to {xml_escape(str(payload.get('end_time', '')))}", text_style))
+
+        story.append(Paragraph("Executive Summary & General Notes", section_style))
+        if payload.get("intro_desc"):
+            story.append(Paragraph(xml_escape(str(payload.get("intro_desc"))), text_style))
+
+        if state_rows:
+            story.append(Paragraph("State Drawal Compliance Details", section_style))
+            if payload.get("state_desc"):
+                story.append(Paragraph(xml_escape(str(payload.get("state_desc"))), text_style))
+            state_data = [["State Name", "Max UD (MW)" if event_type == "high" else "Max OD (MW)", "Time", "Freq", "% Dev>0", "% Dev<0"]]
+            for r in state_rows:
+                state_data.append([
+                    str(r.get("plant_name") or ""),
+                    safe_format_mw(get_stat(r, "max_ud") if event_type == "high" else get_stat(r, "max_od")),
+                    str((get_stat(r, "max_ud_time") if event_type == "high" else get_stat(r, "max_od_time")) or "-"),
+                    safe_format_hz(get_stat(r, "max_ud_freq") if event_type == "high" else get_stat(r, "max_od_freq")),
+                    safe_format_pct(get_stat(r, "over_drawal_pct")),
+                    safe_format_pct(get_stat(r, "under_drawal_pct")),
+                ])
+            t = Table(state_data, colWidths=[120, 72, 78, 62, 65, 65], repeatRows=1)
+            t.setStyle(table_style)
+            story.append(t)
+            if include_annexure:
+                story.append(Paragraph("Annexure - 1 attached", small_style))
+
+        if gen_rows:
+            story.append(Spacer(1, 8))
+            story.append(Paragraph("Generator Scheduling Compliance Details", section_style))
+            if payload.get("gen_desc"):
+                story.append(Paragraph(xml_escape(str(payload.get("gen_desc"))), text_style))
+            gen_data = [["Generator Name", "% Dev<0", "% Dev>0"]]
+            for r in gen_rows:
+                gen_data.append([report_entity_label(r), safe_format_pct(get_stat(r, "under_inj_pct")), safe_format_pct(get_stat(r, "helping_grid_pct"))])
+            t = Table(gen_data, colWidths=[270, 100, 100], repeatRows=1)
+            t.setStyle(table_style)
+            story.append(t)
+            if include_annexure:
+                story.append(Paragraph("Annexure - 2 attached", small_style))
+
+        if include_annexure:
+            annexure_rows = [r for r in rows if r.get("plot_image") or r.get("capacity_plot_image")]
+            if annexure_rows:
+                story.extend([NextPageTemplate("landscape"), PageBreak()])
+                for idx, r in enumerate(annexure_rows, 1):
+                    entity_type = "State" if r.get("is_state") else "Generator"
+                    annexure_no = "1" if r.get("is_state") else "2"
+                    story.append(Paragraph(f"Annexure {annexure_no}: {entity_type}: {xml_escape(report_entity_label(r))}", section_style))
+                    for image_key, height in [("plot_image", 285), ("capacity_plot_image", 145)]:
+                        plot_b64 = r.get(image_key)
+                        if not plot_b64:
+                            continue
+                        try:
+                            story.append(Image(io.BytesIO(base64.b64decode(plot_b64)), width=760, height=height))
+                            story.append(Spacer(1, 3))
+                        except Exception as img_err:
+                            print(f"Skipping invalid PDF plot image for {r.get('plant_name')}: {img_err}")
+                    append_pdf_annexure_writeup_crms(story, r, styles)
+                    if idx < len(annexure_rows):
+                        story.append(PageBreak())
+
+        doc.build(story)
+        buf.seek(0)
+        return StreamingResponse(
+            buf,
+            media_type="application/pdf",
+            headers={"Content-Disposition": "attachment; filename=deviation_compliance_report.pdf"}
+        )
         cfg = event_config(event_type)
         
         buf = io.BytesIO()
@@ -3138,6 +3540,23 @@ async def download_pdf(payload: dict):
                     ["% Duration Under Injection (Freq<49.9 & Dev<0)", under_inj_pct_str]
                 ]
                 
+            if event_type == "high":
+                if r.get("is_state"):
+                    data = [
+                        ["Stat Name", "Value"],
+                        ["Max Under Drawal", safe_format_mw(get_stat(r, "max_ud"))],
+                        ["Time of Max UD", str(get_stat(r, "max_ud_time") or "-")],
+                        ["Frequency at Max UD", safe_format_hz(get_stat(r, "max_ud_freq"))],
+                        ["% Duration Over Drawal (Freq>50.05 & Dev>0)", safe_format_pct(get_stat(r, "over_drawal_pct"))],
+                        ["% Duration Under Drawal (Freq>50.05 & Dev<0)", safe_format_pct(get_stat(r, "under_drawal_pct"))],
+                    ]
+                else:
+                    data = [
+                        ["Stat Name", "Value"],
+                        ["% Duration Under Injection (Freq>50.05 & Dev<0)", safe_format_pct(get_stat(r, "under_inj_pct"))],
+                        ["% Duration Over Injection (Freq>50.05 & Dev>0)", safe_format_pct(get_stat(r, "helping_grid_pct"))],
+                    ]
+
             t = Table(data, colWidths=[280, 220])
             t.setStyle(TableStyle([
                 ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#0F172A')),
@@ -3175,8 +3594,108 @@ async def download_docx(payload: dict):
     gen_desc = payload.get("gen_desc", "")
     state_desc = payload.get("state_desc", "")
     rows = payload.get("rows", [])
+    event_type = normalize_event_type(payload.get("event_type") or (rows[0].get("event_type") if rows else None))
     state_rows = [r for r in rows if r.get("is_state")]
     gen_rows = [r for r in rows if not r.get("is_state")]
+    include_annexure = bool(payload.get("include_annexure", True))
+
+    doc = Document()
+    for section in doc.sections:
+        section.orientation = WD_ORIENT.PORTRAIT
+        section.top_margin = docx.shared.Inches(0.45)
+        section.bottom_margin = docx.shared.Inches(0.45)
+        section.left_margin = docx.shared.Inches(0.45)
+        section.right_margin = docx.shared.Inches(0.45)
+
+    title = doc.add_heading("Power System Deviation Analysis Report", level=0)
+    title.style.font.color.rgb = docx.shared.RGBColor(2, 39, 38)
+    doc.add_paragraph(f"Report Date Range: {payload.get('start_time', '')} to {payload.get('end_time', '')}")
+    doc.add_paragraph(f"Generated at: {datetime.now().strftime('%d-%m-%Y %H:%M')}")
+
+    doc.add_heading("Executive Summary & General Notes", level=1)
+    if intro_desc:
+        doc.add_paragraph(intro_desc)
+
+    doc.add_heading("State Drawal Compliance Details", level=1)
+    if state_desc:
+        doc.add_paragraph(state_desc)
+    if state_rows:
+        table = doc.add_table(rows=1, cols=6)
+        table.style = 'Light Shading Accent 1'
+        hdr_cells = table.rows[0].cells
+        hdr_cells[0].text = 'State Name'
+        hdr_cells[1].text = 'Max UD (MW)' if event_type == "high" else 'Max OD (MW)'
+        hdr_cells[2].text = 'Time'
+        hdr_cells[3].text = 'Freq'
+        hdr_cells[4].text = '% Dev>0'
+        hdr_cells[5].text = '% Dev<0'
+        for r in state_rows:
+            row_cells = table.add_row().cells
+            row_cells[0].text = report_entity_label(r)
+            row_cells[1].text = safe_format_mw(get_stat(r, 'max_ud') if event_type == "high" else get_stat(r, 'max_od'))
+            row_cells[2].text = str((get_stat(r, 'max_ud_time') if event_type == "high" else get_stat(r, 'max_od_time')) or "-")
+            row_cells[3].text = safe_format_hz(get_stat(r, 'max_ud_freq') if event_type == "high" else get_stat(r, 'max_od_freq'))
+            row_cells[4].text = safe_format_pct(get_stat(r, 'over_drawal_pct'))
+            row_cells[5].text = safe_format_pct(get_stat(r, 'under_drawal_pct'))
+        if include_annexure:
+            doc.add_paragraph("Annexure - 1 attached")
+
+    doc.add_heading("Generator Scheduling Compliance Details", level=1)
+    if gen_desc:
+        doc.add_paragraph(gen_desc)
+    if gen_rows:
+        table = doc.add_table(rows=1, cols=3)
+        table.style = 'Light Shading Accent 1'
+        hdr_cells = table.rows[0].cells
+        hdr_cells[0].text = 'Generator Name'
+        hdr_cells[1].text = '% Dev<0'
+        hdr_cells[2].text = '% Dev>0'
+        for r in gen_rows:
+            row_cells = table.add_row().cells
+            row_cells[0].text = str(r.get("plant_name") or "")
+            row_cells[1].text = safe_format_pct(get_stat(r, 'under_inj_pct'))
+            row_cells[2].text = safe_format_pct(get_stat(r, 'helping_grid_pct'))
+        if include_annexure:
+            doc.add_paragraph("Annexure - 2 attached")
+
+    if include_annexure:
+        annexure_rows = [r for r in rows if r.get("plot_image") or r.get("capacity_plot_image")]
+        if annexure_rows:
+            for r in annexure_rows:
+                section = doc.add_section(WD_SECTION.NEW_PAGE)
+                section.orientation = WD_ORIENT.LANDSCAPE
+                section.page_width = docx.shared.Inches(11.69)
+                section.page_height = docx.shared.Inches(8.27)
+                section.top_margin = docx.shared.Inches(0.25)
+                section.bottom_margin = docx.shared.Inches(0.25)
+                section.left_margin = docx.shared.Inches(0.28)
+                section.right_margin = docx.shared.Inches(0.28)
+                section.header.is_linked_to_previous = False
+                entity_type = "State" if r.get("is_state") else "Generator"
+                annexure_no = "1" if r.get("is_state") else "2"
+                header_para = section.header.paragraphs[0]
+                header_para.text = f"Annexure {annexure_no}"
+                header_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+                doc.add_heading(f"{entity_type}: {report_entity_label(r)}", level=1)
+                for image_key in ["plot_image", "capacity_plot_image"]:
+                    plot_b64 = r.get(image_key)
+                    if not plot_b64:
+                        continue
+                    try:
+                        doc.add_picture(io.BytesIO(base64.b64decode(plot_b64)), width=docx.shared.Inches(9.0))
+                    except Exception as img_err:
+                        print(f"Skipping invalid DOCX plot image for {r.get('plant_name')}: {img_err}")
+                append_docx_annexure_writeup_crms(doc, r)
+
+    buf = io.BytesIO()
+    doc.save(buf)
+    buf.seek(0)
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        headers={"Content-Disposition": "attachment; filename=deviation_compliance_report.docx"}
+    )
     
     doc = Document()
     for section in doc.sections:
@@ -3205,19 +3724,19 @@ async def download_docx(payload: dict):
         table.style = 'Light Shading Accent 1'
         hdr_cells = table.rows[0].cells
         hdr_cells[0].text = 'State Name'
-        hdr_cells[1].text = 'Max OD (MW)'
-        hdr_cells[2].text = 'Time of Max OD'
-        hdr_cells[3].text = 'Freq at Max OD'
+        hdr_cells[1].text = 'Max UD (MW)' if event_type == "high" else 'Max OD (MW)'
+        hdr_cells[2].text = 'Time of Max UD' if event_type == "high" else 'Time of Max OD'
+        hdr_cells[3].text = 'Freq at Max UD' if event_type == "high" else 'Freq at Max OD'
         hdr_cells[4].text = '% Duration Over Drawal'
-        hdr_cells[5].text = '% Duration Helping Grid'
+        hdr_cells[5].text = '% Duration Under Drawal' if event_type == "high" else '% Duration Helping Grid'
         
         for r in state_rows:
             row_cells = table.add_row().cells
             row_cells[0].text = str(r.get("plant_name"))
             
-            max_od = get_stat(r, 'max_od')
-            max_od_time = get_stat(r, 'max_od_time')
-            max_od_freq = get_stat(r, 'max_od_freq')
+            max_od = get_stat(r, 'max_ud') if event_type == "high" else get_stat(r, 'max_od')
+            max_od_time = get_stat(r, 'max_ud_time') if event_type == "high" else get_stat(r, 'max_od_time')
+            max_od_freq = get_stat(r, 'max_ud_freq') if event_type == "high" else get_stat(r, 'max_od_freq')
             over_drawal = get_stat(r, 'over_drawal_pct')
             under_drawal = get_stat(r, 'under_drawal_pct')
             
@@ -3254,8 +3773,8 @@ async def download_docx(payload: dict):
         table.style = 'Light Shading Accent 1'
         hdr_cells = table.rows[0].cells
         hdr_cells[0].text = 'Generator Name'
-        hdr_cells[1].text = '% Duration Under Inj (Freq<49.9 & Dev<0)'
-        hdr_cells[2].text = '% Duration Helping Grid (Freq<49.9 & Dev>0)'
+        hdr_cells[1].text = '% Duration Under Inj (Freq>50.05 & Dev<0)' if event_type == "high" else '% Duration Under Inj (Freq<49.9 & Dev<0)'
+        hdr_cells[2].text = '% Duration Over Inj (Freq>50.05 & Dev>0)' if event_type == "high" else '% Duration Helping Grid (Freq<49.9 & Dev>0)'
 
         for r in gen_rows:
             row_cells = table.add_row().cells
@@ -3352,9 +3871,9 @@ async def get_report_data(date: str = Query(..., description="YYYY-MM-DD")):
 
     rows = []
     for m in mapping:
-        plant_name     = m.get("plant_name") or m.get("STAGE_NAME") or ""
+        plant_name     = format_report_plant_name(m)
         state          = m.get("state_name", "")
-        fuel           = m.get("fuel_type", "")
+        fuel           = lookup_unit_fuel_name(db, m.get("plant_id", "")) or m.get("fuel_type", "")
         owner          = m.get("owner_name", "")
         capacity       = float(m.get("stage_installed_capacity") or m.get("installed_capacity") or 0)
         sched_src      = m.get("schedule_source", "RTG")
@@ -3362,7 +3881,8 @@ async def get_report_data(date: str = Query(..., description="YYYY-MM-DD")):
         wbes_acronym   = (m.get("wbes_acronym") or "").upper()
         rtg_pid        = m.get("rtg_plant_id") or m.get("plant_id") or ""
         plant_id       = m.get("plant_id", "")
-        stage_id       = m.get("STAGE_ID", "")
+        stage_id       = m.get("stage_id") or m.get("STAGE_ID", "")
+        stage_name     = m.get("stage_name") or m.get("STAGE_NAME", "")
         scada_key      = m.get("scada_key", "")
         scada_header   = m.get("scada_header", "")
         scada_schedule_key = m.get("scada_schedule_key", "")
@@ -3403,8 +3923,10 @@ async def get_report_data(date: str = Query(..., description="YYYY-MM-DD")):
         rows.append({
             "plant_id":     plant_id,
             "stage_id":     stage_id,
+            "stage_name":   stage_name,
             "plant_name":   plant_name,
             "state":        state,
+            "state_name":   state,
             "fuel":         fuel,
             "owner":        owner,
             "capacity":     capacity,
@@ -3702,6 +4224,7 @@ class FrequencyEventPayload(BaseModel):
     end_time: str
     event_type: Optional[str] = "low"
     notes: Optional[str] = ""
+    report_notes: Optional[dict] = None
     details: Optional[List[dict]] = None
     data_points: Optional[List[dict]] = None
 
@@ -3861,6 +4384,7 @@ def save_frequency_event(payload: FrequencyEventPayload):
             "dates": date_span,
             "duration_minutes": int((end_dt - start_dt).total_seconds() // 60) + 1,
             "notes": payload.notes or "",
+            "report_notes": payload.report_notes or {},
             "details": payload.details or [],
             "data_points": payload.data_points or [],
             "single_event_record": True,
@@ -3883,6 +4407,17 @@ def save_frequency_event(payload: FrequencyEventPayload):
             {"_id": 0},
         )
         return {"success": True, "event": saved}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+@router.delete("/events/{event_id}")
+def delete_frequency_event(event_id: str):
+    try:
+        db = MongoService()
+        result = db.db[EVENT_COLLECTION].delete_one({"event_id": event_id})
+        if result.deleted_count == 0:
+            return {"success": False, "error": f"No event found for id {event_id}."}
+        return {"success": True, "deleted_event_id": event_id}
     except Exception as e:
         return {"success": False, "error": str(e)}
 

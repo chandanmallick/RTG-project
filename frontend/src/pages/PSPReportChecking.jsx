@@ -12,6 +12,7 @@ import {
 } from "recharts";
 
 import AppShell from "../components/layout/AppShell";
+import CalendarInput from "../components/ui/CalendarInput";
 import API from "../services/api";
 
 const todayIso = () => new Date().toISOString().slice(0, 10);
@@ -404,13 +405,7 @@ export default function PSPReportChecking() {
             <div className="d-flex align-items-end gap-2 flex-wrap">
               <div>
                 <label className="form-label small fw-bold mb-1" style={{ color: "#D1FAE5" }}>Operational Date</label>
-                <input
-                  type="date"
-                  className="form-control theme-input"
-                  value={dateStr}
-                  onChange={(event) => setDateStr(event.target.value)}
-                  style={{ minWidth: "160px" }}
-                />
+                <CalendarInput className="form-control theme-input" value={dateStr} onChange={setDateStr} style={{ minWidth: "160px" }} />
               </div>
               <button
                 className="btn theme-btn-action d-flex align-items-center gap-2"
@@ -914,22 +909,17 @@ export default function PSPReportChecking() {
 
                 <div className="modal-body pt-2">
                   <div className="d-flex align-items-end gap-2 flex-wrap mb-3">
-                    <div>
-                      <label className="form-label small fw-bold text-secondary mb-1">Start Date</label>
-                      <input
-                        type="date"
+                    <div style={{ minWidth: "240px" }}>
+                      <label className="form-label small fw-bold text-secondary mb-1">Date Range</label>
+                      <CalendarInput
+                        mode="range"
                         className="form-control theme-input"
                         value={trendStartDate}
-                        onChange={(event) => setTrendStartDate(event.target.value)}
-                      />
-                    </div>
-                    <div>
-                      <label className="form-label small fw-bold text-secondary mb-1">End Date</label>
-                      <input
-                        type="date"
-                        className="form-control theme-input"
-                        value={trendEndDate}
-                        onChange={(event) => setTrendEndDate(event.target.value)}
+                        endValue={trendEndDate}
+                        onRangeChange={(start, end) => {
+                          setTrendStartDate(start);
+                          setTrendEndDate(end);
+                        }}
                       />
                     </div>
                     <div>

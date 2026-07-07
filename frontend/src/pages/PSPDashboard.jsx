@@ -43,6 +43,7 @@ import API from "../services/api";
 
 // LAYOUT
 import AppShell from "../components/layout/AppShell";
+import CalendarInput from "../components/ui/CalendarInput";
 import PowerExchangeGraphic from "../components/PowerExchangeGraphic";
 import PSPStateGenerationSources from "../components/PSPStateGenerationSources";
 import VoltageProfileMap from "../components/VoltageProfileMap";
@@ -1425,23 +1426,14 @@ export default function PSPDashboard() {
 
             <div className="d-flex align-items-end gap-2 flex-wrap">
               <div>
-                <label className="form-label small fw-bold text-secondary mb-1">Start</label>
-                <input
-                  type="date"
+                <label className="form-label small fw-bold text-secondary mb-1">Date Range</label>
+                <CalendarInput
+                  mode="range"
                   className="form-control theme-input py-1"
                   value={nldcDemandStartDate}
-                  onChange={(event) => setNldcDemandStartDate(event.target.value)}
-                  style={{ fontSize: "0.75rem", width: "145px" }}
-                />
-              </div>
-              <div>
-                <label className="form-label small fw-bold text-secondary mb-1">End</label>
-                <input
-                  type="date"
-                  className="form-control theme-input py-1"
-                  value={nldcDemandEndDate}
-                  onChange={(event) => setNldcDemandEndDate(event.target.value)}
-                  style={{ fontSize: "0.75rem", width: "145px" }}
+                  endValue={nldcDemandEndDate}
+                  onRangeChange={(start, end) => { setNldcDemandStartDate(start); setNldcDemandEndDate(end); }}
+                  style={{ fontSize: "0.75rem", width: "210px" }}
                 />
               </div>
               <button
@@ -2942,12 +2934,8 @@ export default function PSPDashboard() {
                       </div>
                       <div className="d-flex align-items-end gap-2 flex-wrap">
                         <div>
-                          <label className="form-label small fw-bold text-secondary mb-1">Start</label>
-                          <input type="date" className="form-control theme-input py-1" value={nldcDemandStartDate} onChange={(event) => setNldcDemandStartDate(event.target.value)} style={{ fontSize: "0.75rem", width: "145px" }} />
-                        </div>
-                        <div>
-                          <label className="form-label small fw-bold text-secondary mb-1">End</label>
-                          <input type="date" className="form-control theme-input py-1" value={nldcDemandEndDate} onChange={(event) => setNldcDemandEndDate(event.target.value)} style={{ fontSize: "0.75rem", width: "145px" }} />
+                          <label className="form-label small fw-bold text-secondary mb-1">Date Range</label>
+                          <CalendarInput mode="range" className="form-control theme-input py-1" value={nldcDemandStartDate} endValue={nldcDemandEndDate} onRangeChange={(start, end) => { setNldcDemandStartDate(start); setNldcDemandEndDate(end); }} style={{ fontSize: "0.75rem", width: "210px" }} />
                         </div>
                         <button className="btn theme-btn-outline theme-btn-mini d-flex align-items-center gap-2" onClick={() => loadNldcDemandTrend(nldcDemandStartDate, nldcDemandEndDate)} disabled={nldcDemandLoading} style={{ height: "32px" }}>
                           <RefreshCw size={12} className={nldcDemandLoading ? "animate-spin-custom" : ""} />
@@ -3118,7 +3106,7 @@ export default function PSPDashboard() {
                       <div className="d-flex align-items-end gap-2">
                         <div>
                           <label className="form-label small fw-bold text-secondary mb-1">Date</label>
-                          <input type="date" className="form-control theme-input py-1" value={nldcGenerationDate} onChange={(event) => setNldcGenerationDate(event.target.value)} style={{ fontSize: "0.75rem", width: "145px" }} />
+                          <CalendarInput className="form-control theme-input py-1" value={nldcGenerationDate} onChange={setNldcGenerationDate} style={{ fontSize: "0.75rem", width: "145px" }} />
                         </div>
                         <button className="btn theme-btn-outline theme-btn-mini d-flex align-items-center gap-2" onClick={() => loadNldcGenerationBreakup(nldcGenerationDate)} disabled={nldcGenerationLoading} style={{ height: "32px" }}>
                           <RefreshCw size={12} className={nldcGenerationLoading ? "animate-spin-custom" : ""} />
@@ -3686,23 +3674,9 @@ export default function PSPDashboard() {
                 </div>
                 <div className="modal-body pt-2">
                   <div className="row g-3 align-items-end mb-3">
-                    <div className="col-12 col-md-2">
-                      <label className="form-label small fw-bold text-secondary mb-1">Start Date</label>
-                      <input
-                        type="date"
-                        className="form-control theme-input"
-                        value={energyTrendStart}
-                        onChange={(event) => setEnergyTrendStart(event.target.value)}
-                      />
-                    </div>
-                    <div className="col-12 col-md-2">
-                      <label className="form-label small fw-bold text-secondary mb-1">End Date</label>
-                      <input
-                        type="date"
-                        className="form-control theme-input"
-                        value={energyTrendEnd}
-                        onChange={(event) => setEnergyTrendEnd(event.target.value)}
-                      />
+                    <div className="col-12 col-md-4">
+                      <label className="form-label small fw-bold text-secondary mb-1">Date Range</label>
+                      <CalendarInput mode="range" className="form-control theme-input" value={energyTrendStart} endValue={energyTrendEnd} onRangeChange={(start, end) => { setEnergyTrendStart(start); setEnergyTrendEnd(end); }} />
                     </div>
                     <div className="col-12 col-md-3">
                       <label className="form-label small fw-bold text-secondary mb-1">Trend View</label>
@@ -4053,27 +4027,11 @@ export default function PSPDashboard() {
                 <div className="modal-body py-4">
                   {/* Date range filter fields */}
                   <div className="row g-3 mb-4 align-items-end">
-                    <div className="col-12 col-sm-4">
+                    <div className="col-12 col-sm-8">
                       <label className="form-label small fw-bold text-secondary mb-1">
-                        Start Date
+                        Date Range
                       </label>
-                      <input
-                        type="date"
-                        className="form-control theme-input w-100"
-                        value={filterStart}
-                        onChange={(e) => setFilterStart(e.target.value)}
-                      />
-                    </div>
-                    <div className="col-12 col-sm-4">
-                      <label className="form-label small fw-bold text-secondary mb-1">
-                        End Date
-                      </label>
-                      <input
-                        type="date"
-                        className="form-control theme-input w-100"
-                        value={filterEnd}
-                        onChange={(e) => setFilterEnd(e.target.value)}
-                      />
+                      <CalendarInput mode="range" className="form-control theme-input w-100" value={filterStart} endValue={filterEnd} onRangeChange={(start, end) => { setFilterStart(start); setFilterEnd(end); }} />
                     </div>
                     <div className="col-12 col-sm-4">
                       <button

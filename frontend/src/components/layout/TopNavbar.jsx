@@ -79,7 +79,8 @@ export default function TopNavbar() {
   // Determine if Report tab is active
   const isReportActive =
     location.pathname === "/frequency-report" ||
-    location.pathname === "/mis-report";
+    location.pathname === "/mis-report" ||
+    location.pathname === "/outage-analysis";
 
   return (
     <Box
@@ -406,6 +407,24 @@ export default function TopNavbar() {
             }}
           >
             Generic MIS Report
+          </MenuItem>
+          <MenuItem
+            onClick={() => handleNavigate("/outage-analysis")}
+            sx={{
+              borderRadius: "10px",
+              py: 1,
+              fontSize: 13.5,
+              fontWeight: 700,
+              color: location.pathname === "/outage-analysis" ? "#0F4B2D" : "#334155",
+              backgroundColor:
+                location.pathname === "/outage-analysis" ? "#E1F5FF" : "transparent",
+              "&:hover": {
+                backgroundColor:
+                  location.pathname === "/outage-analysis" ? "#D2ECFA" : "#F8FAFC",
+              },
+            }}
+          >
+            S/D Analysis
           </MenuItem>
         </Menu>
 

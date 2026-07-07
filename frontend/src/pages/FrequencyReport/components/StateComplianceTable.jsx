@@ -20,8 +20,6 @@ export default function StateComplianceTable({
   onExpandAll,
   onCollapseAll,
   onUpdateRowField,
-  stateDesc,
-  onUpdateStateDesc,
   showSchAct,
   onEditRawData,
 }) {
@@ -372,28 +370,6 @@ export default function StateComplianceTable({
         </table>
       </div>
 
-      <div style={{ background: "linear-gradient(180deg, #F8FBFF 0%, #FFFFFF 56px)", padding: "16px", borderRadius: "14px", border: "1px solid rgba(175, 196, 234, 0.72)", boxShadow: "0 8px 22px rgba(15, 111, 219, 0.055)" }}>
-        <label style={{ fontSize: "0.78rem", fontWeight: 700, color: "#1E293B", display: "block", marginBottom: "6px" }}>
-          State Drawal Compliance Notes
-        </label>
-        <textarea
-          value={stateDesc}
-          onChange={(e) => onUpdateStateDesc(e.target.value)}
-          rows={3}
-          style={{
-            width: "100%",
-            border: "1px solid #CBD5E1",
-            borderRadius: "8px",
-            padding: "8px 12px",
-            fontSize: "0.78rem",
-            color: "#334155",
-            outline: "none",
-            resize: "vertical",
-            fontFamily: "inherit",
-          }}
-          placeholder="Add summaries or remarks for state drawal compliance..."
-        />
-      </div>
     </SectionAccordion>
   );
 }
