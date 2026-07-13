@@ -22,8 +22,15 @@ export default function StateComplianceTable({
   onUpdateRowField,
   showSchAct,
   onEditRawData,
+  chartFontSize = 12,
 }) {
   if (rows.length === 0) return null;
+  const totalMsgCount = rows.reduce((sum, row) => {
+    const count = Number.isFinite(Number(row.crms_message_count))
+      ? Number(row.crms_message_count)
+      : (Array.isArray(row.crms_messages) ? row.crms_messages.length : 0);
+    return sum + count;
+  }, 0);
 
   return (
     <SectionAccordion
@@ -93,6 +100,7 @@ export default function StateComplianceTable({
             <col style={{ width: "120px" }} />
             <col style={{ width: "130px" }} />
             <col style={{ width: "150px" }} />
+            <col style={{ width: "90px" }} />
             <col style={{ width: "200px" }} />
           </colgroup>
           <thead>
@@ -104,6 +112,7 @@ export default function StateComplianceTable({
               <th style={{ padding: "12px 10px", fontSize: "0.72rem", color: "#94A3B8", fontWeight: 700, textAlign: "right" }}>Deviation (MW)</th>
               <th style={{ padding: "12px 10px", fontSize: "0.72rem", color: "#94A3B8", fontWeight: 700, textAlign: "center" }}>Max OD/UD (MW)</th>
               <th style={{ padding: "12px 10px", fontSize: "0.72rem", color: "#94A3B8", fontWeight: 700, textAlign: "center" }}>Max Time / Freq</th>
+              <th style={{ padding: "12px 10px", fontSize: "0.72rem", color: "#94A3B8", fontWeight: 700, textAlign: "center" }}>Msg Count</th>
               <th style={{ padding: "12px 10px", fontSize: "0.72rem", color: "#94A3B8", fontWeight: 700, textAlign: "left" }}>Reason / Comments</th>
             </tr>
           </thead>
@@ -118,6 +127,9 @@ export default function StateComplianceTable({
               const maxStateDev = isHigh ? stats.max_ud : stats.max_od;
               const maxStateTime = isHigh ? stats.max_ud_time : stats.max_od_time;
               const maxStateFreq = isHigh ? stats.freq_at_max_ud : stats.freq_at_max_od;
+              const msgCount = Number.isFinite(Number(row.crms_message_count))
+                ? Number(row.crms_message_count)
+                : (Array.isArray(row.crms_messages) ? row.crms_messages.length : 0);
 
               return (
                 <React.Fragment key={row.plant_id}>
@@ -218,6 +230,9 @@ export default function StateComplianceTable({
                     <td style={{ padding: "10px 10px", fontSize: "0.68rem", color: "#475569", textAlign: "center", fontWeight: "500" }}>
                       {maxStateTime ? `${maxStateTime} | ${fmt(maxStateFreq, 3)} Hz` : "—"}
                     </td>
+                    <td style={{ padding: "10px 10px", fontSize: "0.74rem", color: msgCount > 0 ? "#0B55B8" : "#94A3B8", textAlign: "center", fontWeight: 800 }}>
+                      {msgCount}
+                    </td>
                     <td style={{ padding: "6px 10px" }} onClick={(e) => e.stopPropagation()}>
                       <input
                         value={row.reason || ""}
@@ -246,7 +261,7 @@ export default function StateComplianceTable({
                   </tr>
                   {isExpanded && (
                     <tr style={{ background: "#F8FAFC" }}>
-                      <td colSpan="8" style={{ padding: "8px 10px 12px", borderBottom: "1px solid #E2E8F0" }}>
+                      <td colSpan="9" style={{ padding: "8px 10px 12px", borderBottom: "1px solid #E2E8F0" }}>
                         <div style={{ display: "none", justifyContent: "flex-end", marginBottom: "8px" }}>
                           <button
                             onClick={(e) => {
@@ -281,7 +296,15 @@ export default function StateComplianceTable({
                         <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 224px", gap: "10px", alignItems: "stretch" }}>
                           <div style={{ minWidth: 0, background: "#FFFFFF", border: "1px solid #E2E8F0", borderRadius: "10px", padding: "4px 6px 0", boxShadow: "0 8px 20px -18px rgba(15,23,42,0.45)" }}>
                             {row.series?.timestamps?.length > 0 ? (
-                              <ComplianceChart row={row} showSchAct={showSchAct} height={640} compact />
+                              <ComplianceChart
+                                row={row}
+                                showSchAct={showSchAct}
+                                height={640}
+                                compact
+                                fontSize={chartFontSize}
+                                showDownloadButton
+                                downloadFilename={`${row.plant_name || row.name || "state"}_frequency_deviation`}
+                              />
                             ) : (
                               <div
                                 style={{
@@ -366,6 +389,15 @@ export default function StateComplianceTable({
                 </React.Fragment>
               );
             })}
+            <tr style={{ background: "#EFF6FF", borderTop: "2px solid #BFDBFE" }}>
+              <td colSpan="7" style={{ padding: "10px", textAlign: "right", fontSize: "0.74rem", fontWeight: 900, color: "#0F172A" }}>
+                Total CRMS Messages
+              </td>
+              <td style={{ padding: "10px", textAlign: "center", fontSize: "0.76rem", fontWeight: 900, color: totalMsgCount > 0 ? "#0B55B8" : "#94A3B8" }}>
+                {totalMsgCount}
+              </td>
+              <td />
+            </tr>
           </tbody>
         </table>
       </div>

@@ -86,6 +86,25 @@ def safe_format_pct(val):
         return "—"
     return f"{f_val:.1f}%"
 
+def export_font_size(payload: dict, default=8.5):
+    try:
+        size = float(payload.get("export_font_size", default))
+    except Exception:
+        size = float(default)
+    return max(7.0, min(size, 16.0))
+
+def apply_docx_font_size(doc, size_pt):
+    size = docx.shared.Pt(size_pt)
+    for paragraph in doc.paragraphs:
+        for run in paragraph.runs:
+            run.font.size = size
+    for table in doc.tables:
+        for row in table.rows:
+            for cell in row.cells:
+                for paragraph in cell.paragraphs:
+                    for run in paragraph.runs:
+                        run.font.size = size
+
 def report_entity_label(row):
     name = str(row.get("plant_name") or "").strip()
     if row.get("is_state"):
@@ -919,6 +938,32 @@ def normalize_series(values, length=96):
         result.extend([0.0] * (length - len(result)))
     return result[:length]
 
+def normalize_series_for_resolution(values):
+    if values is None:
+        return None
+    length = len(values) if isinstance(values, list) else 0
+    if length >= 1440:
+        return normalize_series(values, 1440)
+    return normalize_series(values, 96)
+
+def normalize_wbes_identifier(value):
+    return " ".join(str(value or "").strip().upper().split())
+
+def get_wbes_identifier(entity: dict):
+    return normalize_wbes_identifier(
+        entity.get("wbes_name")
+        or entity.get("wbes_acronym")
+        or ""
+    )
+
+def needs_wbes_source(entity: dict):
+    return (
+        entity.get("sched_src") == "WBES"
+        or entity.get("schedule_source") == "WBES"
+        or entity.get("dc_src") == "WBES"
+        or entity.get("dc_source") == "WBES"
+    )
+
 def get_unique_date_strings(start_dt: datetime, end_dt: datetime):
     dates = []
     curr = start_dt.date()
@@ -936,16 +981,24 @@ def block_index_for_time(dt_value: datetime, series_len: int):
 
 def merge_event_raw_data(db, date_iso: str, plant_id: str = "", wbes_name: str = "", set_fields: Optional[dict] = None):
     dd_mm_yyyy, yyyy_mm_dd = get_date_formats(date_iso)
+    wbes_key = normalize_wbes_identifier(wbes_name)
+    wbes_terms = [term for term in {wbes_name or "", wbes_key} if term]
     query = {
         "date": yyyy_mm_dd,
         "$or": [
             {"plant_id": plant_id or ""},
-            {"wbes_name": wbes_name or ""},
-            {"wbes_acronym": wbes_name or ""},
+            *[{"wbes_name": term} for term in wbes_terms],
+            *[{"wbes_acronym": term} for term in wbes_terms],
         ],
     }
     if not plant_id and wbes_name:
-        query = {"date": yyyy_mm_dd, "$or": [{"wbes_name": wbes_name}, {"wbes_acronym": wbes_name}]}
+        query = {
+            "date": yyyy_mm_dd,
+            "$or": [
+                *[{"wbes_name": term} for term in wbes_terms],
+                *[{"wbes_acronym": term} for term in wbes_terms],
+            ],
+        }
     elif plant_id and not wbes_name:
         query = {"date": yyyy_mm_dd, "plant_id": plant_id}
 
@@ -960,7 +1013,7 @@ def merge_event_raw_data(db, date_iso: str, plant_id: str = "", wbes_name: str =
         "date_dmy": dd_mm_yyyy,
         "plant_id": plant_id or (existing or {}).get("plant_id", ""),
         "wbes_name": wbes_name or (existing or {}).get("wbes_name", ""),
-        "wbes_acronym": wbes_name or (existing or {}).get("wbes_acronym", ""),
+        "wbes_acronym": wbes_key or (existing or {}).get("wbes_acronym", ""),
         "last_updated": datetime.utcnow().isoformat(),
     }
     if set_fields:
@@ -973,7 +1026,9 @@ def get_event_raw_data(db, date_iso: str, plant_id: str = "", wbes_name: str = "
     if plant_id:
         query_parts.append({"plant_id": plant_id})
     if wbes_name:
-        query_parts.extend([{"wbes_name": wbes_name}, {"wbes_acronym": wbes_name}])
+        wbes_terms = [term for term in {wbes_name, normalize_wbes_identifier(wbes_name)} if term]
+        query_parts.extend([{"wbes_name": term} for term in wbes_terms])
+        query_parts.extend([{"wbes_acronym": term} for term in wbes_terms])
     if not query_parts:
         return None
     return db.db[RAW_DATA_COLLECTION].find_one({"date": yyyy_mm_dd, "$or": query_parts})
@@ -983,7 +1038,7 @@ def get_source_series(raw_doc: Optional[dict], source: str, field: str):
         return None
     sources = raw_doc.get("sources", {}) or {}
     values = (sources.get(source, {}) or {}).get(field)
-    return normalize_series(values) if values is not None else None
+    return normalize_series_for_resolution(values)
 
 def get_source_series_for_timestamp(db, dt_value: datetime, plant_id: str, wbes_name: str, source: str, field: str):
     raw_doc = get_event_raw_data(db, dt_value.date().isoformat(), plant_id=plant_id, wbes_name=wbes_name)
@@ -998,7 +1053,7 @@ def get_scada_file_series_for_timestamp(db, dt_value: datetime, plant_id: str, w
     series = (sources.get("scada_file", {}) or {}).get(field)
     if series is None:
         return None
-    normalized = normalize_series(series)
+    normalized = normalize_series_for_resolution(series)
     return normalized[block_index_for_time(dt_value, len(normalized))]
 
 def detect_data_frequency(db, start_dt: datetime, end_dt: datetime):
@@ -1153,8 +1208,8 @@ def save_series_by_date(db, timestamps: list, values: list, plant_id: str, wbes_
         if not isinstance(ts, datetime):
             ts = pd.to_datetime(ts).to_pydatetime()
         date_iso = ts.date().isoformat()
-        grouped.setdefault(date_iso, [0.0] * 96)
-        grouped[date_iso][block_index_for_time(ts, 96)] = safe_float(value) or 0.0
+        grouped.setdefault(date_iso, [0.0] * 1440)
+        grouped[date_iso][block_index_for_time(ts, 1440)] = safe_float(value) or 0.0
 
     for date_iso, series in grouped.items():
         merge_event_raw_data(
@@ -1163,8 +1218,9 @@ def save_series_by_date(db, timestamps: list, values: list, plant_id: str, wbes_
             plant_id=plant_id,
             wbes_name=wbes_name,
             set_fields={
-                field_path: normalize_series(series),
+                field_path: normalize_series(series, 1440),
                 f"{'.'.join(field_path.split('.')[:2])}.cached_at": datetime.utcnow().isoformat(),
+                f"{'.'.join(field_path.split('.')[:2])}.resolution": "1min",
             },
         )
 
@@ -1184,7 +1240,7 @@ def build_source_status(db, plant_id: str, wbes_name: str, start_dt: datetime, e
             values = (sources.get(source, {}) or {}).get(field)
             if values is None:
                 continue
-            normalized = normalize_series(values)
+            normalized = normalize_series_for_resolution(values)
             if series_has_data(normalized):
                 available_days += 1
                 total_points += sum(1 for value in normalized if (safe_float(value) or 0.0) != 0.0)
@@ -1349,6 +1405,7 @@ def fetch_wbes_schedule_raw(date_str: str, acronyms: list):
     db = MongoService()
     results = []
     missing_acronyms = []
+    acronyms = [normalize_wbes_identifier(acr) for acr in acronyms or [] if normalize_wbes_identifier(acr)]
     
     for acr in acronyms:
         try:
@@ -1429,7 +1486,7 @@ def fetch_wbes_schedule_raw(date_str: str, acronyms: list):
             group_list = resp_body.get("GroupWiseDataList", []) or []
             
             for fsData in group_list:
-                acr = fsData.get("Acronym")
+                acr = normalize_wbes_identifier(fsData.get("Acronym"))
                 if not acr: continue
                 
                 totalNetSchdAmount = fsData.get('NetScheduleSummary', {}).get('TotalNetSchdAmount', [0.0]*96)
@@ -1650,13 +1707,11 @@ def get_aligned_schedule_dc(entities: list, start_time: datetime, end_time: date
         curr += timedelta(days=1)
     
     # 2. Pre-fetch WBES data for unique dates
-    wbes_acronyms = list(set([
-        e.get("wbes_name") for e in entities 
-        if e.get("sched_src") == "WBES" or e.get("schedule_source") == "WBES" or 
-           e.get("dc_src") == "WBES" or e.get("dc_source") == "WBES" or 
-           e.get("is_state")
-    ]))
-    wbes_acronyms = [a for a in wbes_acronyms if a]
+    wbes_acronyms = sorted({
+        get_wbes_identifier(e)
+        for e in entities
+        if needs_wbes_source(e) and get_wbes_identifier(e)
+    })
     
     wbes_cache = {}
     from concurrent.futures import ThreadPoolExecutor
@@ -1671,7 +1726,7 @@ def get_aligned_schedule_dc(entities: list, start_time: datetime, end_time: date
             if not group_data:
                 return [], False
             for fsData in group_data:
-                acronym = fsData.get("Acronym")
+                acronym = normalize_wbes_identifier(fsData.get("Acronym"))
                 totalNetSchdAmount = fsData.get('NetScheduleSummary', {}).get('TotalNetSchdAmount', [0]*96)
                 
                 NormativeList = [0] * 96
@@ -1757,7 +1812,7 @@ def get_aligned_schedule_dc(entities: list, start_time: datetime, end_time: date
         pid = e.get("plant_id")
         sched_src = e.get("sched_src") or e.get("schedule_source") or "RTG"
         dc_src = e.get("dc_src") or e.get("dc_source") or "RTG"
-        wbes_name = e.get("wbes_name")
+        wbes_name = get_wbes_identifier(e)
         rtg_pid = e.get("rtg_plant_id") or e.get("plant_id")
         is_frequency = e.get("is_frequency", False)
         
@@ -2454,7 +2509,13 @@ async def process_report_sse(
                     if not saved_event_doc:
                         yield "data: " + json.dumps({"success": False, "error": f"Saved event not found for id {event_id}."}) + "\n\n"
                         return
-                    yield "data: " + json.dumps({"step": 2, "message": "Saved event found. Rebuilding rows from cached SCADA file data."}) + "\n\n"
+                    yield "data: " + json.dumps({"step": 2, "message": "Saved event found. Loading stored event series from MongoDB."}) + "\n\n"
+                    saved_response, saved_error = build_saved_event_response(db, event_id, entity_list, st, et)
+                    if saved_error:
+                        yield "data: " + json.dumps({"success": False, "error": saved_error}) + "\n\n"
+                        return
+                    yield "data: " + json.dumps({"complete": True, "result": saved_response}) + "\n\n"
+                    return
                 df_filtered, headers, keys, dt_col, freq_col, db_error = build_database_scada_frame(db, st, et, entity_list, event_id=None)
                 if db_error:
                     yield "data: " + json.dumps({"success": False, "error": db_error}) + "\n\n"
@@ -3346,6 +3407,8 @@ async def download_pdf(payload: dict):
         rows = [r for r in rows if r.get("is_state")] + [r for r in rows if not r.get("is_state")]
         event_type = normalize_event_type(payload.get("event_type") or (rows[0].get("event_type") if rows else None))
         include_annexure = bool(payload.get("include_annexure", True))
+        base_font = export_font_size(payload, 8.5)
+        frequency_plot_b64 = payload.get("frequency_plot_image")
 
         buf = io.BytesIO()
         portrait_size = portrait(A4)
@@ -3361,16 +3424,16 @@ async def download_pdf(payload: dict):
         ])
 
         styles = getSampleStyleSheet()
-        title_style = ParagraphStyle("ReportTitle", parent=styles["Heading1"], fontSize=17, textColor=colors.HexColor("#022726"), spaceAfter=12, alignment=1)
-        section_style = ParagraphStyle("SectionHeading", parent=styles["Heading2"], fontSize=11, textColor=colors.HexColor("#03624C"), spaceBefore=9, spaceAfter=7)
-        text_style = ParagraphStyle("NormalText", parent=styles["Normal"], fontSize=8.5, leading=11, spaceAfter=7)
-        small_style = ParagraphStyle("SmallText", parent=styles["Normal"], fontSize=7, leading=9, textColor=colors.HexColor("#475569"))
+        title_style = ParagraphStyle("ReportTitle", parent=styles["Heading1"], fontSize=base_font + 8.5, textColor=colors.HexColor("#022726"), spaceAfter=12, alignment=1)
+        section_style = ParagraphStyle("SectionHeading", parent=styles["Heading2"], fontSize=base_font + 2.5, textColor=colors.HexColor("#03624C"), spaceBefore=9, spaceAfter=7)
+        text_style = ParagraphStyle("NormalText", parent=styles["Normal"], fontSize=base_font, leading=base_font + 2.5, spaceAfter=7)
+        small_style = ParagraphStyle("SmallText", parent=styles["Normal"], fontSize=max(6.5, base_font - 1.5), leading=base_font + 0.5, textColor=colors.HexColor("#475569"))
         table_style = TableStyle([
             ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0F172A")),
             ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
             ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-            ("FONTSIZE", (0, 0), (-1, 0), 7),
-            ("FONTSIZE", (0, 1), (-1, -1), 6.5),
+            ("FONTSIZE", (0, 0), (-1, 0), max(7, base_font - 1)),
+            ("FONTSIZE", (0, 1), (-1, -1), max(6.5, base_font - 1.5)),
             ("BACKGROUND", (0, 1), (-1, -1), colors.HexColor("#F8FAFC")),
             ("GRID", (0, 0), (-1, -1), 0.6, colors.HexColor("#CBD5E1")),
             ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
@@ -3428,8 +3491,16 @@ async def download_pdf(payload: dict):
 
         if include_annexure:
             annexure_rows = [r for r in rows if r.get("plot_image") or r.get("capacity_plot_image")]
-            if annexure_rows:
+            if frequency_plot_b64 or annexure_rows:
                 story.extend([NextPageTemplate("landscape"), PageBreak()])
+                if frequency_plot_b64:
+                    story.append(Paragraph("Annexure: System Frequency", section_style))
+                    try:
+                        story.append(Image(io.BytesIO(base64.b64decode(frequency_plot_b64)), width=760, height=315))
+                    except Exception as img_err:
+                        print(f"Skipping invalid PDF frequency plot image: {img_err}")
+                    if annexure_rows:
+                        story.append(PageBreak())
                 for idx, r in enumerate(annexure_rows, 1):
                     entity_type = "State" if r.get("is_state") else "Generator"
                     annexure_no = "1" if r.get("is_state") else "2"
@@ -3598,6 +3669,8 @@ async def download_docx(payload: dict):
     state_rows = [r for r in rows if r.get("is_state")]
     gen_rows = [r for r in rows if not r.get("is_state")]
     include_annexure = bool(payload.get("include_annexure", True))
+    base_font = export_font_size(payload, 10)
+    frequency_plot_b64 = payload.get("frequency_plot_image")
 
     doc = Document()
     for section in doc.sections:
@@ -3660,6 +3733,23 @@ async def download_docx(payload: dict):
 
     if include_annexure:
         annexure_rows = [r for r in rows if r.get("plot_image") or r.get("capacity_plot_image")]
+        if frequency_plot_b64:
+            section = doc.add_section(WD_SECTION.NEW_PAGE)
+            section.orientation = WD_ORIENT.LANDSCAPE
+            section.page_width = docx.shared.Inches(11.69)
+            section.page_height = docx.shared.Inches(8.27)
+            section.top_margin = docx.shared.Inches(0.25)
+            section.bottom_margin = docx.shared.Inches(0.25)
+            section.left_margin = docx.shared.Inches(0.28)
+            section.right_margin = docx.shared.Inches(0.28)
+            section.header.is_linked_to_previous = False
+            section.header.paragraphs[0].text = "Annexure: System Frequency"
+            section.header.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+            doc.add_heading("System Frequency", level=1)
+            try:
+                doc.add_picture(io.BytesIO(base64.b64decode(frequency_plot_b64)), width=docx.shared.Inches(9.2))
+            except Exception as img_err:
+                print(f"Skipping invalid DOCX frequency plot image: {img_err}")
         if annexure_rows:
             for r in annexure_rows:
                 section = doc.add_section(WD_SECTION.NEW_PAGE)
@@ -3688,6 +3778,7 @@ async def download_docx(payload: dict):
                         print(f"Skipping invalid DOCX plot image for {r.get('plant_name')}: {img_err}")
                 append_docx_annexure_writeup_crms(doc, r)
 
+    apply_docx_font_size(doc, base_font)
     buf = io.BytesIO()
     doc.save(buf)
     buf.seek(0)
@@ -3847,14 +3938,14 @@ async def get_report_data(date: str = Query(..., description="YYYY-MM-DD")):
             amounts = item.get("NetSchdAmount", [])
             total = sum(float(v or 0) for v in amounts)
             if name:
-                wbes_schedule_by_acronym[name] = total
+                wbes_schedule_by_acronym[normalize_wbes_identifier(name)] = total
 
         stoa = psp_doc.get("pspSTOADetails1", [])
         for item in stoa:
             acronym = item.get("UNIT_NAME") or item.get("UTILITY_NAME") or ""
             dc_val = float(item.get("DC", 0) or 0)
             if acronym:
-                wbes_dc_by_acronym[acronym.upper()] = dc_val
+                wbes_dc_by_acronym[normalize_wbes_identifier(acronym)] = dc_val
 
         load_list = psp_doc.get("pspstateloaddetailsER", [])
         for item in load_list:
@@ -3878,7 +3969,7 @@ async def get_report_data(date: str = Query(..., description="YYYY-MM-DD")):
         capacity       = float(m.get("stage_installed_capacity") or m.get("installed_capacity") or 0)
         sched_src      = m.get("schedule_source", "RTG")
         dc_src         = m.get("dc_source", "RTG")
-        wbes_acronym   = (m.get("wbes_acronym") or "").upper()
+        wbes_key       = get_wbes_identifier(m)
         rtg_pid        = m.get("rtg_plant_id") or m.get("plant_id") or ""
         plant_id       = m.get("plant_id", "")
         stage_id       = m.get("stage_id") or m.get("STAGE_ID", "")
@@ -3899,14 +3990,19 @@ async def get_report_data(date: str = Query(..., description="YYYY-MM-DD")):
                 schedule = 50.0
                 dc       = 50.0
             else:
-                if sched_src != "Manual":
-                    st_lookup_key = plant_name.upper()
-                    if "WEST BENGAL" in st_lookup_key:
-                        st_lookup_key = "WEST BENGAL"
-                    elif "EASTERN REGION" in st_lookup_key or "ER" in st_lookup_key:
-                        st_lookup_key = "ER"
-                    details = state_load_details.get(st_lookup_key, {"schedule": 0.0, "dc": 0.0})
+                st_lookup_key = plant_name.upper()
+                if "WEST BENGAL" in st_lookup_key:
+                    st_lookup_key = "WEST BENGAL"
+                elif "EASTERN REGION" in st_lookup_key or "ER" in st_lookup_key:
+                    st_lookup_key = "ER"
+                details = state_load_details.get(st_lookup_key, {"schedule": 0.0, "dc": 0.0})
+                if sched_src == "WBES" and wbes_key:
+                    schedule = wbes_schedule_by_acronym.get(wbes_key, details["schedule"])
+                elif sched_src != "Manual":
                     schedule = details["schedule"]
+                if dc_src == "WBES" and wbes_key:
+                    dc = wbes_dc_by_acronym.get(wbes_key, details["dc"])
+                elif dc_src != "Manual":
                     dc = details["dc"]
         else:
             if sched_src == "RTG" or dc_src == "RTG":
@@ -3915,10 +4011,10 @@ async def get_report_data(date: str = Query(..., description="YYYY-MM-DD")):
                     schedule = float(rtg.get("schedule", 0) or 0)
                 if dc_src == "RTG":
                     dc = float(rtg.get("dc", 0) or 0)
-            if sched_src == "WBES" and wbes_acronym:
-                schedule = wbes_schedule_by_acronym.get(wbes_acronym, schedule)
-            if dc_src == "WBES" and wbes_acronym:
-                dc = wbes_dc_by_acronym.get(wbes_acronym, dc)
+            if sched_src == "WBES" and wbes_key:
+                schedule = wbes_schedule_by_acronym.get(wbes_key, schedule)
+            if dc_src == "WBES" and wbes_key:
+                dc = wbes_dc_by_acronym.get(wbes_key, dc)
 
         rows.append({
             "plant_id":     plant_id,
@@ -4445,10 +4541,11 @@ def resync_source(payload: ResyncSourcePayload):
         resync_count = 0
         
         if payload.source == "WBES":
-            wbes_acronyms = list(set([
-                e.get("wbes_name") for e in payload.entities
-                if e.get("wbes_name")
-            ]))
+            wbes_acronyms = sorted({
+                get_wbes_identifier(e)
+                for e in payload.entities
+                if get_wbes_identifier(e)
+            })
             for d in unique_dates:
                 dmy = d.strftime('%d-%m-%Y')
                 # Force fetch and overwrite cache

@@ -1,5 +1,6 @@
 import { useRef, useMemo, useImperativeHandle, forwardRef } from "react";
 import ReactECharts from "echarts-for-react";
+import { Download } from "lucide-react";
 
 const COLORS = {
   state: {
@@ -15,10 +16,9 @@ const COLORS = {
 function fmtTick(ts) {
   if (!ts) return "";
   try {
-    const [date, time] = ts.split(" ");
-    const [y, m, d] = date.split("-");
+    const [, time] = ts.split(" ");
     const [hh, mm] = time.split(":");
-    return `${d}-${m}-${String(y).slice(-2)} ${hh}:${mm}`;
+    return `${hh}:${mm}`;
   } catch {
     return ts;
   }
@@ -173,8 +173,21 @@ const crmsTooltipHtml = (message = {}) => {
   return html;
 };
 
+const downloadUrl = (url, filename) => {
+  if (!url) return;
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+};
+
+const safeFileName = (value) =>
+  String(value || "chart").replace(/[^\w.-]+/g, "_").replace(/^_+|_+$/g, "") || "chart";
+
 const ComplianceChart = forwardRef(function ComplianceChart(
-  { row, showSchAct = false, height = 480, compact = false },
+  { row, showSchAct = false, height = 480, compact = false, fontSize = 12, showDownloadButton = false, downloadFilename },
   ref
 ) {
   const eRef = useRef(null);
@@ -327,6 +340,16 @@ const ComplianceChart = forwardRef(function ComplianceChart(
   }, [crmsMarkers]);
 
   const option = useMemo(() => {
+    const baseFont = Math.max(8, Number(fontSize) || 12);
+    const titleFont = baseFont + (compact ? 2 : 3);
+    const smallFont = Math.max(8, baseFont - 2);
+    const titleTop = compact ? 8 : 10;
+    const legendTop = titleTop + titleFont + (smallFont * 1.35) + 18;
+    const legendHeight = baseFont + 18;
+    const gridTop = legendTop + legendHeight + 18;
+    const zoomHeight = compact ? Math.max(16, baseFont) : Math.max(20, baseFont + 2);
+    const gridBottom = compact ? Math.max(72, baseFont * 3.8) : Math.max(92, baseFont * 4.4);
+    const zoomBottom = compact ? 18 : 24;
     const periodText = timestamps.length
       ? `${fmtPeriodTs(timestamps[0])} to ${fmtPeriodTs(timestamps[timestamps.length - 1])}`
       : "";
@@ -342,7 +365,7 @@ const ComplianceChart = forwardRef(function ComplianceChart(
             formatter: fmtDate(ts),
             position: "insideEndTop",
             color: "#334155",
-            fontSize: 10,
+            fontSize: smallFont,
             fontWeight: 800,
             backgroundColor: "rgba(255,255,255,0.84)",
             padding: [2, 4],
@@ -394,7 +417,7 @@ const ComplianceChart = forwardRef(function ComplianceChart(
             silent: true,
             symbol: "none",
             lineStyle: { color: "#94A3B8", type: "dashed", width: 1.5 },
-            label: { formatter: "0 MW", position: "end", color: "#475569", fontSize: 9, fontWeight: "bold" },
+            label: { formatter: "0 MW", position: "end", color: "#475569", fontSize: smallFont, fontWeight: "bold" },
             data: [{ yAxis: 0 }, ...dateMarkers],
           },
           z: 4,
@@ -413,7 +436,7 @@ const ComplianceChart = forwardRef(function ComplianceChart(
           silent: true,
           symbol: "none",
           lineStyle: { color: eventType === "high" ? "#DC2626" : "#F97316", type: "dashed", width: 1.2 },
-          label: { formatter: meta.thresholdText, position: "insideEndTop", color: eventType === "high" ? "#B91C1C" : "#C2410C", fontSize: 9, fontWeight: "bold" },
+          label: { formatter: meta.thresholdText, position: "insideEndTop", color: eventType === "high" ? "#B91C1C" : "#C2410C", fontSize: smallFont, fontWeight: "bold" },
           data: [{ yAxis: meta.threshold }],
         },
         z: 3,
@@ -505,7 +528,7 @@ const ComplianceChart = forwardRef(function ComplianceChart(
         borderColor: "#CBD5E1",
         borderWidth: 1,
         padding: [10, 14],
-        textStyle: { color: "#1E293B", fontSize: 13, fontWeight: 700 },
+        textStyle: { color: "#1E293B", fontSize: baseFont, fontWeight: 700 },
         formatter: (params) => {
           const ts = params[0]?.axisValue || "";
           const map = {};
@@ -520,8 +543,8 @@ const ComplianceChart = forwardRef(function ComplianceChart(
           const freq = map["Frequency (Hz)"];
           const dev = map["Deviation (MW)"];
           const inEvent = freq != null && meta.isEvent(freq);
-          const badge = inEvent ? `<span style="background:${eventType === "high" ? "#DC2626" : "#F97316"};color:#fff;border-radius:3px;padding:1px 5px;font-size:10px;font-weight:800;margin-left:6px">${meta.badge}</span>` : "";
-          let html = `<div style="border-bottom:1px solid #CBD5E1;padding-bottom:5px;margin-bottom:6px;font-size:11px;color:#64748B">${ts}${badge}</div>`;
+          const badge = inEvent ? `<span style="background:${eventType === "high" ? "#DC2626" : "#F97316"};color:#fff;border-radius:3px;padding:1px 5px;font-size:${smallFont}px;font-weight:800;margin-left:6px">${meta.badge}</span>` : "";
+          let html = `<div style="border-bottom:1px solid #CBD5E1;padding-bottom:5px;margin-bottom:6px;font-size:${smallFont}px;color:#64748B">${ts}${badge}</div>`;
           html += `<div style="display:flex;justify-content:space-between;gap:16px;margin-bottom:3px"><span style="color:#64748B">Frequency:</span><span style="font-weight:700;color:${palette.frequency}">${freq != null ? Number(freq).toFixed(3) : "-"} Hz</span></div>`;
           if (hasDeviation) {
             html += `<div style="display:flex;justify-content:space-between;gap:16px;margin-bottom:3px"><span style="color:#64748B">Deviation:</span><span style="font-weight:700;color:${dev >= 0 ? palette.deviation : "#EF4444"}">${dev != null ? (dev >= 0 ? "+" : "") + Number(dev).toFixed(0) : "-"} MW</span></div>`;
@@ -529,7 +552,7 @@ const ComplianceChart = forwardRef(function ComplianceChart(
           if (map["Schedule (MW)"] != null) html += `<div style="display:flex;justify-content:space-between;gap:16px;margin-bottom:3px"><span style="color:#64748B">Schedule:</span><span style="color:#6366F1;font-weight:600">${Number(map["Schedule (MW)"]).toFixed(0)} MW</span></div>`;
           if (map["Actual (MW)"] != null) html += `<div style="display:flex;justify-content:space-between;gap:16px"><span style="color:#64748B">Actual:</span><span style="color:#EC4899;font-weight:600">${Number(map["Actual (MW)"]).toFixed(0)} MW</span></div>`;
           if (hasDeviation && inEvent) {
-            html += `<div style="margin-top:5px;padding-top:5px;border-top:1px solid #E2E8F0;font-size:10px;color:#475569;font-weight:600">${meta.isHelping(dev) ? meta.helping.label : meta.adverse.label}</div>`;
+            html += `<div style="margin-top:5px;padding-top:5px;border-top:1px solid #E2E8F0;font-size:${smallFont}px;color:#475569;font-weight:600">${meta.isHelping(dev) ? meta.helping.label : meta.adverse.label}</div>`;
           }
           if (crmsParams.length) {
             html += `<div style="margin-top:7px;padding-top:7px;border-top:1px solid #CBD5E1">`;
@@ -544,19 +567,19 @@ const ComplianceChart = forwardRef(function ComplianceChart(
       legend: {
         show: true,
         type: "scroll",
-        top: compact ? 38 : 44,
+        top: legendTop,
         left: 56,
         right: 48,
-        textStyle: { color: "#1F2937", fontSize: compact ? 11 : 12, fontWeight: 800 },
-        itemWidth: compact ? 18 : 20,
-        itemHeight: compact ? 12 : 14,
-        pageIconSize: 10,
-        pageTextStyle: { color: "#64748B", fontSize: 10 },
+        textStyle: { color: "#1F2937", fontSize: baseFont, fontWeight: 800 },
+        itemWidth: Math.max(compact ? 18 : 20, baseFont + 2),
+        itemHeight: Math.max(compact ? 12 : 14, baseFont - 4),
+        pageIconSize: Math.max(10, smallFont),
+        pageTextStyle: { color: "#64748B", fontSize: smallFont },
         selectedMode: true,
         data: legendItems,
       },
       toolbox: {
-        show: true,
+        show: false,
         top: 0,
         right: 6,
         itemSize: 15,
@@ -573,22 +596,22 @@ const ComplianceChart = forwardRef(function ComplianceChart(
         text: `${row.plant_name || row.name || row.entity || row.state || "Entity"}: Frequency (Hz) vs Deviation (MW)`,
         subtext: `${eventType === "high" ? "High" : "Low"} Frequency Operation${periodText ? `: ${periodText}` : ""}`,
         left: 10,
-        top: 4,
-        textStyle: { color: "#0F172A", fontSize: compact ? 13 : 15, fontWeight: 900 },
-        subtextStyle: { color: "#475569", fontSize: compact ? 10 : 11, fontWeight: 800 },
+        top: titleTop,
+        textStyle: { color: "#0F172A", fontSize: titleFont, fontWeight: 900 },
+        subtextStyle: { color: "#475569", fontSize: smallFont, fontWeight: 800, lineHeight: smallFont + 4 },
       },
       grid: [
-        { top: compact ? 82 : 94, right: 64, bottom: compact ? 54 : 78, left: 62, containLabel: false },
+        { top: gridTop, right: Math.max(72, baseFont * 4), bottom: gridBottom, left: Math.max(68, baseFont * 3.8), containLabel: false },
       ],
       graphic: annotationText ? [{
         type: "text",
-        right: compact ? 72 : 82,
-        top: compact ? 112 : 124,
+        right: Math.max(78, baseFont * 4.5),
+        top: gridTop + 22,
         z: 20,
         style: {
           text: annotationText,
-          font: `${compact ? 10 : 11}px monospace`,
-          lineHeight: compact ? 14 : 16,
+          font: `${smallFont}px monospace`,
+          lineHeight: smallFont + 5,
           fill: "#0F172A",
           backgroundColor: "rgba(255,255,255,0.92)",
           borderColor: "#CBD5E1",
@@ -604,9 +627,9 @@ const ComplianceChart = forwardRef(function ComplianceChart(
         {
           type: "slider",
           xAxisIndex: 0,
-          height: compact ? 14 : 18,
-          bottom: compact ? 14 : 20,
-          textStyle: { color: "#64748B", fontSize: 9 },
+          height: zoomHeight,
+          bottom: zoomBottom,
+          textStyle: { color: "#64748B", fontSize: smallFont },
           fillerColor: "rgba(3,98,76,0.08)",
           borderColor: "#CBD5E1",
           handleStyle: { color: "#03624C" },
@@ -617,24 +640,59 @@ const ComplianceChart = forwardRef(function ComplianceChart(
         },
       ],
       xAxis: [
-        { type: "category", gridIndex: 0, data: timestamps, boundaryGap: false, axisLabel: { formatter: fmtTick, color: "#334155", fontSize: compact ? 9 : 10, fontWeight: 700, rotate: 0, margin: compact ? 8 : 12, interval: Math.max(Math.floor(timestamps.length / 6) - 1, 0) }, axisLine: { lineStyle: { color: "#94A3B8", width: 1.4 } }, splitLine: { show: false } },
+        { type: "category", gridIndex: 0, data: timestamps, boundaryGap: false, axisLabel: { formatter: fmtTick, color: "#334155", fontSize: smallFont, fontWeight: 700, rotate: 0, margin: compact ? 12 : 16, interval: Math.max(Math.floor(timestamps.length / 5) - 1, 0) }, axisLine: { lineStyle: { color: "#94A3B8", width: 1.4 } }, splitLine: { show: false } },
       ],
       yAxis: [
-        { type: "value", gridIndex: 0, name: "MW", min: hasDeviation ? -maxDevAbs : 0, max: maxDevAbs, interval: hasDeviation ? maxDevAbs / 3 : maxDevAbs / 4, nameTextStyle: { color: "#0F172A", fontWeight: 900, fontSize: compact ? 11 : 12 }, axisLabel: { color: "#334155", fontSize: compact ? 10 : 11, fontWeight: 700, formatter: (v) => v.toFixed(0) }, splitLine: { lineStyle: { color: "#D7E1EA", width: 1.1 } } },
-        { type: "value", gridIndex: 0, name: "Hz", position: "right", min: 49.4, max: 50.6, interval: 0.2, nameTextStyle: { color: palette.frequency, fontWeight: 900, fontSize: compact ? 11 : 12 }, axisLabel: { color: palette.frequency, fontSize: compact ? 10 : 11, fontWeight: 800, formatter: (v) => v.toFixed(2) }, axisLine: { show: true, lineStyle: { color: palette.frequency, width: 1.6 } }, splitLine: { show: false } },
+        { type: "value", gridIndex: 0, name: "MW", min: hasDeviation ? -maxDevAbs : 0, max: maxDevAbs, interval: hasDeviation ? maxDevAbs / 3 : maxDevAbs / 4, nameTextStyle: { color: "#0F172A", fontWeight: 900, fontSize: baseFont, padding: [0, 0, 6, 0] }, axisLabel: { color: "#334155", fontSize: smallFont, fontWeight: 700, formatter: (v) => v.toFixed(0), margin: 10 }, splitLine: { lineStyle: { color: "#D7E1EA", width: 1.1 } } },
+        { type: "value", gridIndex: 0, name: "Hz", position: "right", min: 49.4, max: 50.6, interval: 0.2, nameTextStyle: { color: palette.frequency, fontWeight: 900, fontSize: baseFont, padding: [0, 0, 6, 0] }, axisLabel: { color: palette.frequency, fontSize: smallFont, fontWeight: 800, formatter: (v) => v.toFixed(2), margin: 10 }, axisLine: { show: true, lineStyle: { color: palette.frequency, width: 1.6 } }, splitLine: { show: false } },
       ],
       series: chartSeries,
     };
-  }, [timestamps, cleanDevs, cleanFreqs, cleanScheds, cleanActuals, showSchAct, compact, palette, meta, maxDevAbs, helpingData, adverseData, eventType, hasDeviation, row, crmsMarkersByCategory, annotationText]);
+  }, [timestamps, cleanDevs, cleanFreqs, cleanScheds, cleanActuals, showSchAct, compact, fontSize, palette, meta, maxDevAbs, helpingData, adverseData, eventType, hasDeviation, row, crmsMarkersByCategory, annotationText]);
+
+  const handleDownload = (event) => {
+    event?.stopPropagation();
+    const inst = eRef.current?.getEchartsInstance();
+    const url = inst?.getDataURL({ type: "png", pixelRatio: 2, backgroundColor: "#FFFFFF" });
+    downloadUrl(url, `${safeFileName(downloadFilename || `${row.plant_name || row.name || row.entity || "frequency_deviation"}_frequency_deviation`)}.png`);
+  };
 
   return (
-    <ReactECharts
-      ref={eRef}
-      option={option}
-      style={{ height, width: "100%" }}
-      opts={{ renderer: "canvas" }}
-      notMerge
-    />
+    <div style={{ position: "relative" }}>
+      {showDownloadButton && (
+        <button
+          type="button"
+          onClick={handleDownload}
+          title="Download chart"
+          style={{
+            position: "absolute",
+            top: 6,
+            right: 40,
+            zIndex: 5,
+            width: 30,
+            height: 30,
+            display: "inline-flex",
+            alignItems: "center",
+            justifyContent: "center",
+            border: "1px solid #BFD3F8",
+            borderRadius: 6,
+            background: "#FFFFFF",
+            color: "#0B55B8",
+            cursor: "pointer",
+            boxShadow: "0 4px 12px rgba(15,111,219,0.12)",
+          }}
+        >
+          <Download size={15} />
+        </button>
+      )}
+      <ReactECharts
+        ref={eRef}
+        option={option}
+        style={{ height, width: "100%" }}
+        opts={{ renderer: "canvas" }}
+        notMerge
+      />
+    </div>
   );
 });
 

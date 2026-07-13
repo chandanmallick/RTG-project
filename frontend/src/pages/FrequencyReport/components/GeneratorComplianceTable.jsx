@@ -41,6 +41,7 @@ export default function GeneratorComplianceTable({
   onUpdateGenDesc,
   showSchAct,
   onEditRawData,
+  chartFontSize = 12,
 }) {
   const [searchQuery, setSearchQuery] = useState("");
   const [fuelFilter, setFuelFilter] = useState("ALL_FUELS");
@@ -227,6 +228,12 @@ export default function GeneratorComplianceTable({
           const statePlants = filteredRows
             .filter((p) => generatorCategory(p) === groupLabel)
             .sort((a, b) => String(a.state || a.state_name || "").localeCompare(String(b.state || b.state_name || "")) || String(a.plant_name || "").localeCompare(String(b.plant_name || "")));
+          const groupMsgCount = statePlants.reduce((sum, row) => {
+            const count = Number.isFinite(Number(row.crms_message_count))
+              ? Number(row.crms_message_count)
+              : (Array.isArray(row.crms_messages) ? row.crms_messages.length : 0);
+            return sum + count;
+          }, 0);
 
           if (statePlants.length === 0) return null;
 
@@ -249,7 +256,7 @@ export default function GeneratorComplianceTable({
                 ></span>
                 {groupLabel.toUpperCase()}
                 <span style={{ fontSize: "0.7rem", color: "#64748B", fontWeight: 500 }}>
-                  ({statePlants.length} plants)
+                  ({statePlants.length} plants, {groupMsgCount} messages)
                 </span>
               </h4>
 
@@ -282,6 +289,7 @@ export default function GeneratorComplianceTable({
                     <col style={{ width: "90px" }} />
                     <col style={{ width: "90px" }} />
                     <col style={{ width: "80px" }} />
+                    <col style={{ width: "90px" }} />
                     <col style={{ width: "200px" }} />
                   </colgroup>
                   <thead>
@@ -297,6 +305,7 @@ export default function GeneratorComplianceTable({
                       <th style={{ padding: "10px 8px", fontSize: "0.7rem", color: "#94A3B8", fontWeight: 700, textAlign: "right" }}>Actual (MW)</th>
                       <th style={{ padding: "10px 8px", fontSize: "0.7rem", color: "#94A3B8", fontWeight: 700, textAlign: "right" }}>Deviation</th>
                       <th style={{ padding: "10px 8px", fontSize: "0.7rem", color: "#94A3B8", fontWeight: 700, textAlign: "right" }}>% DC</th>
+                      <th style={{ padding: "10px 8px", fontSize: "0.7rem", color: "#94A3B8", fontWeight: 700, textAlign: "center" }}>Msg Count</th>
                       <th style={{ padding: "10px 8px", fontSize: "0.7rem", color: "#94A3B8", fontWeight: 700, textAlign: "left" }}>Reason / Comments</th>
                     </tr>
                   </thead>
@@ -307,6 +316,9 @@ export default function GeneratorComplianceTable({
                       const devPos = hasDeviation && row.deviation >= 0;
                       const pctDC = hasActual && row.pct_dc !== null && row.pct_dc !== undefined;
                       const isExpanded = expandedRowIds.includes(row.plant_id);
+                      const msgCount = Number.isFinite(Number(row.crms_message_count))
+                        ? Number(row.crms_message_count)
+                        : (Array.isArray(row.crms_messages) ? row.crms_messages.length : 0);
 
                       return (
                         <React.Fragment key={row.plant_id}>
@@ -467,6 +479,9 @@ export default function GeneratorComplianceTable({
                                 "—"
                               )}
                             </td>
+                            <td style={{ padding: "8px 8px", textAlign: "center", fontSize: "0.72rem", color: msgCount > 0 ? "#0B55B8" : "#94A3B8", fontWeight: 800 }}>
+                              {msgCount}
+                            </td>
                             <td style={{ padding: "4px 8px" }} onClick={(e) => e.stopPropagation()}>
                               <input
                                 value={row.reason || ""}
@@ -495,7 +510,7 @@ export default function GeneratorComplianceTable({
                           </tr>
                           {isExpanded && (
                             <tr style={{ background: "#F8FAFC" }}>
-                              <td colSpan="12" style={{ padding: "8px 10px 12px", borderBottom: "1px solid #E2E8F0" }}>
+                              <td colSpan="13" style={{ padding: "8px 10px 12px", borderBottom: "1px solid #E2E8F0" }}>
                                 <div style={{ display: "none", justifyContent: "flex-end", marginBottom: "12px" }}>
                                   <button
                                     onClick={(e) => {
@@ -531,9 +546,24 @@ export default function GeneratorComplianceTable({
                                   <div style={{ minWidth: 0, background: "linear-gradient(180deg, #F8FBFF 0%, #FFFFFF 56px)", border: "1px solid rgba(175, 196, 234, 0.72)", borderRadius: "14px", padding: "4px 6px 0", boxShadow: "0 8px 22px rgba(15, 111, 219, 0.055)" }}>
                                     {row.series?.timestamps?.length > 0 ? (
                                       <>
-                                        <ComplianceChart row={row} showSchAct={showSchAct} height={520} compact />
+                                        <ComplianceChart
+                                          row={row}
+                                          showSchAct={showSchAct}
+                                          height={520}
+                                          compact
+                                          fontSize={chartFontSize}
+                                          showDownloadButton
+                                          downloadFilename={`${row.plant_name || row.name || "generator"}_frequency_deviation`}
+                                        />
                                         <div style={{ marginTop: "6px", borderTop: "1px solid #E2E8F0", paddingTop: "6px" }}>
-                                          <CapacityFrequencyChart row={row} height={330} compact />
+                                          <CapacityFrequencyChart
+                                            row={row}
+                                            height={330}
+                                            compact
+                                            fontSize={chartFontSize}
+                                            showDownloadButton
+                                            downloadFilename={`${row.plant_name || row.name || "generator"}_schedule_actual`}
+                                          />
                                         </div>
                                       </>
                                     ) : (
@@ -618,6 +648,15 @@ export default function GeneratorComplianceTable({
                         </React.Fragment>
                       );
                     })}
+                    <tr style={{ background: "#ECFDF5", borderTop: "2px solid #A7F3D0" }}>
+                      <td colSpan="11" style={{ padding: "9px 8px", textAlign: "right", fontSize: "0.72rem", fontWeight: 900, color: "#0F172A" }}>
+                        Total CRMS Messages
+                      </td>
+                      <td style={{ padding: "9px 8px", textAlign: "center", fontSize: "0.74rem", fontWeight: 900, color: groupMsgCount > 0 ? "#0B55B8" : "#94A3B8" }}>
+                        {groupMsgCount}
+                      </td>
+                      <td />
+                    </tr>
                   </tbody>
                 </table>
               </div>

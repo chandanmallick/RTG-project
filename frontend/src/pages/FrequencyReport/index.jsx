@@ -3,6 +3,7 @@
  * Main entry point for the revamped Frequency Compliance Report Builder.
  */
 import React, { useState, useRef, useCallback, useEffect, useMemo } from "react";
+import ReactECharts from "echarts-for-react";
 import AppShell from "../../components/layout/AppShell";
 import PlantMappingGrid from "../../components/PlantMappingGrid";
 import DataSourceAuditPanel from "../../components/frequency/DataSourceAuditPanel";
@@ -18,7 +19,7 @@ import ExportBar from "./components/ExportBar";
 import ComplianceChart from "./components/ComplianceChart";
 import CapacityFrequencyChart from "./components/CapacityFrequencyChart";
 
-import { Table2, Settings2, FileUp, AlertTriangle, Terminal, X, Save, RefreshCw, Search } from "lucide-react";
+import { Table2, Settings2, FileUp, AlertTriangle, Terminal, X, Save, RefreshCw, Search, Download } from "lucide-react";
 import toast, { Toaster } from "react-hot-toast";
 
 const today = () => new Date().toISOString().slice(0, 10);
@@ -159,7 +160,7 @@ const rowCrmsAliasTokens = (row = {}) => {
 
 const mapCrmsMessagesToRows = (baseRows = [], messages = []) => {
   if (!messages.length) {
-    return baseRows.map((row) => ({ ...row, crms_messages: [] }));
+    return baseRows.map((row) => ({ ...row, crms_messages: [], crms_message_count: 0 }));
   }
   return baseRows.map((row) => {
     const aliasTokens = rowCrmsAliasTokens(row);
@@ -167,8 +168,46 @@ const mapCrmsMessagesToRows = (baseRows = [], messages = []) => {
       const issuedTokens = (message.issued_to || []).map(normalizeCrmsToken).filter(Boolean);
       return issuedTokens.some((token) => aliasTokens.has(token));
     });
-    return { ...row, crms_messages: matched };
+    return { ...row, crms_messages: matched, crms_message_count: matched.length };
   });
+};
+
+const rowCrmsMessageCount = (row = {}) =>
+  Number.isFinite(Number(row.crms_message_count))
+    ? Number(row.crms_message_count)
+    : (Array.isArray(row.crms_messages) ? row.crms_messages.length : 0);
+
+const crmsEntityIssueLines = (rows = [], nameGetter) => {
+  const entries = rows
+    .map((row) => ({
+      name: nameGetter(row),
+      count: rowCrmsMessageCount(row),
+    }))
+    .filter((item) => item.name && item.count > 0)
+    .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
+  return entries.map((item) => `${item.count} ${item.count === 1 ? "no." : "nos."} of Message issued to ${item.name}.`);
+};
+
+const crmsMessageCategory = (message = {}) => {
+  const raw = Array.isArray(message.category) ? message.category[0] : message.category;
+  return String(raw || message.violation_type || "Message").trim() || "Message";
+};
+
+const crmsExecutiveCategorySummary = (messages = []) => {
+  const categoryOrder = ["Alert", "Emergency", "Extreme Emergency", "Non-compliance"];
+  const counts = new Map();
+  messages.forEach((message) => {
+    const category = crmsMessageCategory(message);
+    counts.set(category, (counts.get(category) || 0) + 1);
+  });
+  const parts = Array.from(counts.entries())
+    .sort(([a], [b]) => {
+      const ai = categoryOrder.findIndex((item) => item.toLowerCase() === a.toLowerCase());
+      const bi = categoryOrder.findIndex((item) => item.toLowerCase() === b.toLowerCase());
+      return (ai < 0 ? 999 : ai) - (bi < 0 ? 999 : bi) || a.localeCompare(b);
+    })
+    .map(([category, count]) => `${count} ${count === 1 ? "no." : "nos."} of ${category}`);
+  return parts.length ? `CRMS messages issued: total ${parts.join(", ")} messages issued.` : "";
 };
 
 const generatorSectionLabel = (row = {}) => {
@@ -224,6 +263,109 @@ const fleetMinGenerationPct = (rows = []) => {
 };
 const fmtPctText = (value) => Number.isFinite(Number(value)) ? `${Number(value).toFixed(1)}%` : "-";
 const fmtMwText = (value) => Number.isFinite(Number(value)) ? `${Number(value).toFixed(0)} MW` : "-";
+const safeChartFileName = (value) =>
+  String(value || "chart").replace(/[^\w.-]+/g, "_").replace(/^_+|_+$/g, "") || "chart";
+
+const downloadChartDataUrl = (dataUrl, filename) => {
+  if (!dataUrl) return;
+  const link = document.createElement("a");
+  link.href = dataUrl;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+};
+
+const FrequencyOnlyChart = React.forwardRef(function FrequencyOnlyChart({ row, startTime, endTime, fontSize = 12, height = 520 }, ref) {
+  const chartRef = useRef(null);
+  React.useImperativeHandle(ref, () => ({
+    getDataURL: () => chartRef.current?.getEchartsInstance()?.getDataURL({
+      type: "png",
+      pixelRatio: 2,
+      backgroundColor: "#FFFFFF",
+    }),
+  }));
+
+  const option = useMemo(() => {
+    const baseFont = Math.max(8, Number(fontSize) || 12);
+    const titleFont = baseFont + 3;
+    const smallFont = Math.max(8, baseFont - 2);
+    const titleTop = 10;
+    const legendTop = titleTop + titleFont + (smallFont * 1.35) + 18;
+    const legendHeight = baseFont + 18;
+    const gridTop = legendTop + legendHeight + 18;
+    const gridBottom = Math.max(90, baseFont * 4.2);
+    const zoomHeight = Math.max(20, baseFont + 2);
+    const timestamps = row?.series?.timestamps || [];
+    const frequency = (row?.series?.frequency || []).map((value) => {
+      const parsed = Number(value);
+      return Number.isFinite(parsed) ? parsed : null;
+    });
+    const threshold = row?.event_type === "high" ? 50.05 : 49.9;
+    return {
+      animation: false,
+      backgroundColor: "#FFFFFF",
+      title: {
+        text: "System Frequency",
+        subtext: `${startTime || ""} to ${endTime || ""}`,
+        left: 10,
+        top: titleTop,
+        textStyle: { fontSize: titleFont, fontWeight: 900, color: "#0F172A" },
+        subtextStyle: { fontSize: smallFont, fontWeight: 700, color: "#475569", lineHeight: smallFont + 4 },
+      },
+      tooltip: { trigger: "axis", axisPointer: { type: "cross" }, textStyle: { fontSize: baseFont } },
+      legend: {
+        top: legendTop,
+        textStyle: { fontSize: baseFont, fontWeight: 800 },
+        itemWidth: Math.max(20, baseFont + 2),
+        itemHeight: Math.max(12, baseFont - 4),
+      },
+      grid: { top: gridTop, left: Math.max(70, baseFont * 3.9), right: Math.max(48, baseFont * 2.7), bottom: gridBottom },
+      dataZoom: [{ type: "inside" }, { type: "slider", height: zoomHeight, bottom: 24, textStyle: { fontSize: smallFont } }],
+      xAxis: {
+        type: "category",
+        data: timestamps,
+        boundaryGap: false,
+        axisLabel: {
+          fontSize: smallFont,
+          fontWeight: 700,
+          margin: 16,
+          interval: Math.max(Math.floor(timestamps.length / 6) - 1, 0),
+          formatter: (value) => {
+            const timePart = String(value || "").replace("T", " ").split(" ")[1] || "";
+            const [hh = "", mm = ""] = timePart.split(":");
+            return hh && mm ? `${hh}:${mm}` : String(value || "");
+          },
+        },
+      },
+      yAxis: {
+        type: "value",
+        name: "Hz",
+        min: 49.4,
+        max: 50.6,
+        nameTextStyle: { fontSize: baseFont, fontWeight: 900, color: "#1D4ED8", padding: [0, 0, 6, 0] },
+        axisLabel: { fontSize: smallFont, fontWeight: 800, color: "#1D4ED8", formatter: (value) => Number(value).toFixed(2), margin: 10 },
+      },
+      series: [{
+        name: "Frequency (Hz)",
+        type: "line",
+        data: frequency,
+        symbol: "none",
+        lineStyle: { width: 3, color: "#1D4ED8" },
+        itemStyle: { color: "#1D4ED8" },
+        markLine: {
+          silent: true,
+          symbol: "none",
+          data: [{ yAxis: threshold }],
+          lineStyle: { color: "#DC2626", type: "dashed", width: 1.5 },
+          label: { formatter: `${threshold} Hz`, color: "#DC2626", fontSize: smallFont, fontWeight: 900 },
+        },
+      }],
+    };
+  }, [endTime, fontSize, row, startTime]);
+
+  return <ReactECharts ref={chartRef} option={option} style={{ height, width: "100%" }} notMerge lazyUpdate />;
+});
 
 export default function FrequencyReport() {
   const [tab, setTab] = useState("report");
@@ -298,15 +440,20 @@ export default function FrequencyReport() {
   const [selectedExportGeneratorIds, setSelectedExportGeneratorIds] = useState([]);
   const [exportGeneratorFilter, setExportGeneratorFilter] = useState("");
   const [exportFuelFilter, setExportFuelFilter] = useState("ALL_FUELS");
-  const [exportIncludeDeviationPlot, setExportIncludeDeviationPlot] = useState(true);
+  const [exportIncludeFrequencyPlot, setExportIncludeFrequencyPlot] = useState(true);
+  const [exportIncludeDeviationPlot, setExportIncludeDeviationPlot] = useState(false);
   const [exportIncludeStateScheduleActualPlot, setExportIncludeStateScheduleActualPlot] = useState(false);
-  const [exportIncludeGeneratorScheduleActualPlot, setExportIncludeGeneratorScheduleActualPlot] = useState(true);
+  const [exportIncludeGeneratorScheduleActualPlot, setExportIncludeGeneratorScheduleActualPlot] = useState(false);
+  const [exportFontSize, setExportFontSize] = useState(18);
+  const [visualizationFontSize, setVisualizationFontSize] = useState(18);
   const [exportReportMode, setExportReportMode] = useState("with_annexure");
   const [pendingExportType, setPendingExportType] = useState(null);
 
   // Ref container to collect all ECharts instances for offscreen render/export
   const chartRefs = useRef({});
   const capacityChartRefs = useRef({});
+  const frequencyChartRef = useRef(null);
+  const visibleFrequencyChartRef = useRef(null);
   const fileInputRef = useRef(null);
 
   // Raw Data Editor states
@@ -1368,9 +1515,19 @@ export default function FrequencyReport() {
       title: eventDurationName(),
       start_time: startTime,
       end_time: endTime,
+      includeFrequency: exportIncludeFrequencyPlot,
       includeDeviation: exportIncludeDeviationPlot,
       includeStateScheduleActual: exportIncludeStateScheduleActualPlot,
       includeGeneratorScheduleActual: exportIncludeGeneratorScheduleActualPlot,
+      frequencyRow: systemFrequencyRow ? {
+        plant_id: systemFrequencyRow.plant_id,
+        plant_name: "System Frequency",
+        event_type: systemFrequencyRow.event_type || eventType,
+        series: {
+          timestamps: systemFrequencyRow.series?.timestamps || [],
+          frequency: systemFrequencyRow.series?.frequency || [],
+        },
+      } : null,
       rows: chartRows,
     }).replace(/<\/script/gi, "<\\/script");
 
@@ -1406,6 +1563,14 @@ export default function FrequencyReport() {
   <script>
     const report = ${payload};
     const root = document.getElementById("charts");
+    const CHART_FONT = 18;
+    const SMALL_FONT = 16;
+    const TITLE_FONT = 21;
+    const TITLE_TOP = 10;
+    const LEGEND_TOP = 80;
+    const GRID_TOP = 122;
+    const GRID_BOTTOM = 92;
+    const ZOOM_HEIGHT = 20;
     const clean = (arr) => (Array.isArray(arr) ? arr.map((v) => Number.isFinite(Number(v)) ? Number(v) : null) : []);
     const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" }[c]));
     const parseTs = (v) => {
@@ -1420,6 +1585,13 @@ export default function FrequencyReport() {
       const time = parts[1].split(":");
       if (date.length < 3 || time.length < 2) return raw;
       return date[2] + "-" + date[1] + "-" + date[0].slice(-2) + " " + time[0] + ":" + time[1];
+    };
+    const fmtAxisTime = (ts) => {
+      const raw = String(ts || "").replace("T", " ");
+      const timePart = raw.split(" ")[1] || "";
+      const time = timePart.split(":");
+      if (time.length < 2) return raw;
+      return time[0] + ":" + time[1];
     };
     const categoryColors = {
       "alert": "#FACC15",
@@ -1490,7 +1662,7 @@ export default function FrequencyReport() {
     const crmsHtml = (message) => {
       const category = crmsCategory(message);
       const color = crmsColor(message);
-      let html = '<div style="font-size:12px;line-height:1.4;min-width:240px">';
+      let html = '<div style="font-size:16px;line-height:1.4;min-width:280px">';
       html += '<div style="font-weight:900;color:' + color + ';margin-bottom:4px">' + esc(category) + '</div>';
       html += '<div><span style="color:#64748B">Issue time:</span> ' + esc(crmsIssueTime(message)) + '</div>';
       if (message.message_no) html += '<div><span style="color:#64748B">Message no:</span> ' + esc(message.message_no) + '</div>';
@@ -1573,11 +1745,11 @@ export default function FrequencyReport() {
           backgroundColor: "rgba(255,255,255,0.98)",
           borderColor: "#CBD5E1",
           borderWidth: 1,
-          textStyle: { color: "#1E293B", fontSize: 12, fontWeight: 700 },
+          textStyle: { color: "#1E293B", fontSize: CHART_FONT, fontWeight: 700 },
           formatter: (params) => {
             const list = Array.isArray(params) ? params : [params];
             const ts = list[0]?.axisValue || "";
-            let html = '<div style="border-bottom:1px solid #CBD5E1;padding-bottom:5px;margin-bottom:6px;font-size:11px;color:#64748B">' + esc(fmtTime(ts)) + '</div>';
+            let html = '<div style="border-bottom:1px solid #CBD5E1;padding-bottom:5px;margin-bottom:6px;font-size:16px;color:#64748B">' + esc(fmtTime(ts)) + '</div>';
             list.forEach((p) => {
               if (p.data?.crms) {
                 html += '<div style="margin-top:7px;padding-top:7px;border-top:1px solid #CBD5E1">' + crmsHtml(p.data.crms) + '</div>';
@@ -1594,14 +1766,18 @@ export default function FrequencyReport() {
           text: (row.plant_name || "Entity") + ": Frequency (Hz) vs Deviation (MW)",
           subtext: (row.event_type === "high" ? "High" : "Low") + " Frequency Operation: " + fmtTime(timestamps[0] || "") + " to " + fmtTime(timestamps[timestamps.length - 1] || ""),
           left: 8,
-          top: 4,
-          textStyle: { fontSize: 15, fontWeight: 900, color: "#0F172A" },
-          subtextStyle: { fontSize: 11, fontWeight: 800, color: "#475569" },
+          top: TITLE_TOP,
+          textStyle: { fontSize: TITLE_FONT, fontWeight: 900, color: "#0F172A" },
+          subtextStyle: { fontSize: SMALL_FONT, fontWeight: 800, color: "#475569", lineHeight: SMALL_FONT + 4 },
         },
         legend: {
-          top: 44,
+          top: LEGEND_TOP,
           type: "scroll",
-          textStyle: { fontWeight: 800 },
+          textStyle: { fontSize: CHART_FONT, fontWeight: 800 },
+          itemWidth: 22,
+          itemHeight: 14,
+          pageIconSize: SMALL_FONT,
+          pageTextStyle: { fontSize: SMALL_FONT, fontWeight: 800 },
           data: [
             shaded.meta.helping.label,
             shaded.meta.adverse.label,
@@ -1610,18 +1786,18 @@ export default function FrequencyReport() {
             ...markerSeries.map((series) => ({ name: series.name, icon: messageSymbol })),
           ],
         },
-        grid: { top: 94, left: 58, right: 62, bottom: 58 },
-        dataZoom: [{ type: "inside" }, { type: "slider", height: 18, bottom: 18 }],
-        xAxis: { type: "category", data: timestamps, boundaryGap: false, axisLabel: { fontWeight: 700, formatter: fmtTime } },
+        grid: { top: GRID_TOP, left: 72, right: 76, bottom: GRID_BOTTOM },
+        dataZoom: [{ type: "inside" }, { type: "slider", height: ZOOM_HEIGHT, bottom: 24, textStyle: { fontSize: SMALL_FONT } }],
+        xAxis: { type: "category", data: timestamps, boundaryGap: false, axisLabel: { fontSize: SMALL_FONT, fontWeight: 700, margin: 16, interval: Math.max(Math.floor(timestamps.length / 5) - 1, 0), formatter: fmtAxisTime } },
         yAxis: [
-          { type: "value", name: "MW", min: -maxAbs, max: maxAbs, axisLabel: { fontWeight: 700 } },
-          { type: "value", name: "Hz", min: 49.4, max: 50.6, position: "right", axisLabel: { fontWeight: 800, color: "#7C3AED" } },
+          { type: "value", name: "MW", min: -maxAbs, max: maxAbs, nameTextStyle: { fontSize: CHART_FONT, fontWeight: 900 }, axisLabel: { fontSize: SMALL_FONT, fontWeight: 700, margin: 10 } },
+          { type: "value", name: "Hz", min: 49.4, max: 50.6, position: "right", nameTextStyle: { fontSize: CHART_FONT, fontWeight: 900, color: "#7C3AED" }, axisLabel: { fontSize: SMALL_FONT, fontWeight: 800, color: "#7C3AED", margin: 10 } },
         ],
         series: [
           { name: shaded.meta.helping.label, type: "line", data: shaded.helping, yAxisIndex: 0, symbol: "none", lineStyle: { width: 0 }, itemStyle: { color: shaded.meta.helping.color }, areaStyle: { color: shaded.meta.helping.color }, emphasis: { disabled: true }, z: 1 },
           { name: shaded.meta.adverse.label, type: "line", data: shaded.adverse, yAxisIndex: 0, symbol: "none", lineStyle: { width: 0 }, itemStyle: { color: shaded.meta.adverse.color }, areaStyle: { color: shaded.meta.adverse.color }, emphasis: { disabled: true }, z: 1 },
           { name: "Deviation (MW)", type: "line", data: dev, yAxisIndex: 0, symbol: "none", lineStyle: { width: 3.2, color: row.is_state ? "#059669" : "#DC2626" }, itemStyle: { color: row.is_state ? "#059669" : "#DC2626" } },
-          { name: "Frequency (Hz)", type: "line", data: freq, yAxisIndex: 1, symbol: "none", lineStyle: { width: 2.8, color: freqLineColor }, itemStyle: { color: freqLineColor }, markLine: { silent: true, symbol: "none", data: [{ yAxis: threshold }], lineStyle: { color: "#EF4444", type: "dashed", width: 1.4 }, label: { formatter: threshold + " Hz", color: "#DC2626", fontWeight: 900 } } },
+          { name: "Frequency (Hz)", type: "line", data: freq, yAxisIndex: 1, symbol: "none", lineStyle: { width: 2.8, color: freqLineColor }, itemStyle: { color: freqLineColor }, markLine: { silent: true, symbol: "none", data: [{ yAxis: threshold }], lineStyle: { color: "#EF4444", type: "dashed", width: 1.4 }, label: { formatter: threshold + " Hz", color: "#DC2626", fontSize: SMALL_FONT, fontWeight: 900 } } },
           ...markerSeries,
         ],
       };
@@ -1630,17 +1806,33 @@ export default function FrequencyReport() {
       const timestamps = row.series.timestamps || [];
       return {
         animation: false,
-        tooltip: { trigger: "axis", axisPointer: { type: "cross" } },
-        legend: { top: 4, textStyle: { fontWeight: 800 } },
-        grid: { top: 52, left: 58, right: 26, bottom: 58 },
-        dataZoom: [{ type: "inside" }, { type: "slider", height: 18, bottom: 18 }],
-        xAxis: { type: "category", data: timestamps, boundaryGap: false, axisLabel: { fontWeight: 700 } },
-        yAxis: { type: "value", name: "MW", axisLabel: { fontWeight: 700 } },
+        tooltip: { trigger: "axis", axisPointer: { type: "cross" }, textStyle: { fontSize: CHART_FONT, fontWeight: 700 } },
+        legend: { top: 12, textStyle: { fontSize: CHART_FONT, fontWeight: 800 }, itemWidth: 22, itemHeight: 14 },
+        grid: { top: 62, left: 72, right: 36, bottom: GRID_BOTTOM },
+        dataZoom: [{ type: "inside" }, { type: "slider", height: ZOOM_HEIGHT, bottom: 24, textStyle: { fontSize: SMALL_FONT } }],
+        xAxis: { type: "category", data: timestamps, boundaryGap: false, axisLabel: { fontSize: SMALL_FONT, fontWeight: 700, margin: 16, interval: Math.max(Math.floor(timestamps.length / 8) - 1, 0), formatter: fmtAxisTime } },
+        yAxis: { type: "value", name: "MW", nameTextStyle: { fontSize: CHART_FONT, fontWeight: 900 }, axisLabel: { fontSize: SMALL_FONT, fontWeight: 700, margin: 10 } },
         series: [
           { name: "Schedule (MW)", type: "line", data: clean(row.series.schedule), symbol: "none", lineStyle: { width: 2.8, color: "#4F46E5" }, itemStyle: { color: "#4F46E5" } },
           { name: "Actual (MW)", type: "line", data: clean(row.series.actual), symbol: "none", lineStyle: { width: 3, color: "#DB2777" }, itemStyle: { color: "#DB2777" } },
           { name: "DC (MW)", type: "line", data: clean(row.series.dc), symbol: "none", lineStyle: { width: 2.2, color: "#F59E0B" }, itemStyle: { color: "#F59E0B" } },
         ],
+      };
+    };
+    const makeFrequencyOption = (row) => {
+      const timestamps = row?.series?.timestamps || [];
+      const freq = clean(row?.series?.frequency);
+      const threshold = row?.event_type === "high" ? 50.05 : 49.9;
+      return {
+        animation: false,
+        tooltip: { trigger: "axis", axisPointer: { type: "cross" }, textStyle: { fontSize: CHART_FONT, fontWeight: 700 } },
+        title: { text: "System Frequency", subtext: report.start_time + " to " + report.end_time, left: 8, top: TITLE_TOP, textStyle: { fontSize: TITLE_FONT, fontWeight: 900, color: "#0F172A" }, subtextStyle: { fontSize: SMALL_FONT, fontWeight: 800, color: "#475569", lineHeight: SMALL_FONT + 4 } },
+        legend: { top: LEGEND_TOP, textStyle: { fontSize: CHART_FONT, fontWeight: 800 }, itemWidth: 22, itemHeight: 14 },
+        grid: { top: GRID_TOP, left: 72, right: 50, bottom: GRID_BOTTOM },
+        dataZoom: [{ type: "inside" }, { type: "slider", height: ZOOM_HEIGHT, bottom: 24, textStyle: { fontSize: SMALL_FONT } }],
+        xAxis: { type: "category", data: timestamps, boundaryGap: false, axisLabel: { fontSize: SMALL_FONT, fontWeight: 700, margin: 16, interval: Math.max(Math.floor(timestamps.length / 6) - 1, 0), formatter: fmtAxisTime } },
+        yAxis: { type: "value", name: "Hz", min: 49.4, max: 50.6, nameTextStyle: { fontSize: CHART_FONT, fontWeight: 900, color: "#1D4ED8" }, axisLabel: { fontSize: SMALL_FONT, fontWeight: 800, color: "#1D4ED8", formatter: (v) => Number(v).toFixed(2), margin: 10 } },
+        series: [{ name: "Frequency (Hz)", type: "line", data: freq, symbol: "none", lineStyle: { width: 3, color: "#1D4ED8" }, itemStyle: { color: "#1D4ED8" }, markLine: { silent: true, symbol: "none", data: [{ yAxis: threshold }], lineStyle: { color: "#DC2626", type: "dashed", width: 1.4 }, label: { formatter: threshold + " Hz", color: "#DC2626", fontSize: SMALL_FONT, fontWeight: 900 } } }],
       };
     };
     const addCard = (row, kind, option) => {
@@ -1656,6 +1848,9 @@ export default function FrequencyReport() {
     if (!report.rows.length) {
       root.innerHTML = '<div class="empty">No selected chart rows available for this export.</div>';
     } else {
+      if (report.includeFrequency && report.frequencyRow?.series?.timestamps?.length) {
+        addCard(report.frequencyRow, "System Frequency", makeFrequencyOption(report.frequencyRow));
+      }
       report.rows.forEach((row) => {
         if (report.includeDeviation) addCard(row, "Annexure - Deviation / Frequency", makeDeviationOption(row));
         if (row.is_state && report.includeStateScheduleActual) addCard(row, "Annexure - State Schedule / Actual", makeScheduleOption(row));
@@ -1674,7 +1869,7 @@ export default function FrequencyReport() {
       if (!exportRows.some((row) => !row.is_frequency)) {
         throw new Error("Select at least one state or generator for HTML export.");
       }
-      if (!exportIncludeDeviationPlot && !exportIncludeStateScheduleActualPlot && !exportIncludeGeneratorScheduleActualPlot) {
+      if (!exportIncludeFrequencyPlot && !exportIncludeDeviationPlot && !exportIncludeStateScheduleActualPlot && !exportIncludeGeneratorScheduleActualPlot) {
         throw new Error("Select at least one chart type for HTML export.");
       }
       const html = buildInteractiveChartsHtml(exportRows);
@@ -1698,6 +1893,9 @@ export default function FrequencyReport() {
       }
       const includeAnnexure = exportReportMode === "with_annexure";
       if (includeAnnexure) await waitForHiddenCharts();
+      const frequency_plot_image = includeAnnexure && exportIncludeFrequencyPlot && frequencyChartRef.current
+        ? frequencyChartRef.current.getDataURL()?.replace(/^data:image\/png;base64,/, "")
+        : null;
       // Gather base64 images from chartRefs for all entities that have series data
       const updatedRows = exportRows.map((row) => {
         const ref = chartRefs.current[row.plant_id];
@@ -1722,6 +1920,8 @@ export default function FrequencyReport() {
         event_type: eventType,
         report_mode: exportReportMode,
         include_annexure: includeAnnexure,
+        frequency_plot_image,
+        export_font_size: exportFontSize,
         rows: updatedRows,
         start_time: startTime,
         end_time: endTime,
@@ -1747,6 +1947,9 @@ export default function FrequencyReport() {
       }
       const includeAnnexure = exportReportMode === "with_annexure";
       if (includeAnnexure) await waitForHiddenCharts();
+      const frequency_plot_image = includeAnnexure && exportIncludeFrequencyPlot && frequencyChartRef.current
+        ? frequencyChartRef.current.getDataURL()?.replace(/^data:image\/png;base64,/, "")
+        : null;
       // Gather base64 images from chartRefs
       const updatedRows = exportRows.map((row) => {
         const ref = chartRefs.current[row.plant_id];
@@ -1768,6 +1971,8 @@ export default function FrequencyReport() {
         event_type: eventType,
         report_mode: exportReportMode,
         include_annexure: includeAnnexure,
+        frequency_plot_image,
+        export_font_size: exportFontSize,
         intro_desc: introDesc,
         gen_desc: [genDesc, generatorObservation].filter(Boolean).join("\n\n"),
         state_desc: [stateDesc, stateObservation].filter(Boolean).join("\n\n"),
@@ -1816,6 +2021,10 @@ export default function FrequencyReport() {
   const crmsMappedCount = useMemo(() => {
     return rowsWithCrmsMessages.reduce((sum, row) => sum + (row.crms_messages?.length || 0), 0);
   }, [rowsWithCrmsMessages]);
+
+  const crmsExecutiveSummaryText = useMemo(() => {
+    return crmsExecutiveCategorySummary(crmsMessages);
+  }, [crmsMessages]);
 
   const stateRows = useMemo(() => {
     return rowsWithCrmsMessages.filter((r) => r.is_state && !r.is_frequency);
@@ -1867,6 +2076,14 @@ export default function FrequencyReport() {
 
     const generatorBullets = [];
     const stateBullets = [];
+    stateBullets.push(...crmsEntityIssueLines(
+      stateRows,
+      (row) => row.plant_name || row.state || row.state_name
+    ));
+    generatorBullets.push(...crmsEntityIssueLines(
+      generatorRows,
+      (row) => row.plant_name || row.entity || row.state || row.plant_id
+    ));
     if (isHigh) {
       sectionStats.forEach((section) => {
         if (section.minPct !== null) {
@@ -1903,9 +2120,28 @@ export default function FrequencyReport() {
   }, [eventType, generatorRows, stateRows]);
 
   useEffect(() => {
-    setStateObservation((prev) => prev || autoObservations.stateText || "");
-    setGeneratorObservation((prev) => prev || autoObservations.generatorText || "");
+    setStateObservation((prev) =>
+      !prev || prev.includes("CRMS message count state-wise:")
+        ? (autoObservations.stateText || "")
+        : prev
+    );
+    setGeneratorObservation((prev) =>
+      !prev || prev.includes("CRMS message count constituent-wise:")
+        ? (autoObservations.generatorText || "")
+        : prev
+    );
   }, [autoObservations.stateText, autoObservations.generatorText]);
+
+  useEffect(() => {
+    setIntroDesc((prev) => {
+      const base = String(prev || "")
+        .split("\n")
+        .filter((line) => !line.trim().startsWith("CRMS messages issued:"))
+        .join("\n")
+        .trim();
+      return [base, crmsExecutiveSummaryText].filter(Boolean).join("\n");
+    });
+  }, [crmsExecutiveSummaryText]);
 
   const exportStateOptions = useMemo(() => stateRows.map((row) => ({
     id: row.plant_id,
@@ -1958,6 +2194,32 @@ export default function FrequencyReport() {
       return generatorIds.has(row.plant_id);
     });
   }, [rowsWithCrmsMessages, selectedExportStateIds, selectedExportGeneratorIds, exportFuelFilter]);
+
+  const systemFrequencyRow = useMemo(() => {
+    const direct = rowsWithCrmsMessages.find((row) => row.is_frequency && row.series?.timestamps?.length && row.series?.frequency?.length);
+    if (direct) return direct;
+    const source = rowsWithCrmsMessages.find((row) => !row.is_frequency && row.series?.timestamps?.length && row.series?.frequency?.length);
+    if (!source) return null;
+    return {
+      plant_id: "SYSTEM_FREQUENCY_EXPORT",
+      plant_name: "System Frequency",
+      is_frequency: true,
+      event_type: eventType,
+      series: {
+        timestamps: source.series.timestamps || [],
+        frequency: source.series.frequency || [],
+      },
+    };
+  }, [eventType, rowsWithCrmsMessages]);
+
+  const downloadVisibleFrequencyChart = () => {
+    const dataUrl = visibleFrequencyChartRef.current?.getDataURL();
+    if (!dataUrl) {
+      toast.error("Frequency chart is not ready to download yet.");
+      return;
+    }
+    downloadChartDataUrl(dataUrl, `${safeChartFileName("system_frequency_time_series")}.png`);
+  };
 
   const exportChartRows = useMemo(() => exportRows.filter((row) => (
     row.series?.timestamps?.length > 0 &&
@@ -2252,106 +2514,6 @@ export default function FrequencyReport() {
         <div>
           {scadaLoaded ? (
             <>
-              <div
-                style={{
-                  background: "linear-gradient(180deg, #F8FBFF 0%, #FFFFFF 56px)",
-                  border: "1px solid rgba(175, 196, 234, 0.72)",
-                  borderRadius: "16px",
-                  padding: "14px",
-                  marginBottom: "14px",
-                  boxShadow: "0 8px 22px rgba(15, 111, 219, 0.055)",
-                }}
-              >
-                <div style={{ display: "flex", justifyContent: "space-between", gap: "12px", flexWrap: "wrap", marginBottom: "10px" }}>
-                  <div>
-                    <h3 style={{ fontSize: "0.95rem", fontWeight: 900, color: "#0F172A", margin: 0 }}>
-                      Export Selection
-                    </h3>
-                    <p style={{ fontSize: "0.74rem", color: "#64748B", margin: "2px 0 0" }}>
-                      Choose states, generators and plot types before downloading the report.
-                    </p>
-                  </div>
-                  <div style={{ fontSize: "0.74rem", fontWeight: 800, color: "#0B55B8", alignSelf: "center" }}>
-                    {selectedExportStateIds.length}/{exportStateOptions.length} states | {selectedExportGeneratorIds.length}/{exportGeneratorOptions.length} generators
-                  </div>
-                </div>
-
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: "12px" }}>
-                  <div className="rounded-3 border bg-white p-2">
-                    <div className="d-flex align-items-center justify-content-between mb-2">
-                      <span className="fw-bold text-dark" style={{ fontSize: "0.78rem" }}>States in report</span>
-                      <div className="d-flex gap-1">
-                        <button type="button" className="btn btn-sm theme-btn-outline py-0 px-2" onClick={() => setSelectedExportStateIds(exportStateOptions.map((item) => item.id))}>All</button>
-                        <button type="button" className="btn btn-sm theme-btn-outline py-0 px-2" onClick={() => setSelectedExportStateIds([])}>None</button>
-                      </div>
-                    </div>
-                    <div className="d-flex flex-wrap gap-1">
-                      {exportStateOptions.map((item) => (
-                        <label key={item.id} className="d-flex align-items-center gap-1 rounded-pill border bg-light px-2 py-1 mb-0" style={{ fontSize: "0.72rem", fontWeight: 800, cursor: "pointer" }}>
-                          <input type="checkbox" checked={selectedExportStateIds.includes(item.id)} onChange={() => toggleExportState(item.id)} style={{ accentColor: "#0F6FDB" }} />
-                          {item.label}
-                        </label>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div className="rounded-3 border bg-white p-2">
-                    <div className="d-flex align-items-center justify-content-between gap-2 mb-2">
-                      <span className="fw-bold text-dark" style={{ fontSize: "0.78rem" }}>Generators in report</span>
-                      <div className="d-flex gap-1">
-                        <button type="button" className="btn btn-sm theme-btn-outline py-0 px-2" onClick={() => setSelectedExportGeneratorIds(exportGeneratorOptions.map((item) => item.id))}>All</button>
-                        <button type="button" className="btn btn-sm theme-btn-outline py-0 px-2" onClick={() => setSelectedExportGeneratorIds([])}>None</button>
-                      </div>
-                    </div>
-                    <div className="position-relative mb-2">
-                      <Search size={13} className="position-absolute text-secondary" style={{ left: 9, top: 9 }} />
-                      <input
-                        className="form-control theme-input py-1"
-                        value={exportGeneratorFilter}
-                        onChange={(event) => setExportGeneratorFilter(event.target.value)}
-                        placeholder="Search generator, state or fuel"
-                        style={{ paddingLeft: 30, fontSize: "0.74rem" }}
-                      />
-                    </div>
-                    <div className="d-flex flex-column gap-1" style={{ maxHeight: 145, overflow: "auto" }}>
-                      {filteredExportGeneratorOptions.map((item) => (
-                        <label key={item.id} className="d-flex align-items-center gap-2 rounded-3 border bg-light px-2 py-1 mb-0" style={{ fontSize: "0.7rem", fontWeight: 800, cursor: "pointer" }}>
-                          <input type="checkbox" checked={selectedExportGeneratorIds.includes(item.id)} onChange={() => toggleExportGenerator(item.id)} style={{ accentColor: "#0F6FDB" }} />
-                          <span className="text-truncate" title={item.label}>{item.label}</span>
-                          <span className="ms-auto text-secondary">{item.state}</span>
-                          <span className="text-muted">{item.fuel}</span>
-                        </label>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div className="rounded-3 border bg-white p-2">
-                    <div className="fw-bold text-dark mb-2" style={{ fontSize: "0.78rem" }}>Plots in report</div>
-                    <label className="d-flex align-items-start gap-2 rounded-3 border bg-light px-2 py-2 mb-2" style={{ cursor: "pointer" }}>
-                      <input type="checkbox" checked={exportIncludeDeviationPlot} onChange={(event) => setExportIncludeDeviationPlot(event.target.checked)} style={{ accentColor: "#0F6FDB", marginTop: 3 }} />
-                      <span>
-                        <span className="d-block fw-bold text-dark" style={{ fontSize: "0.75rem" }}>Deviation and frequency plot</span>
-                        <span className="d-block text-secondary" style={{ fontSize: "0.68rem" }}>State and generator deviation chart.</span>
-                      </span>
-                    </label>
-                    <label className="d-flex align-items-start gap-2 rounded-3 border bg-light px-2 py-2 mb-2" style={{ cursor: "pointer" }}>
-                      <input type="checkbox" checked={exportIncludeStateScheduleActualPlot} onChange={(event) => setExportIncludeStateScheduleActualPlot(event.target.checked)} style={{ accentColor: "#0F6FDB", marginTop: 3 }} />
-                      <span>
-                        <span className="d-block fw-bold text-dark" style={{ fontSize: "0.75rem" }}>State schedule/actual plot</span>
-                        <span className="d-block text-secondary" style={{ fontSize: "0.68rem" }}>State drawal, schedule and frequency chart.</span>
-                      </span>
-                    </label>
-                    <label className="d-flex align-items-start gap-2 rounded-3 border bg-light px-2 py-2 mb-0" style={{ cursor: "pointer" }}>
-                      <input type="checkbox" checked={exportIncludeGeneratorScheduleActualPlot} onChange={(event) => setExportIncludeGeneratorScheduleActualPlot(event.target.checked)} style={{ accentColor: "#0F6FDB", marginTop: 3 }} />
-                      <span>
-                        <span className="d-block fw-bold text-dark" style={{ fontSize: "0.75rem" }}>Generator schedule/actual plot</span>
-                        <span className="d-block text-secondary" style={{ fontSize: "0.68rem" }}>Generation, schedule and capacity chart.</span>
-                      </span>
-                    </label>
-                  </div>
-                </div>
-              </div>
-
               {/* Export Button Panel */}
               <ExportBar
                 onExportHtml={() => openExportSelection("html")}
@@ -2364,6 +2526,78 @@ export default function FrequencyReport() {
                 exportingExcel={exportingExcel}
                 disabled={dataLoading}
               />
+
+              <div
+                className="d-flex align-items-center justify-content-between gap-3 px-3 py-2 mb-3"
+                style={{
+                  border: "1px solid #BFD3F8",
+                  borderRadius: "10px",
+                  background: "#F7FAFF",
+                  color: "#0F172A",
+                  fontSize: "0.76rem",
+                  fontWeight: 800,
+                }}
+              >
+                <div>
+                  <div style={{ fontSize: "0.78rem", color: "#0F172A", fontWeight: 900 }}>Front page visualization font</div>
+                  <div style={{ fontSize: "0.66rem", color: "#64748B", fontWeight: 700 }}>Applies to visible charts and individual PNG downloads.</div>
+                </div>
+                <div className="d-flex align-items-center gap-2" style={{ minWidth: "260px" }}>
+                  <input
+                    type="range"
+                    min="12"
+                    max="24"
+                    step="1"
+                    value={visualizationFontSize}
+                    onChange={(e) => setVisualizationFontSize(Number(e.target.value))}
+                    style={{ width: "190px", accentColor: "#147CFF" }}
+                  />
+                  <span style={{ minWidth: "38px", textAlign: "right", color: "#0B55B8", fontWeight: 900 }}>
+                    {visualizationFontSize} pt
+                  </span>
+                </div>
+              </div>
+
+              {systemFrequencyRow?.series?.timestamps?.length > 0 && (
+                <div
+                  style={{
+                    background: "#FFFFFF",
+                    border: "1px solid rgba(175, 196, 234, 0.72)",
+                    borderRadius: "14px",
+                    padding: "14px",
+                    marginBottom: "16px",
+                    boxShadow: "0 8px 22px rgba(15, 111, 219, 0.055)",
+                  }}
+                >
+                  <div className="d-flex align-items-center justify-content-between gap-2 mb-2">
+                    <div>
+                      <h3 style={{ margin: 0, fontSize: "0.92rem", fontWeight: 900, color: "#0F172A" }}>
+                        System Frequency Time Series
+                      </h3>
+                      <p style={{ margin: "2px 0 0", fontSize: "0.72rem", color: "#64748B", fontWeight: 700 }}>
+                        {startTime} to {endTime}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={downloadVisibleFrequencyChart}
+                      className="btn btn-sm theme-btn-outline d-inline-flex align-items-center gap-1"
+                      style={{ fontSize: "0.74rem", fontWeight: 800, whiteSpace: "nowrap" }}
+                    >
+                      <Download size={14} />
+                      Download
+                    </button>
+                  </div>
+                  <FrequencyOnlyChart
+                    ref={visibleFrequencyChartRef}
+                    row={systemFrequencyRow}
+                    startTime={startTime}
+                    endTime={endTime}
+                    fontSize={visualizationFontSize}
+                    height={380}
+                  />
+                </div>
+              )}
 
               {rows.length > 0 && (
                 <div
@@ -2469,6 +2703,7 @@ export default function FrequencyReport() {
                 onUpdateRowField={updateRowField}
                 showSchAct={showSchAct}
                 onEditRawData={handleOpenRawDataEditor}
+                chartFontSize={visualizationFontSize}
               />
 
               <div style={{ background: "linear-gradient(180deg, #F8FBFF 0%, #FFFFFF 56px)", padding: "16px", borderRadius: "14px", border: "1px solid rgba(175, 196, 234, 0.72)", boxShadow: "0 8px 22px rgba(15, 111, 219, 0.055)", marginBottom: "16px" }}>
@@ -2534,6 +2769,7 @@ export default function FrequencyReport() {
                 onUpdateGenDesc={setGenDesc}
                 showSchAct={showSchAct}
                 onEditRawData={handleOpenRawDataEditor}
+                chartFontSize={visualizationFontSize}
               />
             </>
           ) : (
@@ -2701,7 +2937,7 @@ export default function FrequencyReport() {
                 Selected: {selectedExportStateIds.length}/{exportStateOptions.length} states, {exportRows.filter((row) => !row.is_state && !row.is_frequency).length}/{exportGeneratorOptions.length} generators
               </span>
               <span className="text-secondary fw-bold" style={{ fontSize: "0.72rem" }}>
-                {exportReportMode === "with_annexure" ? "Summary + annexure" : "Summary only"} | {exportIncludeDeviationPlot ? "Deviation plot" : "No deviation plot"} | {exportIncludeStateScheduleActualPlot ? "State schedule/actual" : "No state schedule"} | {exportIncludeGeneratorScheduleActualPlot ? "Generator schedule/actual" : "No generator schedule"}
+                {exportReportMode === "with_annexure" ? "Summary + annexure" : "Summary only"} | {exportIncludeFrequencyPlot ? "1 frequency plot" : "No frequency plot"} | {exportIncludeDeviationPlot ? "Deviation plot" : "No deviation plot"} | Font {exportFontSize} pt
               </span>
             </div>
 
@@ -2782,6 +3018,13 @@ export default function FrequencyReport() {
                 )}
                 <div className="fw-bold text-dark mb-2" style={{ fontSize: "0.8rem" }}>Plots</div>
                 <label className="d-flex align-items-start gap-2 rounded-3 border bg-light px-2 py-2 mb-2" style={{ cursor: "pointer" }}>
+                  <input type="checkbox" checked={exportIncludeFrequencyPlot} onChange={(event) => setExportIncludeFrequencyPlot(event.target.checked)} style={{ accentColor: "#0F6FDB", marginTop: 3 }} />
+                  <span>
+                    <span className="d-block fw-bold text-dark" style={{ fontSize: "0.76rem" }}>One system frequency plot</span>
+                    <span className="d-block text-secondary" style={{ fontSize: "0.68rem" }}>Frequency-only event chart, added once.</span>
+                  </span>
+                </label>
+                <label className="d-flex align-items-start gap-2 rounded-3 border bg-light px-2 py-2 mb-2" style={{ cursor: "pointer" }}>
                   <input type="checkbox" checked={exportIncludeDeviationPlot} onChange={(event) => setExportIncludeDeviationPlot(event.target.checked)} style={{ accentColor: "#0F6FDB", marginTop: 3 }} />
                   <span>
                     <span className="d-block fw-bold text-dark" style={{ fontSize: "0.76rem" }}>Deviation and frequency plot</span>
@@ -2792,7 +3035,7 @@ export default function FrequencyReport() {
                   <input type="checkbox" checked={exportIncludeStateScheduleActualPlot} onChange={(event) => setExportIncludeStateScheduleActualPlot(event.target.checked)} style={{ accentColor: "#0F6FDB", marginTop: 3 }} />
                   <span>
                     <span className="d-block fw-bold text-dark" style={{ fontSize: "0.76rem" }}>State schedule/actual plot</span>
-                    <span className="d-block text-secondary" style={{ fontSize: "0.68rem" }}>State drawal, schedule and frequency chart.</span>
+                    <span className="d-block text-secondary" style={{ fontSize: "0.68rem" }}>State drawal and schedule chart.</span>
                   </span>
                 </label>
                 <label className="d-flex align-items-start gap-2 rounded-3 border bg-light px-2 py-2 mt-2 mb-0" style={{ cursor: "pointer" }}>
@@ -2802,6 +3045,22 @@ export default function FrequencyReport() {
                     <span className="d-block text-secondary" style={{ fontSize: "0.68rem" }}>Generation, schedule and capacity chart.</span>
                   </span>
                 </label>
+                {(pendingExportType === "pdf" || pendingExportType === "docx") && (
+                  <div className="rounded-3 border bg-light px-2 py-2 mt-2">
+                    <div className="d-flex justify-content-between align-items-center gap-2 mb-1">
+                      <span className="fw-bold text-dark" style={{ fontSize: "0.76rem" }}>Download font size</span>
+                      <span className="text-secondary fw-bold" style={{ fontSize: "0.72rem" }}>{exportFontSize} pt</span>
+                    </div>
+                    <input
+                      type="range"
+                    min="12"
+                    max="24"
+                      value={exportFontSize}
+                      onChange={(event) => setExportFontSize(Number(event.target.value))}
+                      style={{ width: "100%", accentColor: "#0F6FDB" }}
+                    />
+                  </div>
+                )}
               </div>
             </div>
 
@@ -2827,6 +3086,18 @@ export default function FrequencyReport() {
           pointerEvents: "none",
         }}
       >
+        {(exportingDocx || exportingPdf) && exportIncludeFrequencyPlot && systemFrequencyRow?.series?.timestamps?.length > 0 && (
+          <div key="hidden-system-frequency-wrapper">
+            <FrequencyOnlyChart
+              ref={frequencyChartRef}
+              row={systemFrequencyRow}
+              startTime={startTime}
+              endTime={endTime}
+              fontSize={exportFontSize}
+              height={560}
+            />
+          </div>
+        )}
         {(exportingDocx || exportingPdf) && exportChartRows.map((row) => (
           <div key={`hidden-chart-wrapper-${row.plant_id}`}>
             {exportIncludeDeviationPlot && row.series?.timestamps?.length > 0 && (
@@ -2841,6 +3112,7 @@ export default function FrequencyReport() {
                 row={row}
                 showSchAct={false}
                 height={560}
+                fontSize={exportFontSize}
               />
             )}
             {((row.is_state && exportIncludeStateScheduleActualPlot) || (!row.is_state && exportIncludeGeneratorScheduleActualPlot)) && row.series?.timestamps?.length > 0 && (
@@ -2854,6 +3126,7 @@ export default function FrequencyReport() {
                 }}
                 row={row}
                 height={430}
+                fontSize={exportFontSize}
               />
             )}
           </div>
