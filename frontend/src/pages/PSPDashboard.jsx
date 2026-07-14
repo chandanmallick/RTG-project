@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react";
+import { lazy, Suspense, useEffect, useState, useCallback, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Calendar,
@@ -44,12 +44,12 @@ import API from "../services/api";
 // LAYOUT
 import AppShell from "../components/layout/AppShell";
 import CalendarInput from "../components/ui/CalendarInput";
-import PowerExchangeGraphic from "../components/PowerExchangeGraphic";
-import PSPStateGenerationSources from "../components/PSPStateGenerationSources";
-import VoltageProfileMap from "../components/VoltageProfileMap";
-import PSPHighlightsReport from "../components/PSPHighlightsReport";
-import PSPFrequencyCheckTiles from "../components/ui/PSPFrequencyCheckTiles";
-import PSPFrequencyTrendModal from "../components/ui/PSPFrequencyTrendModal";
+const PowerExchangeGraphic = lazy(() => import("../components/PowerExchangeGraphic"));
+const PSPStateGenerationSources = lazy(() => import("../components/PSPStateGenerationSources"));
+const VoltageProfileMap = lazy(() => import("../components/VoltageProfileMap"));
+const PSPHighlightsReport = lazy(() => import("../components/PSPHighlightsReport"));
+const PSPFrequencyCheckTiles = lazy(() => import("../components/ui/PSPFrequencyCheckTiles"));
+const PSPFrequencyTrendModal = lazy(() => import("../components/ui/PSPFrequencyTrendModal"));
 
 // Donut chart color palette - vibrant, modern, premium
 const DONUT_COLORS = [
@@ -124,6 +124,13 @@ const NldcYearlyMarkerLabel = ({ viewBox, marker }) => {
     </g>
   );
 };
+
+const WidgetLoader = ({ minHeight = 120, label = "Loading..." }) => (
+  <div className="theme-glass-card bg-white d-flex align-items-center justify-content-center" style={{ minHeight }}>
+    <div className="spinner-border text-success spinner-border-sm me-2" role="status" />
+    <span className="small fw-bold text-secondary">{label}</span>
+  </div>
+);
 
 const yearsInRange = (startDate, endDate) => {
   const startYear = Number(String(startDate || "").slice(0, 4));
@@ -420,6 +427,7 @@ const CustomTooltip = ({ active, payload }) => {
 
 export default function PSPDashboard() {
   const navigate = useNavigate();
+  const loadSequenceRef = useRef(0);
   const [statusData, setStatusData] = useState([]);
   const [loading, setLoading] = useState(false);
   const [sourceRefreshLoading, setSourceRefreshLoading] = useState(false);
@@ -517,8 +525,20 @@ export default function PSPDashboard() {
   const [frequencyTrendEndDate, setFrequencyTrendEndDate] = useState("");
 
   const onPieEnter = useCallback((_, index) => {
-    setActivePieIndex(index);
+    setActivePieIndex((current) => (current === index ? current : index));
   }, []);
+
+  const staggerLoadSequence = async (loaders = [], delayMs = 220) => {
+    const sequenceId = ++loadSequenceRef.current;
+    for (const loader of loaders) {
+      if (sequenceId !== loadSequenceRef.current) return;
+      await loader();
+      if (sequenceId !== loadSequenceRef.current) return;
+      if (delayMs > 0) {
+        await new Promise((resolve) => window.setTimeout(resolve, delayMs));
+      }
+    }
+  };
 
   const loadStatus = async () => {
     try {
@@ -831,25 +851,24 @@ export default function PSPDashboard() {
     }
   };
 
-  const loadPortfolioData = async (dateStr) => {
+  const loadPortfolioData = async (dateStr, { loadRelatedSections = true } = {}) => {
+    let portfolioDate = dateStr || "";
     try {
       setPortfolioLoading(true);
       const res = await API.getPspPortfolioBreakdown(dateStr);
       if (res.success) {
         setPortfolioData(res);
-        loadEnergyData(res.date);
-        loadEnergyBreakdown(res.date);
-        loadStateGenerationSources(res.date);
-        loadPowerPosition(res.date);
-        loadPowerSystemData(res.date);
-        loadLoadshedding(res.date);
-        loadGenerationOutageChanges(res.date);
+        portfolioDate = res.date || dateStr || "";
+        if (loadRelatedSections) {
+          await staggerLoadSequence(getPortfolioSectionLoaders(portfolioDate), 180);
+        }
       }
     } catch (err) {
       console.error("Error loading portfolio breakdown:", err);
     } finally {
       setPortfolioLoading(false);
     }
+    return portfolioDate;
   };
 
   const loadVoltageProfile = async (dateStr) => {
@@ -936,30 +955,42 @@ export default function PSPDashboard() {
     loadFrequencyTrend(start, end);
   };
 
-  const handleDateChange = (dateStr) => {
-    setSelectedDate(dateStr);
-    loadPortfolioData(dateStr);
-    loadStateGenerationSources(dateStr);
-    loadPowerSystemData(dateStr);
-    loadLoadshedding(dateStr);
-    loadGenerationOutageChanges(dateStr);
-    loadPowerExchange(dateStr);
-    loadVoltageProfile(dateStr);
-    loadFrequencyCheck(dateStr);
+  const getPortfolioSectionLoaders = (dateSource) => {
+    const getDate = () => (typeof dateSource === "function" ? dateSource() : dateSource);
+    return [
+      () => loadEnergyData(getDate()),
+      () => loadEnergyBreakdown(getDate()),
+      () => loadStateGenerationSources(getDate()),
+      () => loadPowerPosition(getDate()),
+      () => loadPowerSystemData(getDate()),
+      () => loadLoadshedding(getDate()),
+      () => loadGenerationOutageChanges(getDate()),
+    ];
   };
 
-  const handleRefreshAll = () => {
-    loadStatus();
-    loadAnalytics();
-    loadPortfolioData(selectedDate);
-    loadHighestRecords();
-    loadStateGenerationSources(selectedDate);
-    loadPowerSystemData(selectedDate);
-    loadLoadshedding(selectedDate);
-    loadGenerationOutageChanges(selectedDate);
-    loadPowerExchange(selectedDate);
-    loadVoltageProfile(selectedDate);
-    loadFrequencyCheck(selectedDate);
+  const handleDateChange = async (dateStr) => {
+    setSelectedDate(dateStr);
+    await staggerLoadSequence([
+      () => loadPortfolioData(dateStr, { loadRelatedSections: false }),
+      ...getPortfolioSectionLoaders(dateStr),
+      () => loadPowerExchange(dateStr),
+      () => loadVoltageProfile(dateStr),
+      () => loadFrequencyCheck(dateStr),
+    ], 240);
+  };
+
+  const handleRefreshAll = async () => {
+    const dateStr = selectedDate || "";
+    await staggerLoadSequence([
+      () => loadStatus(),
+      () => loadAnalytics(),
+      () => loadPortfolioData(dateStr, { loadRelatedSections: false }),
+      ...getPortfolioSectionLoaders(dateStr),
+      () => loadHighestRecords(),
+      () => loadPowerExchange(dateStr),
+      () => loadVoltageProfile(dateStr),
+      () => loadFrequencyCheck(dateStr),
+    ], 240);
   };
 
   const handleFetchSources = async () => {
@@ -972,17 +1003,16 @@ export default function PSPDashboard() {
       }
       const refreshedDate = res.date || targetDate;
       setSelectedDate(refreshedDate);
-      loadStatus();
-      loadAnalytics();
-      loadPortfolioData(refreshedDate);
-      loadHighestRecords();
-      loadStateGenerationSources(refreshedDate);
-      loadPowerSystemData(refreshedDate);
-      loadLoadshedding(refreshedDate);
-      loadGenerationOutageChanges(refreshedDate);
-      loadPowerExchange(refreshedDate);
-      loadVoltageProfile(refreshedDate);
-      loadFrequencyCheck(refreshedDate);
+      await staggerLoadSequence([
+        () => loadStatus(),
+        () => loadAnalytics(),
+        () => loadPortfolioData(refreshedDate, { loadRelatedSections: false }),
+        ...getPortfolioSectionLoaders(refreshedDate),
+        () => loadHighestRecords(),
+        () => loadPowerExchange(refreshedDate),
+        () => loadVoltageProfile(refreshedDate),
+        () => loadFrequencyCheck(refreshedDate),
+      ], 240);
     } catch (err) {
       console.error("Error refreshing PSP source data:", err);
     } finally {
@@ -991,18 +1021,35 @@ export default function PSPDashboard() {
   };
 
   useEffect(() => {
-    loadStatus();
-    loadAnalytics();
-    loadPortfolioData();
-    loadHighestRecords();
-    loadStateGenerationSources();
-    loadPowerSystemData();
-    loadLoadshedding();
-    loadGenerationOutageChanges();
-    loadPowerExchange();
-    loadVoltageProfile();
-    loadFrequencyCheck();
-    loadNldcDemandTrend(defaultNldcDemandStart, defaultNldcDemandEnd);
+    let isMounted = true;
+
+    const loadInitialDashboardSections = async () => {
+      let portfolioDate = "";
+      await staggerLoadSequence([
+        () => loadStatus(),
+        () => loadAnalytics(),
+        async () => {
+          portfolioDate = await loadPortfolioData(undefined, { loadRelatedSections: false });
+        },
+        ...getPortfolioSectionLoaders(() => portfolioDate),
+        () => loadHighestRecords(),
+        () => loadPowerExchange(),
+        () => loadVoltageProfile(),
+        () => loadFrequencyCheck(),
+      ], 260);
+
+      if (!isMounted) return;
+      window.setTimeout(() => {
+        if (!isMounted) return;
+        loadNldcDemandTrend(defaultNldcDemandStart, defaultNldcDemandEnd);
+      }, 600);
+    };
+
+    loadInitialDashboardSections();
+    return () => {
+      isMounted = false;
+      loadSequenceRef.current += 1;
+    };
   }, []);
 
   const formatDateTime = (isoString) => {
@@ -1368,7 +1415,9 @@ export default function PSPDashboard() {
           </div>
           <div className="col-12 col-lg-5">
             <div className="h-100" style={{ minHeight: "180px" }}>
-              <VoltageProfileMap voltageData={voltageData} voltageLoading={voltageLoading} />
+              <Suspense fallback={<WidgetLoader minHeight={180} label="Loading voltage map..." />}>
+                <VoltageProfileMap voltageData={voltageData} voltageLoading={voltageLoading} />
+              </Suspense>
             </div>
           </div>
         </div>
@@ -1381,10 +1430,12 @@ export default function PSPDashboard() {
             </div>
           </div>
         ) : (
-          <PSPFrequencyCheckTiles
-            data={frequencyCheckData}
-            onOpenTrend={openFrequencyTrend}
-          />
+          <Suspense fallback={<WidgetLoader minHeight={90} label="Loading frequency check..." />}>
+            <PSPFrequencyCheckTiles
+              data={frequencyCheckData}
+              onOpenTrend={openFrequencyTrend}
+            />
+          </Suspense>
         )}
 
         <div className="theme-glass-card p-3 mb-3 bg-white" style={{ borderRadius: "18px" }}>
@@ -1782,18 +1833,26 @@ export default function PSPDashboard() {
         {/* ROW 2: OPERATIONAL VIEW */}
         <div className="row g-3" style={{ marginBottom: "20px" }}>
           <div className="col-12 col-xl-5">
-            <PowerExchangeGraphic data={exchangeData} loading={exchangeLoading} />
+            <Suspense fallback={<WidgetLoader minHeight={220} label="Loading power exchange..." />}>
+              <PowerExchangeGraphic data={exchangeData} loading={exchangeLoading} />
+            </Suspense>
           </div>
           <div className="col-12 col-xl-7">
-            <PSPStateGenerationSources data={stateGenSourceData} loading={stateGenSourceLoading} />
+            <Suspense fallback={<WidgetLoader minHeight={220} label="Loading generation sources..." />}>
+              <PSPStateGenerationSources data={stateGenSourceData} loading={stateGenSourceLoading} />
+            </Suspense>
           </div>
         </div>
 
+        {false && (
         <div className="d-none">
           <div className="col-12">
-            <PSPStateGenerationSources data={stateGenSourceData} loading={stateGenSourceLoading} />
+            <Suspense fallback={null}>
+              <PSPStateGenerationSources data={stateGenSourceData} loading={stateGenSourceLoading} />
+            </Suspense>
           </div>
         </div>
+        )}
 
         {/* ANALYTICS CHARTS SECTION */}
         {analyticsLoading ? (
@@ -2889,17 +2948,21 @@ export default function PSPDashboard() {
           </>
         )}
 
-        <PSPHighlightsReport
-          open={highlightsModalOpen}
-          onClose={() => setHighlightsModalOpen(false)}
-          reportDate={portfolioData?.date || latestDate || selectedDate}
-          powerPositionData={powerPositionData}
-          loadsheddingData={loadsheddingData}
-          outageChangeData={outageChangeData}
-          portfolioData={portfolioData}
-          highestRecords={highestRecords}
-          powerSystemData={powerSystemData}
-        />
+        {highlightsModalOpen && (
+          <Suspense fallback={<WidgetLoader minHeight={180} label="Loading report..." />}>
+            <PSPHighlightsReport
+              open={highlightsModalOpen}
+              onClose={() => setHighlightsModalOpen(false)}
+              reportDate={portfolioData?.date || latestDate || selectedDate}
+              powerPositionData={powerPositionData}
+              loadsheddingData={loadsheddingData}
+              outageChangeData={outageChangeData}
+              portfolioData={portfolioData}
+              highestRecords={highestRecords}
+              powerSystemData={powerSystemData}
+            />
+          </Suspense>
+        )}
 
         {nldcDataModalOpen && (
           <div
@@ -3186,18 +3249,22 @@ export default function PSPDashboard() {
           </div>
         )}
 
-        <PSPFrequencyTrendModal
-          open={frequencyTrendOpen}
-          onClose={() => setFrequencyTrendOpen(false)}
-          data={frequencyTrend}
-          loading={frequencyTrendLoading}
-          error={frequencyTrendError}
-          startDate={frequencyTrendStartDate}
-          endDate={frequencyTrendEndDate}
-          onStartDateChange={setFrequencyTrendStartDate}
-          onEndDateChange={setFrequencyTrendEndDate}
-          onLoad={() => loadFrequencyTrend(frequencyTrendStartDate, frequencyTrendEndDate)}
-        />
+        {frequencyTrendOpen && (
+          <Suspense fallback={<WidgetLoader minHeight={180} label="Loading frequency trend..." />}>
+            <PSPFrequencyTrendModal
+              open={frequencyTrendOpen}
+              onClose={() => setFrequencyTrendOpen(false)}
+              data={frequencyTrend}
+              loading={frequencyTrendLoading}
+              error={frequencyTrendError}
+              startDate={frequencyTrendStartDate}
+              endDate={frequencyTrendEndDate}
+              onStartDateChange={setFrequencyTrendStartDate}
+              onEndDateChange={setFrequencyTrendEndDate}
+              onLoad={() => loadFrequencyTrend(frequencyTrendStartDate, frequencyTrendEndDate)}
+            />
+          </Suspense>
+        )}
 
         {/* PSP HIGHLIGHTS REPORT MODAL */}
         {false && highlightsModalOpen && (

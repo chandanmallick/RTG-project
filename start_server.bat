@@ -90,6 +90,15 @@ cd /d "%FRONTEND_DIR%" || (
   exit /b 1
 )
 
-npm run dev -- --host 0.0.0.0 --port %FRONTEND_PORT%
+echo Building frontend (generating optimized production bundle)...
+call npm run build
+if errorlevel 1 (
+  echo ERROR: Failed to build frontend.
+  pause
+  exit /b 1
+)
+
+echo Starting production server (node server.cjs)...
+node server.cjs
 pause
 exit /b %errorlevel%

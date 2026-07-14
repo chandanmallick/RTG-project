@@ -211,3 +211,74 @@
 11:19:12 am [vite] page reload dist/index.html
 11:19:28 am [vite] hmr update /src/pages/FrequencyReport/index.jsx
 11:19:49 am [vite] page reload dist/index.html
+3:30:13 pm [vite] hmr update /src/pages/DatabaseSync.jsx, /src/pages/PSPReportChecking.jsx, /src/pages/MailMonitor.jsx, /src/pages/PSPAdmin.jsx, /src/pages/RTGDashboard.jsx, /src/pages/MISReport.jsx, /src/pages/PSPDashboard.jsx, /src/pages/FrequencyReport/index.jsx, /src/components/PowerExchangeGraphic.jsx, /src/components/VoltageProfileMap.jsx, /src/pages/OutageAnalysis.jsx
+3:32:13 pm [vite] hmr update /src/App.jsx
+3:32:33 pm [vite] hmr update /src/components/layout/TopNavbar.jsx
+3:33:09 pm [vite] page reload dist/index.html
+3:38:00 pm [vite] hmr update /src/pages/DatabaseSync.jsx, /src/pages/PSPReportChecking.jsx, /src/pages/MailMonitor.jsx, /src/pages/PSPAdmin.jsx, /src/pages/RTGDashboard.jsx, /src/pages/MISReport.jsx, /src/pages/PSPDashboard.jsx, /src/pages/FrequencyReport/index.jsx, /src/components/PowerExchangeGraphic.jsx, /src/components/VoltageProfileMap.jsx, /src/pages/OutageAnalysis.jsx
+3:38:50 pm [vite] hmr update /src/components/layout/TopNavbar.jsx
+3:39:22 pm [vite] page reload dist/index.html
+3:48:03 pm [vite] hmr update /src/pages/OutageAnalysis.jsx
+3:48:09 pm [vite] hmr update /src/pages/OutageAnalysis.jsx
+4:06:59 pm [vite] hmr update /src/components/ui/CalendarInput.jsx
+4:08:21 pm [vite] hmr update /src/App.jsx
+4:09:22 pm [vite] page reload dist/index.html
+4:11:14 pm [vite] hmr update /src/pages/PSPDashboard.jsx
+4:11:51 pm [vite] hmr update /src/pages/PSPDashboard.jsx
+4:11:59 pm [vite] hmr update /src/pages/PSPDashboard.jsx
+4:12:21 pm [vite] hmr update /src/pages/PSPDashboard.jsx
+4:12:29 pm [vite] hmr update /src/pages/PSPDashboard.jsx
+4:12:54 pm [vite] page reload dist/index.html
+4:21:03 pm [vite] hmr update /src/pages/DatabaseSync.jsx, /src/pages/PSPReportChecking.jsx, /src/pages/MailMonitor.jsx, /src/pages/PSPAdmin.jsx, /src/pages/RTGDashboard.jsx, /src/pages/MISReport.jsx, /src/pages/PSPDashboard.jsx, /src/pages/FrequencyReport/index.jsx, /src/components/PowerExchangeGraphic.jsx, /src/components/VoltageProfileMap.jsx, /src/pages/OutageAnalysis.jsx
+4:27:21 pm [vite] hmr update /src/pages/DatabaseSync.jsx, /src/pages/PSPReportChecking.jsx, /src/pages/MailMonitor.jsx, /src/pages/PSPAdmin.jsx, /src/pages/RTGDashboard.jsx, /src/pages/MISReport.jsx, /src/pages/PSPDashboard.jsx, /src/pages/FrequencyReport/index.jsx, /src/components/PowerExchangeGraphic.jsx, /src/components/VoltageProfileMap.jsx, /src/pages/OutageAnalysis.jsx
+4:29:18 pm [vite] page reload dist/index.html
+4:30:43 pm [vite] page reload dist/index.html
+4:45:00 pm [vite] hmr update /src/pages/OutageAnalysis.jsx
+4:50:42 pm [vite] hmr update /src/pages/OutageAnalysis.jsx
+4:51:47 pm [vite] hmr update /src/pages/OutageAnalysis.jsx
+4:51:54 pm [vite] hmr update /src/pages/OutageAnalysis.jsx
+4:52:10 pm [vite] hmr update /src/pages/OutageAnalysis.jsx
+4:52:24 pm [vite] hmr update /src/pages/OutageAnalysis.jsx
+4:52:35 pm [vite] hmr update /src/pages/OutageAnalysis.jsx
+4:52:48 pm [vite] hmr update /src/pages/OutageAnalysis.jsx
+4:53:16 pm [vite] page reload dist/index.html
+4:12:46 pm [vite] page reload index.html
+4:12:46 pm [vite] hmr update /src/components/layout/TopNavbar.jsx
+4:20:24 pm [vite] page reload index.html
+4:20:24 pm [vite] hmr update /src/components/layout/TopNavbar.jsx
+4:20:31 pm [vite] hmr update /src/components/layout/TopNavbar.jsx
+4:20:31 pm [vite] page reload index.html
+4:42:10 pm [vite] page reload index.html
+4:42:10 pm [vite] hmr update /src/components/layout/TopNavbar.jsx
+4:54:08 pm [vite] hmr update /src/pages/PSPDashboard.jsx
+5:46:58 pm [vite] hmr update /src/pages/PSPDashboard.jsx
+5:48:24 pm [vite] hmr update /src/pages/PSPDashboard.jsx
+5:48:45 pm [vite] hmr update /src/pages/PSPDashboard.jsx
+5:49:10 pm [vite] page reload dist/index.html
+5:49:22 pm [vite] hmr update /src/pages/PSPDashboard.jsx
+5:54:55 pm [vite] hmr update /src/App.jsx
+5:55:15 pm [vite] hmr update /src/theme/theme.css
+5:55:36 pm [vite] hmr update /src/pages/OutageAnalysis.jsx
+11:13:02 am [vite] hmr update /src/App.jsx
+11:13:02 am [vite] hmr update /src/components/layout/TopNavbar.jsx
+11:35:44 am [vite] hmr update /src/App.jsx
+11:35:56 am [vite] hmr update /src/components/layout/TopNavbar.jsx
+12:07:51 pm [vite] hmr update /src/App.jsx
+12:59:24 pm [vite] hmr update /src/pages/RTGDashboard.jsx
+12:59:38 pm [vite] hmr update /src/pages/OutageAnalysis.jsx
+2:31:39 pm [vite] hmr update /src/components/layout/TopNavbar.jsx
+2:32:14 pm [vite] hmr update /src/components/layout/TopNavbar.jsx
+2:34:00 pm [vite] hmr update /src/components/layout/TopNavbar.jsx
+2:36:11 pm [vite] hmr update /src/components/layout/TopNavbar.jsx
+2:36:58 pm [vite] hmr update /src/components/layout/TopNavbar.jsx
+2:38:29 pm [vite] hmr update /src/components/layout/TopNavbar.jsx
+2:39:15 pm [vite] hmr update /src/components/layout/TopNavbar.jsx
+2:39:59 pm [vite] hmr update /src/components/layout/TopNavbar.jsx
+2:42:12 pm [vite] hmr update /src/components/layout/TopNavbar.jsx
+3:14:10 pm [vite] hmr update /src/components/layout/TopNavbar.jsx
+3:26:46 pm [vite] hmr update /src/components/layout/TopNavbar.jsx
+3:30:43 pm [vite] vite.config.js changed, restarting server...
+3:30:44 pm [vite] server restarted.
+3:33:38 pm [vite] page reload dist/index.html
+4:55:28 pm [vite] page reload dist/index.html
+5:21:53 pm [vite] page reload dist/index.html

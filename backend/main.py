@@ -2,10 +2,12 @@
 
 import os
 import time
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi import Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from config.settings import RUN_SCHEDULER
 
@@ -21,6 +23,9 @@ from routes.rtg_dashboard_routes import router as rtg_dashboard_router
 
 from routes.psp_routes import router as psp_router
 from routes.frequency_routes import router as frequency_router
+from routes.old_logbook_routes import router as old_logbook_router
+from routes.crew_routes import router as crew_router
+from routes.crew_legacy_routes import router as crew_legacy_router
 
 import urllib3
 
@@ -35,6 +40,10 @@ app = FastAPI(
         "ASTRO Backend"
     )
 )
+
+uploads_directory = Path(__file__).resolve().parent / "uploads"
+uploads_directory.mkdir(parents=True, exist_ok=True)
+app.mount("/uploads", StaticFiles(directory=str(uploads_directory)), name="crew-uploads")
 
 cors_origins_raw = os.getenv(
     "CORS_ALLOW_ORIGINS",
@@ -104,6 +113,18 @@ app.include_router(
 
 app.include_router(
     frequency_router
+)
+
+app.include_router(
+    old_logbook_router
+)
+
+app.include_router(
+    crew_router
+)
+
+app.include_router(
+    crew_legacy_router
 )
 
 @app.on_event("startup")

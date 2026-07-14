@@ -21,7 +21,8 @@ import API from "../services/api";
 const COLORS = ["#03624C", "#2563EB", "#F97316", "#7C3AED", "#16A34A", "#DC2626", "#0891B2", "#64748B"];
 const CATEGORY_STORAGE_KEY = "outage_analysis_custom_categories_v1";
 const EXCLUDED_OUTAGE_TYPES_STORAGE_KEY = "outage_analysis_excluded_outage_types_v1";
-const DEFAULT_EXCLUDED_OUTAGE_TYPES = ["Network Reconfiguration", "Power Assistance", "Bus Section"];
+const OLD_DEFAULT_EXCLUDED_OUTAGE_TYPES = ["Network Reconfiguration", "Power Assistance", "Bus Section"];
+const DEFAULT_EXCLUDED_OUTAGE_TYPES = [];
 const ELEMENT_TYPES = [
   ["AC_TRANSMISSION_LINE_CIRCUIT", "Transmission Line"],
   ["TRANSFORMER", "Transformer"],
@@ -56,6 +57,22 @@ const normalizeKey = (value) => String(value || "")
   .replace(/[_-]+/g, " ")
   .replace(/\s+/g, " ");
 
+const searchTokens = (value) => normalizeKey(value)
+  .split(" ")
+  .map((item) => item.trim())
+  .filter((item) => item.length > 1);
+
+const looseTextMatch = (text, query) => {
+  const normalizedText = normalizeKey(text);
+  const tokens = searchTokens(query);
+  if (!tokens.length) return true;
+  return tokens.every((token) => normalizedText.includes(token));
+};
+
+const sameSet = (left = [], right = []) => (
+  left.length === right.length && left.every((item) => right.some((other) => normalizeKey(other) === normalizeKey(item)))
+);
+
 const parseTableTime = (value) => {
   if (!value) return null;
   const parsed = new Date(String(value).replace(" ", "T"));
@@ -71,6 +88,7 @@ const emptyResult = {
   requesting_entity_summary: [],
   keyword_summary: [],
   filter_options: {},
+  source_summary: {},
   rows: [],
 };
 
@@ -181,7 +199,7 @@ export default function OutageAnalysis() {
   const [startDate, setStartDate] = useState(addDays(todayIso(), -30));
   const [endDate, setEndDate] = useState(todayIso());
   const [reasonQuery, setReasonQuery] = useState("");
-  const [elementTypes, setElementTypes] = useState(["AC_TRANSMISSION_LINE_CIRCUIT"]);
+  const [elementTypes, setElementTypes] = useState([]);
   const [elementOptions, setElementOptions] = useState([]);
   const [elementNames, setElementNames] = useState([]);
   const [elementLoading, setElementLoading] = useState(false);
@@ -190,12 +208,14 @@ export default function OutageAnalysis() {
   const [owners, setOwners] = useState([]);
   const [tableMode, setTableMode] = useState("filtered");
   const [tableSort, setTableSort] = useState({ key: "outage_time", direction: "desc" });
+  const [tableColumnFilters, setTableColumnFilters] = useState({});
   const [selectedCategories, setSelectedCategories] = useState([]);
   const [categoriesOpen, setCategoriesOpen] = useState(false);
   const [excludedOutageTypes, setExcludedOutageTypes] = useState(() => {
     try {
       const parsed = JSON.parse(localStorage.getItem(EXCLUDED_OUTAGE_TYPES_STORAGE_KEY) || "null");
-      return Array.isArray(parsed) && parsed.length ? parsed : DEFAULT_EXCLUDED_OUTAGE_TYPES;
+      if (!Array.isArray(parsed)) return DEFAULT_EXCLUDED_OUTAGE_TYPES;
+      return sameSet(parsed, OLD_DEFAULT_EXCLUDED_OUTAGE_TYPES) ? DEFAULT_EXCLUDED_OUTAGE_TYPES : parsed;
     } catch {
       return DEFAULT_EXCLUDED_OUTAGE_TYPES;
     }
@@ -246,14 +266,10 @@ export default function OutageAnalysis() {
 
   useEffect(() => {
     const fetchElements = async () => {
-      if (!elementTypes.length) {
-        setElementOptions([]);
-        setElementNames([]);
-        return;
-      }
       setElementLoading(true);
       try {
-        const responses = await Promise.all(elementTypes.map((type) => API.getMisElementNames(type)));
+        const requestedTypes = elementTypes.length ? elementTypes : [""];
+        const responses = await Promise.all(requestedTypes.map((type) => API.getMisElementNames(type)));
         const failed = responses.find((data) => !data?.success);
         if (failed) throw new Error(failed?.message || "Unable to fetch element master.");
         const merged = new Map();
@@ -354,14 +370,17 @@ export default function OutageAnalysis() {
   };
 
   const applyPageFilters = (rows) => {
-    const elementSet = new Set(elementNames.map((item) => item.toUpperCase()));
+    const selectedElementTokens = elementNames.map((item) => searchTokens(item));
     const outageTypeSet = new Set(outageTypes.map((item) => item.toUpperCase()));
     const requestingSet = new Set(requestingEntities.map((item) => item.toUpperCase()));
     const ownerSet = new Set(owners.map((item) => item.toUpperCase()));
     const categorySet = new Set(selectedCategories.map((item) => item.toUpperCase()));
     const query = reasonQuery.trim().toUpperCase();
     return rows.filter((row) => {
-      if (elementSet.size && !elementSet.has(String(row.element_name || "").toUpperCase())) return false;
+      if (selectedElementTokens.length) {
+        const rowElement = `${row.element_name || ""} ${row.source || ""}`;
+        if (!selectedElementTokens.some((tokens) => tokens.every((token) => normalizeKey(rowElement).includes(token)))) return false;
+      }
       if (elementTypes.length && !elementTypes.some((type) => normalizeKey(row.entity_name) === normalizeKey(type))) return false;
       if (categorySet.size && !categorySet.has(String(row.custom_category || "").toUpperCase())) return false;
       if (outageTypeSet.size && !outageTypeSet.has(String(row.outage_type || "").toUpperCase())) return false;
@@ -371,8 +390,8 @@ export default function OutageAnalysis() {
         if (!ownerParts.some((item) => ownerSet.has(item))) return false;
       }
       if (query) {
-        const text = `${row.element_name || ""} ${row.entity_name || ""} ${row.outage_type || ""} ${row.reason || ""} ${row.owner || ""} ${row.custom_category || ""}`.toUpperCase();
-        if (!text.includes(query)) return false;
+        const text = `${row.element_name || ""} ${row.entity_name || ""} ${row.outage_type || ""} ${row.reason || ""} ${row.owner || ""} ${row.custom_category || ""} ${row.source || ""}`.toUpperCase();
+        if (!looseTextMatch(text, query)) return false;
       }
       return true;
     });
@@ -486,6 +505,38 @@ export default function OutageAnalysis() {
 
   const detailRows = customRows;
   const tableRows = tableMode === "all" ? customRows : filteredRows;
+  const tableColumns = [
+    { key: "source", label: "Source" },
+    { key: "custom_category", label: "Category" },
+    { key: "element_name", label: "Element" },
+    { key: "entity_name", label: "Entity" },
+    { key: "outage_type", label: "Outage Type" },
+    { key: "outage_time", label: "Outage Time" },
+    { key: "revived_time", label: "Revived Time" },
+    { key: "duration_hours", label: "Duration" },
+    { key: "reason", label: "Reason" },
+  ];
+  const tableTextValue = (row, key) => {
+    if (key === "duration_hours") return row.duration_label || row.duration_hours || "";
+    if (key === "revived_time") return row.revived_time || "Open";
+    return row[key] || "";
+  };
+  const columnFilteredTableRows = useMemo(() => {
+    const activeFilters = Object.entries(tableColumnFilters)
+      .map(([key, value]) => [key, String(value || "").trim()])
+      .filter(([, value]) => value);
+    if (!activeFilters.length) return tableRows;
+    return tableRows.filter((row) =>
+      activeFilters.every(([key, value]) => looseTextMatch(tableTextValue(row, key), value)),
+    );
+  }, [tableRows, tableColumnFilters]);
+  const sourceSummaryText = useMemo(() => {
+    const summary = result.source_summary || {};
+    const parts = [];
+    if (summary.crms_rows !== undefined) parts.push(`CRMS ${formatNumber(summary.crms_rows)}`);
+    if (summary.old_logbook_rows !== undefined) parts.push(`Old Logbook ${formatNumber(summary.old_logbook_rows)}`);
+    return parts.join(" | ");
+  }, [result.source_summary]);
   const sortedTableRows = useMemo(() => {
     const direction = tableSort.direction === "asc" ? 1 : -1;
     const valueFor = (row) => {
@@ -493,7 +544,7 @@ export default function OutageAnalysis() {
       if (tableSort.key === "outage_time" || tableSort.key === "revived_time") return parseTableTime(row[tableSort.key]);
       return String(row[tableSort.key] || "").toUpperCase();
     };
-    return [...tableRows].sort((a, b) => {
+    return [...columnFilteredTableRows].sort((a, b) => {
       const aValue = valueFor(a);
       const bValue = valueFor(b);
       if (aValue === null && bValue === null) return 0;
@@ -502,7 +553,7 @@ export default function OutageAnalysis() {
       if (typeof aValue === "number" && typeof bValue === "number") return (aValue - bValue) * direction;
       return String(aValue).localeCompare(String(bValue), "en", { numeric: true, sensitivity: "base" }) * direction;
     });
-  }, [tableRows, tableSort]);
+  }, [columnFilteredTableRows, tableSort]);
 
   const changeTableSort = (key) => {
     setTableSort((current) => ({
@@ -515,11 +566,14 @@ export default function OutageAnalysis() {
     if (tableSort.key !== key) return "";
     return tableSort.direction === "asc" ? " ↑" : " ↓";
   };
+  const setColumnFilter = (key, value) => {
+    setTableColumnFilters((current) => ({ ...current, [key]: value }));
+  };
   const options = result.filter_options || {};
   const rowElementOptions = useMemo(() => {
     const merged = new Map();
     customRows.forEach((row) => {
-      if (!elementTypes.some((type) => normalizeKey(row.entity_name) === normalizeKey(type))) return;
+      if (elementTypes.length && !elementTypes.some((type) => normalizeKey(row.entity_name) === normalizeKey(type))) return;
       const name = row.element_name || "";
       if (name) merged.set(name.toUpperCase(), { name });
     });
@@ -826,41 +880,46 @@ export default function OutageAnalysis() {
                 <option value="all">Show all fetched data</option>
               </select>
               <div style={styles.meta}>
-                {formatNumber(tableRows.length)} shown of {formatNumber(detailRows.length)}
+                {formatNumber(columnFilteredTableRows.length)} shown of {formatNumber(tableRows.length)} table rows | {formatNumber(detailRows.length)} fetched
+                {sourceSummaryText ? ` | ${sourceSummaryText}` : ""}
                 {result.generated_at ? ` | Generated ${result.generated_at}` : ""}
               </div>
             </div>
           </div>
           <div style={styles.tableWrap}>
-            <table style={styles.table}>
+            <table className="theme-table" style={styles.table}>
               <thead>
                 <tr>
-                  <th style={styles.th}><button type="button" style={styles.sortButton} onClick={() => changeTableSort("custom_category")}>Category{sortIndicator("custom_category")}</button></th>
-                  <th style={styles.th}><button type="button" style={styles.sortButton} onClick={() => changeTableSort("element_name")}>Element{sortIndicator("element_name")}</button></th>
-                  <th style={styles.th}><button type="button" style={styles.sortButton} onClick={() => changeTableSort("entity_name")}>Entity{sortIndicator("entity_name")}</button></th>
-                  <th style={styles.th}><button type="button" style={styles.sortButton} onClick={() => changeTableSort("outage_type")}>Outage Type{sortIndicator("outage_type")}</button></th>
-                  <th style={styles.th}><button type="button" style={styles.sortButton} onClick={() => changeTableSort("outage_time")}>Outage Time{sortIndicator("outage_time")}</button></th>
-                  <th style={styles.th}><button type="button" style={styles.sortButton} onClick={() => changeTableSort("revived_time")}>Revived Time{sortIndicator("revived_time")}</button></th>
-                  <th style={styles.th}><button type="button" style={styles.sortButton} onClick={() => changeTableSort("duration_hours")}>Duration{sortIndicator("duration_hours")}</button></th>
-                  <th style={styles.th}><button type="button" style={styles.sortButton} onClick={() => changeTableSort("reason")}>Reason{sortIndicator("reason")}</button></th>
+                  {tableColumns.map((column) => (
+                    <th key={column.key} style={styles.th}>
+                      <div style={styles.thStack}>
+                        <button type="button" style={styles.sortButton} onClick={() => changeTableSort(column.key)}>
+                          {column.label}{sortIndicator(column.key)}
+                        </button>
+                      </div>
+                    </th>
+                  ))}
                 </tr>
               </thead>
               <tbody>
                 {sortedTableRows.map((row, index) => (
                   <tr key={`${row.element_name}-${row.outage_time}-${index}`} style={index % 2 ? styles.tableRowAlt : styles.tableRow}>
-                    <td style={styles.td}><span style={styles.badge}>{row.custom_category}</span></td>
-                    <td style={{ ...styles.td, ...styles.elementCell }}>{row.element_name}</td>
-                    <td style={styles.td}>{row.entity_name}</td>
-                    <td style={styles.td}>{row.outage_type}</td>
-                    <td style={styles.td}>{row.outage_time}</td>
-                    <td style={styles.td}>{row.revived_time || <span style={styles.openText}>Open</span>}</td>
+                    <td style={styles.td} title={row.source || "CRMS"}><span style={styles.clampText}>{row.source || "CRMS"}</span></td>
+                    <td style={styles.td} title={row.custom_category}><span style={styles.badge}>{row.custom_category}</span></td>
+                    <td style={{ ...styles.td, ...styles.elementCell }} title={row.element_name}><span style={styles.clampText}>{row.element_name}</span></td>
+                    <td style={styles.td} title={row.entity_name}><span style={styles.clampText}>{row.entity_name}</span></td>
+                    <td style={styles.td} title={row.outage_type}><span style={styles.clampText}>{row.outage_type}</span></td>
+                    <td style={styles.td} title={row.outage_time}><span style={styles.clampText}>{row.outage_time}</span></td>
+                    <td style={styles.td} title={row.revived_time || "Open"}>
+                      {row.revived_time ? <span style={styles.clampText}>{row.revived_time}</span> : <span style={styles.openText}>Open</span>}
+                    </td>
                     <td style={{ ...styles.td, ...styles.durationCell }}>{row.duration_label}</td>
-                    <td style={{ ...styles.td, ...styles.reasonCell }}>{row.reason}</td>
+                    <td style={{ ...styles.td, ...styles.reasonCell }} title={row.reason}><span style={styles.clampText}>{row.reason}</span></td>
                   </tr>
                 ))}
                 {!sortedTableRows.length && (
                   <tr>
-                    <td style={styles.emptyTableCell} colSpan={8}>No outage rows match the selected filters.</td>
+                    <td style={styles.emptyTableCell} colSpan={9}>No outage rows match the selected filters.</td>
                   </tr>
                 )}
               </tbody>
@@ -955,16 +1014,19 @@ const styles = {
   tableControls: { display: "flex", alignItems: "center", justifyContent: "flex-end", flexWrap: "wrap", gap: 10 },
   tableSelect: { height: 36, borderRadius: 8, border: "1px solid #cbd5e1", background: "#fff", padding: "0 10px", fontSize: 12, fontWeight: 800, color: "#1f2937" },
   meta: { fontSize: 12, fontWeight: 700, color: "#64748b" },
-  tableWrap: { overflow: "auto", maxHeight: 620, border: "1px solid #e2e8f0", borderRadius: 8, background: "#fff" },
+  tableWrap: { overflow: "auto", maxHeight: 620, border: "1px solid rgba(175, 196, 234, 0.72)", borderRadius: 8, background: "#fff" },
   table: { width: "100%", minWidth: 1180, borderCollapse: "separate", borderSpacing: 0, fontSize: 12 },
-  th: { position: "sticky", top: 0, zIndex: 2, background: "#f8fafc", color: "#334155", padding: "11px 12px", textAlign: "left", fontSize: 11, fontWeight: 900, textTransform: "uppercase", borderBottom: "1px solid #dbe5ee", whiteSpace: "nowrap" },
-  sortButton: { display: "inline-flex", alignItems: "center", gap: 4, border: 0, background: "transparent", color: "#334155", padding: 0, fontSize: 11, fontWeight: 900, textTransform: "uppercase", cursor: "pointer", whiteSpace: "nowrap" },
-  td: { padding: "11px 12px", borderBottom: "1px solid #edf2f7", color: "#1f2937", verticalAlign: "top", fontWeight: 700 },
+  th: { position: "sticky", top: 0, zIndex: 2, background: "#EAF1FF", color: "#0B55B8", padding: "12px 14px", textAlign: "left", fontSize: 11, fontWeight: 900, textTransform: "uppercase", borderBottom: "1px solid rgba(175, 196, 234, 0.72)", verticalAlign: "middle" },
+  thStack: { display: "grid", gap: 4, minWidth: 96 },
+  sortButton: { display: "inline-flex", alignItems: "center", gap: 4, border: 0, background: "transparent", color: "#0B55B8", padding: 0, fontSize: 11, fontWeight: 900, textTransform: "uppercase", cursor: "pointer", whiteSpace: "nowrap" },
+  columnFilterInput: { width: "100%", height: 26, border: "1px solid #cbd5e1", borderRadius: 7, background: "#fff", color: "#0f172a", padding: "0 7px", fontSize: 11, fontWeight: 700, outline: 0, textTransform: "none" },
+  td: { padding: "11px 12px", borderBottom: "1px dashed rgba(175, 196, 234, 0.7)", color: "#1f2937", verticalAlign: "top", fontWeight: 700 },
   tableRow: { background: "#fff" },
   tableRowAlt: { background: "#fbfdff" },
   elementCell: { minWidth: 260, fontWeight: 900, color: "#0f172a" },
   durationCell: { whiteSpace: "nowrap", fontWeight: 900, color: "#03624C" },
   reasonCell: { minWidth: 360, lineHeight: 1.45, color: "#475569" },
+  clampText: { display: "-webkit-box", WebkitLineClamp: 3, WebkitBoxOrient: "vertical", overflow: "hidden", whiteSpace: "normal", lineHeight: 1.35 },
   emptyTableCell: { padding: 24, textAlign: "center", color: "#64748b", fontWeight: 800 },
   badge: { display: "inline-flex", borderRadius: 8, padding: "5px 8px", background: "#e9f7f2", color: "#03624C", fontWeight: 900, whiteSpace: "nowrap" },
   openText: { color: "#b42318", fontWeight: 900 },

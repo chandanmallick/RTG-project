@@ -1,5 +1,5 @@
 :root {
-  /* Color Palette Tokens */
+  /* ─── Legacy Color Tokens (preserved for backward compat) ─── */
   --color-rich-black: #022726;
   --color-dark-green: #032221;
   --color-bangladesh-green: #03624C;
@@ -10,20 +10,71 @@
   --color-mint: #2FA98C;
   --color-pistachio: #AACBC4;
   --color-pine: #0B453A;
-  --ui-blue: #0F6FDB;
+
+  /* ─── UI Kit · Primary Colors ─── */
+  --grid-green: #00B461;
+  --grid-blue: #0D57B7;
+  --deep-navy: #0B302A;
+  --steel-gray: #474B68;
+
+  /* ─── UI Kit · Secondary Colors ─── */
+  --sky-blue: #0A5A21;
+  --teal: #2B9068;
+  --amber: #FEB520;
+  --magenta: #CF6E83;
+  --rose: #D27286;
+
+  /* ─── UI Kit · Neutrals ─── */
+  --text-primary: #2D3748;
+  --text-secondary: #818BBC;
+  --text-muted: #A0AEC0;
+  --border-color: #DDDBE3;
+  --bg-surface: #F4F4F8;
+  --bg-card: #FFFFFF;
+
+  /* ─── UI Kit · Semantic / Status Colors ─── */
+  --status-operational: #00B461;
+  --status-warning: #FEB520;
+  --status-critical: #DC2626;
+  --status-maintenance: #0D57B7;
+  --status-info: #818BBC;
+
+  /* ─── UI Kit · Blue Palette (active UI blue) ─── */
+  --ui-blue: #0D57B7;
   --ui-blue-dark: #0B55B8;
   --ui-blue-soft: #EAF1FF;
   --ui-blue-pale: #F7FAFF;
   --ui-blue-border: #AFC4EA;
   --ui-text-strong: #172033;
 
-  /* Gradient Tokens */
-  --gradient-primary: linear-gradient(135deg, var(--ui-blue) 0%, #075FD1 100%);
-  --gradient-action: linear-gradient(135deg, #147CFF 0%, var(--ui-blue) 100%);
-  --gradient-banner: linear-gradient(135deg, var(--color-rich-black) 0%, var(--color-bangladesh-green) 50%, var(--color-frog) 100%);
-  --gradient-hero: linear-gradient(135deg, var(--color-bangladesh-green) 0%, var(--color-frog) 100%);
+  /* ─── UI Kit · Typography Scale (Inter) ─── */
+  --font-h1: 32px;
+  --font-h2: 24px;
+  --font-h3: 20px;
+  --font-h4: 16px;
+  --font-body1: 14px;
+  --font-body2: 12px;
+  --font-caption: 10px;
+  --font-weight-bold: 700;
+  --font-weight-semibold: 600;
+  --font-weight-medium: 500;
+  --font-weight-regular: 400;
 
-  /* Border overlays */
+  /* ─── UI Kit · Spacing ─── */
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --radius-pill: 999px;
+
+  /* ─── Gradient Tokens ─── */
+  --gradient-primary: linear-gradient(135deg, var(--grid-blue) 0%, #075FD1 100%);
+  --gradient-action: linear-gradient(135deg, #147CFF 0%, var(--grid-blue) 100%);
+  --gradient-banner: linear-gradient(135deg, var(--deep-navy) 0%, var(--color-bangladesh-green) 50%, var(--color-frog) 100%);
+  --gradient-hero: linear-gradient(135deg, var(--color-bangladesh-green) 0%, var(--color-frog) 100%);
+  --gradient-green: linear-gradient(135deg, var(--grid-green) 0%, var(--teal) 100%);
+
+  /* ─── Border overlays ─── */
   --border-pistachio-soft: rgba(170, 203, 196, 0.4);
 }
 
@@ -396,6 +447,116 @@
   border-bottom: none;
 }
 
+.column-search-enhanced {
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.column-search-enhanced thead th,
+.column-search-enhanced thead td {
+  position: relative;
+}
+
+.column-search-enhanced tbody tr.column-search-row-hidden {
+  display: none !important;
+}
+
+.column-search-header {
+  padding-right: 2rem !important;
+}
+
+.column-search-trigger {
+  position: absolute;
+  top: 50%;
+  right: 0.42rem;
+  transform: translateY(-50%);
+  width: 1.1rem;
+  height: 1.1rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(175, 196, 234, 0.95);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.92);
+  color: var(--ui-blue-dark);
+  font-size: 0.55rem;
+  font-weight: 900;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: 0 2px 7px rgba(15, 111, 219, 0.12);
+}
+
+.column-search-trigger:hover,
+.column-search-active .column-search-trigger {
+  background: #FFFFFF;
+  border-color: var(--ui-blue);
+  color: var(--ui-blue);
+}
+
+.column-search-panel {
+  position: absolute;
+  top: calc(100% - 1px);
+  left: 0.35rem;
+  z-index: 40;
+  width: 9.4rem;
+  display: none;
+  gap: 0.35rem;
+  padding: 0.5rem;
+  background: #FFFFFF;
+  border: 1px solid rgba(175, 196, 234, 0.95);
+  border-radius: 6px;
+  box-shadow: 0 14px 30px rgba(15, 23, 42, 0.18);
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.column-search-panel.open {
+  display: grid;
+}
+
+.column-search-operator,
+.column-search-input {
+  width: 100%;
+  height: 1.75rem;
+  border: 1px solid rgba(175, 196, 234, 0.95);
+  border-radius: 5px;
+  background: #FFFFFF;
+  color: var(--ui-text-strong);
+  font-size: 0.68rem;
+  font-weight: 700;
+  outline: none;
+}
+
+.column-search-operator {
+  padding: 0 0.35rem;
+}
+
+.column-search-input {
+  padding: 0 0.45rem;
+}
+
+.column-search-input:focus,
+.column-search-operator:focus {
+  border-color: var(--ui-blue);
+  box-shadow: 0 0 0 3px rgba(15, 111, 219, 0.15);
+}
+
+.column-search-clear {
+  height: 1.55rem;
+  border: 0;
+  border-radius: 5px;
+  background: var(--ui-blue-soft);
+  color: var(--ui-blue-dark);
+  font-size: 0.66rem;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.column-search-clear:hover {
+  background: var(--ui-blue);
+  color: #FFFFFF;
+}
+
 /* Badging */
 .theme-badge-success {
   background-color: rgba(0, 223, 129, 0.12);
@@ -519,4 +680,178 @@
   background: var(--gradient-action);
   border-color: var(--ui-blue);
   box-shadow: 0 8px 18px rgba(15, 111, 219, 0.22);
+}
+
+.crew-roster-print {
+  display: none;
+}
+
+@media print {
+  @page {
+    size: A4 landscape;
+    margin: 8mm;
+  }
+
+  body {
+    background: #FFFFFF !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  body * {
+    visibility: hidden !important;
+  }
+
+  .crew-roster-print,
+  .crew-roster-print * {
+    visibility: visible !important;
+  }
+
+  .crew-roster-print {
+    display: block !important;
+    position: absolute;
+    inset: 0 auto auto 0;
+    width: 100%;
+    color: #000000;
+    font-family: Arial, Helvetica, sans-serif;
+    font-size: 10px;
+    line-height: 1.25;
+  }
+
+  .crew-roster-print-header {
+    display: grid;
+    grid-template-columns: 1.15fr 1fr 1.15fr;
+    align-items: start;
+    gap: 10px;
+    padding-bottom: 6px;
+    border-bottom: 2px solid #000000;
+    margin-bottom: 6px;
+  }
+
+  .crew-roster-print-org {
+    font-size: 18px;
+    font-weight: 800;
+    letter-spacing: 0;
+  }
+
+  .crew-roster-print-subtitle {
+    margin-top: 2px;
+    font-size: 9px;
+    font-weight: 700;
+  }
+
+  .crew-roster-print-title-block {
+    text-align: center;
+  }
+
+  .crew-roster-print-title {
+    font-size: 18px;
+    font-weight: 800;
+    text-transform: uppercase;
+    text-decoration: underline;
+  }
+
+  .crew-roster-print-period {
+    margin-top: 3px;
+    font-size: 11px;
+    font-weight: 700;
+  }
+
+  .crew-roster-print-meta {
+    text-align: right;
+    font-size: 9px;
+    font-weight: 700;
+  }
+
+  .crew-roster-print-table {
+    width: 100%;
+    border-collapse: collapse;
+    table-layout: fixed;
+  }
+
+  .crew-roster-print-table th,
+  .crew-roster-print-table td {
+    border: 1px solid #000000;
+    padding: 3px 4px;
+    vertical-align: middle;
+    color: #000000;
+  }
+
+  .crew-roster-print-table th {
+    background: #E8E8E8 !important;
+    text-align: center;
+    font-size: 9px;
+    font-weight: 800;
+  }
+
+  .crew-roster-group-col {
+    width: 70px;
+  }
+
+  .crew-roster-sic-col {
+    width: 190px;
+  }
+
+  .crew-roster-print-day {
+    font-size: 8px;
+    font-weight: 700;
+  }
+
+  .crew-roster-print-group {
+    text-align: center;
+    font-weight: 800;
+    background: #F5F5F5 !important;
+  }
+
+  .crew-roster-print-people {
+    font-size: 8.5px;
+  }
+
+  .crew-roster-duty {
+    text-align: center;
+    font-size: 12px;
+    font-weight: 800;
+  }
+
+  .crew-roster-duty-E1,
+  .crew-roster-duty-E2 {
+    background: #FFF2CC !important;
+  }
+
+  .crew-roster-duty-M1,
+  .crew-roster-duty-M2 {
+    background: #DDEBF7 !important;
+  }
+
+  .crew-roster-duty-N1,
+  .crew-roster-duty-N2 {
+    background: #E2F0D9 !important;
+  }
+
+  .crew-roster-duty-O1,
+  .crew-roster-duty-O2 {
+    background: #FCE4D6 !important;
+  }
+
+  .crew-roster-print-footer {
+    display: grid;
+    grid-template-columns: 1fr 0.85fr;
+    gap: 16px;
+    margin-top: 8px;
+    page-break-inside: avoid;
+  }
+
+  .crew-roster-print-notes {
+    font-size: 8.5px;
+    font-weight: 600;
+  }
+
+  .crew-roster-print-signatures {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    text-align: center;
+    font-size: 9px;
+    padding-top: 22px;
+  }
 }

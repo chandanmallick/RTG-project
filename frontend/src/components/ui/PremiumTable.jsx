@@ -6,66 +6,55 @@ export default function PremiumTable({
 }) {
   return (
     <Paper
+      elevation={0}
       sx={{
-        borderRadius: "16px",
-
+        borderRadius: "var(--radius-xl)",
         overflow: "auto",
-
         maxHeight,
-
-        background: "linear-gradient(180deg, #F8FBFF 0%, #FFFFFF 56px)",
-
-        border:
-          "1px solid rgba(175, 196, 234, 0.72)",
-
-        boxShadow:
-          "0 12px 30px rgba(15, 111, 219, 0.07)",
+        backgroundColor: "var(--bg-card)",
+        border: "1px solid var(--border-color)",
+        boxShadow: "0 4px 20px rgba(13, 87, 183, 0.03)",
 
         "&::-webkit-scrollbar": {
           width: "10px",
           height: "10px",
         },
-
         "&::-webkit-scrollbar-thumb": {
-          background: "#AFC4EA",
-          borderRadius: "999px",
+          background: "var(--grid-blue)",
+          borderRadius: "var(--radius-pill)",
         },
-
         "&::-webkit-scrollbar-track": {
-          background: "#F7FAFF",
+          background: "var(--bg-surface)",
         },
 
         "& .MuiTableCell-head": {
           position: "sticky",
           top: 0,
-
           zIndex: 5,
-
-          background:
-            "#EAF1FF",
-
-          color: "#0B55B8",
-
-          fontWeight: 800,
-
-          borderBottom:
-            "1px solid #E5E7EB",
+          backgroundColor: "var(--bg-surface)",
+          color: "var(--deep-navy)",
+          fontWeight: "var(--font-weight-bold)",
+          fontSize: "var(--font-body2)",
+          textTransform: "uppercase",
+          letterSpacing: "0.04em",
+          borderBottom: "1px solid var(--border-color)",
+          py: 1.5,
         },
 
         "& .MuiTableRow-root": {
-          transition: ".18s ease",
+          transition: "background 0.15s ease",
         },
 
         "& .MuiTableRow-root:hover": {
-          background:
-            "rgba(15, 111, 219, 0.06)",
+          backgroundColor: "rgba(13, 87, 183, 0.03)",
         },
 
         "& .MuiTableCell-root": {
-          borderBottom:
-            "1px solid #F1F5F9",
-
+          borderBottom: "1px solid #F1F5F9",
           py: 1.6,
+          fontSize: "var(--font-body1)",
+          fontWeight: "var(--font-weight-medium)",
+          color: "var(--text-primary)",
         },
       }}
     >

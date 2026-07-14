@@ -18,6 +18,7 @@ from collections import Counter, defaultdict
 from services.psp_service import LegacySSLAdapter
 from openpyxl import load_workbook
 from openpyxl.utils import column_index_from_string
+from routes.old_logbook_routes import COLLECTION_CONFIG, OLD_LOGBOOK_DB, clean_text, combine_fields, parse_logbook_date, to_jsonable
 
 router = APIRouter(
     prefix="/api/psp",
@@ -187,6 +188,19 @@ class MisOutageAnalysisRequest(BaseModel):
     requesting_entities: list[str] = []
     owners: list[str] = []
     reason_query: str = ""
+
+MIS_OUTAGE_ELEMENT_TYPES = [
+    "AC_TRANSMISSION_LINE_CIRCUIT",
+    "TRANSFORMER",
+    "BUS_REACTOR",
+    "LINE_REACTOR",
+    "BUS",
+    "BAY",
+    "GENERATING_UNIT",
+    "AUTO_RECLOSER",
+    "HVDC_POLE",
+    "STATCOM",
+]
 
 def update_sync_progress(total: int, completed: int, current_date: str, status: str, error_msg: str = None):
     try:
@@ -5623,6 +5637,133 @@ def format_outage_duration(hours):
     rem = hours - (days * 24)
     return f"{days}d {rem:.1f}h"
 
+OLD_LOGBOOK_ANALYSIS_START = date(2019, 10, 1)
+OLD_LOGBOOK_ANALYSIS_END = date(2025, 3, 31)
+OLD_LOGBOOK_ELEMENT_TYPE_MAP = {
+    "14": "AC_TRANSMISSION_LINE_CIRCUIT",
+    "TRANSMISSION LINE": "AC_TRANSMISSION_LINE_CIRCUIT",
+    "9": "TRANSFORMER",
+    "TRANSFORMER": "TRANSFORMER",
+    "4": "BUS_REACTOR",
+    "BUS REACTOR": "BUS_REACTOR",
+    "5": "LINE_REACTOR",
+    "LINE REACTOR": "LINE_REACTOR",
+    "16": "BUS",
+    "BUS": "BUS",
+    "25": "BAY",
+    "BAY": "BAY",
+    "8": "GENERATING_UNIT",
+    "GENERATING UNIT": "GENERATING_UNIT",
+    "26": "AUTO_RECLOSER",
+    "AUTO RECLOSER": "AUTO_RECLOSER",
+    "15": "HVDC_POLE",
+    "HVDC POLE": "HVDC_POLE",
+    "STATCOM": "STATCOM",
+}
+
+def old_logbook_analysis_window(start_dt, end_dt):
+    if not start_dt or not end_dt:
+        return None
+    start_day = max(start_dt.date(), OLD_LOGBOOK_ANALYSIS_START)
+    end_day = min(end_dt.date(), OLD_LOGBOOK_ANALYSIS_END)
+    if start_day > end_day:
+        return None
+    return start_day, end_day
+
+def old_logbook_datetime_text(doc: dict, date_key: str, time_key: str):
+    parsed_date = parse_logbook_date(doc.get(date_key))
+    if not parsed_date:
+        return ""
+    time_text = clean_text(doc.get(time_key)) or "00:00"
+    time_match = re.search(r"\d{1,2}:\d{2}(?::\d{2})?", time_text)
+    normalized_time = time_match.group(0) if time_match else "00:00"
+    if len(normalized_time) == 5:
+        normalized_time = f"{normalized_time}:00"
+    return f"{parsed_date.isoformat()} {normalized_time[:5]}"
+
+def first_old_logbook_value(doc: dict, *field_names: str):
+    for field_name in field_names:
+        value = clean_text(doc.get(field_name))
+        if value:
+            return value
+    return ""
+
+def normalize_old_logbook_element_type(value: str):
+    text = clean_text(value)
+    if not text:
+        return ""
+    key = normalize_check_key(text)
+    return OLD_LOGBOOK_ELEMENT_TYPE_MAP.get(key, OLD_LOGBOOK_ELEMENT_TYPE_MAP.get(text, text))
+
+def old_logbook_doc_to_outage_raw(doc: dict, kind: str):
+    config = COLLECTION_CONFIG[kind]
+    raw = to_jsonable(doc)
+    outage_dt = old_logbook_datetime_text(raw, config["outage_date"], config["outage_time"])
+    if not outage_dt:
+        return None
+    reason = combine_fields(raw, config.get("reason_fields", []))
+    if kind == "shutdown" and clean_text(raw.get("Reason")):
+        reason = clean_text(raw.get("Reason"))
+    element_type = clean_text(raw.get(config.get("element_type", "Type")))
+    if not element_type and kind != "shutdown":
+        element_type = clean_text(raw.get("EntityId"))
+    element_type = normalize_old_logbook_element_type(element_type)
+    requesting_entity = first_old_logbook_value(
+        raw,
+        "RequestingEntity",
+        "Requesting Entity",
+        "CodeIssuedBy",
+        "Code Issued By",
+        "IssuedBy",
+        "Issued By",
+        "CreatedBy",
+        "UserName",
+    )
+    owner = first_old_logbook_value(raw, "owner", "Owner", "OwnerName", "Utility", "EntityName", "Entity")
+    return {
+        "ELEMENTNAME": clean_text(raw.get(config["element"])),
+        "ELEMENT_NAME": clean_text(raw.get(config["element"])),
+        "ENTITY_NAME": element_type,
+        "OUTAGE_TYPE": config["label"],
+        "REASON": reason,
+        "RequestingEntity": requesting_entity,
+        "owner": owner,
+        "OUTAGE_DATE_TIME": outage_dt,
+        "REVIVED_DATE_TIME": old_logbook_datetime_text(raw, config["revival_date"], config["revival_time"]),
+        "SOURCE": "Old Logbook",
+        "SOURCE_COLLECTION": config["collection"],
+        "OLD_LOGBOOK_ID": clean_text(raw.get("_id")),
+    }
+
+def fetch_old_logbook_outage_raw_rows(start_dt, end_dt):
+    window = old_logbook_analysis_window(start_dt, end_dt)
+    if not window:
+        return [], {"enabled": False, "count": 0}
+    start_day, end_day = window
+    mongo = MongoService()
+    db = mongo.client[OLD_LOGBOOK_DB]
+    rows = []
+    scanned = defaultdict(int)
+    for kind, config in COLLECTION_CONFIG.items():
+        collection = db[config["collection"]]
+        date_key = config["outage_date"]
+        docs = list(collection.find({}))
+        scanned[config["collection"]] = len(docs)
+        for doc in docs:
+            parsed_day = parse_logbook_date(doc.get(date_key))
+            if not parsed_day or parsed_day < start_day or parsed_day > end_day:
+                continue
+            row = old_logbook_doc_to_outage_raw(doc, kind)
+            if row:
+                rows.append(row)
+    return rows, {
+        "enabled": True,
+        "count": len(rows),
+        "start_date": start_day.isoformat(),
+        "end_date": end_day.isoformat(),
+        "collections": dict(scanned),
+    }
+
 def summarize_outage_group(rows, key):
     buckets = defaultdict(lambda: {"count": 0, "open_count": 0, "total_duration_hours": 0.0, "durations": []})
     for row in rows:
@@ -5684,6 +5825,8 @@ def analyze_outage_rows(raw_rows, req: MisOutageAnalysisRequest):
         reason = str(item.get("REASON") or "").strip()
         requesting_entity = str(item.get("RequestingEntity") or "").strip()
         owner = str(item.get("owner") or "").strip()
+        source = str(item.get("SOURCE") or item.get("source") or "CRMS").strip() or "CRMS"
+        source_collection = str(item.get("SOURCE_COLLECTION") or item.get("source_collection") or "").strip()
         outage_dt = parse_mis_voltage_datetime(item.get("OUTAGE_DATE_TIME"))
         revived_dt = parse_mis_voltage_datetime(item.get("REVIVED_DATE_TIME"))
 
@@ -5744,6 +5887,8 @@ def analyze_outage_rows(raw_rows, req: MisOutageAnalysisRequest):
             "duration_hours": duration_hours,
             "duration_label": format_outage_duration(duration_hours),
             "duration_bucket": bucket,
+            "source": source,
+            "source_collection": source_collection,
         })
 
     rows.sort(key=lambda row: row["outage_time"], reverse=True)
@@ -5813,18 +5958,28 @@ async def get_mis_voltage_names(start_date: str, end_date: str):
         return {"success": False, "message": str(exc)}
 
 @router.get("/mis/element-names")
-async def get_mis_element_names(element_type: str):
+async def get_mis_element_names(element_type: str = ""):
     try:
         element_type_text = str(element_type or "").strip()
-        if not element_type_text:
-            return {"success": False, "message": "Select an element type."}
-        rows, source_url = fetch_mis_element_names(element_type_text)
+        target_types = [element_type_text] if element_type_text else MIS_OUTAGE_ELEMENT_TYPES
+        merged = {}
+        source_urls = []
+        for target_type in target_types:
+            rows, source_url = fetch_mis_element_names(target_type)
+            source_urls.append(source_url)
+            for row in rows:
+                name = str(row.get("name") or "").strip()
+                if name:
+                    merged[normalize_check_key(name)] = {**row, "name": name, "element_type": target_type}
+        rows = sorted(merged.values(), key=lambda item: item["name"])
         return {
             "success": True,
             "element_type": element_type_text,
+            "element_types": target_types,
             "count": len(rows),
             "elements": rows,
-            "source_url": source_url,
+            "source_url": source_urls[0] if len(source_urls) == 1 else "",
+            "source_urls": source_urls,
         }
     except Exception as exc:
         traceback.print_exc()
@@ -5999,9 +6154,38 @@ async def get_mis_reactor_switching(req: MisReactorSwitchingRequest):
 @router.post("/mis/outage-analysis")
 async def get_mis_outage_analysis(req: MisOutageAnalysisRequest):
     try:
-        raw_rows, source_url = fetch_reactor_switching_raw_rows(req.start_date, req.end_date)
+        start_dt = parse_mis_voltage_datetime(normalize_mis_voltage_datetime(req.start_date))
+        end_dt = parse_mis_voltage_datetime(normalize_mis_voltage_datetime(req.end_date))
+        raw_rows = []
+        source_url = ""
+        source_warnings = []
+
+        if end_dt and end_dt.date() > OLD_LOGBOOK_ANALYSIS_END:
+            crms_start_dt = start_dt
+            historical_next_day = datetime.combine(OLD_LOGBOOK_ANALYSIS_END + timedelta(days=1), datetime.min.time())
+            if not crms_start_dt or crms_start_dt < historical_next_day:
+                crms_start_dt = historical_next_day
+            crms_start = crms_start_dt.strftime("%Y-%m-%d %H:%M")
+            try:
+                crms_rows, source_url = fetch_reactor_switching_raw_rows(crms_start, req.end_date)
+                for row in crms_rows:
+                    if isinstance(row, dict) and not row.get("SOURCE"):
+                        row["SOURCE"] = "CRMS"
+                raw_rows.extend(crms_rows)
+            except Exception as crms_exc:
+                source_warnings.append(f"CRMS fetch failed: {str(crms_exc)}")
+
+        old_rows, old_summary = fetch_old_logbook_outage_raw_rows(start_dt, end_dt)
+        raw_rows.extend(old_rows)
+
         result = analyze_outage_rows(raw_rows, req)
         result["source_url"] = source_url
+        result["source_summary"] = {
+            "crms_rows": sum(1 for row in raw_rows if isinstance(row, dict) and str(row.get("SOURCE") or "").upper() == "CRMS"),
+            "old_logbook_rows": len(old_rows),
+            "old_logbook": old_summary,
+            "warnings": source_warnings,
+        }
         return result
     except Exception as exc:
         traceback.print_exc()

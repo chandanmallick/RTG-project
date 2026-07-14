@@ -1,190 +1,138 @@
-import { Paper, Typography, Box } from "@mui/material";
+import { Paper, Typography, Box, Chip } from "@mui/material";
 import { motion } from "framer-motion";
 
 export default function StatCard({
   title,
   value,
+  unit,
   subtitle,
   icon,
-  color = "#0F6FDB",
+  color = "var(--grid-blue)",
   trend,
+  trendLabel = "vs yesterday",
+  isLive = false,
 }) {
   return (
     <motion.div
-      whileHover={{
-        y: -4,
-      }}
-      transition={{
-        duration: 0.2,
-      }}
+      whileHover={{ y: -4 }}
+      transition={{ duration: 0.2 }}
     >
       <Paper
         sx={{
           position: "relative",
-
           overflow: "hidden",
-
-          borderRadius: "16px",
-
+          borderRadius: "var(--radius-xl)",
           p: 3,
-
-          background: "linear-gradient(180deg, #F8FBFF 0%, #FFFFFF 56px)",
-
-          border:
-            "1px solid rgba(175, 196, 234, 0.72)",
-
-          boxShadow:
-            "0 12px 30px rgba(15, 111, 219, 0.07)",
-
+          backgroundColor: "var(--bg-card)",
+          border: "1px solid var(--border-color)",
+          boxShadow: "0 4px 20px rgba(13, 87, 183, 0.03)",
           minHeight: 160,
         }}
       >
         {/* TOP BAR */}
-
         <Box
           sx={{
             position: "absolute",
-
             top: 0,
             left: 0,
-
             width: "100%",
-            height: 5,
-
+            height: 4,
             background: color,
           }}
         />
 
-        {/* GLOW */}
+        {/* TOP ROW: Title & Badge */}
+        <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mb: 2 }}>
+          <Typography
+            sx={{
+              color: "var(--text-secondary)",
+              fontSize: "var(--font-body1)",
+              fontWeight: "var(--font-weight-semibold)",
+            }}
+          >
+            {title}
+          </Typography>
+          {isLive && (
+            <Chip
+              label="Live"
+              size="small"
+              sx={{
+                height: 20,
+                fontSize: 10,
+                fontWeight: "var(--font-weight-bold)",
+                color: "var(--grid-green)",
+                backgroundColor: "rgba(0, 180, 97, 0.12)",
+              }}
+            />
+          )}
+        </Box>
 
-        <Box
-          sx={{
-            position: "absolute",
-
-            top: -60,
-            right: -40,
-
-            width: 140,
-            height: 140,
-
-            borderRadius: "50%",
-
-            background: `${color}22`,
-
-            filter: "blur(40px)",
-          }}
-        />
-
-        <Box
-          sx={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "flex-start",
-          }}
-        >
-          {/* LEFT */}
-
+        <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end" }}>
+          {/* LEFT: Value & Trend */}
           <Box>
-            <Typography
-              sx={{
-                color: "#6B7280",
-                fontSize: 14,
-                fontWeight: 600,
-              }}
-            >
-              {title}
-            </Typography>
-
-            <Typography
-              sx={{
-                mt: 1,
-
-                fontSize: 36,
-
-                fontWeight: 800,
-
-                lineHeight: 1,
-
-                letterSpacing: "-0.04em",
-
-                color: "#111827",
-              }}
-            >
-              {value}
-            </Typography>
-
-            {subtitle && (
+            <Box sx={{ display: "flex", alignItems: "baseline", gap: 0.5 }}>
               <Typography
                 sx={{
-                  mt: 1.5,
-
-                  fontSize: 13,
-
-                  color: "#9CA3AF",
+                  fontSize: "32px",
+                  fontWeight: 800,
+                  lineHeight: 1,
+                  letterSpacing: "-0.04em",
+                  color: "var(--deep-navy)",
                 }}
               >
-                {subtitle}
+                {value}
               </Typography>
+              {unit && (
+                <Typography
+                  sx={{
+                    fontSize: "var(--font-body2)",
+                    fontWeight: "var(--font-weight-bold)",
+                    color: "var(--text-secondary)",
+                  }}
+                >
+                  {unit}
+                </Typography>
+              )}
+            </Box>
+
+            {(subtitle || trend !== undefined) && (
+              <Box sx={{ mt: 1.5, display: "flex", alignItems: "center", gap: 1 }}>
+                {trend !== undefined && (
+                  <Typography
+                    sx={{
+                      fontSize: "var(--font-body2)",
+                      fontWeight: "var(--font-weight-bold)",
+                      color: trend > 0 ? "var(--grid-green)" : "var(--status-critical)",
+                    }}
+                  >
+                    {trend > 0 ? "+" : ""}{trend}%
+                  </Typography>
+                )}
+                <Typography
+                  sx={{
+                    fontSize: "var(--font-body2)",
+                    color: "var(--text-secondary)",
+                  }}
+                >
+                  {subtitle || trendLabel}
+                </Typography>
+              </Box>
             )}
           </Box>
 
-          {/* ICON */}
-
-          <Box
-            sx={{
-              width: 56,
-              height: 56,
-
-              borderRadius: "18px",
-
-              background: `${color}18`,
-
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-
-              color,
-            }}
-          >
-            {icon}
-          </Box>
+          {/* RIGHT: Icon/Chart slot */}
+          {icon && (
+            <Box
+              sx={{
+                color: color,
+                display: "flex",
+                "& svg": { width: 48, height: 48, opacity: 0.8 },
+              }}
+            >
+              {icon}
+            </Box>
+          )}
         </Box>
-
-        {/* TREND */}
-
-        {trend && (
-          <Box
-            sx={{
-              mt: 3,
-
-              display: "inline-flex",
-
-              alignItems: "center",
-
-              px: 1.5,
-              py: 0.6,
-
-              borderRadius: "999px",
-
-              background:
-                trend > 0
-                  ? "rgba(34,197,94,0.12)"
-                  : "rgba(239,68,68,0.12)",
-
-              color:
-                trend > 0
-                  ? "#16A34A"
-                  : "#DC2626",
-
-              fontSize: 12,
-
-              fontWeight: 700,
-            }}
-          >
-            {trend > 0 ? "+" : ""}
-            {trend}%
-          </Box>
-        )}
       </Paper>
     </motion.div>
   );

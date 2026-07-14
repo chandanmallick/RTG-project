@@ -1,0 +1,64 @@
+(node:15044) [DEP0060] DeprecationWarning: The `util._extend` API is deprecated. Please use Object.assign() instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+10:51:06 am [vite] Internal server error: D:\RTG-project\frontend\src\components\ui\GlassCard.jsx: Unexpected token (12:20)
+
+  10 |
+  11 |   borderGlow = false,
+> 12 |           position: "absolute",
+     |                     ^
+  13 |
+  14 |           top: 0,
+  15 |           left: 0,
+  Plugin: vite:react-babel
+  File: D:/RTG-project/frontend/src/components/ui/GlassCard.jsx:12:20
+  10 |  
+  11 |    borderGlow = false,
+  12 |            position: "absolute",
+     |                                 ^
+  13 |  
+  14 |            top: 0,
+      at constructor (D:\RTG-project\frontend\node_modules\@babel\parser\lib\index.js:365:19)
+      at JSXParserMixin.raise (D:\RTG-project\frontend\node_modules\@babel\parser\lib\index.js:6616:19)
+      at JSXParserMixin.unexpected (D:\RTG-project\frontend\node_modules\@babel\parser\lib\index.js:6636:16)
+      at JSXParserMixin.parseIdentifierName (D:\RTG-project\frontend\node_modules\@babel\parser\lib\index.js:12220:12)
+      at JSXParserMixin.parseIdentifier (D:\RTG-project\frontend\node_modules\@babel\parser\lib\index.js:12198:23)
+      at JSXParserMixin.parseBindingAtom (D:\RTG-project\frontend\node_modules\@babel\parser\lib\index.js:7373:17)
+      at JSXParserMixin.parseMaybeDefault (D:\RTG-project\frontend\node_modules\@babel\parser\lib\index.js:7461:39)
+      at JSXParserMixin.parseObjectProperty (D:\RTG-project\frontend\node_modules\@babel\parser\lib\index.js:11967:37)
+      at JSXParserMixin.parseObjPropValue (D:\RTG-project\frontend\node_modules\@babel\parser\lib\index.js:11995:100)
+      at JSXParserMixin.parseBindingProperty (D:\RTG-project\frontend\node_modules\@babel\parser\lib\index.js:7442:17)
+      at JSXParserMixin.parseObjectLike (D:\RTG-project\frontend\node_modules\@babel\parser\lib\index.js:11847:21)
+      at JSXParserMixin.parseBindingAtom (D:\RTG-project\frontend\node_modules\@babel\parser\lib\index.js:7369:21)
+      at JSXParserMixin.parseMaybeDefault (D:\RTG-project\frontend\node_modules\@babel\parser\lib\index.js:7461:39)
+      at JSXParserMixin.parseBindingElement (D:\RTG-project\frontend\node_modules\@babel\parser\lib\index.js:7445:23)
+      at JSXParserMixin.parseBindingList (D:\RTG-project\frontend\node_modules\@babel\parser\lib\index.js:7409:24)
+      at JSXParserMixin.parseFunctionParams (D:\RTG-project\frontend\node_modules\@babel\parser\lib\index.js:13478:24)
+      at JSXParserMixin.parseFunction (D:\RTG-project\frontend\node_modules\@babel\parser\lib\index.js:13460:10)
+      at JSXParserMixin.parseExportDefaultExpression (D:\RTG-project\frontend\node_modules\@babel\parser\lib\index.js:13924:19)
+      at JSXParserMixin.parseExport (D:\RTG-project\frontend\node_modules\@babel\parser\lib\index.js:13845:25)
+      at JSXParserMixin.parseStatementContent (D:\RTG-project\frontend\node_modules\@babel\parser\lib\index.js:12895:27)
+      at JSXParserMixin.parseStatementLike (D:\RTG-project\frontend\node_modules\@babel\parser\lib\index.js:12784:17)
+      at JSXParserMixin.parseModuleItem (D:\RTG-project\frontend\node_modules\@babel\parser\lib\index.js:12761:17)
+      at JSXParserMixin.parseBlockOrModuleBlockBody (D:\RTG-project\frontend\node_modules\@babel\parser\lib\index.js:13333:36)
+      at JSXParserMixin.parseBlockBody (D:\RTG-project\frontend\node_modules\@babel\parser\lib\index.js:13326:10)
+      at JSXParserMixin.parseProgram (D:\RTG-project\frontend\node_modules\@babel\parser\lib\index.js:12639:10)
+      at JSXParserMixin.parseTopLevel (D:\RTG-project\frontend\node_modules\@babel\parser\lib\index.js:12629:25)
+      at JSXParserMixin.parse (D:\RTG-project\frontend\node_modules\@babel\parser\lib\index.js:14505:25)
+      at parse (D:\RTG-project\frontend\node_modules\@babel\parser\lib\index.js:14539:38)
+      at parser (D:\RTG-project\frontend\node_modules\@babel\core\lib\parser\index.js:41:34)
+      at parser.next (<anonymous>)
+      at normalizeFile (D:\RTG-project\frontend\node_modules\@babel\core\lib\transformation\normalize-file.js:64:37)
+      at normalizeFile.next (<anonymous>)
+      at run (D:\RTG-project\frontend\node_modules\@babel\core\lib\transformation\index.js:22:50)
+      at run.next (<anonymous>)
+      at transform (D:\RTG-project\frontend\node_modules\@babel\core\lib\transform.js:22:33)
+      at transform.next (<anonymous>)
+      at step (D:\RTG-project\frontend\node_modules\gensync\index.js:261:32)
+      at D:\RTG-project\frontend\node_modules\gensync\index.js:273:13
+      at async.call.result.err.err (D:\RTG-project\frontend\node_modules\gensync\index.js:223:11)
+      at D:\RTG-project\frontend\node_modules\gensync\index.js:189:28
+      at D:\RTG-project\frontend\node_modules\@babel\core\lib\gensync-utils\async.js:67:7
+      at D:\RTG-project\frontend\node_modules\gensync\index.js:113:33
+      at step (D:\RTG-project\frontend\node_modules\gensync\index.js:287:14)
+      at D:\RTG-project\frontend\node_modules\gensync\index.js:273:13
+      at async.call.result.err.err (D:\RTG-project\frontend\node_modules\gensync\index.js:223:11)

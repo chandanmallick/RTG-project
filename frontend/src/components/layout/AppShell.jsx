@@ -7,7 +7,7 @@ export default function AppShell({ children }) {
       sx={{
         minHeight: "100vh",
         boxSizing: "border-box",
-        background: "#F4F6F8",
+        backgroundColor: "var(--bg-surface)",
         p: 2.5,
         position: "relative",
         display: "flex",

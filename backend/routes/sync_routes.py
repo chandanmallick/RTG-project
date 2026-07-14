@@ -1,10 +1,15 @@
 from fastapi import APIRouter, Body
-from utils.processor import DataProcessor
-from services.db_handler import MongoService
-
-import pandas as pd
 
 router = APIRouter()
+
+
+def get_sync_dependencies():
+    import pandas as pd
+    from services.db_handler import MongoService
+    from utils.processor import DataProcessor
+
+    globals()["pd"] = pd
+    return pd, MongoService, DataProcessor
 
 
 # ======================================================
@@ -124,6 +129,8 @@ async def preview_db_sync():
 
     try:
 
+        pd, MongoService, DataProcessor = get_sync_dependencies()
+
         db = MongoService()
 
         # LIVE DATA
@@ -168,6 +175,8 @@ async def commit_db_sync(payload: list = Body(...)):
 
     try:
 
+        pd, MongoService, _ = get_sync_dependencies()
+
         db = MongoService()
 
         df = pd.DataFrame(payload)
@@ -198,6 +207,8 @@ async def commit_db_sync(payload: list = Body(...)):
 async def preview_map_changes():
 
     try:
+
+        _, MongoService, _ = get_sync_dependencies()
 
         db = MongoService()
 
@@ -240,6 +251,8 @@ async def preview_map_changes():
 async def commit_map_changes():
 
     try:
+
+        _, MongoService, _ = get_sync_dependencies()
 
         db = MongoService()
 

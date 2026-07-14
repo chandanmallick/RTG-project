@@ -25,6 +25,11 @@ const getTimePart = (value) => {
   return match ? match[1] : "00:00";
 };
 
+const splitTimePart = (value) => {
+  const [hour = "00", minute = "00"] = getTimePart(value).split(":");
+  return { hour, minute };
+};
+
 const formatDisplayDate = (value, includeTime = false) => {
   const parsed = parseIsoDate(value);
   if (!parsed) return "Select date";
@@ -163,6 +168,13 @@ export default function CalendarInput({
     onChange?.(`${datePart}T${timeValue || "00:00"}`);
   };
 
+  const changeTimePart = (part, nextValue) => {
+    const current = splitTimePart(value);
+    const hour = part === "hour" ? nextValue : current.hour;
+    const minute = part === "minute" ? nextValue : current.minute;
+    changeTime(`${hour}:${minute}`);
+  };
+
   const selectedIso = toIsoDate(selectedDate);
   const endIso = toIsoDate(endDate);
   const todayIso = toIsoDate(new Date());
@@ -252,15 +264,32 @@ export default function CalendarInput({
           </div>
           {includeTime && (
             <div style={styles.timeFooter}>
-              <label style={styles.timeLabel}>
-                Time
-                <input
-                  type="time"
-                  value={getTimePart(value)}
-                  onChange={(event) => changeTime(event.target.value)}
-                  style={styles.timeInput}
-                />
-              </label>
+              <div style={styles.timeGroup}>
+                <label style={styles.timeLabel}>
+                  Hour
+                  <select
+                    value={splitTimePart(value).hour}
+                    onChange={(event) => changeTimePart("hour", event.target.value)}
+                    style={styles.timeSelect}
+                  >
+                    {Array.from({ length: 24 }, (_, index) => String(index).padStart(2, "0")).map((hour) => (
+                      <option key={hour} value={hour}>{hour}</option>
+                    ))}
+                  </select>
+                </label>
+                <label style={styles.timeLabel}>
+                  Minute
+                  <select
+                    value={splitTimePart(value).minute}
+                    onChange={(event) => changeTimePart("minute", event.target.value)}
+                    style={styles.timeSelect}
+                  >
+                    {Array.from({ length: 60 }, (_, index) => String(index).padStart(2, "0")).map((minute) => (
+                      <option key={minute} value={minute}>{minute}</option>
+                    ))}
+                  </select>
+                </label>
+              </div>
               <button type="button" style={styles.doneButton} onClick={() => setOpen(false)}>Done</button>
             </div>
           )}
@@ -380,14 +409,18 @@ const styles = {
     marginTop: 12,
     paddingTop: 12,
   },
+  timeGroup: { display: "flex", alignItems: "end", gap: 8 },
   timeLabel: { display: "grid", gap: 4, fontSize: 11, fontWeight: 900, color: "#334155" },
-  timeInput: {
+  timeSelect: {
     height: 34,
+    minWidth: 72,
     borderRadius: 8,
     border: "1px solid #cbd5e1",
     padding: "0 8px",
     fontWeight: 800,
     color: "#0f172a",
+    background: "#fff",
+    cursor: "pointer",
   },
   doneButton: {
     height: 34,

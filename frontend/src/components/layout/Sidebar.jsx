@@ -72,6 +72,18 @@ const menus = [
   },
 
   {
+    label: "Old Logbook",
+    path: "/old-logbook",
+    icon: <StorageRoundedIcon />,
+  },
+
+  {
+    label: "Crew Management",
+    path: "/crew/dashboard",
+    icon: <HubRoundedIcon />,
+  },
+
+  {
     label: "PSP Report Check",
     path: "/psp-report-checking",
     icon: <InsightsRoundedIcon />,

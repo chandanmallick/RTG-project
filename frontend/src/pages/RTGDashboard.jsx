@@ -1187,6 +1187,7 @@ export default function RTGDashboard() {
 
 
       {/* ── PIPELINE EXECUTION DIALOG ── */}
+      {openLogs && (
       <Dialog
         open={openLogs}
         onClose={() => setOpenLogs(false)}
@@ -1299,6 +1300,7 @@ export default function RTGDashboard() {
 
         </DialogContent>
       </Dialog>
+      )}
 
       <Grid
         container
@@ -1734,6 +1736,7 @@ export default function RTGDashboard() {
         }
       />
 
+      {showOutageDialog && (
       <Dialog
         open={showOutageDialog}
         onClose={() =>
@@ -1837,7 +1840,9 @@ export default function RTGDashboard() {
         </DialogContent>
 
       </Dialog>
+      )}
 
+      {showOutageCategoryDialog && (
       <Dialog
         open={showOutageCategoryDialog}
         onClose={() =>
@@ -2103,7 +2108,9 @@ export default function RTGDashboard() {
         </DialogContent>
 
       </Dialog>
+      )}
 
+      {showOutageSummaryDialog && (
       <Dialog
         open={showOutageSummaryDialog}
         onClose={() =>
@@ -2313,7 +2320,9 @@ export default function RTGDashboard() {
         </DialogContent>
 
       </Dialog>
+      )}
 
+      {showUnreqDialog && (
       <Dialog
         open={showUnreqDialog}
         onClose={() =>
@@ -2523,6 +2532,7 @@ export default function RTGDashboard() {
         </DialogContent>
 
       </Dialog>
+      )}
 
     </AppShell>
   );

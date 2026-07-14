@@ -1,19 +1,16 @@
-import { TextField } from "@mui/material";
+import { TextField, InputAdornment } from "@mui/material";
 
 export default function PremiumInput({
   value,
   onChange,
   placeholder,
   label,
-
   size = "small",
-
   type = "text",
-
   InputProps = {},
-
+  startIcon,
+  endIcon,
   disabled = false,
-
   sx = {},
 }) {
   return (
@@ -27,65 +24,68 @@ export default function PremiumInput({
       placeholder={placeholder}
       label={label}
       variant="outlined"
-      InputProps={InputProps}
+      InputProps={{
+        ...InputProps,
+        ...(startIcon && {
+          startAdornment: (
+            <InputAdornment position="start" sx={{ color: "var(--text-muted)" }}>
+              {startIcon}
+            </InputAdornment>
+          ),
+        }),
+        ...(endIcon && {
+          endAdornment: (
+            <InputAdornment position="end" sx={{ color: "var(--text-muted)" }}>
+              {endIcon}
+            </InputAdornment>
+          ),
+        }),
+      }}
       sx={{
         "& .MuiOutlinedInput-root": {
-          borderRadius: "18px",
-
-          background:
-            "rgba(255,255,255,0.72)",
-
-          backdropFilter: "blur(18px)",
-
-          transition:
-            "all .22s ease",
-
-          minHeight: 48,
+          borderRadius: "var(--radius-md)",
+          backgroundColor: "var(--bg-card)",
+          transition: "all .22s ease",
+          minHeight: size === "small" ? 40 : 48,
 
           "& fieldset": {
-            borderColor:
-              "rgba(229,231,235,0.9)",
-
-            transition:
-              "all .22s ease",
+            borderColor: "var(--border-color)",
+            borderWidth: "1.5px",
+            transition: "all .22s ease",
           },
 
           "&:hover fieldset": {
-            borderColor:
-              "#00DF81",
+            borderColor: "var(--grid-blue)",
           },
 
           "&.Mui-focused": {
-            background:
-              "rgba(255,255,255,0.92)",
-
-            boxShadow:
-              "0 0 0 4px rgba(0, 223, 129, 0.15)",
+            backgroundColor: "#FFFFFF",
+            boxShadow: "0 0 0 4px rgba(13, 87, 183, 0.1)",
           },
 
           "&.Mui-focused fieldset": {
-            borderColor:
-              "#03624C",
+            borderColor: "var(--grid-blue)",
+            borderWidth: "1.5px",
           },
 
           "& input": {
-            fontSize: 14,
-
-            fontWeight: 500,
-
-            color: "#111827",
+            fontSize: "var(--font-body1)",
+            fontWeight: "var(--font-weight-medium)",
+            color: "var(--deep-navy)",
           },
 
           "& input::placeholder": {
-            color: "#9CA3AF",
+            color: "var(--text-muted)",
             opacity: 1,
           },
         },
 
         "& .MuiInputLabel-root": {
-          fontWeight: 600,
-
-          color: "#6B7280",
+          fontWeight: "var(--font-weight-semibold)",
+          color: "var(--text-secondary)",
+          "&.Mui-focused": {
+            color: "var(--grid-blue)",
+          },
         },
 
         ...sx,

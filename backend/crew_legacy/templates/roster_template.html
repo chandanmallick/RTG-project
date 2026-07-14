@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+
+<style>
+
+/* ================= PAGE ================= */
+
+@page {
+    size: A4 landscape;
+    margin: 8mm 12mm 12mm 12mm;
+}
+
+body {
+    font-family: "Noto Sans Devanagari", "Mangal", "Arial Unicode MS", sans-serif;
+    font-size: 9.5px;
+    margin: 0;
+    padding: 0;
+}
+
+/* ================= HEADER ================= */
+
+.header-table {
+    width: 100%;
+    border-bottom: 1px solid #444;
+    margin-bottom: 4px;
+}
+
+.logo {
+    width: 95px;
+}
+
+.title {
+    text-align: center;
+    color: #0d47a1;
+    line-height: 1.1;
+}
+
+.title h2,
+.title h3 {
+    margin: 0;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+.main-title {
+    font-weight: 700;
+    font-size: 12px;
+    margin-top: 2px;
+}
+
+/* ================= ROSTER TABLE ================= */
+
+.roster-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 8.5px;
+    margin-top: 5px;
+}
+
+.roster-table th,
+.roster-table td {
+    border: 1px solid #444;
+    padding: 2px;
+    text-align: center;
+}
+
+.roster-table th {
+    background-color: #dbeafe;
+    font-weight: bold;
+}
+
+/* ================= GROUP DETAILS ================= */
+
+.group-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 6px;
+    font-size: 8.5px;
+}
+
+.group-table td {
+    width: 25%;
+    vertical-align: top;
+    border: 1px solid #ccc;
+    padding: 4px;
+}
+
+.group-title {
+    background-color: #e8f5e9;
+    color: #14532d;
+    font-weight: bold;
+    padding: 3px;
+    margin-bottom: 4px;
+}
+
+/* ================= SIGNATURE ================= */
+
+.signature-table {
+    width: 100%;
+    margin-top: 25px;
+}
+
+.signature-right {
+    text-align: right;
+    font-size: 9.5px;
+}
+
+/* ================= FOOTER ================= */
+
+.footer {
+    position: fixed;
+    bottom: 5mm;
+    right: 10mm;
+    font-size: 8px;
+    color: #444;
+}
+
+</style>
+</head>
+
+<body>
+
+<!-- ================= HEADER ================= -->
+
+<table class="header-table">
+<tr>
+    <td style="width:110px;">
+        <!-- IMPORTANT: logo_path must be passed from backend as absolute path -->
+        <img src="file:///{{ logo_path }}" class="logo">
+    </td>
+
+    <td class="title">
+        <h2>ग्रिड कंट्रोलर ऑफ इंडिया लिमिटेड (ग्रिड-इंडिया)</h2>
+        <h3>पूर्वी क्षेत्रीय भार प्रेषण केंद्र, कोलकाता</h3>
+        <h3>Grid Controller of India Limited (GRID-INDIA)</h3>
+        <h3>EASTERN REGIONAL LOAD DESPATCH CENTRE, KOLKATA</h3>
+        <div class="main-title">CONTROL ROOM SHIFT DUTY ROSTER</div>
+    </td>
+</tr>
+</table>
+
+<div style="font-weight:bold; font-size:16px; margin-bottom:10px;">
+  Period: {{ start_date }} to {{ end_date }}
+</div>
+
+<!-- ================= ROSTER TABLE ================= -->
+
+<table class="roster-table" border="1" cellspacing="0" cellpadding="4">
+<tr>
+    <th>Group</th>
+    {% for d in dates %}
+    <th>{{ d[-2:] }}</th>
+    {% endfor %}
+</tr>
+
+{% for group in roster_data %}
+<tr>
+    <td><b>{{ group.groupName }}</b></td>
+
+    {% for d in dates %}
+    <td>{{ group.data.get(d, '') }}</td>
+    {% endfor %}
+</tr>
+{% endfor %}
+
+</table>
+
+<!-- ================= GROUP DETAILS ================= -->
+
+<table class="group-table">
+<tr>
+
+{% for g in group_details %}
+<td>
+
+<div class="group-title">
+Group {{ g.get('groupName','') }}
+</div>
+
+<b>Shift Incharge:</b><br>
+{{ g.get('shiftInCharge', {}).get('name','') }}
+-
+({{ g.get('shiftInCharge', {}).get('employeeId','') }})
+-
+{{ g.get('shiftInCharge', {}).get('designation','') }}
+
+<br><br>
+
+<b>Members:</b><br>
+
+{% for m in g.get('members', []) %}
+{{ loop.index }}.
+{{ m.get('name','') }} ({{ m.get('designation','') }}) - {{ m.get('employeeId','') }}
+<br>
+{% endfor %}
+
+</td>
+{% endfor %}
+
+</tr>
+</table>
+
+<!-- ================= INSTRUCTIONS ================= -->
+
+<br>
+<b>Special Instructions:</b><br>
+{{ instructions | safe }}
+
+<br><br>
+
+<b>Distribution:</b><br>
+{{ distribution | safe }}
+
+<!-- ================= SIGNATURE ================= -->
+
+<table class="signature-table">
+<tr>
+<td width="60%"></td>
+
+<td width="40%" class="signature-right">
+
+<div style="font-weight:600;">
+  {{ sign_name_english }}
+  {% if sign_name_hindi %}
+    &nbsp; / &nbsp;
+    {{ sign_name_hindi }}
+  {% endif %}
+</div>
+
+<div>
+  {{ sign_designation }}
+  {% if sign_designation_hindi %}
+    &nbsp; / &nbsp;
+    {{ sign_designation_hindi }}
+  {% endif %}
+</div>
+
+<div>
+  ERLDC, GRID-INDIA
+</div>
+
+</td>
+</tr>
+</table>
+
+<!-- ================= FOOTER ================= -->
+
+<div class="footer">
+Generated on {{ generated_on }}
+</div>
+
+</body>
+</html>

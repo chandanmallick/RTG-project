@@ -651,6 +651,32 @@ const API = {
     return res.data;
   },
 
+  getOldLogbookHistoricalOutages: async ({ kind = "all", startDate, endDate, search = "", elementType = "", limit = 1000, skip = 0 } = {}) => {
+    const params = new URLSearchParams();
+    params.append("kind", kind);
+    params.append("limit", String(limit));
+    params.append("skip", String(skip));
+    if (startDate) params.append("start_date", startDate);
+    if (endDate) params.append("end_date", endDate);
+    if (search) params.append("search", search);
+    if (elementType) params.append("element_type", elementType);
+    const res = await axios.get(`${BASE_URL}/old-logbook/historical-outages?${params.toString()}`);
+    return res.data;
+  },
+
+  downloadOldLogbookExcel: async ({ kind = "all", startDate, endDate, search = "", elementType = "" } = {}) => {
+    const params = new URLSearchParams();
+    params.append("kind", kind);
+    if (startDate) params.append("start_date", startDate);
+    if (endDate) params.append("end_date", endDate);
+    if (search) params.append("search", search);
+    if (elementType) params.append("element_type", elementType);
+    const res = await axios.get(`${BASE_URL}/old-logbook/historical-outages/export?${params.toString()}`, {
+      responseType: "blob",
+    });
+    return res.data;
+  },
+
   // =========================================
   // FREQUENCY REPORT
   // =========================================

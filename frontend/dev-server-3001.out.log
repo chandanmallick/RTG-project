@@ -1,0 +1,41 @@
+
+> rtg-portal-frontend@1.0.0 dev
+> vite --port 3001 --host 0.0.0.0 --port 3001
+
+
+  VITE v4.5.14  ready in 342 ms
+
+  ➜  Local:   http://localhost:3001/
+  ➜  Network: http://10.3.230.60:3001/
+3:46:54 pm [vite] hmr update /src/components/layout/TopNavbar.jsx
+3:47:48 pm [vite] hmr update /src/theme/theme.css
+3:59:37 pm [vite] hmr update /src/pages/crew/CrewCalendar.jsx
+4:39:24 pm [vite] ✨ new dependencies optimized: react-multi-date-picker, @mui/material/IconButton, @mui/icons-material/ExpandLess
+4:39:24 pm [vite] ✨ optimized dependencies changed. reloading
+4:41:41 pm [vite] ✨ new dependencies optimized: @mui/icons-material/Edit, @mui/icons-material/ArrowUpward, @mui/icons-material/ArrowDownward
+4:41:41 pm [vite] ✨ optimized dependencies changed. reloading
+4:49:27 pm [vite] hmr update /src/crewLegacy/Profile.jsx
+4:51:11 pm [vite] hmr update /src/crewLegacy/Profile.jsx
+4:54:50 pm [vite] hmr update /src/crewLegacy/Profile.jsx
+4:55:28 pm [vite] page reload dist/index.html
+5:17:03 pm [vite] hmr update /src/components/layout/TopNavbar.jsx
+5:20:44 pm [vite] hmr update /src/components/layout/TopNavbar.jsx
+5:20:49 pm [vite] hmr update /src/components/layout/TopNavbar.jsx
+5:20:55 pm [vite] hmr update /src/components/layout/TopNavbar.jsx
+5:21:53 pm [vite] page reload dist/index.html
+5:30:58 pm [vite] hmr update /src/components/layout/TopNavbar.jsx
+5:34:36 pm [vite] hmr update /src/components/layout/TopNavbar.jsx
+5:47:08 pm [vite] hmr update /src/pages/crew/CrewDutyRoster.jsx
+5:50:51 pm [vite] hmr update /src/pages/crew/CrewDutyRoster.jsx
+6:01:34 pm [vite] hmr update /src/pages/crew/CrewDutyRoster.jsx
+9:48:29 am [vite] hmr update /src/pages/crew/CrewDutyRoster.jsx
+10:00:10 am [vite] page reload dist/index.html
+10:34:22 am [vite] hmr update /src/theme/theme.css
+10:51:06 am [vite] hmr update /src/components/ui/GlassCard.jsx
+10:51:29 am [vite] hmr update /src/components/ui/GlassCard.jsx
+10:51:51 am [vite] hmr update /src/components/ui/GradientButton.jsx
+10:53:02 am [vite] hmr update /src/components/layout/AppShell.jsx
+11:39:23 am [vite] hmr update /src/pages/crew/CrewCalendar.jsx
+11:47:11 am [vite] hmr update /src/pages/crew/CrewCalendar.jsx
+11:47:20 am [vite] hmr update /src/pages/crew/CrewCalendar.jsx
+11:47:29 am [vite] hmr update /src/pages/crew/CrewCalendar.jsx
