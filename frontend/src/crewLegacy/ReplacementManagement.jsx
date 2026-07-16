@@ -27,7 +27,10 @@ import {
   IconButton,
   Checkbox,
   FormControlLabel,
-  Grid
+  Grid,
+  FormControl,
+  InputLabel,
+  Select
 } from "@mui/material";
 
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
@@ -55,6 +58,7 @@ export default function ReplacementManagement() {
 
   const [pendingSIC, setPendingSIC] = useState([]);
   const [halfDuty, setHalfDuty] = useState(false);
+  const [candidateFilter, setCandidateFilter] = useState("auto");
 
   useEffect(() => {
     fetchPendingLeaves();
@@ -94,13 +98,19 @@ export default function ReplacementManagement() {
   // OPEN REPLACEMENT
   // ===============================
 
+  const loadCandidates = async (leave, filterValue = candidateFilter) => {
+    const res = await api.get(`/replacement/candidates/${leave.id}`, {
+      params: { roleFilter: filterValue }
+    });
+    setCandidates(res.data || []);
+  };
+
   const openCandidateDialog = async (leave) => {
     try {
-      const res = await api.get(`/replacement/candidates/${leave.id}`);
-
-      setCandidates(res.data || []);
+      const defaultFilter = leave.isSIC ? "sic" : "shift_engineer";
+      setCandidateFilter(defaultFilter);
       setSelectedLeave(leave);
-
+      await loadCandidates(leave, defaultFilter);
       setSelectedCandidate(null);
       setSelectedSIC("");
 
@@ -109,6 +119,17 @@ export default function ReplacementManagement() {
     } catch (err) {
       console.error(err);
       alert("Failed to load candidates");
+    }
+  };
+
+  const handleCandidateFilterChange = async (value) => {
+    setCandidateFilter(value);
+    if (!selectedLeave) return;
+    try {
+      await loadCandidates(selectedLeave, value);
+    } catch (err) {
+      console.error(err);
+      alert("Failed to refresh candidates");
     }
   };
 
@@ -540,7 +561,25 @@ export default function ReplacementManagement() {
 
       <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} fullWidth maxWidth="lg">
 
-        <DialogTitle sx={{background: "linear-gradient(90deg,#4a148c,#7b1fa2)", color: "#fff"}}>  Smart Replacement Selection</DialogTitle>
+        <DialogTitle sx={{background: "linear-gradient(90deg,#4a148c,#7b1fa2)", color: "#fff"}}>Smart Replacement Selection</DialogTitle>
+        <DialogContent sx={{ pt: 2 }}>
+          <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: { xs: "stretch", md: "center" }, flexDirection: { xs: "column", md: "row" }, gap: 2, mb: 2 }}>
+            <Typography variant="body2" color="text.secondary">
+              Replacement candidates are matched from employee category. Filter the list if needed.
+            </Typography>
+            <FormControl size="small" sx={{ minWidth: 240 }}>
+              <InputLabel>Candidate filter</InputLabel>
+              <Select
+                value={candidateFilter}
+                label="Candidate filter"
+                onChange={(e) => handleCandidateFilterChange(e.target.value)}
+              >
+                <MenuItem value="all">All employee</MenuItem>
+                <MenuItem value="sic">Only SIC</MenuItem>
+                <MenuItem value="shift_engineer">Only Shift Engineer</MenuItem>
+              </Select>
+            </FormControl>
+          </Box>
 
           {/* SECTION 1 â€” Recommended */}
 
@@ -583,6 +622,7 @@ export default function ReplacementManagement() {
               </Grid>
             ))}
           </Grid>
+        </DialogContent>
 
 
         <DialogActions>

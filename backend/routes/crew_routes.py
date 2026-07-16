@@ -36,6 +36,17 @@ DEFAULT_INSTRUCTIONS = (
     "2. Control-room staff shall report in time for proper shift handover.\n"
     "3. The Shift In-Charge will assign responsibilities among team members."
 )
+DEFAULT_ROSTER_HEADER = {
+    "organizationHindi": "ग्रिड कंट्रोलर ऑफ इंडिया लिमिटेड (ग्रिड-इंडिया)",
+    "officeHindi": "पूर्वी क्षेत्रीय भार प्रेषण केंद्र, कोलकाता",
+    "organizationEnglish": "Grid Controller of India Limited (GRID-INDIA)",
+    "officeEnglish": "EASTERN REGIONAL LOAD DESPATCH CENTRE, KOLKATA",
+    "rosterTitle": "CONTROL ROOM SHIFT DUTY ROSTER",
+}
+
+
+def roster_header(value: dict | None) -> dict:
+    return {**DEFAULT_ROSTER_HEADER, **(value or {})}
 
 
 def oid(value: str) -> ObjectId:
@@ -235,6 +246,7 @@ def save_roster(payload: dict):
         "data": payload.get("data", []),
         "groupDetails": group_snapshot,
         "instructions": payload.get("instructions") or DEFAULT_INSTRUCTIONS,
+        "header": roster_header(payload.get("header")),
         "distribution": payload.get("distribution") or "",
         "signedBy": employee_snapshot(payload.get("signedBy")),
         "leaveAuthority": employee_snapshot(payload.get("leaveAuthority")),
@@ -279,6 +291,7 @@ def load_roster(roster_id: str):
         "id": str(doc["_id"]), "startDate": doc.get("startDate"), "endDate": doc.get("endDate"),
         "data": doc.get("data", []), "groupDetails": doc.get("groupDetails", []),
         "instructions": doc.get("instructions") or DEFAULT_INSTRUCTIONS,
+        "header": roster_header(doc.get("header")),
         "distribution": doc.get("distribution") or "", "signedBy": doc.get("signedBy") or {},
         "leaveAuthority": doc.get("leaveAuthority") or {}, "isFinal": doc.get("isFinal", False),
         "calendarPushed": doc.get("calendarPushed", False),

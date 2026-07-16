@@ -42,7 +42,7 @@ export default function CrewUserContext() {
         <Stack spacing={2.5}>
           <Paper elevation={0} sx={{ width: 58, height: 58, borderRadius: 4, display: "grid", placeItems: "center", background: "#ECFDF5", color: "#03624C" }}><UserCog size={28} /></Paper>
           <Autocomplete options={employees} value={selected} onChange={(_, value) => { setSelected(value); setSaved(false); }} getOptionLabel={(item) => `${item.name || item.employeeId} · ${item.designation || item.employeeId}`} isOptionEqualToValue={(option, value) => option.employeeId === value?.employeeId} renderInput={(params) => <TextField {...params} label="Employee" placeholder="Search by name or designation" />} />
-          <Alert severity="info">This selector is a compatibility mechanism, not authentication. When DHRUV login is implemented, its verified employee ID and role should replace this context.</Alert>
+          <Alert severity="info">This selector is a compatibility mechanism, not authentication. DRUPAd uses the verified employee ID and role from the authenticated session.</Alert>
           <Stack direction="row" spacing={1.5}><Button onClick={apply} disabled={!selected} variant="contained" sx={{ background: "#03624C", borderRadius: 3, textTransform: "none", fontWeight: 900 }}>Use this employee</Button><Button onClick={() => navigate("/crew/dashboard")} sx={{ borderRadius: 3, textTransform: "none", fontWeight: 900 }}>Open Crew dashboard</Button></Stack>
         </Stack>
       </GlassCard>

@@ -14,6 +14,7 @@ import {
 import AppShell from "../components/layout/AppShell";
 import CalendarInput from "../components/ui/CalendarInput";
 import API from "../services/api";
+import { CHART_GRID_PROPS, CHART_TOOLTIP_PROPS } from "../theme/chartTheme";
 
 const todayIso = () => new Date().toISOString().slice(0, 10);
 const addDays = (dateStr, days) => {
@@ -377,7 +378,7 @@ export default function PSPReportChecking() {
 
   return (
     <AppShell>
-      <div className="container-fluid theme-page-container" style={{ padding: "24px" }}>
+      <div className="container-fluid theme-page-container ui-kit-page" style={{ padding: "24px" }}>
         <div
           className="theme-glass-card position-relative overflow-hidden border-0 text-white mb-3"
           style={{
@@ -961,10 +962,11 @@ export default function PSPReportChecking() {
                     ) : (
                       <ResponsiveContainer width="100%" height="100%">
                         <LineChart data={shortageTrend.data} margin={{ top: 12, right: 20, left: 0, bottom: 8 }}>
-                          <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
+                          <CartesianGrid {...CHART_GRID_PROPS} />
                           <XAxis dataKey="date" tickFormatter={formatDate} tick={{ fontSize: 11 }} />
                           <YAxis tick={{ fontSize: 11 }} />
                           <Tooltip
+                            {...CHART_TOOLTIP_PROPS}
                             labelFormatter={formatDate}
                             formatter={(value, name) => [formatValue(value, name.includes("MU") ? "MU" : "MW"), name]}
                           />

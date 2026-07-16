@@ -4,11 +4,12 @@ import TopNavbar from "./TopNavbar";
 export default function AppShell({ children }) {
   return (
     <Box
+      className="ui-kit-app"
       sx={{
         minHeight: "100vh",
         boxSizing: "border-box",
         backgroundColor: "var(--bg-surface)",
-        p: 2.5,
+        p: { xs: 1.25, md: 2.5 },
         position: "relative",
         display: "flex",
         flexDirection: "column",
@@ -24,6 +25,7 @@ export default function AppShell({ children }) {
           display: "flex",
           flexDirection: "column",
           gap: 2.5,
+          width: "100%",
         }}
       >
         {children}

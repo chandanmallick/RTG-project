@@ -7,8 +7,10 @@ import {
 } from "react-router-dom";
 // import TableColumnSearchEnhancer from "./components/ui/TableColumnSearchEnhancer";
 import CrewLegacyShell from "./components/crew/CrewLegacyShell";
+import ProtectedRoute from "./auth/ProtectedRoute";
 
 const DatabaseSync = lazy(() => import("./pages/DatabaseSync"));
+const HomePage = lazy(() => import("./pages/HomePage"));
 const RTGDashboard = lazy(() => import("./pages/RTGDashboard"));
 const PSPDashboard = lazy(() => import("./pages/PSPDashboard"));
 const PSPAdmin = lazy(() => import("./pages/PSPAdmin"));
@@ -20,7 +22,6 @@ const OldLogbook = lazy(() => import("./pages/OldLogbook"));
 const CrewCalendar = lazy(() => import("./pages/crew/CrewCalendar"));
 const CrewDutyRoster = lazy(() => import("./pages/crew/CrewDutyRoster"));
 const CrewSetup = lazy(() => import("./pages/crew/CrewSetup"));
-const CrewUserContext = lazy(() => import("./pages/crew/CrewUserContext"));
 const CrewDashboard = lazy(() => import("./crewLegacy/Dashboard"));
 const CrewLeave = lazy(() => import("./crewLegacy/LeaveManagement"));
 const CrewReplacement = lazy(() => import("./crewLegacy/ReplacementManagement"));
@@ -30,8 +31,13 @@ const CrewDropdowns = lazy(() => import("./crewLegacy/dropdownmaster"));
 const CrewDutyLeaveTypes = lazy(() => import("./crewLegacy/DutyLeaveMaster"));
 const CrewShiftHistory = lazy(() => import("./crewLegacy/ShiftHistoryAdmin"));
 const CrewOrganization = lazy(() => import("./crewLegacy/DepartmentChart"));
+const CrewOrganizationMaster = lazy(() => import("./crewLegacy/OrganizationMaster"));
 const CrewProfile = lazy(() => import("./crewLegacy/Profile"));
 const CrewLoginAudit = lazy(() => import("./crewLegacy/AdminLoginHistory"));
+const Login = lazy(() => import("./pages/Login"));
+const UserAccessControl = lazy(() => import("./pages/UserAccessControl"));
+
+const protectedPage = (pageKey, element) => <ProtectedRoute pageKey={pageKey}>{element}</ProtectedRoute>;
 
 function PageLoader() {
   return (
@@ -58,58 +64,60 @@ export default function App() {
       <Suspense fallback={<PageLoader />}>
       <Routes>
 
+        <Route path="/login" element={<Login />} />
+
         <Route
           path="/"
           element={
-            <Navigate
-              to="/rtg-dashboard"
-            />
+            <ProtectedRoute pageKey="rtg_dashboard">
+              <HomePage />
+            </ProtectedRoute>
           }
         />
 
         <Route
           path="/database-sync"
-          element={<DatabaseSync />}
+          element={protectedPage("database_sync", <DatabaseSync />)}
         />
 
         <Route
           path="/rtg-dashboard"
-          element={<RTGDashboard />}
+          element={protectedPage("rtg_dashboard", <RTGDashboard />)}
         />
 
         <Route
           path="/psp-dashboard"
-          element={<PSPDashboard />}
+          element={protectedPage("psp_dashboard", <PSPDashboard />)}
         />
 
         <Route
           path="/psp-admin"
-          element={<PSPAdmin />}
+          element={protectedPage("psp_admin", <PSPAdmin />)}
         />
 
         <Route
           path="/psp-report-checking"
-          element={<PSPReportChecking />}
+          element={protectedPage("psp_report_checking", <PSPReportChecking />)}
         />
 
         <Route
           path="/frequency-report"
-          element={<FrequencyReport />}
+          element={protectedPage("frequency_report", <FrequencyReport />)}
         />
 
         <Route
           path="/mis-report"
-          element={<MISReport />}
+          element={protectedPage("mis_report", <MISReport />)}
         />
 
         <Route
           path="/outage-analysis"
-          element={<OutageAnalysis />}
+          element={protectedPage("outage_analysis", <OutageAnalysis />)}
         />
 
         <Route
           path="/old-logbook"
-          element={<OldLogbook />}
+          element={protectedPage("old_logbook", <OldLogbook />)}
         />
 
         <Route
@@ -119,31 +127,33 @@ export default function App() {
 
         <Route
           path="/crew/calendar"
-          element={<CrewCalendar />}
+          element={protectedPage("crew_calendar", <CrewCalendar />)}
         />
 
         <Route
           path="/crew/roster"
-          element={<CrewDutyRoster />}
+          element={protectedPage("crew_roster", <CrewDutyRoster />)}
         />
 
         <Route
           path="/crew/setup"
-          element={<CrewSetup />}
+          element={protectedPage("crew_setup", <CrewSetup />)}
         />
 
-        <Route path="/crew/user-context" element={<CrewUserContext />} />
-        <Route path="/crew/dashboard" element={<CrewLegacyShell><CrewDashboard /></CrewLegacyShell>} />
-        <Route path="/crew/leave" element={<CrewLegacyShell><CrewLeave /></CrewLegacyShell>} />
-        <Route path="/crew/replacement" element={<CrewLegacyShell><CrewReplacement /></CrewLegacyShell>} />
-        <Route path="/crew/training" element={<CrewLegacyShell><CrewTraining /></CrewLegacyShell>} />
-        <Route path="/crew/employees" element={<CrewLegacyShell><CrewEmployees /></CrewLegacyShell>} />
-        <Route path="/crew/dropdowns" element={<CrewLegacyShell><CrewDropdowns /></CrewLegacyShell>} />
-        <Route path="/crew/duty-leave-types" element={<CrewLegacyShell><CrewDutyLeaveTypes /></CrewLegacyShell>} />
-        <Route path="/crew/shift-history" element={<CrewLegacyShell><CrewShiftHistory /></CrewLegacyShell>} />
-        <Route path="/crew/organization" element={<CrewLegacyShell><CrewOrganization /></CrewLegacyShell>} />
-        <Route path="/crew/profile" element={<CrewLegacyShell><CrewProfile /></CrewLegacyShell>} />
-        <Route path="/crew/login-audit" element={<CrewLegacyShell><CrewLoginAudit /></CrewLegacyShell>} />
+        <Route path="/crew/user-context" element={<Navigate to="/admin/user-access" replace />} />
+        <Route path="/admin/user-access" element={protectedPage("user_access", <UserAccessControl />)} />
+        <Route path="/crew/dashboard" element={protectedPage("crew_dashboard", <CrewLegacyShell><CrewDashboard /></CrewLegacyShell>)} />
+        <Route path="/crew/leave" element={protectedPage("crew_leave", <CrewLegacyShell><CrewLeave /></CrewLegacyShell>)} />
+        <Route path="/crew/replacement" element={protectedPage("crew_replacement", <CrewLegacyShell><CrewReplacement /></CrewLegacyShell>)} />
+        <Route path="/crew/training" element={protectedPage("crew_training", <CrewLegacyShell><CrewTraining /></CrewLegacyShell>)} />
+        <Route path="/crew/employees" element={protectedPage("crew_employees", <CrewLegacyShell><CrewEmployees /></CrewLegacyShell>)} />
+        <Route path="/crew/dropdowns" element={protectedPage("crew_admin", <CrewLegacyShell><CrewDropdowns /></CrewLegacyShell>)} />
+        <Route path="/crew/duty-leave-types" element={protectedPage("crew_admin", <CrewLegacyShell><CrewDutyLeaveTypes /></CrewLegacyShell>)} />
+        <Route path="/crew/shift-history" element={protectedPage("crew_admin", <CrewLegacyShell><CrewShiftHistory /></CrewLegacyShell>)} />
+        <Route path="/crew/organization" element={protectedPage("crew_admin", <CrewLegacyShell><CrewOrganization /></CrewLegacyShell>)} />
+        <Route path="/crew/organization-master" element={protectedPage("crew_admin", <CrewLegacyShell><CrewOrganizationMaster /></CrewLegacyShell>)} />
+        <Route path="/crew/profile" element={protectedPage("profile", <CrewLegacyShell><CrewProfile /></CrewLegacyShell>)} />
+        <Route path="/crew/login-audit" element={protectedPage("crew_admin", <CrewLegacyShell><CrewLoginAudit /></CrewLegacyShell>)} />
         <Route path="/crew/*" element={<Navigate to="/crew/dashboard" replace />} />
 
       </Routes>

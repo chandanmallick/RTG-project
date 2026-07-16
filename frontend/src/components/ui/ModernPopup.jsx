@@ -49,15 +49,15 @@ const popupStyles = {
     icon: <InfoRoundedIcon />,
 
     gradient:
-      "linear-gradient(135deg,#147CFF,#0F6FDB)",
+      "linear-gradient(135deg,#08103A,#0057B7)",
 
-    glow: "rgba(15,111,219,0.2)",
+    glow: "rgba(0,87,183,0.2)",
 
     shadow:
-      "0 35px 80px rgba(15,111,219,0.2)",
+      "0 35px 80px rgba(0,87,183,0.2)",
 
     bgSoft:
-      "linear-gradient(180deg,#F8FBFF,#FFFFFF)",
+      "linear-gradient(180deg,#EAF1FB,#FFFFFF)",
   },
 
   warning: {
@@ -121,7 +121,7 @@ export const showModernPopup = ({
             backdropFilter: "blur(28px)",
 
             border:
-              "1px solid rgba(175, 196, 234, 0.72)",
+              "1px solid rgba(184, 204, 227, 0.72)",
 
             boxShadow: config.shadow,
 

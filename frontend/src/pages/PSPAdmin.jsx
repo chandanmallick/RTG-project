@@ -881,7 +881,7 @@ export default function PSPAdmin() {
 
   return (
     <AppShell>
-      <div className="container-fluid py-2 theme-page-container">
+      <div className="container-fluid py-2 theme-page-container ui-kit-page">
         {/* COMPACT TOP HEADER */}
         <div className="d-flex justify-content-between align-items-center mb-3 mt-2 flex-wrap gap-2">
           <div>

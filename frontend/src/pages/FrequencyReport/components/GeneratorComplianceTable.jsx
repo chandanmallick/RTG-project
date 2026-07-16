@@ -212,7 +212,7 @@ export default function GeneratorComplianceTable({
           style={{
             borderRadius: "14px",
             border: "1px solid rgba(175, 196, 234, 0.72)",
-            background: "linear-gradient(180deg, #F8FBFF 0%, #FFFFFF 56px)",
+            background: "linear-gradient(180deg, #E8F5F1 0%, #FFFFFF 56px)",
             boxShadow: "0 8px 22px rgba(15, 111, 219, 0.055)",
             padding: "40px",
             textAlign: "center",
@@ -243,7 +243,7 @@ export default function GeneratorComplianceTable({
                 style={{
                   fontSize: "0.82rem",
                   fontWeight: 800,
-                  color: "#0B55B8",
+                  color: "#03624C",
                   marginBottom: "8px",
                   display: "flex",
                   alignItems: "center",
@@ -266,7 +266,7 @@ export default function GeneratorComplianceTable({
                   borderRadius: "14px",
                   border: "1px solid rgba(175, 196, 234, 0.72)",
                   boxShadow: "0 8px 22px rgba(15, 111, 219, 0.055)",
-                  background: "linear-gradient(180deg, #F8FBFF 0%, #FFFFFF 56px)",
+                  background: "linear-gradient(180deg, #E8F5F1 0%, #FFFFFF 56px)",
                 }}
               >
                 <table
@@ -479,7 +479,7 @@ export default function GeneratorComplianceTable({
                                 "—"
                               )}
                             </td>
-                            <td style={{ padding: "8px 8px", textAlign: "center", fontSize: "0.72rem", color: msgCount > 0 ? "#0B55B8" : "#94A3B8", fontWeight: 800 }}>
+                            <td style={{ padding: "8px 8px", textAlign: "center", fontSize: "0.72rem", color: msgCount > 0 ? "#03624C" : "#94A3B8", fontWeight: 800 }}>
                               {msgCount}
                             </td>
                             <td style={{ padding: "4px 8px" }} onClick={(e) => e.stopPropagation()}>
@@ -521,7 +521,7 @@ export default function GeneratorComplianceTable({
                                       display: "flex",
                                       alignItems: "center",
                                       gap: "6px",
-                                      background: "linear-gradient(135deg, #147CFF 0%, #0F6FDB 100%)",
+                                      background: "linear-gradient(135deg, #022726 0%, #03624C 100%)",
                                       color: "#FFFFFF",
                                       border: "none",
                                       borderRadius: "6px",
@@ -533,17 +533,17 @@ export default function GeneratorComplianceTable({
                                       transition: "all 0.15s ease",
                                     }}
                                     onMouseEnter={(e) => {
-                                      e.currentTarget.style.background = "#0B55B8";
+                                      e.currentTarget.style.background = "#024C3B";
                                     }}
                                     onMouseLeave={(e) => {
-                                      e.currentTarget.style.background = "#0F6FDB";
+                                      e.currentTarget.style.background = "#03624C";
                                     }}
                                   >
                                     ⚙️ Edit Raw Database Data
                                   </button>
                                 </div>
                                 <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 224px", gap: "10px", alignItems: "stretch" }}>
-                                  <div style={{ minWidth: 0, background: "linear-gradient(180deg, #F8FBFF 0%, #FFFFFF 56px)", border: "1px solid rgba(175, 196, 234, 0.72)", borderRadius: "14px", padding: "4px 6px 0", boxShadow: "0 8px 22px rgba(15, 111, 219, 0.055)" }}>
+                                  <div style={{ minWidth: 0, background: "linear-gradient(180deg, #E8F5F1 0%, #FFFFFF 56px)", border: "1px solid rgba(184, 228, 211, 0.72)", borderRadius: "14px", padding: "4px 6px 0", boxShadow: "0 8px 22px rgba(3, 98, 76, 0.055)" }}>
                                     {row.series?.timestamps?.length > 0 ? (
                                       <>
                                         <ComplianceChart
@@ -595,7 +595,7 @@ export default function GeneratorComplianceTable({
                                         alignItems: "center",
                                         justifyContent: "center",
                                         gap: "5px",
-                                        background: "linear-gradient(135deg, #147CFF 0%, #0F6FDB 100%)",
+                                        background: "linear-gradient(135deg, #022726 0%, #03624C 100%)",
                                         color: "#FFFFFF",
                                         border: "none",
                                         borderRadius: "7px",
@@ -607,10 +607,10 @@ export default function GeneratorComplianceTable({
                                         transition: "all 0.15s ease",
                                       }}
                                       onMouseEnter={(e) => {
-                                        e.currentTarget.style.background = "#0B55B8";
+                                        e.currentTarget.style.background = "#024C3B";
                                       }}
                                       onMouseLeave={(e) => {
-                                        e.currentTarget.style.background = "#0F6FDB";
+                                        e.currentTarget.style.background = "#03624C";
                                       }}
                                     >
                                       Edit Raw Data
@@ -652,7 +652,7 @@ export default function GeneratorComplianceTable({
                       <td colSpan="11" style={{ padding: "9px 8px", textAlign: "right", fontSize: "0.72rem", fontWeight: 900, color: "#0F172A" }}>
                         Total CRMS Messages
                       </td>
-                      <td style={{ padding: "9px 8px", textAlign: "center", fontSize: "0.74rem", fontWeight: 900, color: groupMsgCount > 0 ? "#0B55B8" : "#94A3B8" }}>
+                      <td style={{ padding: "9px 8px", textAlign: "center", fontSize: "0.74rem", fontWeight: 900, color: groupMsgCount > 0 ? "#03624C" : "#94A3B8" }}>
                         {groupMsgCount}
                       </td>
                       <td />
@@ -665,7 +665,7 @@ export default function GeneratorComplianceTable({
         })
       )}
 
-      <div style={{ background: "linear-gradient(180deg, #F8FBFF 0%, #FFFFFF 56px)", padding: "16px", borderRadius: "14px", border: "1px solid rgba(175, 196, 234, 0.72)", boxShadow: "0 8px 22px rgba(15, 111, 219, 0.055)", marginTop: "16px" }}>
+      <div style={{ background: "linear-gradient(180deg, #E8F5F1 0%, #FFFFFF 56px)", padding: "16px", borderRadius: "14px", border: "1px solid rgba(184, 228, 211, 0.72)", boxShadow: "0 8px 22px rgba(3, 98, 76, 0.055)", marginTop: "16px" }}>
         <label style={{ fontSize: "0.78rem", fontWeight: 700, color: "#1E293B", display: "block", marginBottom: "6px" }}>
           Generator Compliance Notes
         </label>

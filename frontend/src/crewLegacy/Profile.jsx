@@ -1,7 +1,9 @@
 import React, { useEffect, useMemo, useState } from "react";
-import api, { BASE_URL } from "./api";
+import api from "./api";
+import { useAuth } from "../auth/AuthContext";
 
 import {
+  Alert,
   Avatar,
   Box,
   Button,
@@ -84,6 +86,7 @@ function MiniListCard({ title, items, emptyText, renderItem, action }) {
 }
 
 export default function Profile() {
+  const { refreshSession } = useAuth();
   const employeeId = currentEmployeeId();
   const [profile, setProfile] = useState({});
   const [photo, setPhoto] = useState(null);
@@ -102,9 +105,20 @@ export default function Profile() {
   const [loginHistory, setLoginHistory] = useState([]);
   const [timelineData, setTimelineData] = useState([]);
   const [openLogin, setOpenLogin] = useState(false);
+  const [savingProfile, setSavingProfile] = useState(false);
+  const [changingPassword, setChangingPassword] = useState(false);
+  const [editingProfile, setEditingProfile] = useState(false);
+  const [editingPassword, setEditingPassword] = useState(false);
+  const [profileBeforeEdit, setProfileBeforeEdit] = useState(null);
+  const [notice, setNotice] = useState(null);
+  const [passwordForm, setPasswordForm] = useState({
+    currentPassword: "",
+    newPassword: "",
+    confirmPassword: "",
+  });
 
   const localPhotoUrl = useMemo(() => (photo ? URL.createObjectURL(photo) : ""), [photo]);
-  const profileImage = localPhotoUrl || (profile.profilePhoto ? `${BASE_URL}${profile.profilePhoto}` : "");
+  const profileImage = localPhotoUrl || profile.profilePhoto || "";
 
   const dutyTotal = useMemo(() => dutyStats.reduce((sum, item) => sum + Number(item.count || 0), 0), [dutyStats]);
   const leaveTotal = useMemo(() => leaveStats.reduce((sum, item) => sum + Number(item.count || 0), 0), [leaveStats]);
@@ -112,7 +126,7 @@ export default function Profile() {
 
   const fetchProfile = async () => {
     if (!employeeId) return;
-    const res = await api.get(`/profile/profile/${employeeId}`);
+    const res = await api.get(`/profile/${employeeId}`);
     setProfile(res.data || {});
   };
 
@@ -190,34 +204,75 @@ export default function Profile() {
     try {
       const formData = new FormData();
       formData.append("employeeId", employeeId);
+      formData.append("name", profile.name || "");
       formData.append("nameHindi", profile.nameHindi || "");
+      formData.append("designation", profile.designation || "");
+      formData.append("designationHindi", profile.designationHindi || "");
       formData.append("phone", profile.phone || "");
+      formData.append("gmail", profile.gmail || profile.email || "");
       if (photo instanceof File) formData.append("photo", photo);
-      const res = await api.post("/profile/profile/update", formData, {
+      setSavingProfile(true);
+      const res = await api.post("/profile/update", formData, {
         headers: { "Content-Type": "multipart/form-data" },
       });
       setProfile(res.data || {});
+      setPhoto(null);
+      await refreshSession();
+      setNotice({ severity: "success", text: "Profile updated successfully." });
+      setEditingProfile(false);
+      setProfileBeforeEdit(null);
     } catch (error) {
       console.error(error);
-      alert("Update failed");
+      setNotice({ severity: "error", text: error.response?.data?.detail || "Update failed" });
+    } finally {
+      setSavingProfile(false);
     }
   };
 
-  const uploadPhoto = async (file) => {
-    if (!file) return;
-    setPhoto(file);
-    const formData = new FormData();
-    formData.append("employeeId", employeeId);
-    formData.append("photo", file);
-    await api.post("/profile/update", formData, { headers: { "Content-Type": "multipart/form-data" } });
-    await fetchProfile();
+  const handlePasswordChange = async () => {
+    try {
+      setChangingPassword(true);
+      const formData = new FormData();
+      formData.append("employeeId", employeeId);
+      formData.append("currentPassword", passwordForm.currentPassword || "");
+      formData.append("newPassword", passwordForm.newPassword || "");
+      formData.append("confirmPassword", passwordForm.confirmPassword || "");
+      await api.post("/profile/change-password", formData, {
+        headers: { "Content-Type": "multipart/form-data" },
+      });
+      setPasswordForm({ currentPassword: "", newPassword: "", confirmPassword: "" });
+      setNotice({ severity: "success", text: "Password changed successfully." });
+      setEditingPassword(false);
+    } catch (error) {
+      console.error(error);
+      setNotice({ severity: "error", text: error.response?.data?.detail || "Password change failed" });
+    } finally {
+      setChangingPassword(false);
+    }
+  };
+
+  const beginProfileEdit = () => {
+    setProfileBeforeEdit({ ...profile });
+    setEditingProfile(true);
+  };
+
+  const cancelProfileEdit = () => {
+    if (profileBeforeEdit) setProfile(profileBeforeEdit);
+    setPhoto(null);
+    setProfileBeforeEdit(null);
+    setEditingProfile(false);
+  };
+
+  const cancelPasswordEdit = () => {
+    setPasswordForm({ currentPassword: "", newPassword: "", confirmPassword: "" });
+    setEditingPassword(false);
   };
 
   return (
-    <Box sx={{ minHeight: "calc(100vh - 120px)", borderRadius: 6, background: "#EAF2FF", p: { xs: 1.5, md: 2.5 } }}>
+    <Box className="ui-kit-page ui-kit-profile" sx={{ minHeight: "calc(100vh - 120px)", borderRadius: 3, background: "#F8FAFC", p: { xs: 1.5, md: 2.5 } }}>
       <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", lg: "150px minmax(0,1fr) 230px" }, gap: 2.4 }}>
         <Paper elevation={0} sx={{ display: { xs: "none", lg: "flex" }, flexDirection: "column", minHeight: 620, borderRadius: 0, borderTopLeftRadius: 28, borderBottomLeftRadius: 28, background: "#5B55B2", color: "#FFFFFF", overflow: "hidden" }}>
-          <Box sx={{ px: 2.2, pt: 2.5, pb: 3, fontSize: 14, fontWeight: 950, letterSpacing: ".08em" }}>DHRUV</Box>
+          <Box sx={{ px: 2.2, pt: 2.5, pb: 3, fontSize: 22, fontWeight: 950, letterSpacing: "-.03em" }}>DRUPAd</Box>
           {["Profile", "Duty", "Leave", "Training", "C-OFF", "Login"].map((item, index) => (
             <Box key={item} sx={{ mx: 1.5, mb: 0.7, px: 1.3, py: 1, borderRadius: 999, background: index === 0 ? "#FFFFFF" : "transparent", color: index === 0 ? "#2F2B73" : "rgba(255,255,255,.86)", fontSize: 12, fontWeight: 900 }}>
               {item}
@@ -229,16 +284,23 @@ export default function Profile() {
         </Paper>
 
         <Box sx={{ display: "grid", gap: 2.4, minWidth: 0 }}>
+          {notice && (
+            <Alert severity={notice.severity} onClose={() => setNotice(null)}>
+              {notice.text}
+            </Alert>
+          )}
           <Paper elevation={0} sx={{ p: 2.6, borderRadius: 5, background: "#FFFFFF", boxShadow: "0 18px 45px rgba(72, 83, 140, 0.08)" }}>
             <Stack direction={{ xs: "column", md: "row" }} spacing={2.5} alignItems={{ xs: "flex-start", md: "center" }}>
               <Box sx={{ position: "relative" }}>
                 <Avatar src={profileImage} sx={{ width: 112, height: 112, background: "#EDE9FE", color: "#5B55B2", fontSize: 36, fontWeight: 950 }}>
                   {(profile.name || employeeId || "?").slice(0, 1)}
                 </Avatar>
-                <Button component="label" sx={{ position: "absolute", right: -8, bottom: -6, minWidth: 0, width: 38, height: 38, borderRadius: "50%", background: "#5B55B2", color: "#fff", "&:hover": { background: "#47409A" } }}>
-                  <Camera size={17} />
-                  <input hidden type="file" accept="image/*" onChange={(event) => uploadPhoto(event.target.files?.[0])} />
-                </Button>
+                {editingProfile && (
+                  <Button component="label" sx={{ position: "absolute", right: -8, bottom: -6, minWidth: 0, width: 38, height: 38, borderRadius: "50%", background: "#5B55B2", color: "#fff", "&:hover": { background: "#47409A" } }}>
+                    <Camera size={17} />
+                    <input hidden type="file" accept="image/*" onChange={(event) => setPhoto(event.target.files?.[0] || null)} />
+                  </Button>
+                )}
               </Box>
 
               <Box sx={{ flex: 1, minWidth: 0 }}>
@@ -247,24 +309,83 @@ export default function Profile() {
                     <Typography sx={{ fontSize: 22, fontWeight: 950, color: "#24213F" }}>{loadingProfile ? "Loading profile..." : profile.name || employeeId || "-"}</Typography>
                     <Typography sx={{ mt: 0.3, color: "#7B7F9E", fontSize: 13, fontWeight: 800 }}>{profile.designation || "Crew member"}</Typography>
                   </Box>
-                  <Chip icon={<ShieldCheck size={15} />} label={employeeId || "No ID"} sx={{ background: "#EEF2FF", color: "#4F46E5", fontWeight: 900 }} />
+                  <Stack direction="row" spacing={1} alignItems="center">
+                    <Chip icon={<ShieldCheck size={15} />} label={employeeId || "No ID"} sx={{ background: "#EEF2FF", color: "#4F46E5", fontWeight: 900 }} />
+                    {!editingProfile && <Button size="small" variant="outlined" onClick={beginProfileEdit} sx={{ textTransform: "none", fontWeight: 900 }}>Edit profile</Button>}
+                  </Stack>
                 </Stack>
 
-                <Stack spacing={1.1} mt={2}>
+                <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "repeat(2, minmax(0, 1fr))" }, gap: 1.1, mt: 2 }}>
                   <InfoLine icon={<CalendarDays size={15} />} label="Employee ID" value={profile.employeeId || profile.userId || employeeId} />
-                  <InfoLine icon={<Briefcase size={15} />} label="Department" value={profile.department || profile.vertical || "-"} />
-                  <InfoLine icon={<Mail size={15} />} label="Email" value={profile.email || "-"} />
+                  <InfoLine icon={<User size={15} />} label="Name (Hindi)" value={profile.nameHindi || "-"} />
+                  <InfoLine icon={<Briefcase size={15} />} label="Designation" value={profile.designation || "-"} />
+                  <InfoLine icon={<Briefcase size={15} />} label="Desig. (Hindi)" value={profile.designationHindi || "-"} />
+                  <InfoLine icon={<Mail size={15} />} label="Email" value={profile.gmail || profile.email || "-"} />
                   <InfoLine icon={<Phone size={15} />} label="Phone" value={profile.phone || "-"} />
-                </Stack>
+                </Box>
               </Box>
             </Stack>
 
-            <Divider sx={{ my: 2.3 }} />
-            <Stack direction={{ xs: "column", md: "row" }} spacing={1.5}>
-              <TextField size="small" label="Phone" value={profile.phone || ""} onChange={(event) => setProfile((current) => ({ ...current, phone: event.target.value }))} fullWidth />
-              <TextField size="small" label="Name (Hindi)" value={profile.nameHindi || ""} onChange={(event) => setProfile((current) => ({ ...current, nameHindi: event.target.value }))} fullWidth />
-              <Button onClick={handleSave} variant="contained" sx={{ borderRadius: 2.5, px: 3, background: "#5B55B2", fontWeight: 950, textTransform: "none" }}>Save</Button>
+            {editingProfile && <>
+              <Divider sx={{ my: 2.3 }} />
+              <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "repeat(2, minmax(0, 1fr))" }, gap: 1.5 }}>
+                <TextField size="small" label="Name" value={profile.name || ""} onChange={(event) => setProfile((current) => ({ ...current, name: event.target.value }))} fullWidth />
+                <TextField size="small" label="Name (Hindi)" value={profile.nameHindi || ""} onChange={(event) => setProfile((current) => ({ ...current, nameHindi: event.target.value }))} fullWidth />
+                <TextField size="small" label="Designation" value={profile.designation || ""} onChange={(event) => setProfile((current) => ({ ...current, designation: event.target.value }))} fullWidth />
+                <TextField size="small" label="Designation (Hindi)" value={profile.designationHindi || ""} onChange={(event) => setProfile((current) => ({ ...current, designationHindi: event.target.value }))} fullWidth />
+                <TextField size="small" label="Mobile no" value={profile.phone || ""} onChange={(event) => setProfile((current) => ({ ...current, phone: event.target.value }))} fullWidth />
+                <TextField size="small" label="Mail ID" value={profile.gmail || profile.email || ""} onChange={(event) => setProfile((current) => ({ ...current, gmail: event.target.value, email: event.target.value }))} fullWidth />
+              </Box>
+              <Stack direction="row" spacing={1.5} justifyContent="flex-end" mt={2}>
+                <Button onClick={cancelProfileEdit} disabled={savingProfile} sx={{ textTransform: "none", fontWeight: 900 }}>Cancel</Button>
+                <Button onClick={handleSave} disabled={savingProfile} variant="contained" sx={{ borderRadius: 2.5, px: 3, background: "#5B55B2", fontWeight: 950, textTransform: "none" }}>
+                  {savingProfile ? "Saving..." : "Save profile"}
+                </Button>
+              </Stack>
+            </>}
+          </Paper>
+
+          <Paper elevation={0} sx={{ p: 2.6, borderRadius: 5, background: "#FFFFFF", boxShadow: "0 18px 45px rgba(72, 83, 140, 0.08)" }}>
+            <Stack direction="row" alignItems="center" justifyContent="space-between" spacing={1} mb={editingPassword ? 1.5 : 0}>
+              <Stack direction="row" alignItems="center" spacing={1}>
+                <User size={18} color="#5B55B2" />
+                <Typography sx={{ fontSize: 16, color: "#24213F", fontWeight: 950 }}>Password</Typography>
+              </Stack>
+              {!editingPassword && <Button size="small" variant="outlined" onClick={() => setEditingPassword(true)} sx={{ textTransform: "none", fontWeight: 900 }}>Change password</Button>}
             </Stack>
+            {editingPassword && <><Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "repeat(3, minmax(0, 1fr))" }, gap: 1.5 }}>
+              <TextField
+                size="small"
+                type="password"
+                label="Current password"
+                value={passwordForm.currentPassword}
+                onChange={(event) => setPasswordForm((current) => ({ ...current, currentPassword: event.target.value }))}
+                fullWidth
+              />
+              <TextField
+                size="small"
+                type="password"
+                label="New password"
+                value={passwordForm.newPassword}
+                onChange={(event) => setPasswordForm((current) => ({ ...current, newPassword: event.target.value }))}
+                fullWidth
+              />
+              <TextField
+                size="small"
+                type="password"
+                label="Confirm password"
+                value={passwordForm.confirmPassword}
+                onChange={(event) => setPasswordForm((current) => ({ ...current, confirmPassword: event.target.value }))}
+                fullWidth
+              />
+            </Box>
+            <Stack direction="row" spacing={1.5} justifyContent="flex-end" mt={2}>
+              <Button onClick={cancelPasswordEdit} disabled={changingPassword} sx={{ textTransform: "none", fontWeight: 900 }}>Cancel</Button>
+              <Button onClick={handlePasswordChange} disabled={changingPassword} variant="contained" sx={{ borderRadius: 2.5, px: 3, background: "#24213F", fontWeight: 950, textTransform: "none" }}>
+                {changingPassword ? "Changing..." : "Change password"}
+              </Button>
+            </Stack>
+            </>}
           </Paper>
 
           <Paper elevation={0} sx={{ p: 2.4, borderRadius: 5, background: "#FFFFFF", boxShadow: "0 18px 45px rgba(72, 83, 140, 0.08)" }}>

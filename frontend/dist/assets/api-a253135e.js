@@ -1,1 +1,0 @@
-import{a}from"./axios-84503384.js";const r="/api",o=a.create({baseURL:`${r}/crew`});o.interceptors.request.use(e=>{const t=localStorage.getItem("crewEmployeeId")||localStorage.getItem("employeeId");return t&&(e.headers["X-Crew-Employee-ID"]=t),e});const c="",p=o;export{c as B,p as a};

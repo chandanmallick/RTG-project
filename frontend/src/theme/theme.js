@@ -3,15 +3,15 @@ import { createTheme } from "@mui/material/styles";
 const theme = createTheme({
   palette: {
     primary: {
-      main: "#0F6FDB",
+      main: "#0057B7",
     },
 
     secondary: {
-      main: "#2CC295",
+      main: "#0F6FDB",
     },
 
     background: {
-      default: "#F7FAFF",
+      default: "#F8FAFC",
       paper: "#FFFFFF",
     },
   },
@@ -20,9 +20,9 @@ const theme = createTheme({
     fontFamily: `"Inter", sans-serif`,
 
     h1: {
-      fontSize: "36px",
-      fontWeight: 800,
-      letterSpacing: "-0.04em",
+          fontSize: "36px",
+          fontWeight: 800,
+          letterSpacing: "-0.04em",
     },
 
     h2: {
@@ -41,18 +41,17 @@ const theme = createTheme({
   },
 
   shape: {
-    borderRadius: 18,
+      borderRadius: 12,
   },
 
   components: {
     MuiPaper: {
       styleOverrides: {
         root: {
-          borderRadius: 16,
-          border: "1px solid rgba(175, 196, 234, 0.72)",
-          background:
-            "linear-gradient(180deg, #F8FBFF 0%, #FFFFFF 56px)",
-          boxShadow: "0 12px 30px rgba(15, 111, 219, 0.07)",
+          borderRadius: 12,
+          border: "1px solid #E2E8F0",
+          background: "#FFFFFF",
+          boxShadow: "0 4px 14px rgba(15, 23, 42, 0.04)",
         },
       },
     },
@@ -60,11 +59,10 @@ const theme = createTheme({
     MuiCard: {
       styleOverrides: {
         root: {
-          borderRadius: 16,
-          border: "1px solid rgba(175, 196, 234, 0.72)",
-          background:
-            "linear-gradient(180deg, #F8FBFF 0%, #FFFFFF 56px)",
-          boxShadow: "0 12px 30px rgba(15, 111, 219, 0.07)",
+          borderRadius: 12,
+          border: "1px solid #E2E8F0",
+          background: "#FFFFFF",
+          boxShadow: "0 4px 14px rgba(15, 23, 42, 0.04)",
         },
       },
     },
@@ -72,7 +70,7 @@ const theme = createTheme({
     MuiButton: {
       styleOverrides: {
         root: {
-          borderRadius: 14,
+          borderRadius: 8,
           textTransform: "none",
           fontWeight: 700,
         },
@@ -82,7 +80,7 @@ const theme = createTheme({
     MuiOutlinedInput: {
       styleOverrides: {
         root: {
-          borderRadius: 12,
+          borderRadius: 8,
           background:
             "#FFFFFF",
         },
@@ -93,13 +91,12 @@ const theme = createTheme({
       styleOverrides: {
         root: {
           borderRadius:
-            "16px !important",
+            "12px !important",
 
           overflow: "hidden",
-          border: "1px solid rgba(175, 196, 234, 0.72)",
-          background:
-            "linear-gradient(180deg, #F8FBFF 0%, #FFFFFF 56px)",
-          boxShadow: "0 12px 30px rgba(15, 111, 219, 0.07)",
+          border: "1px solid #E2E8F0",
+          background: "#FFFFFF",
+          boxShadow: "0 4px 14px rgba(15, 23, 42, 0.04)",
 
           "&:before": {
             display: "none",
@@ -112,8 +109,8 @@ const theme = createTheme({
       styleOverrides: {
         head: {
           fontWeight: 800,
-          color: "#0B55B8",
-          backgroundColor: "#EAF1FF",
+          color: "#0057B7",
+          backgroundColor: "#F1F5F9",
         },
       },
     },
@@ -123,9 +120,9 @@ const theme = createTheme({
         root: {
           minHeight: 44,
           padding: 4,
-          border: "1px solid rgba(175, 196, 234, 0.82)",
-          borderRadius: "15px 15px 11px 11px",
-          background: "linear-gradient(135deg, #EEF5FF 0%, #F8FBFF 100%)",
+          border: "1px solid #E2E8F0",
+          borderRadius: 10,
+          background: "#F8FAFC",
         },
         indicator: {
           display: "none",
@@ -137,14 +134,14 @@ const theme = createTheme({
       styleOverrides: {
         root: {
           minHeight: 34,
-          borderRadius: 11,
-          color: "#0B55B8",
+          borderRadius: 8,
+          color: "#0057B7",
           fontWeight: 700,
           textTransform: "none",
           "&.Mui-selected": {
             color: "#FFFFFF",
-            background: "linear-gradient(135deg, #147CFF 0%, #0F6FDB 100%)",
-            boxShadow: "0 8px 18px rgba(15, 111, 219, 0.22)",
+            background: "#0057B7",
+            boxShadow: "0 4px 10px rgba(0, 87, 183, 0.18)",
           },
         },
       },

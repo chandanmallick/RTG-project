@@ -9,6 +9,7 @@ import { Toaster } from "react-hot-toast";
 import App from "./App";
 
 import theme from "./theme/theme";
+import { AuthProvider } from "./auth/AuthContext";
 
 import "bootstrap/dist/css/bootstrap.min.css";
 import "./index.css";
@@ -82,9 +83,11 @@ ReactDOM.createRoot(
     <ThemeProvider theme={theme}>
       <CssBaseline />
 
-      <AppErrorBoundary>
-        <App />
-      </AppErrorBoundary>
+      <AuthProvider>
+        <AppErrorBoundary>
+          <App />
+        </AppErrorBoundary>
+      </AuthProvider>
 
       <Toaster
         position="top-center"

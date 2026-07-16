@@ -21,6 +21,19 @@ from crew_legacy.database.database_mongo import (
 
 router = APIRouter()
 
+
+def normalized_categories(value):
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item).strip()]
+    if value in [None, ""]:
+        return []
+    return [str(value).strip()]
+
+
+def category_matches(category_value, keyword: str) -> bool:
+    target = str(keyword or "").strip().lower()
+    return any(target in item.lower() for item in normalized_categories(category_value))
+
 def calculate_expiry(earned_date_str):
     from datetime import datetime
 
@@ -121,7 +134,11 @@ from datetime import datetime, timedelta
 # =========================================================
 
 @router.get("/candidates/{leave_id}")
-def replacement_candidates(leave_id: str, user=Depends(get_current_user)):
+def replacement_candidates(
+    leave_id: str,
+    roleFilter: str = Query("auto"),
+    user=Depends(get_current_user),
+):
 
     check_replacement_access(user)
 
@@ -156,17 +173,19 @@ def replacement_candidates(leave_id: str, user=Depends(get_current_user)):
         if not candidate_id:
             continue
 
-        category = (c.get("category") or "").lower()
+        category = normalized_categories(c.get("category"))
 
         # ==========================================
         # ROLE FILTER (SIC / SHIFT ENGINEER)
         # ==========================================
-        if is_sic:
-            if "sic" not in category:
-                continue
-        else:
-            if "shift engineer" not in category:
-                continue
+        effective_role_filter = (roleFilter or "auto").strip().lower()
+        if effective_role_filter == "auto":
+            effective_role_filter = "sic" if is_sic else "shift_engineer"
+
+        if effective_role_filter == "sic" and not category_matches(category, "sic"):
+            continue
+        if effective_role_filter == "shift_engineer" and not category_matches(category, "shift engineer"):
+            continue
 
         # ==========================================
         # SKIP IF ON LEAVE
@@ -228,7 +247,7 @@ def replacement_candidates(leave_id: str, user=Depends(get_current_user)):
             "employeeId": candidate_id,
             "name": c.get("name"),
             "designation": c.get("designation"),
-            "category": c.get("category"),
+            "category": category,
 
             "replacementCount90Days": replacement_count,
             "denialCount90Days": denial_count,

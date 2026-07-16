@@ -48,6 +48,37 @@ def calculate_expiry(date_str):
 def get_emp_id(obj):
     return (obj.get("employeeId") or obj.get("id") or "").strip()
 
+
+def enrich_authority_snapshot(authority: dict | None):
+    if not authority:
+        return None
+
+    employee_id = (
+        authority.get("employeeId")
+        or authority.get("userId")
+        or authority.get("id")
+        or ""
+    ).strip()
+
+    lookup = {}
+    if employee_id:
+        lookup = employee_collection.find_one({
+            "$or": [
+                {"employeeId": employee_id},
+                {"userId": employee_id},
+            ]
+        }) or {}
+    elif authority.get("name"):
+        lookup = employee_collection.find_one({"name": authority.get("name")}) or {}
+
+    return {
+        "employeeId": employee_id or lookup.get("employeeId") or lookup.get("userId") or "",
+        "name": authority.get("name") or lookup.get("name") or "",
+        "nameHindi": authority.get("nameHindi") or lookup.get("nameHindi") or "",
+        "designation": authority.get("designation") or lookup.get("designation") or "",
+        "designationHindi": authority.get("designationHindi") or lookup.get("designationHindi") or "",
+    }
+
 # =====================================================
 # CYCLE SETUP
 # =====================================================
@@ -289,6 +320,17 @@ def generate_roster(data: dict):
 # SAVE ROSTER
 # =====================================================
 DEFAULT_INSTRUCTIONS = "1.  Shift Timing: Morning Shift (08:30-14:30hrs), Evening Shift (14:30-20:30hrs), Night Shift (20:30-08:30hrs [Next day]). 2. Shri Debashis Mondal, Shri Akash Kumar Modi, Shri Sumanta Sadhukhan & Shri SSK Suman shall report to Control Room 15 minutes before the commencement of shift duty to note the salient status of the Grid from the previous shift and may leave 15 minutes before the scheduled time. 3. Shift In Charge of a group will assign different responsibilities to his team members. Every Shift-in-charge shall nominate one person from his sub-ordinates to look after the RTSD work."
+DEFAULT_ROSTER_HEADER = {
+    "organizationHindi": "ग्रिड कंट्रोलर ऑफ इंडिया लिमिटेड (ग्रिड-इंडिया)",
+    "officeHindi": "पूर्वी क्षेत्रीय भार प्रेषण केंद्र, कोलकाता",
+    "organizationEnglish": "Grid Controller of India Limited (GRID-INDIA)",
+    "officeEnglish": "EASTERN REGIONAL LOAD DESPATCH CENTRE, KOLKATA",
+    "rosterTitle": "CONTROL ROOM SHIFT DUTY ROSTER",
+}
+
+
+def roster_header(value: dict | None) -> dict:
+    return {**DEFAULT_ROSTER_HEADER, **(value or {})}
 
 @router.post("/saveroster")
 def save_roster(data: dict):
@@ -306,7 +348,7 @@ def save_roster(data: dict):
     leave_auth_raw = data.get("leaveAuthority") or {}
 
     leave_authority_snapshot = {
-        "employeeId": leave_auth_raw.get("employeeId"),
+        "employeeId": leave_auth_raw.get("employeeId") or leave_auth_raw.get("userId") or leave_auth_raw.get("id"),
         "name": leave_auth_raw.get("name"),
         "designation": leave_auth_raw.get("designation")
     }
@@ -343,7 +385,7 @@ def save_roster(data: dict):
     signed = data.get("signedBy") or {}
 
     signed_snapshot = {
-        "employeeId": signed.get("employeeId"),
+        "employeeId": signed.get("employeeId") or signed.get("userId") or signed.get("id"),
         "name": signed.get("name"),
         "nameHindi": signed.get("nameHindi"),
         "designation": signed.get("designation"),
@@ -356,6 +398,7 @@ def save_roster(data: dict):
         "data": data.get("data", []),
         "groupDetails": group_snapshot,
         "instructions": instructions,
+        "header": roster_header(data.get("header")),
         "signedBy": signed_snapshot,
         "leaveAuthority": leave_authority_snapshot,   # âœ… FIXED
         "signedOn": datetime.utcnow() if is_final else None,
@@ -409,10 +452,13 @@ def load_roster(roster_id: str):
         "data": roster["data"],
         "groupDetails": roster.get("groupDetails", []),
         "instructions": roster.get("instructions"),
-        "signedBy": roster.get("signedBy"),
-        "leaveAuthority": roster.get("leaveAuthority"),   # âœ… ADDED
+        "header": roster_header(roster.get("header")),
+        "distribution": roster.get("distribution", ""),
+        "signedBy": enrich_authority_snapshot(roster.get("signedBy")),
+        "leaveAuthority": enrich_authority_snapshot(roster.get("leaveAuthority")),
         "signedOn": roster.get("signedOn"),
-        "isFinal": roster.get("isFinal", False)
+        "isFinal": roster.get("isFinal", False),
+        "calendarPushed": roster.get("calendarPushed", False)
     }
 
 
@@ -456,6 +502,23 @@ def download_roster_pdf(data: dict):
 
     signed_raw = data.get("signedBy")
 
+    def lookup_employee_snapshot(source):
+        if not source:
+            return {}
+        candidate_ids = [source.get("employeeId"), source.get("userId"), source.get("id")]
+        candidate_ids = [str(value).strip() for value in candidate_ids if value]
+        query = {"$or": []}
+        for value in candidate_ids:
+            query["$or"].append({"employeeId": value})
+            query["$or"].append({"userId": value})
+            query["$or"].append({"name": value})
+        if not query["$or"] and source.get("name"):
+            query["$or"].append({"name": source.get("name")})
+        if not query["$or"]:
+            return {}
+        found = employee_collection.find_one(query)
+        return found or {}
+
     # Default values
     sign_name_english = ""
     sign_name_hindi = ""
@@ -465,20 +528,24 @@ def download_roster_pdf(data: dict):
 
     # If signedBy is full object (new structure)
     if isinstance(signed_raw, dict):
+        resolved = lookup_employee_snapshot(signed_raw)
 
-        sign_name_english = signed_raw.get("name", "")
-        sign_name_hindi = signed_raw.get("nameHindi", "")
-        sign_designation = signed_raw.get("designation", "")
-        sign_designation_hindi = signed_raw.get("designationHindi", "")
-        sign_employee_id = signed_raw.get("employeeId", "")
+        sign_name_english = signed_raw.get("name") or resolved.get("name", "")
+        sign_name_hindi = signed_raw.get("nameHindi") or resolved.get("nameHindi", "")
+        sign_designation = signed_raw.get("designation") or resolved.get("designation", "")
+        sign_designation_hindi = signed_raw.get("designationHindi") or resolved.get("designationHindi", "")
+        sign_employee_id = signed_raw.get("employeeId") or signed_raw.get("userId") or signed_raw.get("id") or resolved.get("employeeId") or resolved.get("userId") or ""
 
     # If signedBy is old string format (legacy support)
     elif isinstance(signed_raw, str):
+        resolved = lookup_employee_snapshot({"name": signed_raw})
+        sign_name_english = resolved.get("name") or signed_raw
+        sign_name_hindi = resolved.get("nameHindi", "")
+        sign_designation = resolved.get("designation", "")
+        sign_designation_hindi = resolved.get("designationHindi", "")
+        sign_employee_id = resolved.get("employeeId") or resolved.get("userId") or ""
 
-        sign_name_english = signed_raw
-        # others remain blank
-
-    # If None or anything else â†’ keep default empty values
+    # If None or anything else -> keep default empty values
 
     if not roster_data:
         raise Exception("Roster data missing")
@@ -547,6 +614,7 @@ def download_roster_pdf(data: dict):
         distribution=data.get("distribution", "").replace("\n", "<br>"),
         dates=dates,
         generated_on=datetime.now().strftime("%d-%m-%Y %H:%M"),
+        header=roster_header(data.get("header") or (roster or {}).get("header")),
         sign_name_english=sign_name_english,
         sign_name_hindi=sign_name_hindi,
         sign_designation=sign_designation,
@@ -993,9 +1061,14 @@ def push_roster_to_calendar(roster_id: str):
             coff_doc = {
                 "employeeId": employee_id,
                 "date": date_str,
+                "earnedDate": date_str,
+                "expiryDate": f"{int(date_str[:4]) + 1}-03-31",
+                "status": "Available",
+                "reason": "Duty performed on roster holiday",
                 "type": "C-OFF",
                 "createdOn": datetime.utcnow(),
-                "rosterId": str(object_id)
+                "rosterId": str(object_id),
+                "reference": {"type": "Roster", "rosterId": str(object_id)},
             }
 
             compensatory_off_collection.update_one(
@@ -1006,6 +1079,23 @@ def push_roster_to_calendar(roster_id: str):
                 },
                 {"$setOnInsert": coff_doc},
                 upsert=True
+            )
+            compensatory_off_collection.update_one(
+                {
+                    "employeeId": employee_id,
+                    "date": date_str,
+                    "type": "C-OFF",
+                    "status": {"$exists": False},
+                },
+                {
+                    "$set": {
+                        "earnedDate": date_str,
+                        "expiryDate": f"{int(date_str[:4]) + 1}-03-31",
+                        "status": "Available",
+                        "reason": "Duty performed on roster holiday",
+                        "reference": {"type": "Roster", "rosterId": str(object_id)},
+                    }
+                },
             )
 
     # ==========================================
@@ -1251,6 +1341,28 @@ def get_calendar_view(
 ################# Departmental
 
 
+def _org_list(value):
+    if isinstance(value, list):
+        items = value
+    elif value in [None, ""]:
+        return []
+    else:
+        items = str(value).split(",")
+    return list(dict.fromkeys(
+        str(item).strip() for item in items if str(item).strip()
+    ))
+
+
+def _employee_verticals(employee):
+    return _org_list(employee.get("verticals") or employee.get("vertical")) or ["Others"]
+
+
+def _employee_reporting_ids(employee):
+    return _org_list(
+        employee.get("reportingOfficerIds") or employee.get("reportingOfficerId")
+    )
+
+
 @router.get("/employees/org-structure")
 def get_org_structure():
 
@@ -1259,117 +1371,133 @@ def get_org_structure():
     structure = {}
 
     # Helper map for name lookup
-    emp_map = {e["userId"]: e for e in employees}
+    emp_map = {e.get("userId"): e for e in employees if e.get("userId")}
 
     for emp in employees:
 
-        vertical = emp.get("vertical") or "Others"
         dept = emp.get("department") or "General"
-        interm_id = emp.get("intermediaryReportingId")
+        reporting_ids = _employee_reporting_ids(emp)
 
-        # Get intermediary name
-        interm_name = None
-        if interm_id and interm_id in emp_map:
-            interm_name = emp_map[interm_id].get("name")
+        officer_names = [
+            emp_map[officer_id].get("name")
+            for officer_id in reporting_ids
+            if officer_id in emp_map
+        ] or ["Direct"]
 
-        # =============================
-        # BUILD STRUCTURE
-        # =============================
-
-        if vertical not in structure:
-            structure[vertical] = {}
-
-        # Case 1: With intermediary
-        if interm_name:
-
-            if interm_name not in structure[vertical]:
-                structure[vertical][interm_name] = {}
-
-            if dept not in structure[vertical][interm_name]:
-                structure[vertical][interm_name][dept] = []
-
-            structure[vertical][interm_name][dept].append({
-                "name": emp.get("name"),
-                "designation": emp.get("designation"),
-                "userId": emp.get("userId")
-            })
-
-        # Case 2: No intermediary
-        else:
-
-            if "Direct" not in structure[vertical]:
-                structure[vertical]["Direct"] = {}
-
-            if dept not in structure[vertical]["Direct"]:
-                structure[vertical]["Direct"][dept] = []
-
-            structure[vertical]["Direct"][dept].append({
-                "name": emp.get("name"),
-                "designation": emp.get("designation"),
-                "userId": emp.get("userId")
-            })
+        for vertical in _employee_verticals(emp):
+            vertical_group = structure.setdefault(vertical, {})
+            for officer_name in officer_names:
+                department_group = vertical_group.setdefault(officer_name, {})
+                department_group.setdefault(dept, []).append({
+                    "name": emp.get("name"),
+                    "designation": emp.get("designation"),
+                    "userId": emp.get("userId"),
+                    "reportingOfficerIds": reporting_ids,
+                })
 
     return structure
 
 
 @router.get("/employees/org-tree")
-def get_org_tree():
+def get_org_tree(vertical: str | None = Query(default=None)):
 
     employees = list(employee_collection.find({}))
+    employees = [employee for employee in employees if employee.get("userId")]
+    available_verticals = sorted({
+        name for employee in employees for name in _employee_verticals(employee)
+    })
+    selected_verticals = [vertical] if vertical else available_verticals
 
-    emp_map = {e["userId"]: e for e in employees}
-
-    # Prepare children mapping
-    tree_map = {}
-
-    for emp in employees:
-        parent = emp.get("reportingOfficerId")
-
-        if parent:
-            tree_map.setdefault(parent, []).append(emp)
-        else:
-            tree_map.setdefault("ROOT", []).append(emp)
-
-    # Recursive builder
-    def build_node(emp):
-
+    def person_node(employee, children_map, path):
+        employee_id = employee.get("userId")
+        if employee_id in path:
+            return None
+        child_path = {*path, employee_id}
+        children = [
+            person_node(child, children_map, child_path)
+            for child in children_map.get(employee_id, [])
+        ]
         return {
             "expanded": True,
             "type": "person",
             "data": {
-                "name": emp.get("name"),
-                "title": emp.get("designation"),
-                "image": emp.get("profilePhoto")
+                "userId": employee_id,
+                "name": employee.get("name") or employee_id,
+                "title": employee.get("designation") or "",
+                "department": employee.get("department") or "General",
+                "verticals": _employee_verticals(employee),
+                "reportingOfficerIds": _employee_reporting_ids(employee),
+                "image": employee.get("profilePhoto"),
             },
-            "children": [
-                build_node(child)
-                for child in tree_map.get(emp.get("userId"), [])
-            ]
+            "children": [child for child in children if child],
         }
 
-    # Find top-level (ED level)
-    roots = tree_map.get("ROOT", [])
+    result = []
+    for vertical_name in selected_verticals:
+        members = [
+            employee for employee in employees
+            if vertical_name in _employee_verticals(employee)
+        ]
+        member_ids = {employee.get("userId") for employee in members}
+        children_map = defaultdict(list)
+        roots = []
 
-    return [build_node(r) for r in roots]
+        for employee in members:
+            applicable_parents = [
+                officer_id for officer_id in _employee_reporting_ids(employee)
+                if officer_id in member_ids and officer_id != employee.get("userId")
+            ]
+            if applicable_parents:
+                for officer_id in applicable_parents:
+                    children_map[officer_id].append(employee)
+            else:
+                roots.append(employee)
+
+        # Bad legacy data can contain a closed reporting cycle. Keep the chart
+        # usable and let the recursive path guard stop the loop.
+        if members and not roots:
+            roots = members
+
+        roots.sort(key=lambda item: (item.get("name") or "").lower())
+        result.append({
+            "expanded": True,
+            "type": "vertical",
+            "data": {
+                "name": vertical_name,
+                "title": f"{len(members)} employee{'s' if len(members) != 1 else ''}",
+            },
+            "children": [person_node(root, children_map, set()) for root in roots],
+        })
+
+    return result
 
 
 
-######## Previous roster@router.get("/roster/previous-final")
+######## Previous published roster
+@router.get("/previous-final")
 def get_previous_final_roster():
 
     roster = roster_master_collection.find_one(
-        {"isFinal": True},
+        {"isFinal": True, "calendarPushed": True},
         sort=[("createdOn", -1)]
     )
+
+    # Older final rosters may pre-date the explicit publish flag.
+    if not roster:
+        roster = roster_master_collection.find_one(
+            {"isFinal": True},
+            sort=[("createdOn", -1)]
+        )
 
     if not roster:
         return {}
 
     return {
         "instructions": roster.get("instructions", ""),
+        "header": roster_header(roster.get("header")),
         "distribution": roster.get("distribution", ""),
-        "signedBy": roster.get("signedBy"),
-        "leaveAuthority": roster.get("leaveAuthority")
+        "signedBy": enrich_authority_snapshot(roster.get("signedBy")),
+        "leaveAuthority": enrich_authority_snapshot(roster.get("leaveAuthority"))
     }
 
 
@@ -1592,4 +1720,5 @@ def update_shift_record(record_id: str, data: dict):
     )
 
     return {"message": "Updated successfully"}
+
 

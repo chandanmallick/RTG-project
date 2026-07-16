@@ -18,15 +18,15 @@ export default function GradientButton({
     success: "var(--gradient-green)",
     error: "linear-gradient(135deg,#DC2626 0%,#F87171 100%)",
     dark: "linear-gradient(135deg,#111827 0%,#374151 100%)",
-    info: "linear-gradient(135deg,#4F8CFF 0%,#0B55B8 100%)",
+    info: "linear-gradient(135deg,#08103A 0%,#0057B7 100%)",
   };
 
   const shadows = {
-    primary: "0 12px 24px rgba(13, 87, 183, 0.25)",
+    primary: "0 12px 24px rgba(0, 87, 183, 0.25)",
     success: "0 12px 24px rgba(0, 180, 97, 0.25)",
     error: "0 12px 24px rgba(220,38,38,0.22)",
     dark: "0 12px 24px rgba(17,24,39,0.20)",
-    info: "0 12px 24px rgba(13, 87, 183, 0.2)",
+    info: "0 12px 24px rgba(0, 87, 183, 0.2)",
   };
 
   // Base styles based on variant
@@ -43,14 +43,14 @@ export default function GradientButton({
     hoverBg = "rgba(255,255,255,0.22)";
   } else if (variant === "primary") {
     bg = "var(--deep-navy)";
-    shadow = "0 4px 14px rgba(11, 48, 42, 0.2)";
+    shadow = "0 4px 14px rgba(0, 87, 183, 0.2)";
     hoverBg = "var(--grid-blue)";
   } else if (variant === "secondary") {
     bg = "transparent";
     textColor = "var(--grid-blue)";
     border = "1.5px solid var(--border-color)";
     shadow = "none";
-    hoverBg = "rgba(13, 87, 183, 0.05)";
+    hoverBg = "rgba(0, 87, 183, 0.05)";
   } else if (variant === "tertiary") {
     bg = "transparent";
     textColor = "var(--grid-blue)";

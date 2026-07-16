@@ -16,7 +16,17 @@ import {
   MenuItem,
   TablePagination,
   Switch,
-  FormControlLabel
+  FormControlLabel,
+  FormControl,
+  InputLabel,
+  Select,
+  OutlinedInput,
+  Chip,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  Stack
 } from "@mui/material";
 
 
@@ -32,12 +42,13 @@ export default function EmployeeMaster() {
     phone: "",
     gmail: "",
     dutyType: "",
-    category: "",
+    category: [],
 
-    // ðŸ”¥ NEW
-    vertical: "",
+    // Organization hierarchy
+    verticals: [],
     department: "",
-    reportingOfficerId: "",
+    reportingOfficerIds: [],
+    functionIds: [],
     intermediaryReportingId: "",
     hodId: ""
   });
@@ -49,6 +60,8 @@ export default function EmployeeMaster() {
   const [groupLeaveRule, setGroupLeaveRule] = useState(false);
   const [verticals, setVerticals] = useState([]);
   const [departments, setDepartments] = useState([]);
+  const [organizationUnits, setOrganizationUnits] = useState([]);
+  const [formOpen, setFormOpen] = useState(false);
 
   // ðŸ”Ž Search
   const [searchText, setSearchText] = useState("");
@@ -107,11 +120,13 @@ export default function EmployeeMaster() {
     const catRes = await api.get(`/admin/dropdown/category`);
     const verticalRes = await api.get(`/admin/dropdown/vertical`);
     const deptRes = await api.get(`/admin/dropdown/department`);
+    const orgRes = await api.get(`/admin/organization/units`);
 
     setDutyTypes(dutyRes.data);
     setCategories(catRes.data);
     setVerticals(verticalRes.data);
     setDepartments(deptRes.data);
+    setOrganizationUnits(orgRes.data || []);
   };
 
   useEffect(() => {
@@ -119,6 +134,31 @@ export default function EmployeeMaster() {
     fetchDropdowns();
     fetchLeaveRule();
   }, []);
+
+  const normalizeListValue = (value) => {
+    if (Array.isArray(value)) return value.filter(Boolean);
+    if (!value) return [];
+    return String(value).split(",").map((item) => item.trim()).filter(Boolean);
+  };
+
+  const emptyForm = {
+    name: "",
+    nameHindi: "",
+    designation: "",
+    designationHindi: "",
+    userId: "",
+    password: "",
+    phone: "",
+    gmail: "",
+    dutyType: "",
+    category: [],
+    verticals: [],
+    department: "",
+    reportingOfficerIds: [],
+    functionIds: [],
+    intermediaryReportingId: "",
+    hodId: ""
+  };
 
   const handleChange = (e) => {
     setFormData({
@@ -138,28 +178,34 @@ export default function EmployeeMaster() {
 
     fetchEmployees();
 
-    setFormData({
-      name: "",
-      nameHindi: "",
-      designation: "",
-      designationHindi: "",
-      userId: "",
-      password: "",
-      phone: "",
-      gmail: "",
-      dutyType: "",
-      category: "",
-      vertical: "",
-      department: "",
-      reportingOfficerId: "",
-      intermediaryReportingId: "",
-      hodId: ""
-    });
+    setFormData(emptyForm);
+    setFormOpen(false);
+  };
+
+  const openNewEmployeeForm = () => {
+    setEditId(null);
+    setFormData(emptyForm);
+    setFormOpen(true);
   };
 
   const handleEdit = (employee) => {
-    setFormData(employee);
+    setFormData({
+      ...employee,
+      category: normalizeListValue(employee.category),
+      verticals: normalizeListValue(employee.verticals || employee.vertical),
+      reportingOfficerIds: normalizeListValue(
+        employee.reportingOfficerIds || employee.reportingOfficerId
+      ),
+      functionIds: normalizeListValue(employee.functionIds)
+    });
     setEditId(employee.id);
+    setFormOpen(true);
+  };
+
+  const closeForm = () => {
+    setFormOpen(false);
+    setEditId(null);
+    setFormData(emptyForm);
   };
 
   // ðŸ”„ Sort Handler
@@ -231,134 +277,193 @@ export default function EmployeeMaster() {
             </Button>
           </Grid>
 
+          <Grid item>
+            <Button variant="contained" color="success" onClick={openNewEmployeeForm}>
+              Add Employee
+            </Button>
+          </Grid>
+
         </Grid>
 
       </Paper>
 
-      {/* -------- Entry Form -------- */}
-      <Paper sx={{ p: 3, mb: 4 }}>
-        <Grid container spacing={2}>
-          <Grid item xs={12} md={4}>
-            <TextField label="Name" name="name" fullWidth value={formData.name} onChange={handleChange} />
-          </Grid>
+      <Paper sx={{ p: 2.5, mb: 4, background: "#F8FBFF", border: "1px solid #D9E6F2" }}>
+        <Stack direction={{ xs: "column", md: "row" }} spacing={1.5} alignItems={{ md: "center" }} justifyContent="space-between">
+          <Box>
+            <Typography sx={{ fontSize: 18, fontWeight: 800, color: "#0F172A" }}>
+              Employee master form
+            </Typography>
+            <Typography sx={{ fontSize: 13, color: "#64748B" }}>
+              Open the popup form to add or edit employee details in a two-column layout.
+            </Typography>
+          </Box>
+          <Button variant="outlined" onClick={editId ? () => setFormOpen(true) : openNewEmployeeForm}>
+            {editId ? "Continue Editing" : "Open Form"}
+          </Button>
+        </Stack>
+      </Paper>
 
-          <Grid item xs={12} md={4}>
-            <TextField label="Name (Hindi)" name="nameHindi" fullWidth value={formData.nameHindi} onChange={handleChange} />
-          </Grid>
+      <Dialog open={formOpen} onClose={closeForm} fullWidth maxWidth="lg">
+        <DialogTitle sx={{ pb: 1.5 }}>
+          {editId ? "Update Employee" : "Add Employee"}
+        </DialogTitle>
+        <DialogContent dividers sx={{ px: 3, py: 2.5 }}>
+          <Box
+            sx={{
+              display: "grid",
+              gridTemplateColumns: { xs: "1fr", md: "repeat(2, minmax(0, 1fr))" },
+              gap: 2,
+            }}
+          >
+            <TextField size="small" label="Name" name="name" fullWidth InputLabelProps={{ shrink: true }} value={formData.name} onChange={handleChange} />
+            <TextField size="small" label="Name (Hindi)" name="nameHindi" fullWidth InputLabelProps={{ shrink: true }} value={formData.nameHindi} onChange={handleChange} />
+            <TextField size="small" label="Designation" name="designation" fullWidth InputLabelProps={{ shrink: true }} value={formData.designation} onChange={handleChange} />
+            <TextField size="small" label="Designation (Hindi)" name="designationHindi" fullWidth InputLabelProps={{ shrink: true }} value={formData.designationHindi} onChange={handleChange} />
+            <TextField size="small" label="User ID" name="userId" fullWidth InputLabelProps={{ shrink: true }} value={formData.userId} onChange={handleChange} />
+            <TextField size="small" label="Password" type="password" name="password" fullWidth InputLabelProps={{ shrink: true }} value={formData.password} onChange={handleChange} />
+            <TextField size="small" label="Phone" name="phone" fullWidth InputLabelProps={{ shrink: true }} value={formData.phone} onChange={handleChange} />
+            <TextField size="small" label="Gmail" name="gmail" fullWidth InputLabelProps={{ shrink: true }} value={formData.gmail} onChange={handleChange} />
 
-          <Grid item xs={12} md={4}>
-            <TextField label="Designation" name="designation" fullWidth value={formData.designation} onChange={handleChange} />
-          </Grid>
-
-          <Grid item xs={12} md={4}>
-            <TextField label="Designation (Hindi)" name="designationHindi" fullWidth value={formData.designationHindi} onChange={handleChange}/>
-          </Grid>
-
-          <Grid item xs={12} md={4}>
-            <TextField label="User ID" name="userId" fullWidth value={formData.userId} onChange={handleChange} />
-          </Grid>
-
-          <Grid item xs={12} md={4}>
-            <TextField label="Password" type="password" name="password" fullWidth value={formData.password} onChange={handleChange} />
-          </Grid>
-
-          <Grid item xs={12} md={4}>
-            <TextField label="Phone" name="phone" fullWidth value={formData.phone} onChange={handleChange} />
-          </Grid>
-
-          <Grid item xs={12} md={4}>
-            <TextField label="Gmail" name="gmail" fullWidth value={formData.gmail} onChange={handleChange} />
-          </Grid>
-
-          <Grid item xs={12} md={4}>
-            <TextField select label="Type of Duty" name="dutyType" fullWidth value={formData.dutyType} onChange={handleChange}>
+            <TextField size="small" select label="Type of Duty" name="dutyType" fullWidth InputLabelProps={{ shrink: true }} value={formData.dutyType} onChange={handleChange}>
               {dutyTypes.map((item) => (
                 <MenuItem key={item.id} value={item.value}>
                   {item.value}
                 </MenuItem>
               ))}
             </TextField>
-          </Grid>
 
-          <Grid item xs={12} md={4}>
-            <TextField select label="Category" name="category" fullWidth value={formData.category} onChange={handleChange}>
-              {categories.map((item) => (
+            <FormControl size="small" fullWidth>
+              <InputLabel shrink>Category</InputLabel>
+              <Select
+                multiple
+                notched
+                name="category"
+                value={normalizeListValue(formData.category)}
+                onChange={handleChange}
+                input={<OutlinedInput label="Category" />}
+                renderValue={(selected) => (
+                  <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.5 }}>
+                    {selected.map((value) => <Chip key={value} label={value} size="small" />)}
+                  </Box>
+                )}
+              >
+                {categories.map((item) => (
+                  <MenuItem key={item.id} value={item.value}>
+                    {item.value}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+
+            <FormControl size="small" fullWidth>
+              <InputLabel shrink>Vertical(s)</InputLabel>
+              <Select
+                multiple
+                notched
+                name="verticals"
+                value={normalizeListValue(formData.verticals || formData.vertical)}
+                onChange={handleChange}
+                input={<OutlinedInput label="Vertical(s)" />}
+                renderValue={(selected) => (
+                  <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.5 }}>
+                    {selected.map((value) => <Chip key={value} label={value} size="small" />)}
+                  </Box>
+                )}
+              >
+                {verticals.map((item) => (
+                  <MenuItem key={item.id} value={item.value}>{item.value}</MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+
+            <TextField size="small" select label="Department" name="department" fullWidth InputLabelProps={{ shrink: true }} value={formData.department} onChange={handleChange}>
+              {departments.map((item) => (
                 <MenuItem key={item.id} value={item.value}>
                   {item.value}
                 </MenuItem>
               ))}
             </TextField>
-          </Grid>
 
-          <Grid item xs={12} md={4}>
-            <TextField select label="Vertical" name="vertical" fullWidth value={formData.vertical} onChange={handleChange}>
-              {verticals.map(item => (
-                <MenuItem key={item.id} value={item.value}>
-                  {item.value}
-                </MenuItem>
-              ))}
-            </TextField>
-          </Grid>
+            <FormControl size="small" fullWidth>
+              <InputLabel shrink>Function(s)</InputLabel>
+              <Select
+                multiple
+                notched
+                name="functionIds"
+                value={normalizeListValue(formData.functionIds)}
+                onChange={handleChange}
+                input={<OutlinedInput label="Function(s)" />}
+                renderValue={(selected) => (
+                  <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.5 }}>
+                    {selected.map((unitId) => {
+                      const unit = organizationUnits.find((item) => item.id === unitId);
+                      return <Chip key={unitId} label={unit?.name || unitId} size="small" />;
+                    })}
+                  </Box>
+                )}
+              >
+                {organizationUnits
+                  .filter((item) => item.unitType === "function" && item.isActive !== false)
+                  .map((item) => (
+                    <MenuItem key={item.id} value={item.id}>
+                      {item.name}{item.parentName ? ` — ${item.parentName}` : ""}
+                    </MenuItem>
+                  ))}
+              </Select>
+            </FormControl>
 
+            <FormControl size="small" fullWidth>
+              <InputLabel shrink>Reporting Officer(s)</InputLabel>
+              <Select
+                multiple
+                notched
+                name="reportingOfficerIds"
+                value={normalizeListValue(formData.reportingOfficerIds || formData.reportingOfficerId)}
+                onChange={handleChange}
+                input={<OutlinedInput label="Reporting Officer(s)" />}
+                renderValue={(selected) => (
+                  <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.5 }}>
+                    {selected.map((employeeId) => {
+                      const officer = employees.find((item) => item.userId === employeeId);
+                      return <Chip key={employeeId} label={officer?.name || employeeId} size="small" />;
+                    })}
+                  </Box>
+                )}
+              >
+                {employees
+                  .filter((emp) => emp.userId !== formData.userId)
+                  .map((emp) => (
+                    <MenuItem key={emp.id} value={emp.userId}>
+                      {emp.name} ({emp.userId})
+                    </MenuItem>
+                  ))}
+              </Select>
+            </FormControl>
 
-          <Grid item xs={12} md={4}>
-            <TextField select label="Department" name="department" fullWidth value={formData.department} onChange={handleChange}>
-              {departments.map(item => (
-                <MenuItem key={item.id} value={item.value}>
-                  {item.value}
-                </MenuItem>
-              ))}
-            </TextField>
-          </Grid>
-
-          <Grid item xs={12} md={4}>
-            <TextField select label="Reporting Officer" name="reportingOfficerId" fullWidth value={formData.reportingOfficerId} onChange={handleChange}>
-              {employees.map(emp => (
+            <TextField size="small" select label="Intermediary Reporting" name="intermediaryReportingId" fullWidth InputLabelProps={{ shrink: true }} value={formData.intermediaryReportingId || formData.intermediaryReportingName} onChange={handleChange}>
+              {employees.map((emp) => (
                 <MenuItem key={emp.id} value={emp.userId}>
                   {emp.name}
                 </MenuItem>
               ))}
             </TextField>
-          </Grid>
 
-
-          <Grid item xs={12} md={4}>
-            <TextField select label="Reporting Officer" name="reportingOfficerId" fullWidth value={formData.reportingOfficerId || formData.reportingOfficerName} onChange={handleChange}>
-              {employees.map(emp => (
+            <TextField size="small" select label="HOD" name="hodId" fullWidth InputLabelProps={{ shrink: true }} value={formData.hodId || formData.hodName} onChange={handleChange}>
+              {employees.map((emp) => (
                 <MenuItem key={emp.id} value={emp.userId}>
                   {emp.name}
                 </MenuItem>
               ))}
             </TextField>
-          </Grid>
-
-          <Grid item xs={12} md={4}>
-            <TextField select label="Intermediary Reporting" name="intermediaryReportingId" fullWidth value={formData.intermediaryReportingName  || formData.intermediaryReportingId} onChange={handleChange}>
-              {employees.map(emp => (
-                <MenuItem key={emp.id} value={emp.userId}>
-                  {emp.name}
-                </MenuItem>
-              ))}
-            </TextField>
-          </Grid>
-
-          <Grid item xs={12} md={4}>
-            <TextField select label="HOD" name="hodId" fullWidth value={formData.hodName  || formData.hodId} onChange={handleChange}>
-              {employees.map(emp => (
-                <MenuItem key={emp.id} value={emp.userId}>
-                  {emp.name}
-                </MenuItem>
-              ))}
-            </TextField>
-          </Grid>
-
-          <Grid item xs={12}>
-            <Button variant="contained" onClick={handleSubmit}>
-              {editId ? "Update Employee" : "Add Employee"}
-            </Button>
-          </Grid>
-        </Grid>
-      </Paper>
+          </Box>
+        </DialogContent>
+        <DialogActions sx={{ px: 3, py: 2 }}>
+          <Button onClick={closeForm}>Cancel</Button>
+          <Button variant="contained" onClick={handleSubmit}>
+            {editId ? "Update Employee" : "Add Employee"}
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       {/* -------- Leave rule toggle -------- */}
 
@@ -401,12 +506,15 @@ export default function EmployeeMaster() {
               <TableCell><strong>Duty Type</strong></TableCell>
               <TableCell><strong>Phone No</strong></TableCell>
               <TableCell><strong>Category</strong></TableCell>
+              <TableCell><strong>Vertical(s)</strong></TableCell>
+              <TableCell><strong>Reporting Officer(s)</strong></TableCell>
+              <TableCell><strong>Function(s)</strong></TableCell>
               <TableCell><strong>Action</strong></TableCell>
             </TableRow>
 
             {/* ðŸ”Ž Search Row */}
             <TableRow>
-              <TableCell colSpan={7}>
+              <TableCell colSpan={12}>
                 <TextField
                   fullWidth
                   size="small"
@@ -431,7 +539,10 @@ export default function EmployeeMaster() {
                 <TableCell>{emp.userId}</TableCell>
                 <TableCell>{emp.dutyType}</TableCell>
                 <TableCell>{emp.phone}</TableCell>
-                <TableCell>{emp.category}</TableCell>
+                <TableCell>{normalizeListValue(emp.category).join(", ") || "-"}</TableCell>
+                <TableCell>{normalizeListValue(emp.verticals || emp.vertical).join(", ") || "-"}</TableCell>
+                <TableCell>{normalizeListValue(emp.reportingOfficerNames || emp.reportingOfficerName).join(", ") || "-"}</TableCell>
+                <TableCell>{normalizeListValue(emp.functionNames).join(", ") || "-"}</TableCell>
                 <TableCell>
                   <Button onClick={() => handleEdit(emp)}>Edit</Button>
                 </TableCell>

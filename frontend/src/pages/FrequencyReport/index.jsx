@@ -172,6 +172,33 @@ const mapCrmsMessagesToRows = (baseRows = [], messages = []) => {
   });
 };
 
+const mapCrmsTransmissionToRows = (baseRows = [], events = []) => baseRows.map((row) => {
+  const aliasTokens = rowCrmsAliasTokens(row);
+  const matched = (events || []).filter((event) => {
+    const ownerTokens = [
+      ...(event.owners || []),
+      event.owner,
+      event.agency_name,
+    ].map(normalizeCrmsToken).filter(Boolean);
+    return ownerTokens.some((token) => aliasTokens.has(token));
+  });
+  return {
+    ...row,
+    transmission_line_events: matched,
+    transmission_line_event_count: matched.length,
+  };
+});
+
+const uniqueCrmsItems = (items = [], keyBuilder) => {
+  const seen = new Set();
+  return items.filter((item) => {
+    const key = keyBuilder(item);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+};
+
 const rowCrmsMessageCount = (row = {}) =>
   Number.isFinite(Number(row.crms_message_count))
     ? Number(row.crms_message_count)
@@ -377,6 +404,7 @@ export default function FrequencyReport() {
   const [mapData, setMapData] = useState([]);
   const [mapLoading, setMapLoading] = useState(false);
   const [crmsMessages, setCrmsMessages] = useState([]);
+  const [transmissionLineEvents, setTransmissionLineEvents] = useState([]);
   const [crmsStatus, setCrmsStatus] = useState({ loading: false, error: "", fetched: false });
 
   // RTG Portal Status
@@ -560,6 +588,10 @@ export default function FrequencyReport() {
     }
 
     const saveToast = toast.loading("Saving event...");
+    const rowsWithMarkers = mapCrmsTransmissionToRows(
+      mapCrmsMessagesToRows(rows, crmsMessages),
+      transmissionLineEvents,
+    );
     try {
       const res = await API.createFrequencyEvent({
         name,
@@ -574,7 +606,7 @@ export default function FrequencyReport() {
           generator_observation: generatorObservation,
         },
         details: eventDetails,
-        data_points: rows.map((row) => ({
+        data_points: rowsWithMarkers.map((row) => ({
           plant_id: row.plant_id,
           plant_name: row.plant_name,
           stage_id: row.stage_id || row.STAGE_ID || "",
@@ -604,6 +636,8 @@ export default function FrequencyReport() {
             avg_capacity_on_bar_pct: row.avg_capacity_on_bar_pct,
             statistics: row.statistics || {},
           },
+          crms_messages: row.crms_messages || [],
+          transmission_line_events: row.transmission_line_events || [],
         })),
       });
       if (res?.success) {
@@ -617,7 +651,7 @@ export default function FrequencyReport() {
       console.error(e);
       toast.error("Could not save event: " + e.message, { id: saveToast });
     }
-  }, [endTime, eventDurationName, eventNameDraft, eventType, genDesc, introDesc, loadAvailableDates, rows, startTime, stateDesc]);
+  }, [crmsMessages, endTime, eventDurationName, eventNameDraft, eventType, genDesc, generatorObservation, introDesc, loadAvailableDates, rows, startTime, stateDesc, stateObservation, transmissionLineEvents]);
 
   const handleDeleteEvent = useCallback(async (eventId) => {
     if (!eventId) return;
@@ -1132,25 +1166,45 @@ export default function FrequencyReport() {
     setEventNameDraft(eventDurationName());
   };
 
-  const loadCrmsMessages = useCallback(async (rangeStart = startTime, rangeEnd = endTime) => {
+  const loadCrmsMessages = useCallback(async (rangeStart = startTime, rangeEnd = endTime, fallbackRows = []) => {
     if (!rangeStart || !rangeEnd) return [];
     setCrmsStatus({ loading: true, error: "", fetched: false });
+    const fallbackMessages = uniqueCrmsItems(
+      fallbackRows.flatMap((row) => row.crms_messages || []),
+      (item) => `${item.message_no || ""}|${item.timestamp || item.message_date || ""}`,
+    );
+    const fallbackTransmission = uniqueCrmsItems(
+      fallbackRows.flatMap((row) => row.transmission_line_events || []),
+      (item) => `${item.line_name || ""}|${item.timestamp || ""}|${(item.owners || []).join(",")}`,
+    );
+    if (fallbackRows.length) {
+      setCrmsMessages(fallbackMessages);
+      setTransmissionLineEvents(fallbackTransmission);
+    }
     try {
-      const res = await API.getFrequencyCrmsMessages(rangeStart, rangeEnd);
-      if (!res?.success) {
-        const message = res?.error || "CRMS messages could not be loaded.";
-        setCrmsMessages([]);
-        setCrmsStatus({ loading: false, error: message, fetched: true });
-        toast.error(message);
-        return [];
-      }
-      const nextMessages = Array.isArray(res.messages) ? res.messages : [];
+      const [messageResult, lineResult] = await Promise.allSettled([
+        API.getFrequencyCrmsMessages(rangeStart, rangeEnd),
+        API.getFrequencyCrmsTransmissionLines(rangeStart, rangeEnd),
+      ]);
+      const messageResponse = messageResult.status === "fulfilled" ? messageResult.value : null;
+      const lineResponse = lineResult.status === "fulfilled" ? lineResult.value : null;
+      const nextMessages = messageResponse?.success && Array.isArray(messageResponse.messages)
+        ? messageResponse.messages : fallbackMessages;
+      const nextTransmission = lineResponse?.success && Array.isArray(lineResponse.events)
+        ? lineResponse.events : fallbackTransmission;
       setCrmsMessages(nextMessages);
-      setCrmsStatus({ loading: false, error: "", fetched: true });
+      setTransmissionLineEvents(nextTransmission);
+      const errors = [
+        !messageResponse?.success ? (messageResponse?.error || "Violation messages unavailable") : "",
+        !lineResponse?.success ? (lineResponse?.error || "Transmission-line events unavailable") : "",
+      ].filter(Boolean);
+      setCrmsStatus({ loading: false, error: errors.join("; "), fetched: true });
+      if (errors.length && !fallbackMessages.length && !fallbackTransmission.length) toast.error(errors.join("; "));
       return nextMessages;
     } catch (error) {
       const message = error?.message || "CRMS messages could not be loaded.";
-      setCrmsMessages([]);
+      setCrmsMessages(fallbackMessages);
+      setTransmissionLineEvents(fallbackTransmission);
       setCrmsStatus({ loading: false, error: message, fetched: true });
       toast.error(message);
       return [];
@@ -1226,7 +1280,7 @@ export default function FrequencyReport() {
               setStateObservation(result.report_notes.state_observation || result.report_notes.auto_state_observation || "");
               setGeneratorObservation(result.report_notes.generator_observation || result.report_notes.auto_generator_observation || "");
             }
-            loadCrmsMessages(startTime, endTime);
+            loadCrmsMessages(startTime, endTime, normalizedRows);
             if (result.event_type) {
               setEventType(result.event_type);
             }
@@ -1509,6 +1563,7 @@ export default function FrequencyReport() {
           dc: row.series?.dc || [],
         },
         crms_messages: row.crms_messages || [],
+        transmission_line_events: row.transmission_line_events || [],
       }));
 
     const payload = JSON.stringify({
@@ -1614,6 +1669,7 @@ export default function FrequencyReport() {
       return parts[0] && parts[1] ? parts[0] + ":" + parts[1] + " hrs" : raw;
     };
     const messageSymbol = "path://M4 4h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H9l-5 4v-4H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z";
+    const towerSymbol = "path://M11 1h2l1.4 5H18v2h-3l1 4H20v2h-3.4L19 23h-3l-.8-3H8.8L8 23H5l2.4-9H4v-2h4l1-4H6V6h3.6L11 1zm-.4 7-1 4h4.8l-1-4h-2.8zm-1.5 6-1 4h5.8l-1-4H9.1z";
     const nearestMarkerData = (row, devs, actuals) => {
       const timestamps = row.series.timestamps || [];
       const parsed = timestamps.map(parseTs);
@@ -1659,6 +1715,26 @@ export default function FrequencyReport() {
         z: 20,
       }));
     };
+    const transmissionMarkers = (row, devs) => {
+      const timestamps = row.series.timestamps || [];
+      const parsed = timestamps.map(parseTs);
+      const first = parsed.find(Boolean);
+      const last = [...parsed].reverse().find(Boolean);
+      if (!first || !last) return [];
+      return (row.transmission_line_events || []).map((event, idx) => {
+        const mt = parseTs(event.timestamp || event.outage_date_time);
+        if (!mt || mt < first || mt > last) return null;
+        let nearest = -1;
+        let diff = Infinity;
+        parsed.forEach((ts, i) => {
+          if (!ts) return;
+          const d = Math.abs(ts.getTime() - mt.getTime());
+          if (d < diff) { diff = d; nearest = i; }
+        });
+        if (nearest < 0) return null;
+        return { value: [timestamps[nearest], (devs[nearest] ?? 0) + ((idx % 4) - 1.5) * 8], transmission: event };
+      }).filter(Boolean);
+    };
     const crmsHtml = (message) => {
       const category = crmsCategory(message);
       const color = crmsColor(message);
@@ -1668,6 +1744,16 @@ export default function FrequencyReport() {
       if (message.message_no) html += '<div><span style="color:#64748B">Message no:</span> ' + esc(message.message_no) + '</div>';
       if (message.issued_by) html += '<div><span style="color:#64748B">Issued by:</span> ' + esc(message.issued_by) + '</div>';
       if (message.remarks) html += '<div style="margin-top:4px;color:#334155;font-weight:800">' + esc(message.remarks) + '</div>';
+      html += '</div>';
+      return html;
+    };
+    const transmissionHtml = (event) => {
+      let html = '<div style="font-size:16px;line-height:1.4;min-width:300px">';
+      html += '<div style="font-weight:900;color:#0057B7;margin-bottom:4px">Transmission Line — Physical Regulation</div>';
+      html += '<div style="font-weight:900">' + esc(event.line_name || 'Transmission line') + '</div>';
+      html += '<div><span style="color:#64748B">Time:</span> ' + esc(event.timestamp || event.outage_date_time || '-') + '</div>';
+      if (event.owners?.length) html += '<div><span style="color:#64748B">Owner(s):</span> ' + esc(event.owners.join(', ')) + '</div>';
+      if (event.agency_name) html += '<div><span style="color:#64748B">Agency:</span> ' + esc(event.agency_name) + '</div>';
       html += '</div>';
       return html;
     };
@@ -1737,6 +1823,13 @@ export default function FrequencyReport() {
       const freqLineColor = row.is_state ? "#7C3AED" : "#1D4ED8";
       const markers = nearestMarkerData(row, dev, actual);
       const markerSeries = markerSeriesByCategory(markers);
+      const lineMarkers = transmissionMarkers(row, dev);
+      const lineSeries = lineMarkers.length ? [{
+        name: "Physical Regulation — Transmission Line", type: "scatter", data: lineMarkers,
+        yAxisIndex: 0, symbol: towerSymbol, symbolSize: 32,
+        itemStyle: { color: "#0057B7", borderColor: "#fff", borderWidth: 2 },
+        tooltip: { trigger: "item", formatter: (p) => transmissionHtml(p.data?.transmission || {}) }, z: 22,
+      }] : [];
       return {
         animation: false,
         tooltip: {
@@ -1753,6 +1846,10 @@ export default function FrequencyReport() {
             list.forEach((p) => {
               if (p.data?.crms) {
                 html += '<div style="margin-top:7px;padding-top:7px;border-top:1px solid #CBD5E1">' + crmsHtml(p.data.crms) + '</div>';
+                return;
+              }
+              if (p.data?.transmission) {
+                html += '<div style="margin-top:7px;padding-top:7px;border-top:1px solid #CBD5E1">' + transmissionHtml(p.data.transmission) + '</div>';
                 return;
               }
               const val = Array.isArray(p.value) ? p.value[1] : p.value;
@@ -1784,6 +1881,7 @@ export default function FrequencyReport() {
             "Deviation (MW)",
             "Frequency (Hz)",
             ...markerSeries.map((series) => ({ name: series.name, icon: messageSymbol })),
+            ...(lineSeries.length ? [{ name: "Physical Regulation — Transmission Line", icon: towerSymbol }] : []),
           ],
         },
         grid: { top: GRID_TOP, left: 72, right: 76, bottom: GRID_BOTTOM },
@@ -1799,6 +1897,7 @@ export default function FrequencyReport() {
           { name: "Deviation (MW)", type: "line", data: dev, yAxisIndex: 0, symbol: "none", lineStyle: { width: 3.2, color: row.is_state ? "#059669" : "#DC2626" }, itemStyle: { color: row.is_state ? "#059669" : "#DC2626" } },
           { name: "Frequency (Hz)", type: "line", data: freq, yAxisIndex: 1, symbol: "none", lineStyle: { width: 2.8, color: freqLineColor }, itemStyle: { color: freqLineColor }, markLine: { silent: true, symbol: "none", data: [{ yAxis: threshold }], lineStyle: { color: "#EF4444", type: "dashed", width: 1.4 }, label: { formatter: threshold + " Hz", color: "#DC2626", fontSize: SMALL_FONT, fontWeight: 900 } } },
           ...markerSeries,
+          ...lineSeries,
         ],
       };
     };
@@ -2015,8 +2114,11 @@ export default function FrequencyReport() {
   };
 
   const rowsWithCrmsMessages = useMemo(() => {
-    return mapCrmsMessagesToRows(rows, crmsMessages);
-  }, [rows, crmsMessages]);
+    return mapCrmsTransmissionToRows(
+      mapCrmsMessagesToRows(rows, crmsMessages),
+      transmissionLineEvents,
+    );
+  }, [rows, crmsMessages, transmissionLineEvents]);
 
   const crmsMappedCount = useMemo(() => {
     return rowsWithCrmsMessages.reduce((sum, row) => sum + (row.crms_messages?.length || 0), 0);
@@ -2474,8 +2576,8 @@ export default function FrequencyReport() {
           gap: "8px",
           marginBottom: "16px",
           padding: "6px",
-          background: "linear-gradient(135deg, #EEF5FF 0%, #F8FBFF 100%)",
-          border: "1px solid rgba(175, 196, 234, 0.82)",
+          background: "linear-gradient(135deg, #E8F5F1 0%, #F8FCFA 100%)",
+          border: "1px solid rgba(184, 228, 211, 0.82)",
           borderRadius: "15px 15px 11px 11px",
         }}
       >
@@ -2491,15 +2593,15 @@ export default function FrequencyReport() {
                 alignItems: "center",
                 gap: "8px",
                 padding: "9px 18px",
-                border: active ? "1px solid #0F6FDB" : "1px solid transparent",
+                border: active ? "1px solid #03624C" : "1px solid transparent",
                 borderRadius: "11px",
-                background: active ? "linear-gradient(135deg, #147CFF 0%, #0F6FDB 100%)" : "rgba(255, 255, 255, 0.78)",
+                background: active ? "linear-gradient(135deg, #022726 0%, #03624C 100%)" : "rgba(255, 255, 255, 0.78)",
                 fontWeight: active ? 800 : 600,
                 fontSize: "0.84rem",
-                color: active ? "#FFFFFF" : "#0B55B8",
+                color: active ? "#FFFFFF" : "#03624C",
                 cursor: "pointer",
                 transition: "all 0.15s ease",
-                boxShadow: active ? "0 8px 18px rgba(15, 111, 219, 0.22)" : "none",
+                boxShadow: active ? "0 8px 18px rgba(3, 98, 76, 0.22)" : "none",
               }}
             >
               <Icon size={14} />
@@ -2550,9 +2652,9 @@ export default function FrequencyReport() {
                     step="1"
                     value={visualizationFontSize}
                     onChange={(e) => setVisualizationFontSize(Number(e.target.value))}
-                    style={{ width: "190px", accentColor: "#147CFF" }}
+                      style={{ width: "190px", accentColor: "#03624C" }}
                   />
-                  <span style={{ minWidth: "38px", textAlign: "right", color: "#0B55B8", fontWeight: 900 }}>
+                  <span style={{ minWidth: "38px", textAlign: "right", color: "#03624C", fontWeight: 900 }}>
                     {visualizationFontSize} pt
                   </span>
                 </div>
@@ -2615,6 +2717,8 @@ export default function FrequencyReport() {
                     CRMS Frequency/Deviation messages:
                     <strong className="ms-1">{crmsMessages.length}</strong> fetched,
                     <strong className="ms-1">{crmsMappedCount}</strong> plotted on utility charts
+                    <span className="ms-2">Transmission regulation events:</span>
+                    <strong className="ms-1">{transmissionLineEvents.length}</strong>
                   </span>
                   <button type="button" className="btn btn-sm theme-btn-outline py-0 px-2" onClick={() => loadCrmsMessages(startTime, endTime)} disabled={crmsStatus.loading}>
                     {crmsStatus.loading ? "Loading..." : "Refresh CRMS"}
@@ -2634,7 +2738,7 @@ export default function FrequencyReport() {
               {/* 1. Executive Summary */}
               <ExecutiveSummary value={introDesc} onChange={setIntroDesc} />
 
-              <div style={{ background: "linear-gradient(180deg, #F8FBFF 0%, #FFFFFF 56px)", padding: "16px", borderRadius: "14px", border: "1px solid rgba(175, 196, 234, 0.72)", boxShadow: "0 8px 22px rgba(15, 111, 219, 0.055)", marginBottom: "16px" }}>
+              <div style={{ background: "linear-gradient(180deg, #E8F5F1 0%, #FFFFFF 56px)", padding: "16px", borderRadius: "14px", border: "1px solid rgba(184, 228, 211, 0.72)", boxShadow: "0 8px 22px rgba(3, 98, 76, 0.055)", marginBottom: "16px" }}>
                 <div className="d-flex align-items-center justify-content-between gap-2 mb-2">
                   <label style={{ fontSize: "0.78rem", fontWeight: 800, color: "#1E293B", display: "block", margin: 0 }}>
                     State Drawal Compliance Notes & Observation
@@ -2706,7 +2810,7 @@ export default function FrequencyReport() {
                 chartFontSize={visualizationFontSize}
               />
 
-              <div style={{ background: "linear-gradient(180deg, #F8FBFF 0%, #FFFFFF 56px)", padding: "16px", borderRadius: "14px", border: "1px solid rgba(175, 196, 234, 0.72)", boxShadow: "0 8px 22px rgba(15, 111, 219, 0.055)", marginBottom: "16px" }}>
+              <div style={{ background: "linear-gradient(180deg, #E8F5F1 0%, #FFFFFF 56px)", padding: "16px", borderRadius: "14px", border: "1px solid rgba(184, 228, 211, 0.72)", boxShadow: "0 8px 22px rgba(3, 98, 76, 0.055)", marginBottom: "16px" }}>
                 <div className="d-flex align-items-center justify-content-between gap-2 mb-2">
                   <label style={{ fontSize: "0.78rem", fontWeight: 800, color: "#1E293B", display: "block", margin: 0 }}>
                     Generator Section Observations
@@ -2730,7 +2834,7 @@ export default function FrequencyReport() {
                   <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 8, marginBottom: 10 }}>
                     {autoObservations.sectionStats.map((section) => (
                       <div key={section.label} style={{ border: "1px solid #D7E1EA", borderRadius: 10, padding: "9px 10px", background: "#FFFFFF" }}>
-                        <div style={{ color: "#0B55B8", fontSize: "0.7rem", fontWeight: 900 }}>{section.label}</div>
+                        <div style={{ color: "#03624C", fontSize: "0.7rem", fontWeight: 900 }}>{section.label}</div>
                         <div style={{ color: "#0F172A", fontSize: "1rem", fontWeight: 950 }}>{fmtPctText(section.minPct)}</div>
                         <div style={{ color: "#64748B", fontSize: "0.64rem", fontWeight: 750 }}>Fleet minimum generation vs 94% cap on bar ({section.count} units)</div>
                       </div>
@@ -2953,7 +3057,7 @@ export default function FrequencyReport() {
                 <div className="d-flex flex-wrap gap-1">
                   {exportStateOptions.map((item) => (
                     <label key={`modal-state-${item.id}`} className="d-flex align-items-center gap-1 rounded-pill border bg-light px-2 py-1 mb-0" style={{ fontSize: "0.74rem", fontWeight: 800, cursor: "pointer" }}>
-                      <input type="checkbox" checked={selectedExportStateIds.includes(item.id)} onChange={() => toggleExportState(item.id)} style={{ accentColor: "#0F6FDB" }} />
+                      <input type="checkbox" checked={selectedExportStateIds.includes(item.id)} onChange={() => toggleExportState(item.id)} style={{ accentColor: "#03624C" }} />
                       {item.label}
                     </label>
                   ))}
@@ -2993,7 +3097,7 @@ export default function FrequencyReport() {
                 <div className="d-flex flex-column gap-1" style={{ maxHeight: 240, overflow: "auto" }}>
                   {filteredExportGeneratorOptions.map((item) => (
                     <label key={`modal-generator-${item.id}`} className="d-flex align-items-center gap-2 rounded-3 border bg-light px-2 py-1 mb-0" style={{ fontSize: "0.72rem", fontWeight: 800, cursor: "pointer" }}>
-                      <input type="checkbox" checked={selectedExportGeneratorIds.includes(item.id)} onChange={() => toggleExportGenerator(item.id)} style={{ accentColor: "#0F6FDB" }} />
+                      <input type="checkbox" checked={selectedExportGeneratorIds.includes(item.id)} onChange={() => toggleExportGenerator(item.id)} style={{ accentColor: "#03624C" }} />
                       <span className="text-truncate" title={item.label}>{item.label}</span>
                       <span className="ms-auto text-secondary">{item.state}</span>
                       <span className="text-muted">{item.fuel}</span>
@@ -3007,39 +3111,39 @@ export default function FrequencyReport() {
                   <>
                     <div className="fw-bold text-dark mb-2" style={{ fontSize: "0.8rem" }}>Report layout</div>
                     <label className="d-flex align-items-center gap-2 rounded-3 border bg-light px-2 py-2 mb-2" style={{ cursor: "pointer" }}>
-                      <input type="radio" checked={exportReportMode === "summary"} onChange={() => setExportReportMode("summary")} style={{ accentColor: "#0F6FDB" }} />
+                      <input type="radio" checked={exportReportMode === "summary"} onChange={() => setExportReportMode("summary")} style={{ accentColor: "#03624C" }} />
                       <span className="fw-bold text-dark" style={{ fontSize: "0.76rem" }}>Executive summary only</span>
                     </label>
                     <label className="d-flex align-items-center gap-2 rounded-3 border bg-light px-2 py-2 mb-3" style={{ cursor: "pointer" }}>
-                      <input type="radio" checked={exportReportMode === "with_annexure"} onChange={() => setExportReportMode("with_annexure")} style={{ accentColor: "#0F6FDB" }} />
+                      <input type="radio" checked={exportReportMode === "with_annexure"} onChange={() => setExportReportMode("with_annexure")} style={{ accentColor: "#03624C" }} />
                       <span className="fw-bold text-dark" style={{ fontSize: "0.76rem" }}>Executive summary with annexure plots</span>
                     </label>
                   </>
                 )}
                 <div className="fw-bold text-dark mb-2" style={{ fontSize: "0.8rem" }}>Plots</div>
                 <label className="d-flex align-items-start gap-2 rounded-3 border bg-light px-2 py-2 mb-2" style={{ cursor: "pointer" }}>
-                  <input type="checkbox" checked={exportIncludeFrequencyPlot} onChange={(event) => setExportIncludeFrequencyPlot(event.target.checked)} style={{ accentColor: "#0F6FDB", marginTop: 3 }} />
+                  <input type="checkbox" checked={exportIncludeFrequencyPlot} onChange={(event) => setExportIncludeFrequencyPlot(event.target.checked)} style={{ accentColor: "#03624C", marginTop: 3 }} />
                   <span>
                     <span className="d-block fw-bold text-dark" style={{ fontSize: "0.76rem" }}>One system frequency plot</span>
                     <span className="d-block text-secondary" style={{ fontSize: "0.68rem" }}>Frequency-only event chart, added once.</span>
                   </span>
                 </label>
                 <label className="d-flex align-items-start gap-2 rounded-3 border bg-light px-2 py-2 mb-2" style={{ cursor: "pointer" }}>
-                  <input type="checkbox" checked={exportIncludeDeviationPlot} onChange={(event) => setExportIncludeDeviationPlot(event.target.checked)} style={{ accentColor: "#0F6FDB", marginTop: 3 }} />
+                  <input type="checkbox" checked={exportIncludeDeviationPlot} onChange={(event) => setExportIncludeDeviationPlot(event.target.checked)} style={{ accentColor: "#03624C", marginTop: 3 }} />
                   <span>
                     <span className="d-block fw-bold text-dark" style={{ fontSize: "0.76rem" }}>Deviation and frequency plot</span>
                     <span className="d-block text-secondary" style={{ fontSize: "0.68rem" }}>State and generator deviation chart.</span>
                   </span>
                 </label>
                 <label className="d-flex align-items-start gap-2 rounded-3 border bg-light px-2 py-2 mb-0" style={{ cursor: "pointer" }}>
-                  <input type="checkbox" checked={exportIncludeStateScheduleActualPlot} onChange={(event) => setExportIncludeStateScheduleActualPlot(event.target.checked)} style={{ accentColor: "#0F6FDB", marginTop: 3 }} />
+                  <input type="checkbox" checked={exportIncludeStateScheduleActualPlot} onChange={(event) => setExportIncludeStateScheduleActualPlot(event.target.checked)} style={{ accentColor: "#03624C", marginTop: 3 }} />
                   <span>
                     <span className="d-block fw-bold text-dark" style={{ fontSize: "0.76rem" }}>State schedule/actual plot</span>
                     <span className="d-block text-secondary" style={{ fontSize: "0.68rem" }}>State drawal and schedule chart.</span>
                   </span>
                 </label>
                 <label className="d-flex align-items-start gap-2 rounded-3 border bg-light px-2 py-2 mt-2 mb-0" style={{ cursor: "pointer" }}>
-                  <input type="checkbox" checked={exportIncludeGeneratorScheduleActualPlot} onChange={(event) => setExportIncludeGeneratorScheduleActualPlot(event.target.checked)} style={{ accentColor: "#0F6FDB", marginTop: 3 }} />
+                  <input type="checkbox" checked={exportIncludeGeneratorScheduleActualPlot} onChange={(event) => setExportIncludeGeneratorScheduleActualPlot(event.target.checked)} style={{ accentColor: "#03624C", marginTop: 3 }} />
                   <span>
                     <span className="d-block fw-bold text-dark" style={{ fontSize: "0.76rem" }}>Generator schedule/actual plot</span>
                     <span className="d-block text-secondary" style={{ fontSize: "0.68rem" }}>Generation, schedule and capacity chart.</span>
@@ -3057,7 +3161,7 @@ export default function FrequencyReport() {
                     max="24"
                       value={exportFontSize}
                       onChange={(event) => setExportFontSize(Number(event.target.value))}
-                      style={{ width: "100%", accentColor: "#0F6FDB" }}
+                      style={{ width: "100%", accentColor: "#03624C" }}
                     />
                   </div>
                 )}

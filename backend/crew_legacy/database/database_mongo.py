@@ -31,6 +31,8 @@ compensatory_off_collection = db["compensatory_off_collection"]
 
 deleted_leave_collection = db["deleted_leave_collection"]
 login_history_collection = db["login_history_collection"]
+page_access_collection = db["page_access_control"]
+organization_unit_collection = db["organization_unit_master"]
 duty_denial_collection = db["duty_denial_collection"]
 duty_notification_collection = db["duty_notification_collection"]
 employee_shift_history = db["employee_shift_history"]

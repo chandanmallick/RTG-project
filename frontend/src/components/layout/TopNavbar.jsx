@@ -42,11 +42,16 @@ import {
   GraduationCap,
   UserCheck,
   Settings2,
-  CalendarRange
+  CalendarRange,
+  LogOut
 } from "lucide-react";
+import { useAuth } from "../../auth/AuthContext";
+import { pageKeyForPath } from "../../auth/pageAccess";
 
 // Reusable premium Dropdown Item component
 function DropdownItem({ title, description, icon: Icon, iconColor, iconBg, path, active, onClick }) {
+  const { user } = useAuth();
+  if (user?.permissions?.[pageKeyForPath(path)]?.view === false) return null;
   return (
     <Box
       onClick={() => onClick(path)}
@@ -97,6 +102,7 @@ function DropdownItem({ title, description, icon: Icon, iconColor, iconBg, path,
 export default function TopNavbar() {
   const location = useLocation();
   const navigate = useNavigate();
+  const { user, logout } = useAuth();
 
   // Modular dropdown states
   const [openMenu, setOpenMenu] = useState(null);
@@ -140,7 +146,7 @@ export default function TopNavbar() {
   }, [openMenu]);
 
   // Determine active states for high-level main menu buttons
-  const isHomepageActive = location.pathname === "/rtg-dashboard" || location.pathname === "/";
+  const isHomepageActive = location.pathname === "/" || location.pathname === "/rtg-dashboard";
   
   const isMISActive = 
     location.pathname === "/psp-dashboard" || 
@@ -158,7 +164,7 @@ export default function TopNavbar() {
   const isAdminActive =
     location.pathname === "/database-sync" ||
     location.pathname === "/psp-admin" ||
-    location.pathname === "/crew/user-context";
+    location.pathname === "/admin/user-access";
 
   // Reusable framer-motion properties
   const dropdownMotionProps = {
@@ -171,6 +177,7 @@ export default function TopNavbar() {
   // Caret element pointing to the trigger center
   const caretElement = (
     <Box
+      className="ui-kit-navbar"
       sx={{
         position: "absolute",
         top: -6,
@@ -206,8 +213,8 @@ export default function TopNavbar() {
         alignItems: "center",
         justifyContent: "space-between",
         backgroundColor: "#FFFFFF",
-        borderRadius: "16px",
-        boxShadow: "0 10px 30px rgba(15, 98, 76, 0.05)",
+        borderRadius: "12px",
+        boxShadow: "0 4px 14px rgba(15, 23, 42, 0.04)",
         border: "1px solid #E2E8F0",
         px: 3.5,
         py: 1.5,
@@ -218,43 +225,32 @@ export default function TopNavbar() {
       }}
     >
       {/* LEFT BRAND SECTION */}
-      <Box sx={{ display: "flex", alignItems: "center", gap: 1.5, minWidth: 180 }}>
-        <Box
-          sx={{
-            width: 38,
-            height: 38,
-            borderRadius: "12px",
-            background: "linear-gradient(135deg, #022726 0%, #03624C 58%, #00DF81 100%)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            boxShadow: "0 4px 10px rgba(3, 98, 76, 0.25)",
-          }}
-        >
-          <Zap size={20} color="#FFFFFF" strokeWidth={2.5} />
-        </Box>
+      <Box sx={{ display: "flex", alignItems: "center", gap: 1.5, minWidth: 330 }}>
+        <Box component="img" src="/logo.png" alt="GRID-INDIA" sx={{ width: 108, height: 46, objectFit: "contain" }} />
         <Box>
           <Typography
             sx={{
-              fontSize: 18,
-              fontWeight: 900,
-              color: "#0F172A",
-              letterSpacing: "-0.03em",
-              lineHeight: 1,
+              fontSize: 27,
+              fontWeight: 950,
+              color: "#0057B7",
+              letterSpacing: "-0.035em",
+              lineHeight: 0.95,
             }}
           >
-            DHRUV
+            DRUPAd
           </Typography>
           <Typography
             sx={{
-              fontSize: 9,
+              fontSize: 8,
               fontWeight: 800,
               color: "#64748B",
-              letterSpacing: "0.02em",
-              mt: 0.3,
+              letterSpacing: "0.01em",
+              lineHeight: 1.2,
+              mt: 0.45,
+              maxWidth: 205,
             }}
           >
-            GRID DASHBOARD & ROSTERING
+            Data Dashboard &amp; Resource Utilization Portal for Administration
           </Typography>
         </Box>
       </Box>
@@ -263,7 +259,7 @@ export default function TopNavbar() {
       <Box sx={{ display: "flex", alignItems: "center", gap: 1.2 }}>
         {/* 1. Homepage Link */}
         <Button
-          onClick={() => handleNavigate("/rtg-dashboard")}
+          onClick={() => handleNavigate("/")}
           sx={{
             textTransform: "none",
             fontSize: 14,
@@ -333,8 +329,8 @@ export default function TopNavbar() {
                     title="PSP Dashboard"
                     description="Daily peak load curves and statistics"
                     icon={TrendingUp}
-                    iconColor="#0F6FDB"
-                    iconBg="#EBF3FC"
+                    iconColor="#03624C"
+                    iconBg="#E8F5F1"
                     path="/psp-dashboard"
                     active={location.pathname === "/psp-dashboard"}
                     onClick={handleNavigate}
@@ -532,8 +528,8 @@ export default function TopNavbar() {
                         <DropdownItem
                           title="Calendar"
                           icon={Calendar}
-                          iconColor="#0F6FDB"
-                          iconBg="#EBF3FC"
+                          iconColor="#03624C"
+                          iconBg="#E8F5F1"
                           path="/crew/calendar"
                           active={location.pathname === "/crew/calendar"}
                           onClick={handleNavigate}
@@ -580,6 +576,26 @@ export default function TopNavbar() {
                           onClick={handleNavigate}
                         />
                         <DropdownItem
+                          title="Departmental Chart"
+                          description="View vertical and reporting hierarchy"
+                          icon={Users}
+                          iconColor="#0057B7"
+                          iconBg="#EAF2FF"
+                          path="/crew/organization"
+                          active={location.pathname === "/crew/organization"}
+                          onClick={handleNavigate}
+                        />
+                        <DropdownItem
+                          title="Organization Master"
+                          description="Map departments, sections, functions and heads"
+                          icon={Settings2}
+                          iconColor="#0057B7"
+                          iconBg="#EAF2FF"
+                          path="/crew/organization-master"
+                          active={location.pathname === "/crew/organization-master"}
+                          onClick={handleNavigate}
+                        />
+                        <DropdownItem
                           title="Holiday & Training"
                           icon={GraduationCap}
                           iconColor="#9B59B6"
@@ -604,6 +620,16 @@ export default function TopNavbar() {
                           iconBg="#EAEDED"
                           path="/crew/setup"
                           active={location.pathname === "/crew/setup"}
+                          onClick={handleNavigate}
+                        />
+                        <DropdownItem
+                          title="Dropdown Management"
+                          description="Maintain crew dropdown master values"
+                          icon={CheckSquare}
+                          iconColor="#0057B7"
+                          iconBg="#EAF2FF"
+                          path="/crew/dropdowns"
+                          active={location.pathname === "/crew/dropdowns"}
                           onClick={handleNavigate}
                         />
                         <DropdownItem
@@ -713,13 +739,13 @@ export default function TopNavbar() {
                     onClick={handleNavigate}
                   />
                   <DropdownItem
-                    title="User Management"
-                    description="Switch acting employee context"
+                    title="User Access Control"
+                    description="Assign page View and Write access"
                     icon={UserCheck}
                     iconColor="#03624C"
                     iconBg="#E8F5F1"
-                    path="/crew/user-context"
-                    active={location.pathname === "/crew/user-context"}
+                    path="/admin/user-access"
+                    active={location.pathname === "/admin/user-access"}
                     onClick={handleNavigate}
                   />
                 </Box>
@@ -842,10 +868,22 @@ export default function TopNavbar() {
         >
           <Avatar
             variant="square"
-            sx={{ width: "100%", height: "100%" }}
-            src="https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=150&q=80"
-          />
+            sx={{ width: "100%", height: "100%", bgcolor: "#E8F1FB", color: "#0057B7", fontWeight: 800 }}
+            src={user?.profilePhoto || undefined}
+            alt={user?.name || user?.employeeId || "User profile"}
+          >
+            {(user?.name || user?.employeeId || "U").slice(0, 1).toUpperCase()}
+          </Avatar>
         </Box>
+
+        <Button
+          onClick={async () => { await logout(); navigate("/login", { replace: true }); }}
+          startIcon={<LogOut size={15} />}
+          aria-label="Logout"
+          sx={{ minWidth: "auto", px: { xs: 1.2, xl: 1.8 }, color: "#0057B7", border: "1px solid #B8CCE3", background: "#E8F1FB", fontWeight: 800, "&:hover": { background: "#DCEBFA", borderColor: "#8FB3DF" } }}
+        >
+          <Box component="span">Logout</Box>
+        </Button>
       </Box>
 
       {/* CONTACT DIALOG (Provides support contact details + navigation to User Switcher) */}
@@ -863,7 +901,7 @@ export default function TopNavbar() {
         }}
       >
         <DialogTitle sx={{ fontWeight: 800, fontSize: 20, color: "#03624C", pb: 1 }}>
-          DHRUV System Support
+          DRUPAd System Support
         </DialogTitle>
         <DialogContent sx={{ display: "flex", flexDirection: "column", gap: 2.5, pt: 1.5 }}>
           <Typography sx={{ fontSize: 13.5, color: "#64748B", fontWeight: 550, lineHeight: 1.5 }}>
@@ -882,7 +920,7 @@ export default function TopNavbar() {
             </Box>
 
             <Box sx={{ display: "flex", alignItems: "center", gap: 1.5 }}>
-              <Box sx={{ width: 36, height: 36, borderRadius: "8px", backgroundColor: "#EEF5FC", color: "#0F6FDB", display: "flex", alignItems: "center", justify: "center", flexShrink: 0, pl: 1.1 }}>
+              <Box sx={{ width: 36, height: 36, borderRadius: "8px", backgroundColor: "#E8F5F1", color: "#03624C", display: "flex", alignItems: "center", justify: "center", flexShrink: 0, pl: 1.1 }}>
                 <Mail size={16} />
               </Box>
               <Box>
@@ -907,7 +945,7 @@ export default function TopNavbar() {
           <Box
             onClick={() => {
               setIsContactOpen(false);
-              handleNavigate("/crew/user-context");
+              handleNavigate("/admin/user-access");
             }}
             sx={{
               display: "flex",
@@ -927,13 +965,21 @@ export default function TopNavbar() {
           >
             <Box>
               <Typography sx={{ fontSize: 13.5, fontWeight: 700, color: "#334155" }}>
-                Switch User / Context
+                User Access Control
               </Typography>
               <Typography sx={{ fontSize: 11, color: "#64748B", fontWeight: 550, mt: 0.2 }}>
-                Change your acting employee context
+                Manage page-level View and Write permissions
               </Typography>
             </Box>
             <ArrowRight size={16} color="#03624C" />
+          </Box>
+
+          <Box
+            onClick={async () => { setIsContactOpen(false); await logout(); navigate("/login", { replace: true }); }}
+            sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", p: 1.5, borderRadius: "12px", border: "1px solid #FECACA", backgroundColor: "#FFF7F7", cursor: "pointer" }}
+          >
+            <Box><Typography sx={{ fontSize: 13.5, fontWeight: 700, color: "#991B1B" }}>Sign out</Typography><Typography sx={{ fontSize: 11, color: "#64748B" }}>{user?.name || user?.employeeId}</Typography></Box>
+            <LogOut size={16} color="#B91C1C" />
           </Box>
         </DialogContent>
         <DialogActions sx={{ p: 2 }}>

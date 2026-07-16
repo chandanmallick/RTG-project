@@ -197,7 +197,7 @@ const CapacityFrequencyChart = forwardRef(function CapacityFrequencyChart(
             border: "1px solid #BFD3F8",
             borderRadius: 6,
             background: "#FFFFFF",
-            color: "#0B55B8",
+            color: "#03624C",
             cursor: "pointer",
             boxShadow: "0 4px 12px rgba(15,111,219,0.12)",
           }}

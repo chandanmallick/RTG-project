@@ -1,5 +1,6 @@
 ﻿import smtplib
 import requests
+import os
 from email.mime.text import MIMEText
 from datetime import datetime
 
@@ -7,6 +8,7 @@ from crew_legacy.database.database_mongo import duty_notification_collection
 
 EMAIL = "erldccroomcrew@gmail.com"
 PASSWORD = "yfwj mqbg geiz vltv"
+EMAIL_ENABLED = os.getenv("CREW_EMAIL_ENABLED", "0").strip().lower() in {"1", "true", "yes", "on"}
 
 TEAMS_WEBHOOK_URL = "YOUR_TEAMS_WEBHOOK_URL"  # ðŸ”¥ replace
 
@@ -16,6 +18,9 @@ TEAMS_WEBHOOK_URL = "YOUR_TEAMS_WEBHOOK_URL"  # ðŸ”¥ replace
 # ============================================
 
 def send_email(to_list, subject, body):
+    if not EMAIL_ENABLED:
+        print("MAIL BYPASSED: email notifications are disabled.")
+        return
 
     try:
         msg = MIMEText(body)

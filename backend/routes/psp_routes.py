@@ -4867,9 +4867,11 @@ async def get_power_position(date_str: str = None):
         
         rows.append({
             "constituent": name,
+            "daily_date": target_date_str,
             "daily_demand": t_val["demand"],
             "daily_demand_time": t_val["demand_time"],
             "daily_energy": round(t_val["energy"], 2),
+            "daily_energy_date": target_date_str,
             
             "all_time_demand": p_val["max_demand"],
             "all_time_demand_date": p_val["max_demand_date"],

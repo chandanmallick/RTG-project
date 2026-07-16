@@ -1,4 +1,5 @@
 import axios from "axios";
+import { pageKeyForPath, storedPermissions } from "../auth/pageAccess";
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL || "/api";
 
@@ -9,6 +10,19 @@ axios.interceptors.request.use((config) => {
 
   const method = (config.method || "GET").toUpperCase();
   const url = `${config.baseURL || ""}${config.url || ""}`;
+  const token = localStorage.getItem("portalToken");
+  if (token) config.headers.Authorization = `Bearer ${token}`;
+
+  const isMutation = !["GET", "HEAD", "OPTIONS"].includes(method);
+  const isAuthRequest = url.includes("/crew/auth/login") || url.includes("/crew/auth/logout") || url.includes("/crew/auth/admin/access");
+  if (isMutation && !isAuthRequest) {
+    const access = storedPermissions()[pageKeyForPath()];
+    if (access && !access.write) {
+      const error = new Error("This page is read-only for your account.");
+      error.code = "PAGE_READ_ONLY";
+      return Promise.reject(error);
+    }
+  }
 
   console.log(`[API REQUEST] ${method} ${url}`);
 
@@ -712,6 +726,13 @@ const API = {
         end_time: endTime,
         _t: Date.now()
       }
+    });
+    return res.data;
+  },
+
+  getFrequencyCrmsTransmissionLines: async (startTime, endTime) => {
+    const res = await axios.get(`${BASE_URL}/frequency/crms-transmission-lines`, {
+      params: { start_time: startTime, end_time: endTime, _t: Date.now() },
     });
     return res.data;
   },

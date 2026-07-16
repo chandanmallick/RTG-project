@@ -57,7 +57,21 @@ const server = http.createServer((req, res) => {
     }
 
     const contentType = MIME_TYPES[path.extname(filePath)] || 'application/octet-stream';
-    res.writeHead(200, { 'Content-Type': contentType });
+    const isAppShell = path.basename(filePath).toLowerCase() === 'index.html';
+    const cacheControl = isAppShell
+      ? 'no-store, no-cache, must-revalidate, proxy-revalidate'
+      : 'public, max-age=31536000, immutable';
+
+    res.writeHead(200, {
+      'Content-Type': contentType,
+      'Cache-Control': cacheControl,
+      ...(isAppShell
+        ? {
+            Pragma: 'no-cache',
+            Expires: '0',
+          }
+        : {}),
+    });
     fs.createReadStream(filePath).pipe(res);
   });
 });

@@ -135,6 +135,7 @@ const CRMS_CATEGORY_COLORS = {
 
 const CRMS_CATEGORY_ORDER = ["Alert", "Emergency", "Extreme Emergency", "Non-compliance"];
 const CRMS_MESSAGE_SYMBOL = "path://M4 4h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H9l-5 4v-4H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z";
+const TRANSMISSION_TOWER_SYMBOL = "path://M11 1h2l1.4 5H18v2h-3l1 4H20v2h-3.4L19 23h-3l-.8-3H8.8L8 23H5l2.4-9H4v-2h4l1-4H6V6h3.6L11 1zm-.4 7-1 4h4.8l-1-4h-2.8zm-1.5 6-1 4h5.8l-1-4H9.1z";
 
 const crmsCategory = (message = {}) => {
   const raw = Array.isArray(message.category) ? message.category[0] : message.category;
@@ -169,6 +170,18 @@ const crmsTooltipHtml = (message = {}) => {
   if (message.issued_to?.length) html += `<div><span style="color:#64748B">Issued to:</span> ${escapeHtml(message.issued_to.join(", "))}</div>`;
   if (message.issued_by) html += `<div><span style="color:#64748B">Issued by:</span> ${escapeHtml(message.issued_by)}</div>`;
   if (message.remarks) html += `<div style="margin-top:4px;color:#334155;font-weight:800">${escapeHtml(message.remarks)}</div>`;
+  html += `</div>`;
+  return html;
+};
+
+const transmissionTooltipHtml = (event = {}) => {
+  let html = `<div style="font-size:11px;line-height:1.4;min-width:240px">`;
+  html += `<div style="font-weight:900;color:#0057B7;margin-bottom:4px">Transmission Line — Physical Regulation</div>`;
+  html += `<div style="font-weight:900;color:#0F172A">${escapeHtml(event.line_name || "Transmission line")}</div>`;
+  html += `<div><span style="color:#64748B">Time:</span> ${escapeHtml(event.timestamp || event.outage_date_time || "-")}</div>`;
+  if (event.owners?.length) html += `<div><span style="color:#64748B">Owner(s):</span> ${escapeHtml(event.owners.join(", "))}</div>`;
+  if (event.agency_name) html += `<div><span style="color:#64748B">Agency:</span> ${escapeHtml(event.agency_name)}</div>`;
+  if (event.reason) html += `<div style="margin-top:4px;color:#334155;font-weight:800">${escapeHtml(event.reason)}</div>`;
   html += `</div>`;
   return html;
 };
@@ -339,6 +352,37 @@ const ComplianceChart = forwardRef(function ComplianceChart(
     });
   }, [crmsMarkers]);
 
+  const transmissionMarkers = useMemo(() => {
+    const events = Array.isArray(row.transmission_line_events) ? row.transmission_line_events : [];
+    if (!hasDeviation || !events.length || !timestamps.length) return [];
+    const parsedTimestamps = timestamps.map((ts) => parseTs(ts));
+    const firstTs = parsedTimestamps.find(Boolean);
+    const lastTs = [...parsedTimestamps].reverse().find(Boolean);
+    if (!firstTs || !lastTs) return [];
+
+    return events.map((event, markerIndex) => {
+      const eventTs = parseTs(event.timestamp || event.outage_date_time);
+      if (!eventTs || eventTs < firstTs || eventTs > lastTs) return null;
+      let nearestIndex = -1;
+      let nearestDiff = Number.POSITIVE_INFINITY;
+      parsedTimestamps.forEach((ts, index) => {
+        if (!ts) return;
+        const diff = Math.abs(ts.getTime() - eventTs.getTime());
+        if (diff < nearestDiff) {
+          nearestDiff = diff;
+          nearestIndex = index;
+        }
+      });
+      if (nearestIndex < 0) return null;
+      const baseValue = cleanDevs[nearestIndex] ?? 0;
+      const collisionOffset = ((markerIndex % 4) - 1.5) * Math.max(maxDevAbs * 0.035, 1.5);
+      return {
+        value: [timestamps[nearestIndex], baseValue + collisionOffset],
+        transmission: event,
+      };
+    }).filter(Boolean);
+  }, [row.transmission_line_events, hasDeviation, timestamps, cleanDevs, maxDevAbs]);
+
   const option = useMemo(() => {
     const baseFont = Math.max(8, Number(fontSize) || 12);
     const titleFont = baseFont + (compact ? 2 : 3);
@@ -504,6 +548,19 @@ const ComplianceChart = forwardRef(function ComplianceChart(
         },
         z: 12,
       })),
+      ...(hasDeviation && transmissionMarkers.length ? [{
+        name: "Physical Regulation — Transmission Line",
+        type: "scatter",
+        xAxisIndex: 0,
+        yAxisIndex: 0,
+        data: transmissionMarkers,
+        symbol: TRANSMISSION_TOWER_SYMBOL,
+        symbolSize: compact ? 27 : 32,
+        itemStyle: { color: "#0057B7", borderColor: "#FFFFFF", borderWidth: 1.8, shadowColor: "rgba(0,87,183,.35)", shadowBlur: 8 },
+        emphasis: { scale: 1.5, itemStyle: { color: "#003B7A", borderColor: "#FACC15", borderWidth: 3 } },
+        tooltip: { trigger: "item", formatter: (params) => transmissionTooltipHtml(params.data?.transmission || {}) },
+        z: 14,
+      }] : []),
     ];
 
     const legendItems = [
@@ -515,7 +572,8 @@ const ComplianceChart = forwardRef(function ComplianceChart(
         ...(cleanScheds.some((v) => v !== null) ? ["Schedule (MW)"] : []),
         "Actual (MW)"
       ] : []),
-      ...crmsMarkersByCategory.map(([categoryName]) => ({ name: categoryName, icon: CRMS_MESSAGE_SYMBOL }))
+      ...crmsMarkersByCategory.map(([categoryName]) => ({ name: categoryName, icon: CRMS_MESSAGE_SYMBOL })),
+      ...(hasDeviation && transmissionMarkers.length ? [{ name: "Physical Regulation — Transmission Line", icon: TRANSMISSION_TOWER_SYMBOL }] : [])
     ];
 
     return {
@@ -533,7 +591,12 @@ const ComplianceChart = forwardRef(function ComplianceChart(
           const ts = params[0]?.axisValue || "";
           const map = {};
           const crmsParams = [];
+          const transmissionParams = [];
           params.forEach((p) => {
+            if (p.data?.transmission) {
+              transmissionParams.push(p.data.transmission);
+              return;
+            }
             if (p.data?.crms) {
               crmsParams.push(p.data.crms);
               return;
@@ -559,6 +622,11 @@ const ComplianceChart = forwardRef(function ComplianceChart(
             crmsParams.forEach((message) => {
               html += crmsTooltipHtml(message);
             });
+            html += `</div>`;
+          }
+          if (transmissionParams.length) {
+            html += `<div style="margin-top:7px;padding-top:7px;border-top:1px solid #CBD5E1">`;
+            transmissionParams.forEach((event) => { html += transmissionTooltipHtml(event); });
             html += `</div>`;
           }
           return html;
@@ -648,7 +716,7 @@ const ComplianceChart = forwardRef(function ComplianceChart(
       ],
       series: chartSeries,
     };
-  }, [timestamps, cleanDevs, cleanFreqs, cleanScheds, cleanActuals, showSchAct, compact, fontSize, palette, meta, maxDevAbs, helpingData, adverseData, eventType, hasDeviation, row, crmsMarkersByCategory, annotationText]);
+  }, [timestamps, cleanDevs, cleanFreqs, cleanScheds, cleanActuals, showSchAct, compact, fontSize, palette, meta, maxDevAbs, helpingData, adverseData, eventType, hasDeviation, row, crmsMarkersByCategory, transmissionMarkers, annotationText]);
 
   const handleDownload = (event) => {
     event?.stopPropagation();
@@ -677,7 +745,7 @@ const ComplianceChart = forwardRef(function ComplianceChart(
             border: "1px solid #BFD3F8",
             borderRadius: 6,
             background: "#FFFFFF",
-            color: "#0B55B8",
+            color: "#03624C",
             cursor: "pointer",
             boxShadow: "0 4px 12px rgba(15,111,219,0.12)",
           }}

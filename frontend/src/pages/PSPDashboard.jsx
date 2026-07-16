@@ -44,6 +44,8 @@ import API from "../services/api";
 // LAYOUT
 import AppShell from "../components/layout/AppShell";
 import CalendarInput from "../components/ui/CalendarInput";
+import PSPComparisonBar from "../components/ui/PSPComparisonBar";
+import { CHART_COLORS, CHART_GRID_PROPS } from "../theme/chartTheme";
 const PowerExchangeGraphic = lazy(() => import("../components/PowerExchangeGraphic"));
 const PSPStateGenerationSources = lazy(() => import("../components/PSPStateGenerationSources"));
 const VoltageProfileMap = lazy(() => import("../components/VoltageProfileMap"));
@@ -52,23 +54,15 @@ const PSPFrequencyCheckTiles = lazy(() => import("../components/ui/PSPFrequencyC
 const PSPFrequencyTrendModal = lazy(() => import("../components/ui/PSPFrequencyTrendModal"));
 
 // Donut chart color palette - vibrant, modern, premium
-const DONUT_COLORS = [
-  "#03624C",  // Bangladesh Green (largest)
-  "#2CC295",  // Mountain Meadow
-  "#00DF81",  // Caribbean Green
-  "#17876D",  // Frog
-  "#0B453A",  // Pine
-  "#2FA98C",  // Mint
-  "#AACBC4",  // Pistachio
-];
+const DONUT_COLORS = CHART_COLORS;
 
 const NLDC_DEMAND_LINES = [
-  { key: "ALL INDIA", label: "All India", color: "#022726", strokeWidth: 3.2 },
-  { key: "NR", label: "NR", color: "#2563EB" },
-  { key: "WR", label: "WR", color: "#F97316" },
-  { key: "SR", label: "SR", color: "#7C3AED" },
-  { key: "NER", label: "NER", color: "#16A34A" },
-  { key: "ER", label: "ER", color: "#DB2777" }
+  { key: "ALL INDIA", label: "All India", color: "#08103A", strokeWidth: 3.2 },
+  { key: "NR", label: "NR", color: "#0057B7" },
+  { key: "WR", label: "WR", color: "#FFB300" },
+  { key: "SR", label: "SR", color: "#E91E63" },
+  { key: "NER", label: "NER", color: "#009688" },
+  { key: "ER", label: "ER", color: "#006845" }
 ];
 
 const NLDC_DEMAND_COMPONENTS = [
@@ -1174,12 +1168,12 @@ export default function PSPDashboard() {
 
   return (
     <AppShell>
-      <div className="container-fluid theme-page-container" style={{ padding: "24px" }}>
+      <div className="container-fluid theme-page-container ui-kit-page" style={{ padding: "24px" }}>
         {/* BANNER */}
         <div
           className="theme-glass-card position-relative overflow-hidden border-0 text-white"
           style={{
-            background: "linear-gradient(135deg, #022726 0%, #03624C 50%, #17876D 100%)",
+            background: "linear-gradient(135deg, #08103A 0%, #0057B7 50%, #0F6FDB 100%)",
             minHeight: "90px",
             marginBottom: "20px",
             padding: "18px 24px",
@@ -1278,7 +1272,7 @@ export default function PSPDashboard() {
             <div
               className="theme-glass-card p-4 h-100 d-flex flex-column justify-content-between border border-success-subtle shadow-sm"
               style={{
-                background: "linear-gradient(135deg, #ffffff 0%, #F1F7F6 100%)",
+                background: "linear-gradient(135deg, #ffffff 0%, #E8F1FB 100%)",
                 cursor: "pointer",
                 minHeight: "180px",
                 borderRadius: "18px"
@@ -1614,7 +1608,7 @@ export default function PSPDashboard() {
             <div style={{ width: "100%", height: "330px" }}>
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={nldcDemandRows} margin={{ top: 12, right: nldcDemandUseRightAxis ? 34 : 8, left: 0, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(170,203,196,0.22)" />
+                  <CartesianGrid {...CHART_GRID_PROPS} />
                   <XAxis
                     dataKey="period"
                     stroke="#0B453A"
@@ -1755,7 +1749,7 @@ export default function PSPDashboard() {
               <div
                 className="theme-glass-card p-4 h-100 d-flex flex-column justify-content-between text-white border-0"
                 style={{
-                  background: "linear-gradient(135deg, #0B453A 0%, #03624C 100%)"
+                  background: "linear-gradient(135deg, #08103A 0%, #0057B7 100%)"
                 }}
               >
                 <div>
@@ -1808,7 +1802,7 @@ export default function PSPDashboard() {
               <div className="col-12 col-md-4">
                 <div
                   className="theme-stat-card border-0 text-white h-100"
-                  style={{ background: "linear-gradient(135deg, #17876D 0%, #03624C 100%)" }}
+                  style={{ background: "linear-gradient(135deg, #0F6FDB 0%, #0057B7 100%)" }}
                 >
                   <div className="theme-icon-container" style={{ color: "#AACBC4" }}>
                     <Database size={22} />
@@ -1901,7 +1895,7 @@ export default function PSPDashboard() {
                           <stop offset="95%" stopColor="#2CC295" stopOpacity={0.0} />
                         </linearGradient>
                       </defs>
-                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(170,203,196,0.2)" />
+                      <CartesianGrid {...CHART_GRID_PROPS} />
                       <XAxis dataKey="date" stroke="#0B453A" style={{ fontSize: "0.75rem" }} />
                       <YAxis stroke="#0B453A" style={{ fontSize: "0.75rem" }} />
                       <Tooltip
@@ -1959,7 +1953,7 @@ export default function PSPDashboard() {
                       data={stateData}
                       margin={{ top: 10, right: 10, left: -20, bottom: 0 }}
                     >
-                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(170,203,196,0.2)" />
+                      <CartesianGrid {...CHART_GRID_PROPS} />
                       <XAxis dataKey="name" stroke="#0B453A" style={{ fontSize: "0.75rem" }} />
                       <YAxis stroke="#0B453A" style={{ fontSize: "0.75rem" }} />
                       <Tooltip
@@ -1976,7 +1970,7 @@ export default function PSPDashboard() {
                           return null;
                         }}
                       />
-                      <Bar dataKey="requirement" name="Requirement" fill="#03624C" radius={[4, 4, 0, 0]} />
+                      <Bar dataKey="requirement" name="Requirement" fill="#0057B7" radius={[4, 4, 0, 0]} />
                       <Bar dataKey="availability" name="Availability" fill="#2CC295" radius={[4, 4, 0, 0]} />
                     </BarChart>
                   </ResponsiveContainer>
@@ -2335,7 +2329,7 @@ export default function PSPDashboard() {
                           layout="vertical"
                           margin={{ top: 10, right: 10, left: 10, bottom: 0 }}
                         >
-                          <CartesianGrid strokeDasharray="3 3" stroke="rgba(170,203,196,0.15)" />
+                          <CartesianGrid {...CHART_GRID_PROPS} />
                           <XAxis
                             type="number"
                             stroke="#0B453A"
@@ -2714,7 +2708,7 @@ export default function PSPDashboard() {
                 <div 
                   className="p-3 text-white d-flex align-items-center justify-content-between"
                   style={{
-                    background: "linear-gradient(135deg, #022726 0%, #03624C 100%)"
+                    background: "linear-gradient(135deg, #08103A 0%, #0057B7 100%)"
                   }}
                 >
                   <div className="d-flex align-items-center gap-2">
@@ -3097,7 +3091,7 @@ export default function PSPDashboard() {
                       <div style={{ width: "100%", height: "330px" }}>
                         <ResponsiveContainer width="100%" height="100%">
                           <LineChart data={nldcDemandRows} margin={{ top: 64, right: nldcDemandUseRightAxis ? 34 : 14, left: 8, bottom: 0 }}>
-                            <CartesianGrid strokeDasharray="3 3" stroke="rgba(170,203,196,0.22)" />
+                            <CartesianGrid {...CHART_GRID_PROPS} />
                             <XAxis dataKey="period" stroke="#0B453A" style={{ fontSize: "0.7rem" }} minTickGap={18} />
                             <YAxis yAxisId="left" stroke="#022726" style={{ fontSize: "0.7rem" }} tickFormatter={(value) => `${Math.round(value / 1000)}k`} />
                             {nldcDemandUseRightAxis && <YAxis yAxisId="right" orientation="right" stroke="#17876D" style={{ fontSize: "0.7rem" }} tickFormatter={(value) => `${Math.round(value / 1000)}k`} />}
@@ -3210,7 +3204,7 @@ export default function PSPDashboard() {
                       <div style={{ width: "100%", height: "360px" }}>
                         <ResponsiveContainer width="100%" height="100%">
                           <AreaChart data={nldcGenerationRows} margin={{ top: 12, right: 18, left: 0, bottom: 0 }}>
-                            <CartesianGrid strokeDasharray="3 3" stroke="rgba(170,203,196,0.22)" />
+                            <CartesianGrid {...CHART_GRID_PROPS} />
                             <XAxis dataKey="timestamp" stroke="#0B453A" style={{ fontSize: "0.7rem" }} minTickGap={18} />
                             <YAxis stroke="#022726" style={{ fontSize: "0.7rem" }} tickFormatter={(value) => `${Math.round(value / 1000)}k`} />
                             <Tooltip
@@ -3339,7 +3333,7 @@ export default function PSPDashboard() {
                         alignItems: "center",
                         justifyContent: "space-between",
                         marginBottom: "12px",
-                        borderBottom: "2px solid #03624C",
+                        borderBottom: "2px solid #0057B7",
                         paddingBottom: "8px"
                       }}
                     >
@@ -3864,7 +3858,7 @@ export default function PSPDashboard() {
                         <div style={{ width: "100%", height: "340px" }}>
                           <ResponsiveContainer width="100%" height="100%">
                             <LineChart data={energyTrendRows} margin={{ top: 12, right: 18, left: 0, bottom: 0 }}>
-                              <CartesianGrid strokeDasharray="3 3" stroke="rgba(170,203,196,0.35)" />
+                              <CartesianGrid {...CHART_GRID_PROPS} />
                               <XAxis
                                 dataKey="displayDate"
                                 tick={{ fontSize: 11, fill: "#475569", fontWeight: 700 }}
@@ -4054,6 +4048,93 @@ export default function PSPDashboard() {
                   >
                     Close
                   </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {powerPositionData.length > 0 && (
+          <div className="row g-3" style={{ marginBottom: "20px" }}>
+            <div className="col-12">
+              <div className="theme-glass-card p-4 h-100">
+                <div className="d-flex align-items-start justify-content-between flex-wrap gap-2 mb-3">
+                  <div className="text-start">
+                    <h3 className="h6 fw-bold mb-0 text-dark d-flex align-items-center gap-2">
+                      <Activity size={16} className="text-primary" />
+                      <span>PSP State-wise Demand & Energy Comparison</span>
+                    </h3>
+                    <p className="small text-muted mb-0" style={{ fontSize: "0.72rem" }}>
+                      Yesterday is plotted on the same line as the so far highest record for each state.
+                    </p>
+                  </div>
+                  <span className="badge rounded-pill text-primary border border-primary-subtle bg-primary-subtle px-3 py-2">
+                    Demand first, Energy second
+                  </span>
+                </div>
+
+                <div className="row g-3">
+                  {[
+                    {
+                      key: "demand",
+                      title: "State-wise Demand",
+                      dailyKey: "daily_demand",
+                      highKey: "all_time_demand",
+                      unit: "MW",
+                    },
+                    {
+                      key: "energy",
+                      title: "State-wise Energy",
+                      dailyKey: "daily_energy",
+                      highKey: "all_time_energy",
+                      unit: "MU",
+                    },
+                  ].map((panel) => {
+                    return (
+                      <div className="col-12 col-lg-6" key={panel.key}>
+                        <div
+                          className="p-3 rounded-4 border bg-white h-100"
+                          style={{ borderColor: "#B8CCE3" }}
+                        >
+                          <div className="d-flex align-items-center justify-content-between mb-3">
+                            <div>
+                              <div className="fw-bold text-dark">{panel.title}</div>
+                              <div className="small text-muted" style={{ fontSize: "0.72rem" }}>
+                                Full bar = so far highest, filled bar = yesterday
+                              </div>
+                            </div>
+                            <div className="small fw-bold text-primary">{panel.unit}</div>
+                          </div>
+
+                          <div
+                            className="d-flex flex-column gap-2 theme-scrollbar"
+                            style={{ maxHeight: "360px", overflowY: "auto", paddingRight: "4px" }}
+                          >
+                            {powerPositionData.map((row) => {
+                              const daily = Number(row?.[panel.dailyKey] || 0);
+                              const high = Number(row?.[panel.highKey] || 0);
+                              const barKey = `${panel.key}-${row.constituent}`;
+
+                              return (
+                                <PSPComparisonBar
+                                  key={barKey}
+                                  state={row.constituent}
+                                  daily={daily}
+                                  high={high}
+                                  unit={panel.unit}
+                                  metric={panel.key === "demand" ? "Demand" : "Energy"}
+                                  dailyDate={row.daily_date || row.daily_energy_date || selectedDate || latestDate}
+                                  dailyTime={panel.key === "demand" ? row.daily_demand_time : null}
+                                  highDate={panel.key === "demand" ? row.all_time_demand_date : row.all_time_energy_date}
+                                  highTime={panel.key === "demand" ? row.all_time_demand_time : null}
+                                />
+                              );
+                            })}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             </div>

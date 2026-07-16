@@ -18,6 +18,7 @@ import { BarChart3, ChevronDown, Download, FileSpreadsheet, Plus, RefreshCw, Tra
 import AppShell from "../components/layout/AppShell";
 import CalendarInput from "../components/ui/CalendarInput";
 import API from "../services/api";
+import { CHART_COLORS, CHART_GRID_PROPS, CHART_TOOLTIP_PROPS } from "../theme/chartTheme";
 
 const todayIso = () => new Date().toISOString().slice(0, 10);
 const addDays = (dateStr, days) => {
@@ -33,7 +34,7 @@ const CURVE_TYPES = [
   ["weekday_weekend_average", "Weekday/Weekend average"],
   ["custom_dates", "Custom selected dates"],
 ];
-const COLORS = ["#03624C", "#2563EB", "#F97316", "#7C3AED", "#16A34A", "#DB2777", "#0891B2", "#DC2626", "#64748B", "#D97706"];
+const COLORS = CHART_COLORS;
 
 const makeId = () => {
   if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
@@ -833,10 +834,10 @@ export default function MISReport() {
       <div className="px-2 pb-1 fw-bold text-dark" style={{ fontSize: "0.82rem" }}>{title}</div>
       <ResponsiveContainer width="100%" height="94%">
         <LineChart data={result.chart_rows} margin={{ top: 12, right: 24, left: 0, bottom: 10 }}>
-          <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
+          <CartesianGrid {...CHART_GRID_PROPS} />
           <XAxis dataKey="time" tick={{ fontSize: 10 }} minTickGap={18} />
           <YAxis tick={{ fontSize: 11 }} tickFormatter={formatMw} />
-          <Tooltip formatter={(value, name) => [`${formatMw(value)} MW`, name]} labelFormatter={(label) => `Time: ${label}`} />
+          <Tooltip {...CHART_TOOLTIP_PROPS} formatter={(value, name) => [`${formatMw(value)} MW`, name]} labelFormatter={(label) => `Time: ${label}`} />
           <Legend wrapperStyle={{ fontSize: 11 }} />
           {seriesList.map((series, index) => (
             <Line
@@ -910,7 +911,7 @@ export default function MISReport() {
       )}
       <ResponsiveContainer width="100%" height="94%">
         <ComposedChart data={voltageChart.rows} margin={{ top: 12, right: 24, left: 0, bottom: 10 }}>
-          <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
+          <CartesianGrid {...CHART_GRID_PROPS} />
           <XAxis
             dataKey="timestamp"
             type="number"
@@ -1007,7 +1008,7 @@ export default function MISReport() {
 
   return (
     <AppShell>
-      <div className="container-fluid theme-page-container" style={{ padding: 24 }}>
+      <div className="container-fluid theme-page-container ui-kit-page" style={{ padding: 24 }}>
         <div
           className="theme-glass-card border-0 text-white mb-3"
           style={{

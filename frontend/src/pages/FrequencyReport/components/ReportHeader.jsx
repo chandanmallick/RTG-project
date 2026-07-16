@@ -79,14 +79,14 @@ export default function ReportHeader({
 
   const modeButton = (active) => ({
     height: "34px",
-    border: active ? "1px solid #0F6FDB" : "1px solid transparent",
+    border: active ? "1px solid #03624C" : "1px solid transparent",
     borderRadius: "11px",
     display: "inline-flex",
     alignItems: "center",
     gap: "7px",
     padding: "0 12px",
-    background: active ? "linear-gradient(135deg, #147CFF 0%, #0F6FDB 100%)" : "rgba(255, 255, 255, 0.78)",
-    color: active ? "#FFFFFF" : "#0B55B8",
+    background: active ? "linear-gradient(135deg, #022726 0%, #03624C 100%)" : "rgba(255, 255, 255, 0.78)",
+    color: active ? "#FFFFFF" : "#03624C",
     fontSize: "0.78rem",
     fontWeight: 850,
     cursor: "pointer",
@@ -104,11 +104,11 @@ export default function ReportHeader({
         initial={{ opacity: 0, y: 6 }}
         animate={{ opacity: 1, y: 0 }}
         style={{
-          background: "linear-gradient(180deg, #F8FBFF 0%, #FFFFFF 56px)",
-          border: "1px solid rgba(175, 196, 234, 0.72)",
+          background: "linear-gradient(180deg, #E8F5F1 0%, #FFFFFF 56px)",
+          border: "1px solid rgba(184, 228, 211, 0.72)",
           borderRadius: "16px",
           padding: "10px 12px",
-          boxShadow: "0 12px 30px rgba(15, 111, 219, 0.07)",
+          boxShadow: "0 12px 30px rgba(3, 98, 76, 0.07)",
         }}
       >
         <div

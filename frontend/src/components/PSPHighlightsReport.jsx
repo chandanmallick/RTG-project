@@ -318,7 +318,7 @@ export default function PSPHighlightsReport({
           <div
             className="modal-header border-0"
             style={{
-              background: "linear-gradient(135deg, #022726 0%, #03624C 100%)",
+              background: "linear-gradient(135deg, #08103A 0%, #0057B7 100%)",
               padding: "14px 18px"
             }}
           >
@@ -382,11 +382,11 @@ export default function PSPHighlightsReport({
                   display: block;
                   height: 4px;
                   margin: -22px -24px 16px -24px;
-                  background: linear-gradient(90deg, #022726, #03624C, #00DF81);
+                  background: linear-gradient(90deg, #08103A, #0057B7, #0F6FDB);
                 }
               `}</style>
               <div ref={summaryPageRef} className="psp-highlight-report psp-report-page">
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "12px", borderBottom: "2px solid #03624C", paddingBottom: "8px" }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "12px", borderBottom: "2px solid #0057B7", paddingBottom: "8px" }}>
                 <div>
                   <div style={{ fontSize: "18px", fontWeight: 900, color: "#022726", lineHeight: 1.1 }}>
                     PSP Operational Highlights
@@ -404,7 +404,7 @@ export default function PSPHighlightsReport({
                 <table style={{ borderCollapse: "collapse", width: "780px", tableLayout: "fixed", fontSize: "10.5px", fontWeight: 800 }}>
                   <thead>
                     <tr>
-                      <th colSpan="9" style={{ background: "linear-gradient(135deg, #022726 0%, #03624C 100%)", color: "#fff", border: "1px solid #111", padding: "5px", fontSize: "12px" }}>
+                              <th colSpan="9" style={{ background: "linear-gradient(135deg, #08103A 0%, #0057B7 100%)", color: "#fff", border: "1px solid #111", padding: "5px", fontSize: "12px" }}>
                         ER Power Position: {label}
                       </th>
                     </tr>
@@ -580,7 +580,7 @@ export default function PSPHighlightsReport({
 
                   return (
                     <div key={section.state} className="psp-highlight-report psp-report-page">
-                      <div style={{ fontSize: "16px", fontWeight: 900, color: "#022726", marginBottom: "10px", borderBottom: "2px solid #03624C", paddingBottom: "6px" }}>
+                      <div style={{ fontSize: "16px", fontWeight: 900, color: "#022726", marginBottom: "10px", borderBottom: "2px solid #0057B7", paddingBottom: "6px" }}>
                         {section.title} PSP Highlights
                       </div>
                       <div style={{ display: "grid", gridTemplateColumns: "300px 1fr", gap: "22px", alignItems: "start" }}>
@@ -624,7 +624,7 @@ export default function PSPHighlightsReport({
                                 Yesterday vs all time high portfolio at peak time
                               </div>
                             </div>
-                            <div style={{ border: "1px solid #AACBC4", borderRadius: "6px", padding: "5px 9px", fontSize: "10px", color: "#03624C", fontWeight: 900 }}>
+                            <div style={{ border: "1px solid #B8CCE3", borderRadius: "6px", padding: "5px 9px", fontSize: "10px", color: "#0057B7", fontWeight: 900 }}>
                               Current Operational Day
                             </div>
                           </div>
@@ -682,7 +682,7 @@ export default function PSPHighlightsReport({
                                         })}
                                       </div>
                                     </div>
-                                    <div style={{ fontSize: "10px", fontWeight: 900, color: "#03624C", textAlign: "right" }}>
+                                    <div style={{ fontSize: "10px", fontWeight: 900, color: "#0057B7", textAlign: "right" }}>
                                       {numberText(row.maxDemand)} MW
                                     </div>
                                   </div>

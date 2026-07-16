@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+﻿import { useEffect, useMemo, useState } from "react";
 import {
   Alert,
   Box,
@@ -48,6 +48,17 @@ import crewApi from "../../services/crewApi";
 const DUTIES = ["E1", "E2", "M1", "M2", "N1", "N2", "O1", "O2"];
 const DEFAULT_INSTRUCTIONS = `1. Shift Timing: Morning Shift (08:30-14:30hrs), Evening Shift (14:30-20:30hrs), Night Shift (20:30-08:30hrs [Next day]).
 2. Shri Debashis Mondal, Shri Akash Kumar Modi, Shri Sumanta Sadhukhan & Shri SSK Suman shall report to Control Room 15 minutes before the commencement of shift duty to note the salient status of the Grid from the previous shift and may leave 15 minutes`;
+const DEFAULT_DISTRIBUTION = `1. DGM(HR)/GM(F&A)/GM(IT)/GM(SO)/CGM(MO & Logistics)/ED-ERLDC, Kolkata.
+2. All Shift Charge Engineers, ERLDC, Kolkata.
+3. Security In-Charge, ERLDC: 4 copies`;
+const DEFAULT_HEADER = {
+  organizationHindi: "ग्रिड कंट्रोलर ऑफ इंडिया लिमिटेड (ग्रिड-इंडिया)",
+  officeHindi: "पूर्वी क्षेत्रीय भार प्रेषण केंद्र, कोलकाता",
+  organizationEnglish: "Grid Controller of India Limited (GRID-INDIA)",
+  officeEnglish: "EASTERN REGIONAL LOAD DESPATCH CENTRE, KOLKATA",
+  rosterTitle: "CONTROL ROOM SHIFT DUTY ROSTER",
+};
+const rosterHeader = (value) => ({ ...DEFAULT_HEADER, ...(value || {}) });
 
 const today = () => new Date().toISOString().slice(0, 10);
 const addDays = (date, amount) => {
@@ -73,6 +84,16 @@ const dutyColor = (duty) => ({
   O1: ["#FEE2E2", "#991B1B"], O2: ["#FFE4E6", "#9F1239"],
 })[duty] || ["#F8FAFC", "#475569"];
 
+const employeeKey = (item) => String(item?.employeeId || item?.userId || item?.id || "");
+const resolveAuthorityId = (authority, people) => {
+  if (!authority) return "";
+  const storedId = String(authority.employeeId || authority.userId || authority.id || "");
+  const idMatch = people.find((item) => employeeKey(item) === storedId);
+  if (idMatch) return employeeKey(idMatch);
+  const nameMatch = people.find((item) => item.name && authority.name && item.name.trim().toLowerCase() === authority.name.trim().toLowerCase());
+  return nameMatch ? employeeKey(nameMatch) : "";
+};
+
 export default function CrewDutyRoster() {
   const [startDate, setStartDate] = useState(today());
   const [endDate, setEndDate] = useState(addDays(today(), 7));
@@ -85,39 +106,19 @@ export default function CrewDutyRoster() {
   const [calendarPushed, setCalendarPushed] = useState(false);
   const [instructions, setInstructions] = useState(DEFAULT_INSTRUCTIONS);
   const [distribution, setDistribution] = useState("");
+  const [header, setHeader] = useState(DEFAULT_HEADER);
+  const [lastPublishedRoster, setLastPublishedRoster] = useState(null);
+  const [publishedSigner, setPublishedSigner] = useState(null);
   const [signedBy, setSignedBy] = useState("");
   const [leaveAuthority, setLeaveAuthority] = useState("");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState(null);
   const [historyOpen, setHistoryOpen] = useState(false);
-
-  // Bilingual translation lookups for official SLDC printing
-  const bilingualName = (name) => {
-    const dict = {
-      "Debabrata Biswas": "Debabrata Biswas / देवब्रत बिस्वास",
-      "Pranab Debnath": "Pranab Debnath / प्रणब देवनाथ",
-      "Raj Protim Kundu": "Raj Protim Kundu / राज प्रतिम कुंडू",
-      "Biswajit Mondal": "Biswajit Mondal / विश्वजीत मंडल",
-      "Ashoke Kumar Basak": "Ashoke Kumar Basak / अशोक कुमार बसाक",
-    };
-    return dict[name] || name;
-  };
-
-  const bilingualDesignation = (desig) => {
-    const dict = {
-      "GM": "GM / महाप्रबंधक",
-      "Ch Mgr": "Ch Mgr / मुख्य प्रबंधक",
-      "Chief Manager": "Chief Manager / मुख्य प्रबंधक",
-      "Mgr": "Mgr / प्रबंधक",
-      "Manager": "Manager / प्रबंधक",
-      "Dy Mgr": "Dy Mgr / उप प्रबंधक",
-      "Deputy Manager": "Deputy Manager / उप प्रबंधक",
-      "Asstt Mgr": "Asstt Mgr / सहायक प्रबंधक",
-      "Assistant Manager": "Assistant Manager / सहायक प्रबंधक",
-      "JE": "JE / कनिष्ठ अभियंता",
-      "ET": "ET / कार्यकारी प्रशिक्षु",
-    };
-    return dict[desig] || desig;
+  const formatBilingual = (english, hindi) => {
+    const en = String(english || "").trim();
+    const hi = String(hindi || "").trim();
+    if (en && hi) return `${en} / ${hi}`;
+    return en || hi || "";
   };
 
   const formatPrintDateRange = (start, end) => {
@@ -143,24 +144,43 @@ export default function CrewDutyRoster() {
   };
 
   const loadReferenceData = async () => {
-    try {
-      const [people, records, groupList] = await Promise.all([
+    const [peopleResult, recordsResult, groupsResult, previousResult] = await Promise.allSettled([
         crewApi.employees(),
         crewApi.rosters(),
-        crewApi.groups()
-      ]);
-      setEmployees(people);
-      setHistory(records);
-      setGroups(groupList || []);
-    } catch (error) {
-      setMessage({ severity: "error", text: error.response?.data?.detail || "Unable to load crew roster data." });
+        crewApi.groups(),
+        crewApi.previousFinalRoster()
+    ]);
+
+    const loadedPeople = peopleResult.status === "fulfilled" ? (peopleResult.value || []) : [];
+    if (peopleResult.status === "fulfilled") setEmployees(loadedPeople);
+    if (recordsResult.status === "fulfilled") setHistory(recordsResult.value || []);
+    if (groupsResult.status === "fulfilled") setGroups(groupsResult.value || []);
+
+    if (previousResult.status === "fulfilled") {
+      const previousFinal = previousResult.value || null;
+      setLastPublishedRoster(previousFinal || null);
+      setPublishedSigner(previousFinal?.signedBy || null);
+      setHeader((current) => rosterHeader(previousFinal?.header || current));
+      if (!instructions || instructions === DEFAULT_INSTRUCTIONS) {
+        setInstructions(previousFinal?.instructions || DEFAULT_INSTRUCTIONS);
+      }
+      if (!distribution) {
+        setDistribution(previousFinal?.distribution || DEFAULT_DISTRIBUTION);
+      }
+      if (!signedBy) setSignedBy(resolveAuthorityId(previousFinal?.signedBy, loadedPeople));
+      if (!leaveAuthority) setLeaveAuthority(resolveAuthorityId(previousFinal?.leaveAuthority, loadedPeople));
+    }
+
+    const failedRequired = [peopleResult, recordsResult, groupsResult].find((result) => result.status === "rejected");
+    if (failedRequired) {
+      setMessage({ severity: "error", text: failedRequired.reason?.response?.data?.detail || "Some crew roster reference data could not be loaded." });
     }
   };
 
   useEffect(() => { loadReferenceData(); }, []);
 
   const dates = useMemo(() => rosterData[0] ? Object.keys(rosterData[0].data || {}) : [], [rosterData]);
-  const person = (id) => employees.find((item) => item.employeeId === id || item.userId === id || item.id === id) || null;
+  const person = (id) => employees.find((item) => employeeKey(item) === String(id)) || null;
   const notify = (severity, text) => setMessage({ severity, text });
 
   const printedOn = new Date().toLocaleString("en-GB", {
@@ -170,12 +190,18 @@ export default function CrewDutyRoster() {
     hour: "2-digit",
     minute: "2-digit",
   });
+  const signingAuthority = {
+    ...(publishedSigner || {}),
+    ...(person(signedBy) || {}),
+  };
 
   const generate = async () => {
     setBusy(true); setMessage(null);
     try {
       const generated = await crewApi.generateRoster({ startDate, endDate });
       setRosterData(generated); setRosterId(""); setIsFinal(false); setCalendarPushed(false);
+      if (!instructions || instructions === DEFAULT_INSTRUCTIONS) setInstructions(lastPublishedRoster?.instructions || DEFAULT_INSTRUCTIONS);
+      if (!distribution) setDistribution(lastPublishedRoster?.distribution || DEFAULT_DISTRIBUTION);
       notify("success", "Roster generated from the configured eight-day duty cycle.");
     } catch (error) { notify("error", error.response?.data?.detail || "Roster generation failed."); }
     finally { setBusy(false); }
@@ -188,7 +214,7 @@ export default function CrewDutyRoster() {
     try {
       const response = await crewApi.saveRoster({
         rosterId: rosterId || undefined, startDate, endDate, data: rosterData,
-        instructions, distribution, signedBy: person(signedBy), leaveAuthority: person(leaveAuthority), isFinal: makeFinal,
+        header, instructions, distribution, signedBy: person(signedBy), leaveAuthority: person(leaveAuthority), isFinal: makeFinal,
       });
       setRosterId(response.rosterId); setIsFinal(makeFinal);
       notify("success", response.message); await loadReferenceData();
@@ -201,8 +227,12 @@ export default function CrewDutyRoster() {
     try {
       const record = await crewApi.roster(id);
       setStartDate(record.startDate); setEndDate(record.endDate); setRosterData(record.data || []);
-      setInstructions(record.instructions || DEFAULT_INSTRUCTIONS); setDistribution(record.distribution || "");
-      setSignedBy(record.signedBy?.employeeId || ""); setLeaveAuthority(record.leaveAuthority?.employeeId || "");
+      setInstructions(record.instructions || lastPublishedRoster?.instructions || DEFAULT_INSTRUCTIONS);
+      setDistribution(record.distribution || lastPublishedRoster?.distribution || DEFAULT_DISTRIBUTION);
+      setHeader(rosterHeader(record.header || lastPublishedRoster?.header));
+      setPublishedSigner(record.signedBy || lastPublishedRoster?.signedBy || null);
+      setSignedBy(resolveAuthorityId(record.signedBy, employees));
+      setLeaveAuthority(resolveAuthorityId(record.leaveAuthority, employees));
       setRosterId(id); setIsFinal(record.isFinal); setCalendarPushed(record.calendarPushed); setHistoryOpen(false);
       notify("success", `Loaded ${record.isFinal ? "final" : "draft"} roster.`);
     } catch (error) { notify("error", error.response?.data?.detail || "Unable to load roster."); }
@@ -256,19 +286,19 @@ export default function CrewDutyRoster() {
           {/* Header Layout */}
           <div style={{ display: "flex", alignItems: "center", justifyContent: "center", position: "relative", paddingBottom: "8px", borderBottom: "2px solid #000000", marginBottom: "12px" }}>
             <div style={{ position: "absolute", left: 0, top: "50%", transform: "translateY(-50%)" }}>
-              <img src="/logo.png" alt="GRID-INDIA" style={{ width: "70px", height: "auto" }} onError={(e) => e.target.style.display = 'none'} />
-            </div>
+            <img src="/logo.png" alt="GRID-INDIA" style={{ width: "118px", height: "auto" }} onError={(e) => e.target.style.display = 'none'} />
+          </div>
             <div style={{ textAlign: "center", color: "#003366", fontFamily: "Arial, sans-serif" }}>
-              <div style={{ fontSize: "12px", fontWeight: "bold" }}>ग्रिड कंट्रोलर ऑफ इंडिया लिमिटेड (ग्रिड-इंडिया)</div>
-              <div style={{ fontSize: "10px", fontWeight: "bold", marginTop: "1px" }}>पूर्वी क्षेत्रीय भार प्रेषण केंद्र, कोलकाता</div>
-              <div style={{ fontSize: "11px", fontWeight: "bold", marginTop: "2px" }}>Grid Controller of India Limited (GRID-INDIA)</div>
-              <div style={{ fontSize: "10px", fontWeight: "bold", marginTop: "1px" }}>EASTERN REGIONAL LOAD DESPATCH CENTRE, KOLKATA</div>
-              <div style={{ fontSize: "13px", fontWeight: 800, color: "#0056B3", marginTop: "3px", letterSpacing: "0.5px" }}>CONTROL ROOM SHIFT DUTY ROSTER</div>
+              <div style={{ fontSize: "15px", fontWeight: "bold" }}>{header.organizationHindi}</div>
+              <div style={{ fontSize: "12px", fontWeight: "bold", marginTop: "1px" }}>{header.officeHindi}</div>
+              <div style={{ fontSize: "14px", fontWeight: "bold", marginTop: "2px" }}>{header.organizationEnglish}</div>
+              <div style={{ fontSize: "12px", fontWeight: "bold", marginTop: "1px" }}>{header.officeEnglish}</div>
+              <div style={{ fontSize: "17px", fontWeight: 800, color: "#0056B3", marginTop: "3px", letterSpacing: "0.5px" }}>{header.rosterTitle}</div>
             </div>
           </div>
 
           {/* Period Display */}
-          <div style={{ fontSize: "13px", fontWeight: "bold", color: "#000000", marginBottom: "10px", fontFamily: "Arial, sans-serif" }}>
+          <div style={{ fontSize: "15px", fontWeight: "bold", color: "#000000", marginBottom: "10px", fontFamily: "Arial, sans-serif" }}>
             Period: {formatPrintDateRange(startDate, endDate)}
           </div>
 
@@ -320,7 +350,7 @@ export default function CrewDutyRoster() {
           </table>
 
           {/* Group Details section */}
-          <div style={{ marginTop: "15px", display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "10px", fontFamily: "Arial, sans-serif" }}>
+          <div className="crew-roster-print-group-details" style={{ marginTop: "15px", display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "10px", fontFamily: "Arial, sans-serif" }}>
             {groupsToDisplay.map((group, idx) => (
               <div
                 key={group.groupName || idx}
@@ -359,37 +389,36 @@ export default function CrewDutyRoster() {
           </div>
 
           {/* Special Instructions section */}
-          <div style={{ marginTop: "15px", fontSize: "10px", fontFamily: "Arial, sans-serif" }}>
+          <div className="crew-roster-print-notes" style={{ marginTop: "15px", fontSize: "10px", fontFamily: "Arial, sans-serif" }}>
             <strong>Special Instructions:</strong>
             <div style={{ marginTop: "4px" }}>
-              {instructions.split("\n").map((line, lIdx) => (
+              {(instructions || lastPublishedRoster?.instructions || DEFAULT_INSTRUCTIONS).split("\n").map((line, lIdx) => (
                 <div key={lIdx} style={{ marginBottom: "2.5px", lineHeight: "1.4", color: "#000000" }}>{line}</div>
               ))}
             </div>
           </div>
 
           {/* Distribution section */}
-          <div style={{ marginTop: "15px", fontSize: "10px", fontFamily: "Arial, sans-serif" }}>
+          <div className="crew-roster-print-notes" style={{ marginTop: "15px", fontSize: "10px", fontFamily: "Arial, sans-serif" }}>
             <strong>Distribution:</strong>
             <div style={{ marginTop: "4px" }}>
-              {distribution.split("\n").map((line, lIdx) => (
+              {(distribution || lastPublishedRoster?.distribution || DEFAULT_DISTRIBUTION).split("\n").map((line, lIdx) => (
                 <div key={lIdx} style={{ marginBottom: "2.5px", lineHeight: "1.4", color: "#000000" }}>{line}</div>
               ))}
             </div>
           </div>
 
-          {/* Signature section */}
-          {signedBy && (
-            <div style={{ marginTop: "35px", display: "flex", flexDirection: "column", alignItems: "flex-end", fontFamily: "Arial, sans-serif", fontSize: "11px", pageBreakInside: "avoid", textAlign: "right", paddingRight: "15px" }}>
-              <div style={{ fontWeight: "bold", marginBottom: "2px" }}>{bilingualName(person(signedBy)?.name || "")}</div>
-              <div style={{ marginBottom: "2px" }}>{bilingualDesignation(person(signedBy)?.designation || "")}</div>
-              <div>ERLDC, GRID-INDIA</div>
+          <div className="crew-roster-print-footer" style={{ marginTop: "18px", display: "flex", justifyContent: "space-between", alignItems: "flex-end", gap: "20px", pageBreakInside: "avoid" }}>
+            <div className="crew-roster-print-timestamp" style={{ textAlign: "left", fontFamily: "Arial, sans-serif", fontSize: "9px", color: "#7B8BAA", fontWeight: "600", paddingLeft: "2px" }}>
+              Generated on {getPrintGenerationTime()}
             </div>
-          )}
-
-          {/* Generated timestamp footer */}
-          <div style={{ marginTop: "20px", textAlign: "right", fontFamily: "Arial, sans-serif", fontSize: "9px", color: "#7B8BAA", paddingRight: "15px", fontWeight: "600" }}>
-            Generated on {getPrintGenerationTime()}
+            {signedBy && (
+              <div className="crew-roster-print-signature" style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", fontFamily: "Arial, sans-serif", fontSize: "11px", textAlign: "right", paddingRight: "15px" }}>
+                <div style={{ fontWeight: "bold", marginBottom: "2px" }}>{formatBilingual(signingAuthority?.name, signingAuthority?.nameHindi)}</div>
+                <div style={{ marginBottom: "2px" }}>{formatBilingual(signingAuthority?.designation, signingAuthority?.designationHindi)}</div>
+                <div>ERLDC, GRID-INDIA</div>
+              </div>
+            )}
           </div>
         </section>
       )}
@@ -737,6 +766,61 @@ export default function CrewDutyRoster() {
         </Stack>
       </Box>
 
+      {/* Editable bilingual header; inherited from the latest published roster. */}
+      <Box
+        sx={{
+          p: 2.5,
+          backgroundColor: "#FFFFFF",
+          borderRadius: "16px",
+          border: "1px solid #D7E3F7",
+        }}
+      >
+        <Stack direction={{ xs: "column", sm: "row" }} alignItems={{ sm: "center" }} justifyContent="space-between" gap={1} mb={2}>
+          <Box>
+            <Typography sx={{ fontWeight: 900, fontSize: 16, color: "#0F172A" }}>
+              Roster Header — Hindi & English
+            </Typography>
+            <Typography sx={{ fontSize: 12, color: "#64748B", mt: 0.25 }}>
+              Auto-fetched from the last published roster. You can edit it before saving this roster.
+            </Typography>
+          </Box>
+          <Button
+            size="small"
+            variant="outlined"
+            disabled={isFinal || !lastPublishedRoster?.header}
+            onClick={() => setHeader(rosterHeader(lastPublishedRoster?.header))}
+            sx={{ borderColor: "#0057B7", color: "#0057B7", fontWeight: 800, textTransform: "none" }}
+          >
+            Restore published header
+          </Button>
+        </Stack>
+        <Grid container spacing={1.5}>
+          {[
+            ["organizationHindi", "Organization name (Hindi)"],
+            ["officeHindi", "Office name (Hindi)"],
+            ["organizationEnglish", "Organization name (English)"],
+            ["officeEnglish", "Office name (English)"],
+            ["rosterTitle", "Roster title"],
+          ].map(([key, label], index) => (
+            <Grid item xs={12} md={index === 4 ? 12 : 6} key={key}>
+              <TextField
+                label={label}
+                value={header[key] || ""}
+                onChange={(event) => setHeader((current) => ({ ...current, [key]: event.target.value }))}
+                disabled={isFinal}
+                size="small"
+                fullWidth
+                inputProps={{ lang: key.endsWith("Hindi") ? "hi" : "en" }}
+                sx={{
+                  "& .MuiOutlinedInput-root": { borderRadius: "9px" },
+                  "& input": { fontFamily: key.endsWith("Hindi") ? '"Noto Sans Devanagari", Mangal, sans-serif' : "inherit" },
+                }}
+              />
+            </Grid>
+          ))}
+        </Grid>
+      </Box>
+
       {/* 3. GROUP DETAILS SECTION */}
       <Box sx={{ mt: 1 }}>
         <Typography sx={{ fontWeight: 800, fontSize: 16, color: "#334155", mb: 2 }}>
@@ -979,11 +1063,14 @@ export default function CrewDutyRoster() {
               <MenuItem value="">
                 <Typography sx={{ color: "#94A3B8", fontSize: 13, fontWeight: 600 }}>Select signing authority</Typography>
               </MenuItem>
-              {employees.map((item) => (
-                <MenuItem key={`sign-${item.id}`} value={item.employeeId} sx={{ fontSize: 13, fontWeight: 700 }}>
-                  {item.name} · {item.designation}
+              {employees.map((item) => {
+                const employeeId = employeeKey(item);
+                return (
+                <MenuItem key={`sign-${employeeId}`} value={employeeId} sx={{ fontSize: 13, fontWeight: 700 }}>
+                  {formatBilingual(item.name, item.nameHindi)} · {formatBilingual(item.designation, item.designationHindi)}
                 </MenuItem>
-              ))}
+                );
+              })}
             </Select>
           </FormControl>
         </Box>
@@ -1016,14 +1103,18 @@ export default function CrewDutyRoster() {
               <MenuItem value="">
                 <Typography sx={{ color: "#94A3B8", fontSize: 13, fontWeight: 600 }}>Select leave authority</Typography>
               </MenuItem>
-              {employees.map((item) => (
-                <MenuItem key={`leave-${item.id}`} value={item.employeeId} sx={{ fontSize: 13, fontWeight: 700 }}>
-                  {item.name} · {item.designation}
+              {employees.map((item) => {
+                const employeeId = employeeKey(item);
+                return (
+                <MenuItem key={`leave-${employeeId}`} value={employeeId} sx={{ fontSize: 13, fontWeight: 700 }}>
+                  {formatBilingual(item.name, item.nameHindi)} · {formatBilingual(item.designation, item.designationHindi)}
                 </MenuItem>
-              ))}
+                );
+              })}
             </Select>
           </FormControl>
         </Box>
+
       </Stack>
 
       {/* Roster History Modal */}
@@ -1095,3 +1186,4 @@ export default function CrewDutyRoster() {
     </AppShell>
   );
 }
+

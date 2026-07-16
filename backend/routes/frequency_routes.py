@@ -3,6 +3,7 @@ import json
 import base64
 import io
 import os
+import re
 import uuid
 import shutil
 import openpyxl
@@ -44,6 +45,9 @@ router = APIRouter(
 SSE_REPORT_JOBS = {}
 CRMS_MESSAGE_URL = "https://crms.erldc.in/MessageAppUI/getIssuedMessagesApi"
 CRMS_VIOLATION_TYPES = {"frequency", "deviation"}
+CRMS_TRANSMISSION_OUTAGE_URL = "https://crms.erldc.in/Codebook/TrElementOutageHistoryData"
+CRMS_TRANSMISSION_ELEMENT_TYPE = "AC_TRANSMISSION_LINE_CIRCUIT"
+CRMS_PHYSICAL_REGULATION_REASON = "H/T ON PHYSICAL REGULATION"
 
 # ──────────────────────────────────────────────────────────────
 # TYPE-SAFE FORMATTING & METRIC RESOLUTION HELPERS
@@ -644,6 +648,55 @@ def normalize_crms_message(item, msg_dt):
     }
 
 
+def crms_text_list(value):
+    if isinstance(value, list):
+        items = value
+    elif value in [None, ""]:
+        return []
+    else:
+        items = re.split(r"[;,|]+", str(value))
+    return list(dict.fromkeys(str(item).strip() for item in items if str(item).strip()))
+
+
+def crms_first_value(item, *keys):
+    for key in keys:
+        value = item.get(key)
+        if value not in [None, ""]:
+            return value
+    return ""
+
+
+def normalize_crms_lookup(value):
+    return re.sub(r"[^A-Z0-9]", "", str(value or "").upper())
+
+
+def normalize_crms_transmission_event(item, event_dt):
+    owners = crms_text_list(crms_first_value(
+        item, "owner", "OWNER", "Owner", "owners", "OWNERS"
+    ))
+    agency_name = str(crms_first_value(
+        item, "RequestingEntity", "requestingEntity", "REQUESTING_ENTITY",
+        "agencyName", "AGENCY_NAME"
+    ) or "").strip()
+    return {
+        "line_name": str(crms_first_value(
+            item, "ELEMENTNAME", "elementName", "entityElementName", "NAME", "name"
+        ) or "").strip(),
+        "timestamp": event_dt.strftime("%Y-%m-%d %H:%M:%S"),
+        "outage_date_time": str(crms_first_value(
+            item, "OUTAGE_DATE_TIME", "outageDateTime", "outage_date_time", "START_DATE_TIME"
+        ) or "").strip(),
+        "revived_date_time": str(crms_first_value(
+            item, "REVIVED_DATE_TIME", "revivedDateTime", "revived_date_time", "END_DATE_TIME"
+        ) or "").strip(),
+        "reason": str(crms_first_value(item, "REASON", "reason", "Reason") or "").strip(),
+        "owners": owners,
+        "agency_name": agency_name,
+        "outage_type": str(crms_first_value(item, "OUTAGE_TYPE", "outageType", "outage_type") or "").strip(),
+        "element_type": CRMS_TRANSMISSION_ELEMENT_TYPE,
+    }
+
+
 def crms_message_category(message: dict):
     raw = message.get("category") if isinstance(message, dict) else ""
     if isinstance(raw, list) and raw:
@@ -880,6 +933,83 @@ async def get_crms_frequency_messages(start_time: str = Query(...), end_time: st
         }
     except Exception as e:
         return {"success": False, "error": str(e), "messages": []}
+
+
+@router.get("/crms-transmission-lines")
+async def get_crms_frequency_transmission_lines(start_time: str = Query(...), end_time: str = Query(...)):
+    try:
+        st = datetime.fromisoformat(start_time.replace("Z", ""))
+        et = datetime.fromisoformat(end_time.replace("Z", ""))
+        if et < st:
+            return {"success": False, "error": "end_time must be after start_time", "events": []}
+
+        session = get_legacy_session_no_verify()
+        params = {
+            "start_date": st.strftime("%Y-%m-%d %H:%M"),
+            "end_date": et.strftime("%Y-%m-%d %H:%M"),
+        }
+        response = session.get(
+            CRMS_TRANSMISSION_OUTAGE_URL,
+            params=params,
+            timeout=180,
+            verify=False,
+        )
+        response.raise_for_status()
+        payload = response.json()
+        raw_rows = (payload.get("data") or payload.get("rows") or []) if isinstance(payload, dict) else payload
+        if not isinstance(raw_rows, list):
+            raw_rows = []
+
+        events = []
+        seen = set()
+        for item in raw_rows:
+            if not isinstance(item, dict):
+                continue
+            line_name = str(crms_first_value(
+                item, "ELEMENTNAME", "elementName", "entityElementName", "NAME", "name"
+            ) or "").strip()
+            if not line_name:
+                continue
+
+            element_type = str(crms_first_value(
+                item, "ENTITY_NAME", "entityName", "ELEMENT_TYPE", "elementType",
+                "ENTITY_TYPE", "entityType", "EntityType"
+            ) or "").strip()
+            if normalize_crms_lookup(element_type) != normalize_crms_lookup(CRMS_TRANSMISSION_ELEMENT_TYPE):
+                continue
+
+            reason = str(crms_first_value(item, "REASON", "reason", "Reason") or "").strip()
+            if normalize_crms_lookup(CRMS_PHYSICAL_REGULATION_REASON) not in normalize_crms_lookup(reason):
+                continue
+
+            event_dt = parse_crms_message_datetime(crms_first_value(
+                item, "OUTAGE_DATE_TIME", "outageDateTime", "outage_date_time", "START_DATE_TIME"
+            ))
+            if event_dt is None or event_dt < st or event_dt > et:
+                continue
+
+            normalized = normalize_crms_transmission_event(item, event_dt)
+            key = (
+                normalize_crms_lookup(normalized["line_name"]),
+                normalized["timestamp"],
+                tuple(normalized["owners"]),
+            )
+            if key in seen:
+                continue
+            seen.add(key)
+            events.append(normalized)
+
+        events.sort(key=lambda item: (item["timestamp"], item["line_name"]))
+        return {
+            "success": True,
+            "events": events,
+            "count": len(events),
+            "reason_filter": CRMS_PHYSICAL_REGULATION_REASON,
+            "element_type": CRMS_TRANSMISSION_ELEMENT_TYPE,
+            "source_url": response.url,
+        }
+    except Exception as e:
+        return {"success": False, "error": str(e), "events": []}
 
 
 def get_legacy_session_no_verify():
@@ -1378,6 +1508,8 @@ def build_saved_event_response(db, event_id: str, entity_list: list, start_dt: d
             "source_status": build_source_status(db, pid, entity.get("wbes_name", ""), start_dt, end_dt),
             "reason": point.get("reason", ""),
             "chart_note": point.get("chart_note", ""),
+            "crms_messages": point.get("crms_messages") or [],
+            "transmission_line_events": point.get("transmission_line_events") or [],
         })
 
     return {

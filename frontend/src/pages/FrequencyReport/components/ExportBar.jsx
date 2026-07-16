@@ -22,7 +22,7 @@ export default function ExportBar({
     alignItems: "center",
     justifyContent: "flex-end",
     padding: "12px 16px",
-    background: "linear-gradient(135deg, #EEF5FF 0%, #F8FBFF 100%)",
+    background: "linear-gradient(135deg, #E8F5F1 0%, #F8FCFA 100%)",
     borderRadius: "14px",
     border: "1px solid rgba(175, 196, 234, 0.72)",
     marginBottom: "16px",

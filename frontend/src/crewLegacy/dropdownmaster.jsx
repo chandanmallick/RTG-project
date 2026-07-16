@@ -77,6 +77,8 @@ export default function DropdownMaster() {
             >
               <MenuItem value="dutyType">Duty Type</MenuItem>
               <MenuItem value="category">Category</MenuItem>
+              <MenuItem value="vertical">Vertical</MenuItem>
+              <MenuItem value="department">Department</MenuItem>
             </TextField>
           </Grid>
 

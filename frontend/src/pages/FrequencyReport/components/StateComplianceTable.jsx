@@ -78,10 +78,10 @@ export default function StateComplianceTable({
         style={{
           overflowX: "auto",
           borderRadius: "14px",
-          border: "1px solid rgba(175, 196, 234, 0.72)",
-          boxShadow: "0 8px 22px rgba(15, 111, 219, 0.055)",
+          border: "1px solid rgba(184, 228, 211, 0.72)",
+          boxShadow: "0 8px 22px rgba(3, 98, 76, 0.055)",
           marginBottom: "16px",
-          background: "linear-gradient(180deg, #F8FBFF 0%, #FFFFFF 56px)",
+          background: "linear-gradient(180deg, #E8F5F1 0%, #FFFFFF 56px)",
         }}
       >
         <table
@@ -230,7 +230,7 @@ export default function StateComplianceTable({
                     <td style={{ padding: "10px 10px", fontSize: "0.68rem", color: "#475569", textAlign: "center", fontWeight: "500" }}>
                       {maxStateTime ? `${maxStateTime} | ${fmt(maxStateFreq, 3)} Hz` : "—"}
                     </td>
-                    <td style={{ padding: "10px 10px", fontSize: "0.74rem", color: msgCount > 0 ? "#0B55B8" : "#94A3B8", textAlign: "center", fontWeight: 800 }}>
+                    <td style={{ padding: "10px 10px", fontSize: "0.74rem", color: msgCount > 0 ? "#03624C" : "#94A3B8", textAlign: "center", fontWeight: 800 }}>
                       {msgCount}
                     </td>
                     <td style={{ padding: "6px 10px" }} onClick={(e) => e.stopPropagation()}>
@@ -272,7 +272,7 @@ export default function StateComplianceTable({
                               display: "flex",
                               alignItems: "center",
                               gap: "6px",
-                            background: "linear-gradient(135deg, #147CFF 0%, #0F6FDB 100%)",
+                            background: "linear-gradient(135deg, #022726 0%, #03624C 100%)",
                               color: "#FFFFFF",
                               border: "none",
                               borderRadius: "6px",
@@ -287,7 +287,7 @@ export default function StateComplianceTable({
                               e.currentTarget.style.background = "#024c3b";
                             }}
                             onMouseLeave={(e) => {
-                              e.currentTarget.style.background = "#0F6FDB";
+                              e.currentTarget.style.background = "#03624C";
                             }}
                           >
                             ⚙️ Edit Raw Database Data
@@ -334,7 +334,7 @@ export default function StateComplianceTable({
                                 alignItems: "center",
                                 justifyContent: "center",
                                 gap: "5px",
-                                background: "linear-gradient(135deg, #147CFF 0%, #0F6FDB 100%)",
+                                background: "linear-gradient(135deg, #022726 0%, #03624C 100%)",
                                 color: "#FFFFFF",
                                 border: "none",
                                 borderRadius: "7px",
@@ -349,7 +349,7 @@ export default function StateComplianceTable({
                                 e.currentTarget.style.background = "#024c3b";
                               }}
                               onMouseLeave={(e) => {
-                                  e.currentTarget.style.background = "#0F6FDB";
+                                  e.currentTarget.style.background = "#03624C";
                               }}
                             >
                               Edit Raw Data
@@ -393,7 +393,7 @@ export default function StateComplianceTable({
               <td colSpan="7" style={{ padding: "10px", textAlign: "right", fontSize: "0.74rem", fontWeight: 900, color: "#0F172A" }}>
                 Total CRMS Messages
               </td>
-              <td style={{ padding: "10px", textAlign: "center", fontSize: "0.76rem", fontWeight: 900, color: totalMsgCount > 0 ? "#0B55B8" : "#94A3B8" }}>
+              <td style={{ padding: "10px", textAlign: "center", fontSize: "0.76rem", fontWeight: 900, color: totalMsgCount > 0 ? "#03624C" : "#94A3B8" }}>
                 {totalMsgCount}
               </td>
               <td />

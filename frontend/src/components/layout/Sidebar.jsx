@@ -11,6 +11,8 @@ import {
   NavLink,
   useLocation,
 } from "react-router-dom";
+import { useAuth } from "../../auth/AuthContext";
+import { pageKeyForPath } from "../../auth/pageAccess";
 
 import MenuRoundedIcon from "@mui/icons-material/MenuRounded";
 
@@ -26,6 +28,8 @@ import HubRoundedIcon from "@mui/icons-material/HubRounded";
 
 import SyncRoundedIcon from "@mui/icons-material/SyncRounded";
 import BoltRoundedIcon from "@mui/icons-material/BoltRounded";
+import ChecklistRoundedIcon from "@mui/icons-material/ChecklistRounded";
+import AccountTreeRoundedIcon from "@mui/icons-material/AccountTreeRounded";
 
 const menus = [
 
@@ -84,6 +88,24 @@ const menus = [
   },
 
   {
+    label: "Crew Dropdowns",
+    path: "/crew/dropdowns",
+    icon: <ChecklistRoundedIcon />,
+  },
+
+  {
+    label: "Departmental Chart",
+    path: "/crew/organization",
+    icon: <AccountTreeRoundedIcon />,
+  },
+
+  {
+    label: "Organization Master",
+    path: "/crew/organization-master",
+    icon: <AccountTreeRoundedIcon />,
+  },
+
+  {
     label: "PSP Report Check",
     path: "/psp-report-checking",
     icon: <InsightsRoundedIcon />,
@@ -113,6 +135,7 @@ export default function Sidebar() {
   const [open, setOpen] = useState(true);
 
   const location = useLocation();
+  const { user } = useAuth();
 
   return (
 
@@ -391,7 +414,7 @@ export default function Sidebar() {
         }}
       >
 
-        {menus.map((item, index) => {
+        {menus.filter((item) => user?.permissions?.[pageKeyForPath(item.path)]?.view !== false).map((item, index) => {
 
           const active =
             location.pathname === item.path;
