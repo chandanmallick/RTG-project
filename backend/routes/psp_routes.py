@@ -1,6 +1,7 @@
 from fastapi import APIRouter, BackgroundTasks
 from pydantic import BaseModel
 from datetime import date, timedelta, datetime
+import io
 from services.db_handler import MongoService
 from services.psp_service import PSPService
 from services.pipeline_config_service import PipelineConfigService
@@ -16,8 +17,10 @@ import json
 import re
 from collections import Counter, defaultdict
 from services.psp_service import LegacySSLAdapter
-from openpyxl import load_workbook
+from openpyxl import load_workbook, Workbook
+from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import column_index_from_string
+from fastapi.responses import StreamingResponse
 from routes.old_logbook_routes import COLLECTION_CONFIG, OLD_LOGBOOK_DB, clean_text, combine_fields, parse_logbook_date, to_jsonable
 
 router = APIRouter(
@@ -188,6 +191,15 @@ class MisOutageAnalysisRequest(BaseModel):
     requesting_entities: list[str] = []
     owners: list[str] = []
     reason_query: str = ""
+
+class MisPlannedOutageRequest(BaseModel):
+    element_type: str = "GENERATING_UNIT"
+    unit_name: str = ""
+    planned_outage_date: str = ""
+    planned_outage_from_date: str = ""
+    planned_outage_to_date: str = ""
+    reason: str = ""
+    remarks: str = ""
 
 MIS_OUTAGE_ELEMENT_TYPES = [
     "AC_TRANSMISSION_LINE_CIRCUIT",
@@ -1027,6 +1039,20 @@ async def get_india_15_min_generation_breakup(date_str: str = None):
                 "message": "No India 15 Min demand document found."
             }
 
+        demand_doc = db.nldc_psp_demand_collection.find_one(
+            {"date": doc.get("date")},
+            {"_id": 0, "regions.ALL INDIA": 1},
+        ) or {}
+        demand_row = ((demand_doc.get("regions") or {}).get("ALL INDIA") or {})
+        all_india_demand = {
+            "value": demand_row.get("max_demand_met"),
+            "time": demand_row.get("max_demand_met_time") or "",
+            "solar_period_value": demand_row.get("max_demand_met_solar"),
+            "solar_period_time": demand_row.get("max_demand_met_solar_time") or "",
+            "non_solar_period_value": demand_row.get("max_demand_met_non_solar"),
+            "non_solar_period_time": demand_row.get("max_demand_met_non_solar_time") or "",
+        }
+
         def as_float(value):
             try:
                 return float(value or 0)
@@ -1081,6 +1107,10 @@ async def get_india_15_min_generation_breakup(date_str: str = None):
         rows.sort(key=lambda item: (item.get("time_minutes", 9999), item.get("block", 9999)))
         for index, item in enumerate(rows):
             item["block"] = index + 1
+            item["solar_generation"] = round(item.get("AI_SOLAR") or 0, 3)
+            item["non_solar_generation"] = round(
+                (item.get("total_generation") or 0) - item["solar_generation"], 3
+            )
 
         total_energy = sum(abs(value) for value in totals.values())
         component_summary = [
@@ -1094,6 +1124,49 @@ async def get_india_15_min_generation_breakup(date_str: str = None):
             for key, label in components
         ]
 
+        def nearest_generation_row(time_value):
+            target_minutes, _ = parse_time_of_day(time_value)
+            if target_minutes == 9999 or not rows:
+                return {}
+            return min(rows, key=lambda row: abs((row.get("time_minutes") or 0) - target_minutes))
+
+        def build_generation_mix(mode, label, generation_row, demand_value=None, demand_time=""):
+            total = float(generation_row.get("total_generation") or 0)
+            solar = float(generation_row.get("solar_generation") or 0)
+            non_solar = float(generation_row.get("non_solar_generation") or 0)
+            return {
+                "mode": mode,
+                "label": label,
+                "block": generation_row.get("block"),
+                "timestamp": generation_row.get("timestamp") or "",
+                "total_generation": round(total, 3),
+                "solar_generation": round(solar, 3),
+                "non_solar_generation": round(non_solar, 3),
+                "solar_share": round((solar / total) * 100, 3) if total else 0,
+                "non_solar_share": round((non_solar / total) * 100, 3) if total else 0,
+                "demand_value": as_float(demand_value) if demand_value not in [None, ""] else None,
+                "demand_time": demand_time or "",
+            }
+
+        peak_row = max(rows, key=lambda row: row.get("total_generation") or 0, default={})
+        generation_mix_modes = {
+            "peak_generation": build_generation_mix(
+                "peak_generation", "Peak Generation", peak_row,
+                all_india_demand.get("value"), all_india_demand.get("time"),
+            ),
+            "solar_max_demand": build_generation_mix(
+                "solar_max_demand", "Solar-period Maximum Demand",
+                nearest_generation_row(all_india_demand.get("solar_period_time")),
+                all_india_demand.get("solar_period_value"), all_india_demand.get("solar_period_time"),
+            ),
+            "non_solar_max_demand": build_generation_mix(
+                "non_solar_max_demand", "Non-solar-period Maximum Demand",
+                nearest_generation_row(all_india_demand.get("non_solar_period_time")),
+                all_india_demand.get("non_solar_period_value"), all_india_demand.get("non_solar_period_time"),
+            ),
+        }
+        maximum_generation_mix = generation_mix_modes["peak_generation"]
+
         return {
             "success": True,
             "date": doc.get("date"),
@@ -1102,6 +1175,9 @@ async def get_india_15_min_generation_breakup(date_str: str = None):
             "rows": rows,
             "components": component_summary,
             "record_count": len(rows),
+            "all_india_demand": all_india_demand,
+            "maximum_generation_mix": maximum_generation_mix,
+            "generation_mix_modes": generation_mix_modes,
             "max_total_generation": max((row.get("total_generation") or 0 for row in rows), default=0),
             "min_total_generation": min((row.get("total_generation") or 0 for row in rows), default=0),
         }
@@ -1110,6 +1186,124 @@ async def get_india_15_min_generation_breakup(date_str: str = None):
     except Exception as e:
         traceback.print_exc()
         return {"success": False, "message": str(e)}
+
+
+@router.get("/india-15-min-demand/generation-breakup/export")
+async def export_india_15_min_generation_breakup(date_str: str = None):
+    result = await get_india_15_min_generation_breakup(date_str)
+    if not result.get("success"):
+        return result
+
+    rows = result.get("rows") or []
+    components = result.get("components") or []
+    mix = result.get("maximum_generation_mix") or {}
+    mix_modes = result.get("generation_mix_modes") or {}
+    demand = result.get("all_india_demand") or {}
+    workbook = Workbook()
+    summary = workbook.active
+    summary.title = "Maximum Generation Mix"
+
+    title_fill = PatternFill("solid", fgColor="022726")
+    header_fill = PatternFill("solid", fgColor="DDEFEA")
+    title_font = Font(color="FFFFFF", bold=True, size=14)
+    header_font = Font(color="03624C", bold=True)
+
+    summary.merge_cells("A1:D1")
+    summary["A1"] = "All India Demand Contribution"
+    summary["A1"].fill = title_fill
+    summary["A1"].font = title_font
+    summary["A1"].alignment = Alignment(horizontal="center")
+    summary.append(["Date", result.get("date") or date_str or "", "Source", result.get("source") or ""])
+    summary.append(["All India Maximum Demand", demand.get("value") or 0, "Time", demand.get("time") or "-"])
+    summary.append([])
+    summary.append(["Maximum Generation Mix", "MW", "Share (%)", "Time / Block"])
+    summary.append(["Total Generation", mix.get("total_generation", 0), 100, f'{mix.get("timestamp") or "-"} / Block {mix.get("block") or "-"}'])
+    summary.append(["Solar", mix.get("solar_generation", 0), mix.get("solar_share", 0), mix.get("timestamp") or "-"])
+    summary.append(["Non-Solar", mix.get("non_solar_generation", 0), mix.get("non_solar_share", 0), mix.get("timestamp") or "-"])
+    summary.append([])
+    summary.append(["Component", "Maximum (MW)", "Daily Share (%)", "Block Total"])
+    for component in components:
+        summary.append([
+            component.get("label") or component.get("key"),
+            component.get("max", 0),
+            component.get("share", 0),
+            component.get("total", 0),
+        ])
+
+    for cell in summary[5]:
+        cell.fill = header_fill
+        cell.font = header_font
+    for cell in summary[10]:
+        cell.fill = header_fill
+        cell.font = header_font
+    summary.freeze_panes = "A5"
+    summary.column_dimensions["A"].width = 30
+    summary.column_dimensions["B"].width = 18
+    summary.column_dimensions["C"].width = 18
+    summary.column_dimensions["D"].width = 24
+
+    detail = workbook.create_sheet("15-Minute Data")
+    component_keys = [component.get("key") for component in components if component.get("key")]
+    headers = ["Block", "Timestamp", *component_keys, "Solar Generation", "Non-Solar Generation", "Total Generation"]
+    detail.append(headers)
+    for cell in detail[1]:
+        cell.fill = title_fill
+        cell.font = Font(color="FFFFFF", bold=True)
+        cell.alignment = Alignment(horizontal="center")
+    for row in rows:
+        detail.append([
+            row.get("block"),
+            row.get("timestamp"),
+            *[row.get(key, 0) for key in component_keys],
+            row.get("solar_generation", 0),
+            row.get("non_solar_generation", 0),
+            row.get("total_generation", 0),
+        ])
+    detail.freeze_panes = "A2"
+    detail.auto_filter.ref = detail.dimensions
+    for column in detail.columns:
+        letter = column[0].column_letter
+        detail.column_dimensions[letter].width = max(13, min(24, max(len(str(cell.value or "")) for cell in column) + 2))
+
+    demand_mix = workbook.create_sheet("Demand-Based Mix")
+    demand_mix.append([
+        "Basis", "Demand (MW)", "Demand Time", "Nearest Generation Time", "Block",
+        "Total Generation (MW)", "Solar Generation (MW)", "Solar Share (%)",
+        "Non-Solar Generation (MW)", "Non-Solar Share (%)",
+    ])
+    for cell in demand_mix[1]:
+        cell.fill = title_fill
+        cell.font = Font(color="FFFFFF", bold=True)
+        cell.alignment = Alignment(horizontal="center")
+    for mode in ["peak_generation", "solar_max_demand", "non_solar_max_demand"]:
+        item = mix_modes.get(mode) or {}
+        demand_mix.append([
+            item.get("label") or mode,
+            item.get("demand_value"),
+            item.get("demand_time") or "",
+            item.get("timestamp") or "",
+            item.get("block"),
+            item.get("total_generation", 0),
+            item.get("solar_generation", 0),
+            item.get("solar_share", 0),
+            item.get("non_solar_generation", 0),
+            item.get("non_solar_share", 0),
+        ])
+    demand_mix.freeze_panes = "A2"
+    demand_mix.auto_filter.ref = demand_mix.dimensions
+    for column in demand_mix.columns:
+        letter = column[0].column_letter
+        demand_mix.column_dimensions[letter].width = max(15, min(28, max(len(str(cell.value or "")) for cell in column) + 2))
+
+    output = io.BytesIO()
+    workbook.save(output)
+    output.seek(0)
+    export_date = result.get("date") or date_str or "latest"
+    return StreamingResponse(
+        output,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="all_india_demand_contribution_{export_date}.xlsx"'},
+    )
 
 @router.get("/all-state-demand/status")
 async def get_all_state_demand_status(start_date: str = None, end_date: str = None):
@@ -5482,6 +5676,14 @@ async def get_mis_diurnal_curve(req: DiurnalCurveRequest):
 MIS_VOLTAGE_API_BASE_URL = "http://10.3.230.62:5010"
 MIS_REACTOR_SWITCHING_URL = "https://crms.erldc.in/Codebook/TrElementOutageHistoryData"
 MIS_ELEMENT_NAMES_URL = "https://crms.erldc.in/Codebook/getElementNamesbyType"
+MIS_UNIT_MASTER_URL = "https://mdp.erldc.in/outageapi/API/GeneratingStation/GetAllGeneratingUnits/0"
+MIS_PLANNED_OUTAGE_COLLECTION = "MIS_Planned_Outage_Master"
+MIS_PLANNED_OUTAGE_DEFAULT_ELEMENT_TYPE = "GENERATING_UNIT"
+MIS_PLANNED_OUTAGE_FALLBACK_ELEMENT_TYPES = [
+    "14",
+    "TRANSMISSION LINE",
+    "AC_TRANSMISSION_LINE_CIRCUIT",
+]
 
 def normalize_mis_voltage_datetime(value: str):
     text = str(value or "").strip().replace("T", " ")
@@ -5588,6 +5790,343 @@ def fetch_mis_element_names(element_type: str):
         rows.append({"id": item.get("id"), "name": name})
     rows.sort(key=lambda item: item["name"])
     return rows, response.url
+
+def fetch_local_mis_element_names(element_type: str):
+    db = MongoService().db
+    element_type_text = str(element_type or "").strip().upper()
+    projections = {
+        "_id": 0,
+        "Unit_Name": 1,
+        "utility_type": 1,
+        "state_name": 1,
+        "entity_name": 1,
+        "element_type": 1,
+        "EntityId": 1,
+        "plant_id": 1,
+    }
+    query = {"Unit_Name": {"$exists": True, "$nin": [None, ""]}}
+    if element_type_text and ("TRANSMISSION" in element_type_text or element_type_text in {"14", "AC_TRANSMISSION_LINE_CIRCUIT"}):
+        query["$or"] = [
+            {"utility_type": {"$regex": "TRANSMISSION|LINE", "$options": "i"}},
+            {"entity_name": {"$regex": "TRANSMISSION|LINE", "$options": "i"}},
+            {"element_type": {"$regex": "TRANSMISSION|LINE", "$options": "i"}},
+            {"EntityId": {"$in": ["14", "TRANSMISSION LINE", "AC_TRANSMISSION_LINE_CIRCUIT"]}},
+        ]
+    rows = []
+    seen = set()
+    try:
+        for doc in db.unit_collection.find(query, projections):
+            name = str(doc.get("Unit_Name") or "").strip()
+            if not name:
+                continue
+            key = normalize_check_key(name)
+            if key in seen:
+                continue
+            seen.add(key)
+            rows.append({"id": doc.get("plant_id") or doc.get("EntityId"), "name": name})
+    except Exception:
+        rows = []
+    if not rows and element_type_text and ("TRANSMISSION" in element_type_text or element_type_text in {"14", "AC_TRANSMISSION_LINE_CIRCUIT"}):
+        try:
+            for doc in db.unit_collection.find({"Unit_Name": {"$exists": True, "$nin": [None, ""]}}, projections):
+                name = str(doc.get("Unit_Name") or "").strip()
+                if not name:
+                    continue
+                key = normalize_check_key(name)
+                if key in seen:
+                    continue
+                seen.add(key)
+                rows.append({"id": doc.get("plant_id") or doc.get("EntityId"), "name": name})
+        except Exception:
+            rows = []
+    rows.sort(key=lambda item: item["name"])
+    return rows, "mongo:unit_collection"
+
+def fetch_mdp_unit_master_names():
+    session = requests.Session()
+    session.mount("https://", LegacySSLAdapter())
+    response = session.get(MIS_UNIT_MASTER_URL, timeout=120, verify=False)
+    response.raise_for_status()
+    data = response.json()
+    if isinstance(data, dict):
+        data = data.get("data") or data.get("rows") or []
+    rows = []
+    seen = set()
+    for item in data if isinstance(data, list) else []:
+        if not isinstance(item, dict):
+            continue
+        if item.get("ACTIVE") not in (None, 1, "1", True):
+            continue
+        name = str(item.get("Unit_Name") or item.get("unit_name") or item.get("name") or "").strip()
+        if not name:
+            continue
+        key = normalize_check_key(name)
+        if key in seen:
+            continue
+        seen.add(key)
+        rows.append({"id": item.get("Id") or item.get("id") or item.get("Unit_Id") or item.get("Unit_Number"), "name": name})
+    rows.sort(key=lambda item: item["name"])
+    return rows, response.url
+
+def fetch_mis_planned_outage_unit_names(element_type: str):
+    element_type_text = str(element_type or MIS_PLANNED_OUTAGE_DEFAULT_ELEMENT_TYPE).strip()
+    if normalize_check_key(element_type_text) in {
+        normalize_check_key("GENERATING_UNIT"),
+        normalize_check_key("GENERATING UNIT"),
+    }:
+        rows, source_url = fetch_mdp_unit_master_names()
+        return rows, source_url, MIS_PLANNED_OUTAGE_DEFAULT_ELEMENT_TYPE, "crms_generating_unit_master"
+
+    candidates = [element_type_text]
+    normalized = normalize_check_key(element_type_text)
+    if normalized in {normalize_check_key("AC_TRANSMISSION_LINE_CIRCUIT"), normalize_check_key("TRANSMISSION LINE"), "14"}:
+        for fallback_type in MIS_PLANNED_OUTAGE_FALLBACK_ELEMENT_TYPES:
+            if fallback_type not in candidates:
+                candidates.append(fallback_type)
+
+    for candidate in candidates:
+        try:
+            rows, source_url = fetch_mis_element_names(candidate)
+        except Exception:
+            rows, source_url = [], ""
+        if rows and "accounts/login" not in str(source_url or "").lower():
+            return rows, source_url, candidate, "crms"
+
+    local_rows, source_url = fetch_local_mis_element_names(element_type_text)
+    if local_rows:
+        return local_rows, source_url, element_type_text, "mongo"
+
+    mdp_rows, source_url = fetch_mdp_unit_master_names()
+    return mdp_rows, source_url, element_type_text, "mdp"
+
+def get_mis_planned_outage_collection():
+    db = MongoService().db
+    if MIS_PLANNED_OUTAGE_COLLECTION not in db.list_collection_names():
+        db.create_collection(MIS_PLANNED_OUTAGE_COLLECTION)
+    return db[MIS_PLANNED_OUTAGE_COLLECTION]
+
+def normalize_planned_outage_date(value):
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    try:
+        return date.fromisoformat(text).isoformat()
+    except ValueError:
+        return ""
+
+def serialize_planned_outage_entry(doc):
+    history = doc.get("history") or []
+    legacy_date = doc.get("planned_outage_date") or ""
+    from_date = doc.get("planned_outage_from_date") or legacy_date
+    to_date = doc.get("planned_outage_to_date") or from_date
+    return {
+        "id": str(doc["_id"]),
+        "element_type": doc.get("element_type") or "",
+        "unit_name": doc.get("unit_name") or "",
+        "planned_outage_date": legacy_date or from_date,
+        "planned_outage_from_date": from_date,
+        "planned_outage_to_date": to_date,
+        "reason": doc.get("reason") or "",
+        "remarks": doc.get("remarks") or "",
+        "source": doc.get("source") or "CRMS",
+        "history": [
+            {
+                "unit_name": item.get("unit_name") or "",
+                "planned_outage_date": item.get("planned_outage_date") or item.get("planned_outage_from_date") or "",
+                "planned_outage_from_date": item.get("planned_outage_from_date") or item.get("planned_outage_date") or "",
+                "planned_outage_to_date": item.get("planned_outage_to_date") or item.get("planned_outage_from_date") or item.get("planned_outage_date") or "",
+                "reason": item.get("reason") or "",
+                "remarks": item.get("remarks") or "",
+                "changed_at": item.get("changed_at").isoformat() if isinstance(item.get("changed_at"), datetime) else item.get("changed_at") or "",
+            }
+            for item in history
+            if isinstance(item, dict)
+        ],
+        "created_at": doc.get("created_at").isoformat() if isinstance(doc.get("created_at"), datetime) else doc.get("created_at") or "",
+        "updated_at": doc.get("updated_at").isoformat() if isinstance(doc.get("updated_at"), datetime) else doc.get("updated_at") or "",
+    }
+
+@router.get("/mis/planned-outage/unit-names")
+async def get_mis_planned_outage_unit_names(element_type: str = MIS_PLANNED_OUTAGE_DEFAULT_ELEMENT_TYPE):
+    try:
+        rows, source_url, resolved_element_type, source_kind = fetch_mis_planned_outage_unit_names(
+            element_type or MIS_PLANNED_OUTAGE_DEFAULT_ELEMENT_TYPE
+        )
+        return {
+            "success": True,
+            "element_type": resolved_element_type,
+            "source_kind": source_kind,
+            "source_url": source_url,
+            "units": rows,
+            "unit_count": len(rows),
+        }
+    except Exception as exc:
+        traceback.print_exc()
+        return {
+            "success": False,
+            "message": str(exc),
+            "units": [],
+            "unit_count": 0,
+        }
+
+@router.get("/mis/planned-outage/entries")
+async def get_mis_planned_outage_entries(element_type: str = ""):
+    try:
+        collection = get_mis_planned_outage_collection()
+        query = {}
+        if element_type:
+            query["element_type"] = element_type
+        docs = list(collection.find(query).sort([("planned_outage_from_date", 1), ("planned_outage_date", 1), ("updated_at", -1)]))
+        return {
+            "success": True,
+            "rows": [serialize_planned_outage_entry(doc) for doc in docs],
+            "count": len(docs),
+        }
+    except Exception as exc:
+        traceback.print_exc()
+        return {"success": False, "message": str(exc), "rows": []}
+
+@router.post("/mis/planned-outage/entries")
+async def create_mis_planned_outage_entry(req: MisPlannedOutageRequest):
+    try:
+        element_type = str(req.element_type or MIS_PLANNED_OUTAGE_DEFAULT_ELEMENT_TYPE).strip()
+        unit_name = str(req.unit_name or "").strip()
+        reason = str(req.reason or "").strip()
+        remarks = str(req.remarks or "").strip()
+        planned_outage_from_date = normalize_planned_outage_date(
+            req.planned_outage_from_date or req.planned_outage_date
+        )
+        planned_outage_to_date = normalize_planned_outage_date(
+            req.planned_outage_to_date or req.planned_outage_from_date or req.planned_outage_date
+        )
+        if not unit_name:
+            return {"success": False, "message": "Unit name is required."}
+        if not reason:
+            return {"success": False, "message": "Outage reason is required."}
+        if not planned_outage_from_date or not planned_outage_to_date:
+            return {"success": False, "message": "Valid planned outage From and To dates are required."}
+        selected_from_date = date.fromisoformat(planned_outage_from_date)
+        selected_to_date = date.fromisoformat(planned_outage_to_date)
+        if selected_from_date < date.today():
+            return {"success": False, "message": "Planned outage From date must be today or a future date."}
+        if selected_to_date < selected_from_date:
+            return {"success": False, "message": "Planned outage To date cannot be before the From date."}
+
+        units, _, _, source_kind = fetch_mis_planned_outage_unit_names(element_type)
+        normalized_unit = ""
+        needle = normalize_check_key(unit_name)
+        for item in units:
+            if normalize_check_key(item.get("name")) == needle:
+                normalized_unit = item.get("name") or unit_name
+                break
+        if not normalized_unit:
+            return {"success": False, "message": "Unit name was not found in CRMS master data."}
+
+        now = datetime.utcnow()
+        doc = {
+            "element_type": element_type,
+            "unit_name": normalized_unit,
+            "planned_outage_date": planned_outage_from_date,
+            "planned_outage_from_date": planned_outage_from_date,
+            "planned_outage_to_date": planned_outage_to_date,
+            "reason": reason,
+            "remarks": remarks,
+            "source": source_kind,
+            "history": [],
+            "created_at": now,
+            "updated_at": now,
+        }
+        collection = get_mis_planned_outage_collection()
+        result = collection.insert_one(doc)
+        return {
+            "success": True,
+            "message": "Planned outage entry saved.",
+            "id": str(result.inserted_id),
+            "entry": serialize_planned_outage_entry({**doc, "_id": result.inserted_id}),
+        }
+    except Exception as exc:
+        traceback.print_exc()
+        return {"success": False, "message": str(exc)}
+
+@router.put("/mis/planned-outage/entries/{entry_id}")
+async def update_mis_planned_outage_entry(entry_id: str, req: MisPlannedOutageRequest):
+    try:
+        if not ObjectId.is_valid(entry_id):
+            return {"success": False, "message": "Invalid planned outage entry."}
+        collection = get_mis_planned_outage_collection()
+        existing = collection.find_one({"_id": ObjectId(entry_id)})
+        if not existing:
+            return {"success": False, "message": "Planned outage entry not found."}
+
+        element_type = str(req.element_type or existing.get("element_type") or MIS_PLANNED_OUTAGE_DEFAULT_ELEMENT_TYPE).strip()
+        unit_name = str(req.unit_name or "").strip()
+        reason = str(req.reason or "").strip()
+        remarks = str(req.remarks or "").strip()
+        planned_outage_from_date = normalize_planned_outage_date(
+            req.planned_outage_from_date or req.planned_outage_date
+        )
+        planned_outage_to_date = normalize_planned_outage_date(
+            req.planned_outage_to_date or req.planned_outage_from_date or req.planned_outage_date
+        )
+        if not unit_name:
+            return {"success": False, "message": "Unit name is required."}
+        if not reason:
+            return {"success": False, "message": "Outage reason is required."}
+        if not planned_outage_from_date or not planned_outage_to_date:
+            return {"success": False, "message": "Valid planned outage From and To dates are required."}
+        selected_from_date = date.fromisoformat(planned_outage_from_date)
+        selected_to_date = date.fromisoformat(planned_outage_to_date)
+        if selected_from_date < date.today():
+            return {"success": False, "message": "Planned outage From date must be today or a future date."}
+        if selected_to_date < selected_from_date:
+            return {"success": False, "message": "Planned outage To date cannot be before the From date."}
+
+        units, _, _, source_kind = fetch_mis_planned_outage_unit_names(element_type)
+        normalized_unit = ""
+        needle = normalize_check_key(unit_name)
+        for item in units:
+            if normalize_check_key(item.get("name")) == needle:
+                normalized_unit = item.get("name") or unit_name
+                break
+        if not normalized_unit:
+            return {"success": False, "message": "Unit name was not found in CRMS master data."}
+
+        now = datetime.utcnow()
+        history_entry = {
+            "unit_name": existing.get("unit_name") or "",
+            "planned_outage_date": existing.get("planned_outage_date") or "",
+            "planned_outage_from_date": existing.get("planned_outage_from_date") or existing.get("planned_outage_date") or "",
+            "planned_outage_to_date": existing.get("planned_outage_to_date") or existing.get("planned_outage_from_date") or existing.get("planned_outage_date") or "",
+            "reason": existing.get("reason") or "",
+            "remarks": existing.get("remarks") or "",
+            "changed_at": now,
+        }
+        collection.update_one(
+            {"_id": ObjectId(entry_id)},
+            {
+                "$set": {
+                    "element_type": element_type,
+                    "unit_name": normalized_unit,
+                    "planned_outage_date": planned_outage_from_date,
+                    "planned_outage_from_date": planned_outage_from_date,
+                    "planned_outage_to_date": planned_outage_to_date,
+                    "reason": reason,
+                    "remarks": remarks,
+                    "source": source_kind or existing.get("source") or "CRMS",
+                    "updated_at": now,
+                },
+                "$push": {"history": history_entry},
+            },
+        )
+        updated = collection.find_one({"_id": ObjectId(entry_id)})
+        return {
+            "success": True,
+            "message": "Planned outage entry updated.",
+            "entry": serialize_planned_outage_entry(updated),
+        }
+    except Exception as exc:
+        traceback.print_exc()
+        return {"success": False, "message": str(exc)}
 
 OUTAGE_REASON_STOPWORDS = {
     "THE", "AND", "FOR", "FROM", "WITH", "DUE", "TO", "OF", "IN", "AT", "ON", "BY", "IS", "WAS",

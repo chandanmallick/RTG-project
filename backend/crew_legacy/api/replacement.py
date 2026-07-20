@@ -34,6 +34,168 @@ def category_matches(category_value, keyword: str) -> bool:
     target = str(keyword or "").strip().lower()
     return any(target in item.lower() for item in normalized_categories(category_value))
 
+
+def employee_id_sort_key(value):
+    text = str(value or "").strip()
+    return (0, int(text)) if text.isdigit() else (1, text.lower())
+
+
+def date_difference_days(later_date: str, earlier_date: str):
+    if not later_date or not earlier_date:
+        return None
+    try:
+        return (datetime.strptime(later_date, "%Y-%m-%d") - datetime.strptime(earlier_date, "%Y-%m-%d")).days
+    except (TypeError, ValueError):
+        return None
+
+
+def utc_naive(value):
+    if not isinstance(value, datetime):
+        return value
+    if value.tzinfo is not None:
+        return value.astimezone(pytz.UTC).replace(tzinfo=None)
+    return value
+
+
+def controlling_officer_ids(employee_id: str, duty_date: str = "", group_name: str = ""):
+    employee = employee_collection.find_one(
+        {"userId": employee_id},
+        {"reportingOfficerIds": 1, "reportingOfficerId": 1, "functionIds": 1, "manualFunctionIds": 1},
+    ) or {}
+    try:
+        from crew_legacy.api.admin_api import resolve_employee_organization
+        resolved = resolve_employee_organization(
+            employee.get("manualFunctionIds", employee.get("functionIds")),
+            employee_id,
+        )
+        values = (
+            resolved.get("reportingOfficerIds")
+            or [resolved.get("intermediaryReportingId"), resolved.get("hodId")]
+        )
+    except Exception:
+        values = normalized_categories(
+            employee.get("reportingOfficerIds") or employee.get("reportingOfficerId")
+        )
+    values = [value for value in values if value]
+    if duty_date and group_name:
+        shift_controllers = employee_daily_collection.find({
+            "date": duty_date,
+            "groupName": group_name,
+            "$or": [{"isActingSIC": True}, {"isSIC": True}],
+        }, {"employeeId": 1})
+        values.extend(
+            record.get("employeeId") for record in shift_controllers
+            if record.get("employeeId")
+        )
+    return [value for value in dict.fromkeys(values) if value and value != employee_id]
+
+
+def auto_accept_pending_duty_notifications():
+    now = datetime.utcnow()
+    result = duty_notification_collection.update_many(
+        {
+            "status": "Pending",
+            "cutoffTime": {"$lte": now},
+        },
+        {
+            "$set": {
+                "status": "Accepted",
+                "decision": "Auto accepted at 16:00 cutoff",
+                "autoAccepted": True,
+                "updatedAt": now,
+            },
+            "$push": {
+                "decisionHistory": {
+                    "action": "AutoAccepted",
+                    "actedBy": "SYSTEM",
+                    "actorRole": "System",
+                    "actedAt": now,
+                }
+            },
+        },
+    )
+    return result.modified_count
+
+
+def release_replacement_assignment(leave, reason: str, acted_by: str, actor_role: str):
+    replacement = leave.get("replacement") or {}
+    replacement_id = replacement.get("employeeId")
+    leave_date = leave.get("date")
+    if not replacement_id or not leave_date:
+        return
+
+    consumed_credit = compensatory_off_collection.find_one({
+        "employeeId": replacement_id,
+        "reference.leaveRequestId": str(leave["_id"]),
+        "status": {"$in": ["Reserved", "Used"]},
+    })
+    if consumed_credit:
+        raise HTTPException(409, "Assignment cannot be changed because its C-OFF credit is reserved or used")
+
+    compensatory_off_collection.delete_many({
+        "employeeId": replacement_id,
+        "reference.leaveRequestId": str(leave["_id"]),
+        "status": "Available",
+    })
+
+    daily = employee_daily_collection.find_one({
+        "employeeId": replacement_id,
+        "date": leave_date,
+    }) or {}
+    original = daily.get("replacementOriginal") or {}
+    created_by_replacement = bool(
+        daily.get("replacementCreatedDaily")
+        or (
+            daily.get("replacementDuty")
+            and not original
+            and not daily.get("attachedRosterId")
+            and not daily.get("isFinalRoster")
+            and not daily.get("rosterVersion")
+        )
+    )
+    if created_by_replacement:
+        employee_daily_collection.delete_one({"_id": daily["_id"]})
+    else:
+        restore = {}
+        unset = {
+            "replacementDuty": "",
+            "replacementMode": "",
+            "halfDuty": "",
+            "replacementFor": "",
+            "replacementOriginal": "",
+            "replacementCreatedDaily": "",
+        }
+        for field in ("assignedDuty", "groupName", "rosterId"):
+            if field in original:
+                restore[field] = original[field]
+            elif field == "rosterId":
+                unset[field] = ""
+        update = {"$unset": unset}
+        if restore:
+            update["$set"] = restore
+        employee_daily_collection.update_one({"_id": daily.get("_id")}, update)
+
+    now = datetime.utcnow()
+    audit = {
+        **replacement,
+        "releasedOn": now,
+        "releaseReason": reason,
+        "releasedBy": acted_by,
+        "releasedByRole": actor_role,
+    }
+    leave_request_collection.update_one(
+        {"_id": leave["_id"]},
+        {
+            "$set": {"replacement": None, "replacementAssigned": False},
+            "$push": {"replacementAssignmentHistory": audit},
+        },
+    )
+    employee_daily_collection.update_one(
+        {"employeeId": leave.get("employeeId"), "date": leave_date},
+        {"$set": {"replacementAssigned": False}},
+    )
+
+
 def calculate_expiry(earned_date_str):
     from datetime import datetime
 
@@ -123,6 +285,48 @@ def pending_replacements(user=Depends(get_current_user)):
     return result
 
 
+@router.get("/assigned")
+def assigned_replacements(user=Depends(get_current_user)):
+    check_replacement_access(user)
+    leaves = leave_request_collection.find({
+        "finalStatus": "Approved",
+        "replacement.employeeId": {"$exists": True, "$ne": None},
+    }).sort([("date", 1), ("replacement.assignedOn", -1)])
+    result = []
+    for leave in leaves:
+        replacement = leave.get("replacement") or {}
+        notification = duty_notification_collection.find_one(
+            {
+                "leaveId": str(leave["_id"]),
+                "employeeId": replacement.get("employeeId"),
+                "status": {"$ne": "Superseded"},
+            },
+            sort=[("createdAt", -1)],
+        ) or {}
+        leave_daily = employee_daily_collection.find_one({
+            "employeeId": leave.get("employeeId"),
+            "date": leave.get("date"),
+        }) or {}
+        result.append({
+            "id": str(leave["_id"]),
+            "employeeId": leave.get("employeeId"),
+            "name": leave.get("name"),
+            "groupName": leave.get("groupName"),
+            "leaveType": leave.get("leaveType"),
+            "date": leave.get("date"),
+            "assignedDuty": leave_daily.get("assignedDuty") or leave.get("assignedDuty"),
+            "replacement": {
+                "employeeId": replacement.get("employeeId"),
+                "name": replacement.get("name"),
+                "mode": replacement.get("mode"),
+                "assignedOn": replacement.get("assignedOn"),
+            },
+            "notificationStatus": notification.get("status") or "Not recorded",
+            "canChange": notification.get("status") not in {"Denied", "Superseded"},
+        })
+    return result
+
+
 # =========================================================
 # GET REPLACEMENT CANDIDATES
 # =========================================================
@@ -149,6 +353,15 @@ def replacement_candidates(
 
     leave_date = leave.get("date")
     is_sic = leave.get("isSIC", False)
+    leave_daily = employee_daily_collection.find_one({
+        "employeeId": leave.get("employeeId"),
+        "date": leave_date,
+    }) or {}
+    is_sic = bool(leave_daily.get("isSIC", is_sic))
+    required_duty = leave_daily.get("assignedDuty") or leave.get("assignedDuty") or ""
+    next_date = (
+        datetime.strptime(leave_date, "%Y-%m-%d") + timedelta(days=1)
+    ).strftime("%Y-%m-%d")
 
     # ðŸ”¥ DATE RANGE (LAST 90 DAYS)
     today = datetime.utcnow()
@@ -156,6 +369,9 @@ def replacement_candidates(
     last_90_days_str = last_90_days_date.strftime("%Y-%m-%d")
 
     result = []
+    effective_role_filter = (roleFilter or "auto").strip().lower()
+    if effective_role_filter == "auto":
+        effective_role_filter = "sic" if is_sic else "shift_engineer"
 
     # ==========================================
     # GET CANDIDATES
@@ -178,10 +394,6 @@ def replacement_candidates(
         # ==========================================
         # ROLE FILTER (SIC / SHIFT ENGINEER)
         # ==========================================
-        effective_role_filter = (roleFilter or "auto").strip().lower()
-        if effective_role_filter == "auto":
-            effective_role_filter = "sic" if is_sic else "shift_engineer"
-
         if effective_role_filter == "sic" and not category_matches(category, "sic"):
             continue
         if effective_role_filter == "shift_engineer" and not category_matches(category, "shift engineer"):
@@ -214,31 +426,23 @@ def replacement_candidates(
             "employeeId": candidate_id,
             "createdAt": {"$gte": last_90_days_date}
         })
-
-        # ==========================================
-        # NO DUTY IN LAST 90 DAYS
-        # ==========================================
-        last_duty = employee_daily_collection.find_one({
+        total_denial_count = duty_denial_collection.count_documents({
             "employeeId": candidate_id,
-            "date": {"$gte": last_90_days_str}
         })
 
-        no_duty_90 = last_duty is None
-
-        # ==========================================
-        # WEIGHT CALCULATION
-        # ==========================================
-        score = 0
-
-        # Less replacement â†’ better
-        score += replacement_count * 2
-
-        # More denial â†’ higher priority
-        score -= denial_count * 3
-
-        # No duty â†’ highest priority boost
-        if no_duty_90:
-            score -= 10
+        # Use the last occurrence of the duty being replaced as the transparent
+        # fairness basis for replacement-tagged employees.
+        last_matching_duty = employee_daily_collection.find_one({
+            "employeeId": candidate_id,
+            "assignedDuty": required_duty,
+            "date": {"$lt": leave_date},
+        }, sort=[("date", -1)])
+        last_matching_duty_date = (
+            last_matching_duty.get("date") if last_matching_duty else ""
+        )
+        days_since_matching_duty = date_difference_days(
+            leave_date, last_matching_duty_date
+        )
 
         # ==========================================
         # APPEND RESULT
@@ -251,9 +455,10 @@ def replacement_candidates(
 
             "replacementCount90Days": replacement_count,
             "denialCount90Days": denial_count,
-            "noDuty90Days": no_duty_90,
-
-            "score": score,
+            "denialCount": total_denial_count,
+            "requiredDuty": required_duty,
+            "lastMatchingDutyDate": last_matching_duty_date,
+            "daysSinceMatchingDuty": days_since_matching_duty,
             "isSIC": is_sic,
             "source": "replacement",
 
@@ -267,7 +472,7 @@ def replacement_candidates(
         "date": leave_date,
         "assignedDuty": {"$in": ["Morning", "Evening", "Night"]},
         "leaveStatus": {"$ne": "Approved"}
-    }))
+    }).sort([("groupName", 1), ("employeeId", 1)]))
 
     existing_ids = {r["employeeId"] for r in result}
 
@@ -281,27 +486,60 @@ def replacement_candidates(
         if candidate_id == leave.get("employeeId"):
             continue
 
+        employee_master = employee_collection.find_one(
+            {"userId": candidate_id},
+            {"category": 1},
+        ) or {}
+        category = normalized_categories(employee_master.get("category"))
+        if effective_role_filter == "sic" and not category_matches(category, "sic"):
+            continue
+        if effective_role_filter == "shift_engineer" and not category_matches(category, "shift engineer"):
+            continue
+
+        next_day_record = employee_daily_collection.find_one({
+            "employeeId": candidate_id,
+            "date": next_date,
+        }) or {}
+        assigned_duty = s.get("assignedDuty") or "-"
+        source = "shift" if assigned_duty == required_duty else "otherShift"
+
         result.append({
             "employeeId": candidate_id,
             "name": s.get("name"),
             "designation": s.get("designation"),
-            "category": "Shift Staff",
-
-            "replacementCount90Days": 999,
-            "denialCount90Days": 0,
-            "noDuty90Days": False,
-
-            "score": 999,  # lowest priority
+            "category": category or ["Shift Staff"],
+            "assignedDuty": assigned_duty,
+            "nextDayDuty": next_day_record.get("assignedDuty") or "-",
+            "requiredDuty": required_duty,
             "isSIC": False,
-            "source": "shift",
+            "source": source,
 
             "groupName": s.get("groupName")
         })
 
     # ==========================================
-    # FINAL SORT
+    # FINAL SERIAL ORDER
     # ==========================================
-    result.sort(key=lambda x: x["score"])
+    source_order = {"replacement": 0, "shift": 1, "otherShift": 2}
+
+    def candidate_order(item):
+        source = item.get("source")
+        if source == "replacement":
+            days = item.get("daysSinceMatchingDuty")
+            return (
+                source_order[source],
+                0 if days is None else 1,
+                -(days if days is not None else 0),
+                employee_id_sort_key(item.get("employeeId")),
+            )
+        return (
+            source_order.get(source, 9),
+            employee_id_sort_key(item.get("employeeId")),
+        )
+
+    result.sort(key=candidate_order)
+    for index, item in enumerate(result, start=1):
+        item["serialNo"] = index
 
     return result
 
@@ -324,6 +562,29 @@ def assign_replacement(leave_id: str, payload: dict, user=Depends(get_current_us
 
     if not leave:
         raise HTTPException(404, "Leave not found")
+
+    existing_replacement = leave.get("replacement") or {}
+    if existing_replacement.get("employeeId"):
+        release_replacement_assignment(
+            leave,
+            "Assignment changed by replacement manager",
+            str(user.get("employeeId") or user.get("userId") or "ADMIN"),
+            "Replacement Manager",
+        )
+        duty_notification_collection.update_many(
+            {
+                "leaveId": str(leave["_id"]),
+                "status": {"$in": ["Pending", "Accepted"]},
+            },
+            {
+                "$set": {
+                    "status": "Superseded",
+                    "decision": "Assignment changed by replacement manager",
+                    "updatedAt": datetime.utcnow(),
+                }
+            },
+        )
+        leave = leave_request_collection.find_one({"_id": ObjectId(leave_id)})
 
     # =============================
     # GET REPLACEMENT EMPLOYEE
@@ -387,6 +648,12 @@ def assign_replacement(leave_id: str, payload: dict, user=Depends(get_current_us
         "groupName": leave.get("groupName"),
         "name": replacement_emp.get("name"),
         "designation": replacement_emp.get("designation"),
+        "replacementCreatedDaily": existing_daily is None,
+        "replacementOriginal": {
+            field: existing_daily.get(field)
+            for field in ("assignedDuty", "groupName", "rosterId")
+            if existing_daily and field in existing_daily
+        },
     }
 
     leave_daily = employee_daily_collection.find_one({
@@ -667,24 +934,43 @@ def assign_replacement(leave_id: str, payload: dict, user=Depends(get_current_us
 
     leave_date_obj = datetime.strptime(leave_date, "%Y-%m-%d")
 
-    cutoff = IST.localize(
+    cutoff_local = IST.localize(
         leave_date_obj - timedelta(days=2)
     ).replace(hour=16, minute=0, second=0)
+    cutoff = cutoff_local.astimezone(pytz.UTC).replace(tzinfo=None)
+    now_utc = datetime.utcnow()
+    auto_accepted = now_utc >= cutoff
+    controller_ids = controlling_officer_ids(
+        replacement_emp["userId"],
+        leave_date,
+        leave.get("groupName") or "",
+    )
 
     duty_notification_collection.insert_one({
         "employeeId": replacement_emp["userId"],
+        "employeeName": replacement_emp.get("name"),
+        "controllerIds": controller_ids,
         "leaveId": str(leave["_id"]),
         "date": leave_date,
         "groupName": leave.get("groupName"),
         "assignedDuty": assigned_duty,
+        "assignmentMode": mode,
 
-        "status": "Pending",
+        "status": "Accepted" if auto_accepted else "Pending",
+        "decision": "Auto accepted at 16:00 cutoff" if auto_accepted else None,
+        "autoAccepted": auto_accepted,
         "reason": None,
 
         "cutoffTime": cutoff,
 
-        "createdAt": datetime.utcnow(),
-        "updatedAt": None
+        "createdAt": now_utc,
+        "updatedAt": now_utc if auto_accepted else None,
+        "decisionHistory": [{
+            "action": "AutoAccepted",
+            "actedBy": "SYSTEM",
+            "actorRole": "System",
+            "actedAt": now_utc,
+        }] if auto_accepted else [],
     })
 
     # =============================
@@ -957,30 +1243,34 @@ def pending_sic(user=Depends(get_current_user)):
 def get_notifications(user=Depends(get_current_user)):
 
     user_id = user.get("userId")
-    now = datetime.now(IST)
+    auto_accept_pending_duty_notifications()
+    now = datetime.utcnow()
 
     data = list(duty_notification_collection.find({
-        "employeeId": user_id
-    }))
+        "$or": [
+            {"employeeId": user_id},
+            {"controllerIds": user_id},
+        ],
+        "status": {"$ne": "Superseded"},
+    }).sort([("createdAt", -1)]))
 
     result = []
 
     for n in data:
 
-        cutoff = n.get("cutoffTime")
-
-        # ðŸ”¥ AUTO ACCEPT AFTER CUT-OFF
-        if cutoff and now > cutoff and n["status"] == "Pending":
-            duty_notification_collection.update_one(
-                {"_id": n["_id"]},
-                {"$set": {"status": "Accepted"}}
-            )
-            n["status"] = "Accepted"
+        cutoff = utc_naive(n.get("cutoffTime"))
 
         n["_id"] = str(n["_id"])
-
-        # ðŸ”¥ FLAG FOR FRONTEND
-        n["canDeny"] = cutoff and now <= cutoff
+        is_assignee = n.get("employeeId") == user_id
+        is_controller = user_id in normalized_categories(n.get("controllerIds"))
+        before_cutoff = bool(cutoff and now <= cutoff)
+        n["viewerRole"] = "Employee" if is_assignee else "Controlling Officer"
+        n["canAccept"] = bool(is_assignee and n.get("status") == "Pending" and before_cutoff)
+        n["canDeny"] = bool(
+            (is_assignee or is_controller)
+            and n.get("status") in {"Pending", "Accepted"}
+            and before_cutoff
+        )
 
         result.append(n)
 
@@ -988,14 +1278,41 @@ def get_notifications(user=Depends(get_current_user)):
 
 
 @router.put("/notifications/accept/{id}")
-def accept_duty(id: str):
+def accept_duty(id: str, user=Depends(get_current_user)):
+    if not ObjectId.is_valid(id):
+        raise HTTPException(400, "Invalid duty notification")
+    notif = duty_notification_collection.find_one({"_id": ObjectId(id)})
+    if not notif:
+        raise HTTPException(404, "Duty notification not found")
+    user_id = str(user.get("userId") or user.get("employeeId") or "")
+    if notif.get("employeeId") != user_id:
+        raise HTTPException(403, "Only the assigned employee can accept this duty")
+    if notif.get("status") != "Pending":
+        raise HTTPException(409, f"Duty is already {notif.get('status')}")
+    now = datetime.utcnow()
+    cutoff = utc_naive(notif.get("cutoffTime"))
+    if cutoff and now > cutoff:
+        auto_accept_pending_duty_notifications()
+        return {"message": "Duty auto accepted at the 16:00 cutoff"}
 
     duty_notification_collection.update_one(
-        {"_id": ObjectId(id)},
-        {"$set": {
-            "status": "Accepted",
-            "updatedAt": datetime.utcnow()
-        }}
+        {"_id": notif["_id"]},
+        {
+            "$set": {
+                "status": "Accepted",
+                "decision": "Accepted by employee",
+                "acceptedBy": user_id,
+                "updatedAt": now,
+            },
+            "$push": {
+                "decisionHistory": {
+                    "action": "Accepted",
+                    "actedBy": user_id,
+                    "actorRole": "Employee",
+                    "actedAt": now,
+                }
+            },
+        },
     )
 
     return {"message": "Accepted"}
@@ -1003,8 +1320,10 @@ def accept_duty(id: str):
 
 
 @router.put("/notifications/deny/{id}")
-def deny_duty(id: str, payload: dict):
+def deny_duty(id: str, payload: dict, user=Depends(get_current_user)):
 
+    if not ObjectId.is_valid(id):
+        raise HTTPException(400, "Invalid duty notification")
     notif = duty_notification_collection.find_one({
         "_id": ObjectId(id)
     })
@@ -1012,27 +1331,78 @@ def deny_duty(id: str, payload: dict):
     if not notif:
         raise HTTPException(404, "Notification not found")
 
-    now = datetime.now(IST)
+    user_id = str(user.get("userId") or user.get("employeeId") or "")
+    is_assignee = notif.get("employeeId") == user_id
+    is_controller = user_id in normalized_categories(notif.get("controllerIds"))
+    if not is_assignee and not is_controller:
+        raise HTTPException(403, "Only the assigned employee or controlling officer can deny this duty")
+    if notif.get("status") not in {"Pending", "Accepted"}:
+        raise HTTPException(409, f"Duty is already {notif.get('status')}")
 
-    # ðŸ”¥ BLOCK AFTER CUT-OFF
-    if notif.get("cutoffTime") and now > notif["cutoffTime"]:
-        raise HTTPException(400, "Denial time expired (after D-2 4PM)")
+    now = datetime.utcnow()
+    cutoff = utc_naive(notif.get("cutoffTime"))
+    if cutoff and now > cutoff:
+        auto_accept_pending_duty_notifications()
+        raise HTTPException(400, "Denial time expired after the 16:00 cutoff")
+
+    reason = str(payload.get("reason") or "").strip()
+    if not reason:
+        raise HTTPException(400, "Denial reason is required")
+    actor_role = "Employee" if is_assignee else "Controlling Officer"
+    leave = None
+    if ObjectId.is_valid(str(notif.get("leaveId") or "")):
+        leave = leave_request_collection.find_one({"_id": ObjectId(notif["leaveId"])})
+    if leave:
+        replacement = leave.get("replacement") or {}
+        consumed_credit = compensatory_off_collection.find_one({
+            "employeeId": replacement.get("employeeId"),
+            "reference.leaveRequestId": str(leave["_id"]),
+            "status": {"$in": ["Reserved", "Used"]},
+        })
+        if consumed_credit:
+            raise HTTPException(409, "Duty cannot be denied because its C-OFF credit is reserved or used")
 
     duty_notification_collection.update_one(
-        {"_id": ObjectId(id)},
-        {"$set": {
-            "status": "Denied",
-            "reason": payload.get("reason"),
-            "updatedAt": datetime.utcnow()
-        }}
+        {"_id": notif["_id"]},
+        {
+            "$set": {
+                "status": "Denied",
+                "decision": f"Denied by {actor_role}",
+                "reason": reason,
+                "deniedBy": user_id,
+                "deniedByRole": actor_role,
+                "updatedAt": now,
+            },
+            "$push": {
+                "decisionHistory": {
+                    "action": "Denied",
+                    "actedBy": user_id,
+                    "actorRole": actor_role,
+                    "reason": reason,
+                    "actedAt": now,
+                }
+            },
+        },
     )
 
-    # ðŸ”¥ STORE DENIAL
     duty_denial_collection.insert_one({
         "employeeId": notif.get("employeeId"),
+        "employeeName": notif.get("employeeName"),
         "date": notif.get("date"),
-        "reason": payload.get("reason"),
-        "createdAt": datetime.utcnow()
+        "assignedDuty": notif.get("assignedDuty"),
+        "leaveId": notif.get("leaveId"),
+        "notificationId": str(notif["_id"]),
+        "deniedBy": user_id,
+        "deniedByRole": actor_role,
+        "reason": reason,
+        "createdAt": now,
     })
+    if leave:
+        release_replacement_assignment(
+            leave,
+            reason,
+            user_id,
+            actor_role,
+        )
 
     return {"message": "Denied"}

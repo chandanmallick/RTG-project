@@ -110,6 +110,7 @@ export default function TopNavbar() {
   // References for handling click outside
   const misRef = useRef(null);
   const analyticsRef = useRef(null);
+  const reportRef = useRef(null);
   const crewRef = useRef(null);
   const adminRef = useRef(null);
 
@@ -133,6 +134,7 @@ export default function TopNavbar() {
       if (
         (openMenu === "mis" && misRef.current && !misRef.current.contains(event.target)) ||
         (openMenu === "analytics" && analyticsRef.current && !analyticsRef.current.contains(event.target)) ||
+        (openMenu === "reports" && reportRef.current && !reportRef.current.contains(event.target)) ||
         (openMenu === "crew" && crewRef.current && !crewRef.current.contains(event.target)) ||
         (openMenu === "admin" && adminRef.current && !adminRef.current.contains(event.target))
       ) {
@@ -158,6 +160,7 @@ export default function TopNavbar() {
     location.pathname === "/outage-analysis" ||
     location.pathname === "/mis-report";
 
+  const isReportPreparationActive = location.pathname.startsWith("/report-preparation/");
   const isCrewActive = location.pathname.startsWith("/crew/") && location.pathname !== "/crew/user-context";
   const isOldLogbookActive = location.pathname === "/old-logbook";
   
@@ -436,6 +439,75 @@ export default function TopNavbar() {
                     iconBg="#FEF9E7"
                     path="/mis-report"
                     active={location.pathname === "/mis-report"}
+                    onClick={handleNavigate}
+                  />
+                </Box>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </Box>
+
+        {/* Report Preparation */}
+        <Box ref={reportRef} sx={{ position: "relative" }}>
+          <Button
+            onClick={() => toggleDropdown("reports")}
+            endIcon={
+              <ChevronDown
+                size={14}
+                style={{
+                  transform: openMenu === "reports" ? "rotate(180deg)" : "rotate(0deg)",
+                  transition: "transform 0.2s ease-in-out",
+                  color: (openMenu === "reports" || isReportPreparationActive) ? "#03624C" : "#64748B"
+                }}
+              />
+            }
+            sx={{
+              textTransform: "none",
+              fontSize: 14,
+              fontWeight: 700,
+              color: (openMenu === "reports" || isReportPreparationActive) ? "#03624C" : "#475569",
+              px: 2.2,
+              py: 0.9,
+              borderRadius: "999px",
+              backgroundColor: openMenu === "reports" ? "#E6F0EE" : "transparent",
+              "&:hover": { backgroundColor: "#F1F7F6", color: "#03624C" },
+            }}
+          >
+            Report Preparation
+          </Button>
+          <AnimatePresence>
+            {openMenu === "reports" && (
+              <motion.div
+                {...dropdownMotionProps}
+                style={{
+                  position: "absolute",
+                  top: "calc(100% + 12px)",
+                  left: "50%",
+                  transform: "translateX(-50%)",
+                  width: 330,
+                  zIndex: 1000,
+                }}
+              >
+                <Box sx={dropdownBoxStyles}>
+                  {caretElement}
+                  <DropdownItem
+                    title="DSO Evening"
+                    description="00:00–16:59 SCADA and CRMS report"
+                    icon={FileText}
+                    iconColor="#0057B7"
+                    iconBg="#EAF2FF"
+                    path="/report-preparation/dso-evening"
+                    active={location.pathname === "/report-preparation/dso-evening"}
+                    onClick={handleNavigate}
+                  />
+                  <DropdownItem
+                    title="DSO Morning"
+                    description="Morning DSO report preparation"
+                    icon={FileText}
+                    iconColor="#008645"
+                    iconBg="#E9F8F0"
+                    path="/report-preparation/dso-morning"
+                    active={location.pathname === "/report-preparation/dso-morning"}
                     onClick={handleNavigate}
                   />
                 </Box>

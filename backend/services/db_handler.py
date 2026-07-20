@@ -56,6 +56,10 @@ class MongoService:
             PSP_COLLECTION
         ]
 
+        self.dso_reports_collection = self.db[
+            "dso_reports"
+        ]
+
         self.nldc_psp_demand_collection = self.db[
             "NLDC_PSP_Demand"
         ]
@@ -87,6 +91,9 @@ class MongoService:
                 old_docs = list(self.db["station_mapping"].find({}, {"_id": 0}))
                 if old_docs:
                     self.db["frequency_mapping"].insert_many(old_docs)
+
+        if "dso_reports" not in self.db.list_collection_names():
+            self.db.create_collection("dso_reports")
 
     # 🔥 UPSERT LOGIC (CORE)
     def upsert_data(self, df: pd.DataFrame):

@@ -44,6 +44,134 @@ def normalize_list(value):
     ))
 
 
+def resolve_employee_organization(function_ids=None, employee_id=None):
+    """Resolve employee hierarchy only from the Organization Master."""
+    employee_id = str(employee_id or "").strip()
+    units = list(organization_unit_collection.find({"isActive": {"$ne": False}}))
+    unit_by_id = {str(unit["_id"]): unit for unit in units}
+
+    manual_function_ids = [
+        unit_id for unit_id in normalize_list(function_ids)
+        if unit_id in unit_by_id and unit_by_id[unit_id].get("unitType") == "function"
+    ]
+    role_unit_ids = []
+    if employee_id:
+        for unit in units:
+            role_ids = normalize_list(unit.get("headEmployeeIds")) + normalize_list(unit.get("juniorEmployeeIds"))
+            if employee_id in role_ids:
+                role_unit_ids.append(str(unit["_id"]))
+    role_function_ids = [
+        unit_id for unit_id in role_unit_ids
+        if unit_by_id[unit_id].get("unitType") == "function"
+    ]
+    manual_function_ids = [
+        unit_id for unit_id in manual_function_ids
+        if unit_id not in role_function_ids
+    ]
+
+    selected_function_ids = list(dict.fromkeys(manual_function_ids + role_function_ids))
+    seed_ids = list(dict.fromkeys(selected_function_ids + role_unit_ids))
+    vertical_ids = []
+    section_ids = []
+    department_ids = []
+    reporting_ids = []
+    intermediary_candidates = []
+    hod_candidates = []
+
+    for seed_id in seed_ids:
+        current = unit_by_id.get(seed_id)
+        if not current:
+            continue
+
+        configured_current_heads = normalize_list(current.get("headEmployeeIds"))
+        employee_is_current_head = employee_id in configured_current_heads
+        current_heads = [
+            value for value in configured_current_heads
+            if value and value != employee_id
+        ]
+        direct_found = False
+        if current_heads and not employee_is_current_head:
+            reporting_ids.extend(current_heads)
+            direct_found = True
+
+        parent_id = str(current.get("parentId")) if current.get("parentId") else ""
+        while parent_id and parent_id in unit_by_id:
+            parent = unit_by_id[parent_id]
+            parent_type = parent.get("unitType")
+            if parent_type == "vertical":
+                vertical_ids.append(parent_id)
+            elif parent_type == "section":
+                section_ids.append(parent_id)
+            elif parent_type == "department":
+                department_ids.append(parent_id)
+
+            parent_heads = [
+                value for value in normalize_list(parent.get("headEmployeeIds"))
+                if value and value != employee_id
+            ]
+            if parent_heads:
+                if not direct_found:
+                    reporting_ids.extend(parent_heads)
+                    direct_found = True
+                elif parent_type != "department":
+                    intermediary_candidates.extend(parent_heads)
+                if parent_type == "department":
+                    hod_candidates.extend(parent_heads)
+
+            parent_id = str(parent.get("parentId")) if parent.get("parentId") else ""
+
+        seed_type = current.get("unitType")
+        if seed_type == "vertical":
+            vertical_ids.append(seed_id)
+        elif seed_type == "section":
+            section_ids.append(seed_id)
+        elif seed_type == "department":
+            department_ids.append(seed_id)
+
+    vertical_ids = list(dict.fromkeys(vertical_ids))
+    section_ids = list(dict.fromkeys(section_ids))
+    department_ids = list(dict.fromkeys(department_ids))
+    reporting_ids = list(dict.fromkeys(reporting_ids))
+    intermediary_candidates = [
+        value for value in dict.fromkeys(intermediary_candidates)
+        if value not in reporting_ids
+    ]
+    hod_candidates = list(dict.fromkeys(hod_candidates))
+
+    return {
+        "manualFunctionIds": manual_function_ids,
+        "roleFunctionIds": role_function_ids,
+        "functionIds": selected_function_ids,
+        "verticalIds": vertical_ids,
+        "verticals": [unit_by_id[value].get("name") for value in vertical_ids],
+        "sectionIds": section_ids,
+        "sections": [unit_by_id[value].get("name") for value in section_ids],
+        "departmentIds": department_ids,
+        "departments": [unit_by_id[value].get("name") for value in department_ids],
+        "department": unit_by_id[department_ids[0]].get("name") if department_ids else None,
+        "reportingOfficerIds": reporting_ids,
+        "reportingOfficerId": reporting_ids[0] if reporting_ids else None,
+        "intermediaryReportingId": intermediary_candidates[0] if intermediary_candidates else None,
+        "hodId": hod_candidates[0] if hod_candidates else None,
+    }
+
+
+def sync_employee_organization():
+    for employee in employee_collection.find({}, {"userId": 1, "functionIds": 1, "manualFunctionIds": 1}):
+        resolved = resolve_employee_organization(
+            employee.get("manualFunctionIds", employee.get("functionIds")),
+            employee.get("userId"),
+        )
+        employee_collection.update_one(
+            {"_id": employee["_id"]},
+            {"$set": {
+                **resolved,
+                "vertical": (resolved.get("verticals") or [None])[0],
+                "updatedAt": datetime.utcnow(),
+            }},
+        )
+
+
 def serialize(emp):
 
     # ðŸ”¥ FETCH RELATED EMPLOYEES
@@ -87,6 +215,11 @@ def serialize(emp):
         # ðŸ”¥ NEW FIELDS
         "verticals": verticals,
         "vertical": verticals[0] if verticals else None,
+        "verticalIds": normalize_list(emp.get("verticalIds")),
+        "sections": normalize_list(emp.get("sections")),
+        "sectionIds": normalize_list(emp.get("sectionIds")),
+        "departments": normalize_list(emp.get("departments")),
+        "departmentIds": normalize_list(emp.get("departmentIds")),
         "department": emp.get("department"),
 
         # ðŸ”¥ IDs (keep for logic)
@@ -110,6 +243,10 @@ def serialize(emp):
 
 @router.post("/employees")  #### save employee entry to database
 def create_employee(employee: dict):
+    employee.update(resolve_employee_organization(
+        employee.get("manualFunctionIds", employee.get("functionIds")),
+        employee.get("userId"),
+    ))
     inserted_id = create_employee_logic(employee)
     return {"message": "Employee added", "id": inserted_id}
 
@@ -140,7 +277,7 @@ def get_dropdown(dropdown_type: str):
 ORG_PARENT_TYPES = {
     "department": set(),
     "vertical": {"department"},
-    "section": {"department"},
+    "section": {"vertical"},
     "function": {"vertical", "section"},
 }
 
@@ -172,6 +309,10 @@ def validate_org_unit(data, current_id=None):
     if not name or unit_type not in ORG_PARENT_TYPES:
         raise HTTPException(400, "Name and a valid unit type are required")
 
+    current_unit = None
+    if current_id and ObjectId.is_valid(current_id):
+        current_unit = organization_unit_collection.find_one({"_id": ObjectId(current_id)})
+
     parent = None
     if parent_id:
         if not ObjectId.is_valid(parent_id):
@@ -184,7 +325,12 @@ def validate_org_unit(data, current_id=None):
 
     allowed = ORG_PARENT_TYPES[unit_type]
     if allowed and (not parent or parent.get("unitType") not in allowed):
-        raise HTTPException(400, f"{unit_type.title()} must belong to a {' or '.join(sorted(allowed))}")
+        if not (
+            current_unit
+            and unit_type == "section"
+            and str(current_unit.get("parentId")) == parent_id
+        ):
+            raise HTTPException(400, f"{unit_type.title()} must belong to a {' or '.join(sorted(allowed))}")
     if not allowed and parent:
         raise HTTPException(400, "Department is a top-level unit")
 
@@ -210,6 +356,34 @@ def get_organization_units():
     return [serialize_org_unit(item, employee_names, parent_names) for item in units]
 
 
+@router.post("/organization/resolve-employee")
+def resolve_organization_employee(data: dict):
+    resolved = resolve_employee_organization(
+        data.get("manualFunctionIds", data.get("functionIds")),
+        data.get("userId"),
+    )
+    related_ids = list(dict.fromkeys(
+        resolved["reportingOfficerIds"]
+        + [resolved.get("intermediaryReportingId"), resolved.get("hodId")]
+    ))
+    related_ids = [value for value in related_ids if value]
+    employee_names = {
+        item.get("userId"): item.get("name")
+        for item in employee_collection.find(
+            {"userId": {"$in": related_ids}},
+            {"userId": 1, "name": 1},
+        )
+    }
+    resolved.update({
+        "reportingOfficerNames": [
+            employee_names.get(value, value) for value in resolved["reportingOfficerIds"]
+        ],
+        "intermediaryReportingName": employee_names.get(resolved.get("intermediaryReportingId")),
+        "hodName": employee_names.get(resolved.get("hodId")),
+    })
+    return resolved
+
+
 @router.post("/organization/units")
 def create_organization_unit(data: dict):
     unit = validate_org_unit(data)
@@ -219,6 +393,7 @@ def create_organization_unit(data: dict):
         raise HTTPException(409, "This organization unit already exists")
     unit["createdAt"] = datetime.utcnow()
     result = organization_unit_collection.insert_one(unit)
+    sync_employee_organization()
     return {"message": "Organization unit created", "id": str(result.inserted_id)}
 
 
@@ -231,6 +406,7 @@ def update_organization_unit(unit_id: str, data: dict):
     organization_unit_collection.update_one(
         {"_id": ObjectId(unit_id)}, {"$set": validate_org_unit(data, unit_id)}
     )
+    sync_employee_organization()
     return {"message": "Organization unit updated"}
 
 
@@ -246,6 +422,7 @@ def delete_organization_unit(unit_id: str):
     result = organization_unit_collection.delete_one({"_id": object_id})
     if not result.deleted_count:
         raise HTTPException(404, "Organization unit not found")
+    sync_employee_organization()
     return {"message": "Organization unit deleted"}
 
 
@@ -318,15 +495,12 @@ def get_organization_tree():
 
 @router.put("/employees/{employee_id}")
 def update_employee(employee_id: str, data: dict):
-
-    verticals = normalize_list(
-        data.get("verticals") if "verticals" in data else data.get("vertical")
+    organization = resolve_employee_organization(
+        data.get("manualFunctionIds", data.get("functionIds")),
+        data.get("userId"),
     )
-    reporting_officer_ids = normalize_list(
-        data.get("reportingOfficerIds")
-        if "reportingOfficerIds" in data
-        else data.get("reportingOfficerId")
-    )
+    verticals = organization["verticals"]
+    reporting_officer_ids = organization["reportingOfficerIds"]
 
     update_data = {
         "name": data.get("name"),
@@ -340,12 +514,19 @@ def update_employee(employee_id: str, data: dict):
         "category": normalize_list(data.get("category")),
         "verticals": verticals,
         "vertical": verticals[0] if verticals else None,
-        "department": data.get("department"),
+        "verticalIds": organization["verticalIds"],
+        "sections": organization["sections"],
+        "sectionIds": organization["sectionIds"],
+        "departments": organization["departments"],
+        "departmentIds": organization["departmentIds"],
+        "department": organization["department"],
         "reportingOfficerIds": reporting_officer_ids,
         "reportingOfficerId": reporting_officer_ids[0] if reporting_officer_ids else None,
-        "functionIds": normalize_list(data.get("functionIds")),
-        "intermediaryReportingId": data.get("intermediaryReportingId") or None,
-        "hodId": data.get("hodId") or None,
+        "functionIds": organization["functionIds"],
+        "manualFunctionIds": organization["manualFunctionIds"],
+        "roleFunctionIds": organization["roleFunctionIds"],
+        "intermediaryReportingId": organization["intermediaryReportingId"],
+        "hodId": organization["hodId"],
     }
 
     password = data.get("password")
@@ -562,18 +743,12 @@ async def import_employees_excel(file: UploadFile = File(...)):
             "phone": emp_raw.get("phone"),
             "gmail": emp_raw.get("gmail"),
 
-            "verticals": normalize_list(emp_raw.get("verticals") or emp_raw.get("vertical")),
-            "vertical": (normalize_list(emp_raw.get("verticals") or emp_raw.get("vertical")) or [None])[0],
-            "department": emp_raw.get("department"),
-
-            # ðŸ”¥ IMPORTANT MAPPING (userId based)
-            "reportingOfficerIds": normalize_list(emp_raw.get("reportingOfficerIds") or emp_raw.get("reportingOfficerId")),
-            "reportingOfficerId": (normalize_list(emp_raw.get("reportingOfficerIds") or emp_raw.get("reportingOfficerId")) or [None])[0],
-            "intermediaryReportingId": str(emp_raw.get("intermediaryReportingId")).strip() if emp_raw.get("intermediaryReportingId") else None,
-            "hodId": str(emp_raw.get("hodId")).strip() if emp_raw.get("hodId") else None,
+            "functionIds": normalize_list(emp_raw.get("functionIds")),
 
             "updatedAt": datetime.utcnow()
         }
+        emp_data.update(resolve_employee_organization(emp_data["functionIds"], user_id))
+        emp_data["vertical"] = (emp_data.get("verticals") or [None])[0]
 
         # ============================
         # UPSERT (UPDATE OR INSERT)

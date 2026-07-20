@@ -366,6 +366,18 @@
   background-image: linear-gradient(180deg, #E8F5F1 0%, #FFFFFF 76px) !important;
 }
 
+.dso-report-banner {
+  background-color: #081F5C !important;
+  background-image: linear-gradient(110deg, #081F5C 0%, #0057B7 65%, #1689E8 100%) !important;
+  border: 0 !important;
+  color: #FFFFFF !important;
+  box-shadow: 0 8px 20px rgba(8, 16, 58, 0.16) !important;
+}
+
+.dso-report-banner .MuiTypography-root {
+  color: #FFFFFF !important;
+}
+
 .MuiAccordionSummary-root {
   background-image: linear-gradient(135deg, #E8F5F1 0%, #F8FCFA 100%) !important;
   color: var(--ui-text-strong) !important;

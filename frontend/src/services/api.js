@@ -345,6 +345,17 @@ const API = {
     return res.data;
   },
 
+  downloadIndia15MinGenerationBreakup: async (dateStr) => {
+    const params = new URLSearchParams();
+    if (dateStr) params.append("date_str", dateStr);
+    const query = params.toString();
+    const res = await axios.get(
+      `${BASE_URL}/psp/india-15-min-demand/generation-breakup/export${query ? `?${query}` : ""}`,
+      { responseType: "blob" }
+    );
+    return res.data;
+  },
+
   getAllStateDemandStatus: async (startDate, endDate) => {
     let url = `${BASE_URL}/psp/all-state-demand/status`;
     if (startDate && endDate) {
@@ -660,6 +671,32 @@ const API = {
     return res.data;
   },
 
+  getMisPlannedOutageUnitNames: async (elementType) => {
+    const params = new URLSearchParams();
+    if (elementType) params.append("element_type", elementType);
+    const query = params.toString();
+    const res = await axios.get(`${BASE_URL}/psp/mis/planned-outage/unit-names${query ? `?${query}` : ""}`);
+    return res.data;
+  },
+
+  getMisPlannedOutageEntries: async (elementType = "") => {
+    const params = new URLSearchParams();
+    if (elementType) params.append("element_type", elementType);
+    const query = params.toString();
+    const res = await axios.get(`${BASE_URL}/psp/mis/planned-outage/entries${query ? `?${query}` : ""}`);
+    return res.data;
+  },
+
+  createMisPlannedOutageEntry: async (payload) => {
+    const res = await axios.post(`${BASE_URL}/psp/mis/planned-outage/entries`, payload);
+    return res.data;
+  },
+
+  updateMisPlannedOutageEntry: async (entryId, payload) => {
+    const res = await axios.put(`${BASE_URL}/psp/mis/planned-outage/entries/${entryId}`, payload);
+    return res.data;
+  },
+
   getMisOutageAnalysis: async (payload) => {
     const res = await axios.post(`${BASE_URL}/psp/mis/outage-analysis`, payload);
     return res.data;
@@ -881,7 +918,52 @@ const API = {
 
   getSSEUrl: (jobId) => {
     return `${BASE_URL}/frequency/process-report-sse?job_id=${encodeURIComponent(jobId)}`;
-  }
+  },
+
+  getDsoMaster: async () => {
+    const res = await axios.get(`${BASE_URL}/dso-reports/master`);
+    return res.data;
+  },
+
+  saveDsoMaster: async (limits) => {
+    const res = await axios.put(`${BASE_URL}/dso-reports/master`, { limits });
+    return res.data;
+  },
+
+  getDsoReport: async (reportType, reportDate) => {
+    const res = await axios.get(`${BASE_URL}/dso-reports/${reportType}/${reportDate}`);
+    return res.data;
+  },
+
+  saveDsoReport: async (reportType, reportDate, payload) => {
+    const res = await axios.put(`${BASE_URL}/dso-reports/${reportType}/${reportDate}`, payload);
+    return res.data;
+  },
+
+  processDsoReport: async ({ reportType, reportDate, importantEvents, sicName, overwrite = false, file }) => {
+    const form = new FormData();
+    form.append("report_type", reportType);
+    form.append("report_date", reportDate);
+    form.append("important_events", importantEvents || "");
+    form.append("sic_name", sicName || "");
+    form.append("overwrite", overwrite ? "true" : "false");
+    form.append("file", file);
+    const res = await axios.post(`${BASE_URL}/dso-reports/process`, form);
+    return res.data;
+  },
+
+  deleteDsoReport: async (reportType, reportDate) => {
+    const res = await axios.delete(`${BASE_URL}/dso-reports/${reportType}/${reportDate}`);
+    return res.data;
+  },
+
+  dsoReportExcelUrl: (reportType, reportDate) => (
+    `${BASE_URL}/dso-reports/${reportType}/${reportDate}/excel`
+  ),
+
+  dsoReportPdfUrl: (reportType, reportDate) => (
+    `${BASE_URL}/dso-reports/${reportType}/${reportDate}/pdf`
+  )
 };
 
 export default API;

@@ -343,7 +343,7 @@ export default function Dashboard() {
           }}>
 
             <Typography fontWeight="bold" mb={1}>
-              My Assigned Duties
+              Duty Assignments & Approvals
             </Typography>
 
             {notifications.length === 0 && (
@@ -369,8 +369,14 @@ export default function Dashboard() {
                   Shift: {n.assignedDuty || "-"}
                 </Typography>
 
+                {n.viewerRole === "Controlling Officer" && (
+                  <Typography variant="body2">
+                    Assigned to: {n.employeeName || n.employeeId}
+                  </Typography>
+                )}
+
                 <Typography variant="caption">
-                  Status: {n.status}
+                  Status: {n.status} · Viewing as {n.viewerRole || "Employee"}
                 </Typography>
 
                 <Typography variant="caption" display="block">
@@ -380,7 +386,7 @@ export default function Dashboard() {
                 <Box sx={{ mt:1, display:"flex", gap:1 }}>
 
                   {/* ACCEPT */}
-                  {n.status === "Pending" && (
+                  {n.canAccept && (
                     <Button
                       size="small"
                       variant="contained"

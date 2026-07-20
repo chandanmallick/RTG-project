@@ -18,8 +18,20 @@ from services.pipeline_logger import (
 
 from services.psp_service import PSPService
 from services.db_handler import MongoService
+from crew_legacy.api.replacement import auto_accept_pending_duty_notifications
 
 scheduler = BackgroundScheduler()
+
+scheduler.add_job(
+    auto_accept_pending_duty_notifications,
+    trigger="interval",
+    minutes=1,
+    id="crew_replacement_auto_accept",
+    max_instances=1,
+    coalesce=True,
+    misfire_grace_time=120,
+    replace_existing=True,
+)
 
 PSP_DAILY_SOURCE_STATUS_COLLECTION = "psp_daily_source_sync_status"
 

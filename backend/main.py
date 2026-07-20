@@ -26,6 +26,7 @@ from routes.frequency_routes import router as frequency_router
 from routes.old_logbook_routes import router as old_logbook_router
 from routes.crew_routes import router as crew_router
 from routes.crew_legacy_routes import router as crew_legacy_router
+from routes.dso_report_routes import router as dso_report_router
 
 import urllib3
 
@@ -125,6 +126,10 @@ app.include_router(
 
 app.include_router(
     crew_legacy_router
+)
+
+app.include_router(
+    dso_report_router
 )
 
 @app.on_event("startup")

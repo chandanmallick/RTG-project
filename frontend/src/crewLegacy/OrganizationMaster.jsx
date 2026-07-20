@@ -12,6 +12,7 @@ const EMPTY = {
   name: "",
   unitType: "department",
   parentId: "",
+  reportingMode: "either",
   headEmployeeIds: [],
   juniorEmployeeIds: [],
   isActive: true,
@@ -48,14 +49,31 @@ export default function OrganizationMaster() {
   useEffect(() => { load(); }, []);
 
   const allowedParents = useMemo(() => {
-    if (["vertical", "section"].includes(form.unitType)) {
+    if (form.unitType === "vertical") {
       return units.filter((unit) => unit.unitType === "department" && unit.id !== editId);
     }
+    if (form.unitType === "section") {
+      return units.filter((unit) => unit.unitType === "vertical" && unit.id !== editId);
+    }
     if (form.unitType === "function") {
+      if (form.reportingMode === "vertical") {
+        return units.filter((unit) => unit.unitType === "vertical" && unit.id !== editId);
+      }
+      if (form.reportingMode === "section") {
+        return units.filter((unit) => unit.unitType === "section" && unit.id !== editId);
+      }
       return units.filter((unit) => ["vertical", "section"].includes(unit.unitType) && unit.id !== editId);
     }
     return [];
-  }, [units, form.unitType, editId]);
+  }, [units, form.unitType, form.reportingMode, editId]);
+
+  const inferFunctionReportingMode = (parentId) => {
+    const parent = units.find((unit) => unit.id === parentId);
+    if (!parent) return "either";
+    if (parent.unitType === "vertical") return "vertical";
+    if (parent.unitType === "section") return "section";
+    return "either";
+  };
 
   const openNew = () => {
     setForm(EMPTY);
@@ -68,6 +86,7 @@ export default function OrganizationMaster() {
       name: unit.name || "",
       unitType: unit.unitType || "department",
       parentId: unit.parentId || "",
+      reportingMode: unit.unitType === "function" ? inferFunctionReportingMode(unit.parentId) : "either",
       headEmployeeIds: unit.headEmployeeIds || [],
       juniorEmployeeIds: unit.juniorEmployeeIds || [],
       isActive: unit.isActive !== false,
@@ -82,6 +101,7 @@ export default function OrganizationMaster() {
       ...current,
       unitType,
       parentId: "",
+      reportingMode: "either",
       juniorEmployeeIds: unitType === "function" ? current.juniorEmployeeIds : [],
     }));
   };
@@ -189,9 +209,38 @@ export default function OrganizationMaster() {
             <TextField size="small" select label="Unit type" value={form.unitType} onChange={changeType} fullWidth>
               {Object.entries(TYPE_LABELS).map(([value, label]) => <MenuItem key={value} value={value}>{label}</MenuItem>)}
             </TextField>
-            {form.unitType !== "department" && <TextField size="small" select label="Parent unit" value={form.parentId} onChange={(event) => setForm((current) => ({ ...current, parentId: event.target.value }))} fullWidth>
-              {allowedParents.map((unit) => <MenuItem key={unit.id} value={unit.id}>{unit.name} ({TYPE_LABELS[unit.unitType]})</MenuItem>)}
-            </TextField>}
+            {form.unitType === "function" && (
+              <TextField
+                size="small"
+                select
+                label="Function reporting route"
+                value={form.reportingMode}
+                onChange={(event) => setForm((current) => ({ ...current, reportingMode: event.target.value, parentId: "" }))}
+                fullWidth
+                helperText="Choose whether this function reports directly to a Vertical or through a Section."
+              >
+                <MenuItem value="either">Either Vertical or Section</MenuItem>
+                <MenuItem value="vertical">Direct to Vertical</MenuItem>
+                <MenuItem value="section">Through Section</MenuItem>
+              </TextField>
+            )}
+            {form.unitType !== "department" && (
+              <TextField
+                size="small"
+                select
+                label={form.unitType === "function" ? "Reports under" : "Reports under Vertical"}
+                value={form.parentId}
+                onChange={(event) => setForm((current) => ({ ...current, parentId: event.target.value }))}
+                fullWidth
+                helperText={
+                  form.unitType === "function"
+                    ? "Pick the exact Vertical or Section this function should report to."
+                    : "Pick the Vertical this section should report to."
+                }
+              >
+                {allowedParents.map((unit) => <MenuItem key={unit.id} value={unit.id}>{unit.name} ({TYPE_LABELS[unit.unitType]})</MenuItem>)}
+              </TextField>
+            )}
             {employeeSelect(`${TYPE_LABELS[form.unitType]} Head(s)`, "headEmployeeIds")}
             {form.unitType === "function" && employeeSelect("Function Junior(s)", "juniorEmployeeIds")}
           </Box>

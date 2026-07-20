@@ -52,10 +52,17 @@ def create_employee_logic(data):
         # for older roster/leave code while the arrays are the source of truth.
         "verticals": verticals,
         "vertical": (verticals or [None])[0],
+        "verticalIds": _normalize_list(data.get("verticalIds")),
+        "sections": _normalize_list(data.get("sections")),
+        "sectionIds": _normalize_list(data.get("sectionIds")),
+        "departments": _normalize_list(data.get("departments")),
+        "departmentIds": _normalize_list(data.get("departmentIds")),
         "department": data.get("department"),
         "reportingOfficerIds": reporting_officer_ids,
         "reportingOfficerId": (reporting_officer_ids or [None])[0],
         "functionIds": _normalize_list(data.get("functionIds")),
+        "manualFunctionIds": _normalize_list(data.get("manualFunctionIds")),
+        "roleFunctionIds": _normalize_list(data.get("roleFunctionIds")),
         "intermediaryReportingId": data.get("intermediaryReportingId"),
         "hodId": data.get("hodId"),
 

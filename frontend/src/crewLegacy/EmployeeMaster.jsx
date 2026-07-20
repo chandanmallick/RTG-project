@@ -26,7 +26,8 @@ import {
   DialogTitle,
   DialogContent,
   DialogActions,
-  Stack
+  Stack,
+  CircularProgress
 } from "@mui/material";
 
 
@@ -58,9 +59,8 @@ export default function EmployeeMaster() {
   const [categories, setCategories] = useState([]);
   const [editId, setEditId] = useState(null);
   const [groupLeaveRule, setGroupLeaveRule] = useState(false);
-  const [verticals, setVerticals] = useState([]);
-  const [departments, setDepartments] = useState([]);
   const [organizationUnits, setOrganizationUnits] = useState([]);
+  const [organizationResolving, setOrganizationResolving] = useState(false);
   const [formOpen, setFormOpen] = useState(false);
 
   // ðŸ”Ž Search
@@ -118,14 +118,10 @@ export default function EmployeeMaster() {
   const fetchDropdowns = async () => {
     const dutyRes = await api.get(`/admin/dropdown/dutyType`);
     const catRes = await api.get(`/admin/dropdown/category`);
-    const verticalRes = await api.get(`/admin/dropdown/vertical`);
-    const deptRes = await api.get(`/admin/dropdown/department`);
     const orgRes = await api.get(`/admin/organization/units`);
 
     setDutyTypes(dutyRes.data);
     setCategories(catRes.data);
-    setVerticals(verticalRes.data);
-    setDepartments(deptRes.data);
     setOrganizationUnits(orgRes.data || []);
   };
 
@@ -167,13 +163,45 @@ export default function EmployeeMaster() {
     });
   };
 
+  const resolveOrganization = async (functionIds, userId, baseData = formData) => {
+    try {
+      setOrganizationResolving(true);
+      const response = await api.post("/admin/organization/resolve-employee", {
+        functionIds: normalizeListValue(functionIds),
+        userId,
+      });
+      const resolved = response.data || {};
+      const next = {
+        ...baseData,
+        ...resolved,
+        functionIds: normalizeListValue(resolved.functionIds),
+        verticals: normalizeListValue(resolved.verticals),
+        reportingOfficerIds: normalizeListValue(resolved.reportingOfficerIds),
+      };
+      setFormData(next);
+      return next;
+    } finally {
+      setOrganizationResolving(false);
+    }
+  };
+
+  const handleFunctionsChange = async (event) => {
+    const functionIds = normalizeListValue(event.target.value);
+    await resolveOrganization(functionIds, formData.userId, { ...formData, functionIds });
+  };
+
   const handleSubmit = async () => {
+    const resolvedForm = await resolveOrganization(
+      formData.functionIds,
+      formData.userId,
+      formData
+    );
 
     if (editId) {
-      await api.put(`admin/employees/${editId}`, formData);
+      await api.put(`admin/employees/${editId}`, resolvedForm);
       setEditId(null);
     } else {
-      await api.post(`/admin/employees`, formData);
+      await api.post(`/admin/employees`, resolvedForm);
     }
 
     fetchEmployees();
@@ -188,18 +216,21 @@ export default function EmployeeMaster() {
     setFormOpen(true);
   };
 
-  const handleEdit = (employee) => {
-    setFormData({
+  const handleEdit = async (employee) => {
+    const employeeForm = {
       ...employee,
+      password: "",
       category: normalizeListValue(employee.category),
       verticals: normalizeListValue(employee.verticals || employee.vertical),
       reportingOfficerIds: normalizeListValue(
         employee.reportingOfficerIds || employee.reportingOfficerId
       ),
       functionIds: normalizeListValue(employee.functionIds)
-    });
+    };
+    setFormData(employeeForm);
     setEditId(employee.id);
     setFormOpen(true);
+    await resolveOrganization(employeeForm.functionIds, employeeForm.userId, employeeForm);
   };
 
   const closeForm = () => {
@@ -356,42 +387,14 @@ export default function EmployeeMaster() {
             </FormControl>
 
             <FormControl size="small" fullWidth>
-              <InputLabel shrink>Vertical(s)</InputLabel>
-              <Select
-                multiple
-                notched
-                name="verticals"
-                value={normalizeListValue(formData.verticals || formData.vertical)}
-                onChange={handleChange}
-                input={<OutlinedInput label="Vertical(s)" />}
-                renderValue={(selected) => (
-                  <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.5 }}>
-                    {selected.map((value) => <Chip key={value} label={value} size="small" />)}
-                  </Box>
-                )}
-              >
-                {verticals.map((item) => (
-                  <MenuItem key={item.id} value={item.value}>{item.value}</MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-
-            <TextField size="small" select label="Department" name="department" fullWidth InputLabelProps={{ shrink: true }} value={formData.department} onChange={handleChange}>
-              {departments.map((item) => (
-                <MenuItem key={item.id} value={item.value}>
-                  {item.value}
-                </MenuItem>
-              ))}
-            </TextField>
-
-            <FormControl size="small" fullWidth>
               <InputLabel shrink>Function(s)</InputLabel>
               <Select
                 multiple
                 notched
                 name="functionIds"
                 value={normalizeListValue(formData.functionIds)}
-                onChange={handleChange}
+                onChange={handleFunctionsChange}
+                disabled={organizationResolving}
                 input={<OutlinedInput label="Function(s)" />}
                 renderValue={(selected) => (
                   <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.5 }}>
@@ -412,55 +415,66 @@ export default function EmployeeMaster() {
               </Select>
             </FormControl>
 
-            <FormControl size="small" fullWidth>
-              <InputLabel shrink>Reporting Officer(s)</InputLabel>
-              <Select
-                multiple
-                notched
-                name="reportingOfficerIds"
-                value={normalizeListValue(formData.reportingOfficerIds || formData.reportingOfficerId)}
-                onChange={handleChange}
-                input={<OutlinedInput label="Reporting Officer(s)" />}
-                renderValue={(selected) => (
-                  <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.5 }}>
-                    {selected.map((employeeId) => {
-                      const officer = employees.find((item) => item.userId === employeeId);
-                      return <Chip key={employeeId} label={officer?.name || employeeId} size="small" />;
-                    })}
-                  </Box>
-                )}
-              >
-                {employees
-                  .filter((emp) => emp.userId !== formData.userId)
-                  .map((emp) => (
-                    <MenuItem key={emp.id} value={emp.userId}>
-                      {emp.name} ({emp.userId})
-                    </MenuItem>
-                  ))}
-              </Select>
-            </FormControl>
+            <TextField
+              size="small"
+              label="Vertical(s)"
+              fullWidth
+              InputLabelProps={{ shrink: true }}
+              value={normalizeListValue(formData.verticals).join(", ")}
+              InputProps={{ readOnly: true }}
+              helperText="Auto-fetched from Organization Master"
+            />
 
-            <TextField size="small" select label="Intermediary Reporting" name="intermediaryReportingId" fullWidth InputLabelProps={{ shrink: true }} value={formData.intermediaryReportingId || formData.intermediaryReportingName} onChange={handleChange}>
-              {employees.map((emp) => (
-                <MenuItem key={emp.id} value={emp.userId}>
-                  {emp.name}
-                </MenuItem>
-              ))}
-            </TextField>
+            <TextField
+              size="small"
+              label="Department"
+              fullWidth
+              InputLabelProps={{ shrink: true }}
+              value={formData.department || ""}
+              InputProps={{ readOnly: true }}
+              helperText="Auto-fetched from Organization Master"
+            />
 
-            <TextField size="small" select label="HOD" name="hodId" fullWidth InputLabelProps={{ shrink: true }} value={formData.hodId || formData.hodName} onChange={handleChange}>
-              {employees.map((emp) => (
-                <MenuItem key={emp.id} value={emp.userId}>
-                  {emp.name}
-                </MenuItem>
-              ))}
-            </TextField>
+            <TextField
+              size="small"
+              label="Reporting Officer(s)"
+              fullWidth
+              InputLabelProps={{ shrink: true }}
+              value={normalizeListValue(formData.reportingOfficerNames).join(", ")}
+              InputProps={{ readOnly: true }}
+              helperText="Function head(s) configured in Organization Master"
+            />
+
+            <TextField
+              size="small"
+              label="Intermediary Reporting"
+              fullWidth
+              InputLabelProps={{ shrink: true }}
+              value={formData.intermediaryReportingName || ""}
+              InputProps={{ readOnly: true }}
+              helperText="Section/Vertical head configured in Organization Master"
+            />
+
+            <TextField
+              size="small"
+              label="HOD"
+              fullWidth
+              InputLabelProps={{ shrink: true }}
+              value={formData.hodName || ""}
+              InputProps={{ readOnly: true }}
+              helperText="Department head configured in Organization Master"
+            />
           </Box>
         </DialogContent>
         <DialogActions sx={{ px: 3, py: 2 }}>
           <Button onClick={closeForm}>Cancel</Button>
-          <Button variant="contained" onClick={handleSubmit}>
-            {editId ? "Update Employee" : "Add Employee"}
+          <Button
+            variant="contained"
+            onClick={handleSubmit}
+            disabled={organizationResolving}
+            startIcon={organizationResolving ? <CircularProgress size={15} color="inherit" /> : null}
+          >
+            {organizationResolving ? "Reading Organization Master..." : editId ? "Update Employee" : "Add Employee"}
           </Button>
         </DialogActions>
       </Dialog>

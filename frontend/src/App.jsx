@@ -17,6 +17,8 @@ const PSPAdmin = lazy(() => import("./pages/PSPAdmin"));
 const PSPReportChecking = lazy(() => import("./pages/PSPReportChecking"));
 const FrequencyReport = lazy(() => import("./pages/FrequencyReport"));
 const MISReport = lazy(() => import("./pages/MISReport"));
+const DSOReportPreparation = lazy(() => import("./pages/DSOReportPreparation"));
+const DSOMorningReport = lazy(() => import("./pages/DSOMorningReport"));
 const OutageAnalysis = lazy(() => import("./pages/OutageAnalysis"));
 const OldLogbook = lazy(() => import("./pages/OldLogbook"));
 const CrewCalendar = lazy(() => import("./pages/crew/CrewCalendar"));
@@ -108,6 +110,16 @@ export default function App() {
         <Route
           path="/mis-report"
           element={protectedPage("mis_report", <MISReport />)}
+        />
+
+        <Route
+          path="/report-preparation/dso-evening"
+          element={protectedPage("dso_evening_report", <DSOReportPreparation reportType="evening" />)}
+        />
+
+        <Route
+          path="/report-preparation/dso-morning"
+          element={protectedPage("dso_morning_report", <DSOMorningReport />)}
         />
 
         <Route

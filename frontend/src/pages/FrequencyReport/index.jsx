@@ -387,6 +387,17 @@ const FrequencyOnlyChart = React.forwardRef(function FrequencyOnlyChart({ row, s
           lineStyle: { color: "#DC2626", type: "dashed", width: 1.5 },
           label: { formatter: `${threshold} Hz`, color: "#DC2626", fontSize: smallFont, fontWeight: 900 },
         },
+      }, {
+        name: "Frequency violation area",
+        type: "line",
+        data: frequency.map((value) => value !== null && (row?.event_type === "high" ? value > 50.05 : value < 49.9) ? value : null),
+        symbol: "none",
+        connectNulls: false,
+        silent: true,
+        lineStyle: { width: 0, opacity: 0 },
+        itemStyle: { color: "rgba(239,68,68,0.18)" },
+        areaStyle: { color: "rgba(239,68,68,0.18)", origin: threshold },
+        tooltip: { show: false },
       }],
     };
   }, [endTime, fontSize, row, startTime]);
@@ -469,8 +480,8 @@ export default function FrequencyReport() {
   const [exportGeneratorFilter, setExportGeneratorFilter] = useState("");
   const [exportFuelFilter, setExportFuelFilter] = useState("ALL_FUELS");
   const [exportIncludeFrequencyPlot, setExportIncludeFrequencyPlot] = useState(true);
-  const [exportIncludeDeviationPlot, setExportIncludeDeviationPlot] = useState(false);
-  const [exportIncludeStateScheduleActualPlot, setExportIncludeStateScheduleActualPlot] = useState(false);
+  const [exportIncludeDeviationPlot, setExportIncludeDeviationPlot] = useState(true);
+  const [exportIncludeStateScheduleActualPlot, setExportIncludeStateScheduleActualPlot] = useState(true);
   const [exportIncludeGeneratorScheduleActualPlot, setExportIncludeGeneratorScheduleActualPlot] = useState(false);
   const [exportFontSize, setExportFontSize] = useState(18);
   const [visualizationFontSize, setVisualizationFontSize] = useState(18);
@@ -1602,6 +1613,14 @@ export default function FrequencyReport() {
     .card { background: #fff; border: 1px solid #d8e4ef; border-radius: 10px; padding: 12px; box-shadow: 0 8px 24px rgba(15, 23, 42, 0.055); }
     .card-title { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; margin-bottom: 8px; }
     .card-title h2 { margin: 0; font-size: 14px; font-weight: 900; }
+    details.card { padding: 0; overflow: hidden; }
+    details.card > summary { cursor: pointer; list-style: none; padding: 13px 14px; display: flex; justify-content: space-between; gap: 12px; align-items: center; background: #fff; }
+    details.card > summary::-webkit-details-marker { display: none; }
+    details.card > summary::before { content: "▸"; color: #03624c; font-size: 18px; font-weight: 900; transition: transform .15s ease; }
+    details.card > summary h2 { margin: 0; font-size: 14px; font-weight: 900; flex: 1; }
+    details.card[open] > summary::before { transform: rotate(90deg); }
+    details.card[open] > summary { border-bottom: 1px solid #d8e4ef; }
+    details.card .chart-wrap { padding: 10px 12px 12px; }
     .badge { border-radius: 999px; padding: 3px 8px; font-size: 11px; font-weight: 900; background: #eef2ff; color: #4338ca; }
     .chart { width: 100%; height: 520px; }
     .small { height: 380px; }
@@ -1749,7 +1768,7 @@ export default function FrequencyReport() {
     };
     const transmissionHtml = (event) => {
       let html = '<div style="font-size:16px;line-height:1.4;min-width:300px">';
-      html += '<div style="font-weight:900;color:#0057B7;margin-bottom:4px">Transmission Line — Physical Regulation</div>';
+      html += '<div style="font-weight:900;color:#050505;margin-bottom:4px">Transmission Line — Physical Regulation</div>';
       html += '<div style="font-weight:900">' + esc(event.line_name || 'Transmission line') + '</div>';
       html += '<div><span style="color:#64748B">Time:</span> ' + esc(event.timestamp || event.outage_date_time || '-') + '</div>';
       if (event.owners?.length) html += '<div><span style="color:#64748B">Owner(s):</span> ' + esc(event.owners.join(', ')) + '</div>';
@@ -1827,7 +1846,8 @@ export default function FrequencyReport() {
       const lineSeries = lineMarkers.length ? [{
         name: "Physical Regulation — Transmission Line", type: "scatter", data: lineMarkers,
         yAxisIndex: 0, symbol: towerSymbol, symbolSize: 32,
-        itemStyle: { color: "#0057B7", borderColor: "#fff", borderWidth: 2 },
+        itemStyle: { color: "#050505", borderColor: "#fff", borderWidth: 2, shadowColor: "rgba(250,204,21,0.95)", shadowBlur: 16 },
+        emphasis: { scale: 1.55, itemStyle: { color: "#000", borderColor: "#FACC15", borderWidth: 3, shadowColor: "rgba(250,204,21,1)", shadowBlur: 22 } },
         tooltip: { trigger: "item", formatter: (p) => transmissionHtml(p.data?.transmission || {}) }, z: 22,
       }] : [];
       return {
@@ -1844,6 +1864,7 @@ export default function FrequencyReport() {
             const ts = list[0]?.axisValue || "";
             let html = '<div style="border-bottom:1px solid #CBD5E1;padding-bottom:5px;margin-bottom:6px;font-size:16px;color:#64748B">' + esc(fmtTime(ts)) + '</div>';
             list.forEach((p) => {
+              if (p.seriesName === "Frequency violation area") return;
               if (p.data?.crms) {
                 html += '<div style="margin-top:7px;padding-top:7px;border-top:1px solid #CBD5E1">' + crmsHtml(p.data.crms) + '</div>';
                 return;
@@ -1896,6 +1917,7 @@ export default function FrequencyReport() {
           { name: shaded.meta.adverse.label, type: "line", data: shaded.adverse, yAxisIndex: 0, symbol: "none", lineStyle: { width: 0 }, itemStyle: { color: shaded.meta.adverse.color }, areaStyle: { color: shaded.meta.adverse.color }, emphasis: { disabled: true }, z: 1 },
           { name: "Deviation (MW)", type: "line", data: dev, yAxisIndex: 0, symbol: "none", lineStyle: { width: 3.2, color: row.is_state ? "#059669" : "#DC2626" }, itemStyle: { color: row.is_state ? "#059669" : "#DC2626" } },
           { name: "Frequency (Hz)", type: "line", data: freq, yAxisIndex: 1, symbol: "none", lineStyle: { width: 2.8, color: freqLineColor }, itemStyle: { color: freqLineColor }, markLine: { silent: true, symbol: "none", data: [{ yAxis: threshold }], lineStyle: { color: "#EF4444", type: "dashed", width: 1.4 }, label: { formatter: threshold + " Hz", color: "#DC2626", fontSize: SMALL_FONT, fontWeight: 900 } } },
+          { name: "Frequency violation area", type: "line", data: freq.map((value) => value !== null && (row.event_type === "high" ? value > 50.05 : value < 49.9) ? value : null), yAxisIndex: 1, symbol: "none", connectNulls: false, silent: true, lineStyle: { width: 0, opacity: 0 }, itemStyle: { color: "rgba(239,68,68,0.18)" }, areaStyle: { color: "rgba(239,68,68,0.18)", origin: threshold }, tooltip: { show: false }, z: 2 },
           ...markerSeries,
           ...lineSeries,
         ],
@@ -1931,18 +1953,34 @@ export default function FrequencyReport() {
         dataZoom: [{ type: "inside" }, { type: "slider", height: ZOOM_HEIGHT, bottom: 24, textStyle: { fontSize: SMALL_FONT } }],
         xAxis: { type: "category", data: timestamps, boundaryGap: false, axisLabel: { fontSize: SMALL_FONT, fontWeight: 700, margin: 16, interval: Math.max(Math.floor(timestamps.length / 6) - 1, 0), formatter: fmtAxisTime } },
         yAxis: { type: "value", name: "Hz", min: 49.4, max: 50.6, nameTextStyle: { fontSize: CHART_FONT, fontWeight: 900, color: "#1D4ED8" }, axisLabel: { fontSize: SMALL_FONT, fontWeight: 800, color: "#1D4ED8", formatter: (v) => Number(v).toFixed(2), margin: 10 } },
-        series: [{ name: "Frequency (Hz)", type: "line", data: freq, symbol: "none", lineStyle: { width: 3, color: "#1D4ED8" }, itemStyle: { color: "#1D4ED8" }, markLine: { silent: true, symbol: "none", data: [{ yAxis: threshold }], lineStyle: { color: "#DC2626", type: "dashed", width: 1.4 }, label: { formatter: threshold + " Hz", color: "#DC2626", fontSize: SMALL_FONT, fontWeight: 900 } } }],
+        series: [
+          { name: "Frequency (Hz)", type: "line", data: freq, symbol: "none", lineStyle: { width: 3, color: "#1D4ED8" }, itemStyle: { color: "#1D4ED8" }, markLine: { silent: true, symbol: "none", data: [{ yAxis: threshold }], lineStyle: { color: "#DC2626", type: "dashed", width: 1.4 }, label: { formatter: threshold + " Hz", color: "#DC2626", fontSize: SMALL_FONT, fontWeight: 900 } } },
+          { name: "Frequency violation area", type: "line", data: freq.map((value) => value !== null && (row?.event_type === "high" ? value > 50.05 : value < 49.9) ? value : null), symbol: "none", connectNulls: false, silent: true, lineStyle: { width: 0, opacity: 0 }, itemStyle: { color: "rgba(239,68,68,0.18)" }, areaStyle: { color: "rgba(239,68,68,0.18)", origin: threshold }, tooltip: { show: false }, z: 1 },
+        ],
       };
     };
-    const addCard = (row, kind, option) => {
-      const card = document.createElement("section");
+    const addCard = (row, kind, option, { collapsible = false, open = true } = {}) => {
+      const card = document.createElement(collapsible ? "details" : "section");
       card.className = "card";
+      if (collapsible) card.open = open;
       const annexureLabel = row.is_state ? "Annexure 1" : "Annexure 2";
-      card.innerHTML = '<div class="card-title"><h2>' + annexureLabel + ': ' + esc(row.plant_name) + '</h2><span class="badge">' + esc(kind) + '</span></div><div class="chart ' + (kind.includes("Schedule") ? "small" : "") + '"></div>';
+      const heading = '<h2>' + annexureLabel + ': ' + esc(row.plant_name) + '</h2><span class="badge">' + esc(kind) + '</span>';
+      card.innerHTML = collapsible
+        ? '<summary>' + heading + '</summary><div class="chart-wrap"><div class="chart ' + (kind.includes("Schedule") ? "small" : "") + '"></div></div>'
+        : '<div class="card-title">' + heading + '</div><div class="chart ' + (kind.includes("Schedule") ? "small" : "") + '"></div>';
       root.appendChild(card);
-      const chart = echarts.init(card.querySelector(".chart"));
-      chart.setOption(option);
-      window.addEventListener("resize", () => chart.resize());
+      let chart = null;
+      const renderChart = () => {
+        if (!chart) {
+          chart = echarts.init(card.querySelector(".chart"));
+          chart.setOption(option);
+          window.addEventListener("resize", () => chart?.resize());
+        } else {
+          chart.resize();
+        }
+      };
+      if (!collapsible || open) requestAnimationFrame(renderChart);
+      if (collapsible) card.addEventListener("toggle", () => { if (card.open) requestAnimationFrame(renderChart); });
     };
     if (!report.rows.length) {
       root.innerHTML = '<div class="empty">No selected chart rows available for this export.</div>';
@@ -1951,8 +1989,8 @@ export default function FrequencyReport() {
         addCard(report.frequencyRow, "System Frequency", makeFrequencyOption(report.frequencyRow));
       }
       report.rows.forEach((row) => {
-        if (report.includeDeviation) addCard(row, "Annexure - Deviation / Frequency", makeDeviationOption(row));
-        if (row.is_state && report.includeStateScheduleActual) addCard(row, "Annexure - State Schedule / Actual", makeScheduleOption(row));
+        if (report.includeDeviation) addCard(row, "Annexure - Deviation / Frequency", makeDeviationOption(row), { collapsible: true, open: true });
+        if (row.is_state && report.includeStateScheduleActual) addCard(row, "Annexure - State Schedule / Actual", makeScheduleOption(row), { collapsible: true, open: false });
         if (!row.is_state && report.includeGeneratorScheduleActual) addCard(row, "Annexure - Generator Schedule / Actual", makeScheduleOption(row));
       });
     }

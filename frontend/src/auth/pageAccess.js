@@ -5,6 +5,8 @@ export const ROUTE_PAGE_KEYS = {
   "/frequency-report": "frequency_report",
   "/outage-analysis": "outage_analysis",
   "/mis-report": "mis_report",
+  "/report-preparation/dso-evening": "dso_evening_report",
+  "/report-preparation/dso-morning": "dso_morning_report",
   "/old-logbook": "old_logbook",
   "/database-sync": "database_sync",
   "/psp-admin": "psp_admin",

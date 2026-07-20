@@ -27,6 +27,8 @@ PAGE_CATALOG = [
     ("frequency_report", "Frequency Data Analysis", "/frequency-report"),
     ("outage_analysis", "S/D Analysis", "/outage-analysis"),
     ("mis_report", "Generic Reports", "/mis-report"),
+    ("dso_evening_report", "DSO Evening Report", "/report-preparation/dso-evening"),
+    ("dso_morning_report", "DSO Morning Report", "/report-preparation/dso-morning"),
     ("old_logbook", "Old Logbook", "/old-logbook"),
     ("crew_dashboard", "Crew Dashboard", "/crew/dashboard"),
     ("crew_calendar", "Crew Calendar", "/crew/calendar"),
@@ -57,6 +59,11 @@ def _ensure_access(user_id: str) -> dict:
         page_access_collection.insert_one({"userId": user_id, "pages": defaults, "updatedOn": datetime.utcnow()})
         return defaults
     pages = existing.get("pages") or {}
+    legacy_dso_access = pages.get("dso_reports")
+    if legacy_dso_access:
+        pages = dict(pages)
+        pages.setdefault("dso_evening_report", legacy_dso_access)
+        pages.setdefault("dso_morning_report", legacy_dso_access)
     merged = {key: {"view": bool((pages.get(key) or defaults[key]).get("view")), "write": bool((pages.get(key) or defaults[key]).get("write"))} for key, _, _ in PAGE_CATALOG}
     if user_id == "50041":
         merged = {key: {"view": True, "write": True} for key, _, _ in PAGE_CATALOG}

@@ -176,7 +176,7 @@ const crmsTooltipHtml = (message = {}) => {
 
 const transmissionTooltipHtml = (event = {}) => {
   let html = `<div style="font-size:11px;line-height:1.4;min-width:240px">`;
-  html += `<div style="font-weight:900;color:#0057B7;margin-bottom:4px">Transmission Line — Physical Regulation</div>`;
+  html += `<div style="font-weight:900;color:#050505;margin-bottom:4px">Transmission Line — Physical Regulation</div>`;
   html += `<div style="font-weight:900;color:#0F172A">${escapeHtml(event.line_name || "Transmission line")}</div>`;
   html += `<div><span style="color:#64748B">Time:</span> ${escapeHtml(event.timestamp || event.outage_date_time || "-")}</div>`;
   if (event.owners?.length) html += `<div><span style="color:#64748B">Owner(s):</span> ${escapeHtml(event.owners.join(", "))}</div>`;
@@ -486,6 +486,21 @@ const ComplianceChart = forwardRef(function ComplianceChart(
         z: 3,
       },
       {
+        name: "Frequency violation area",
+        type: "line",
+        xAxisIndex: 0,
+        yAxisIndex: 1,
+        data: cleanFreqs.map((value) => (value !== null && meta.isEvent(value) ? value : null)),
+        symbol: "none",
+        connectNulls: false,
+        silent: true,
+        lineStyle: { width: 0, opacity: 0 },
+        itemStyle: { color: "rgba(239,68,68,0.18)" },
+        areaStyle: { color: "rgba(239,68,68,0.18)", origin: meta.threshold },
+        tooltip: { show: false },
+        z: 2,
+      },
+      {
         name: `Event Threshold (${meta.thresholdText})`,
         type: "line",
         xAxisIndex: 0,
@@ -556,8 +571,8 @@ const ComplianceChart = forwardRef(function ComplianceChart(
         data: transmissionMarkers,
         symbol: TRANSMISSION_TOWER_SYMBOL,
         symbolSize: compact ? 27 : 32,
-        itemStyle: { color: "#0057B7", borderColor: "#FFFFFF", borderWidth: 1.8, shadowColor: "rgba(0,87,183,.35)", shadowBlur: 8 },
-        emphasis: { scale: 1.5, itemStyle: { color: "#003B7A", borderColor: "#FACC15", borderWidth: 3 } },
+        itemStyle: { color: "#050505", borderColor: "#FFFFFF", borderWidth: 1.8, shadowColor: "rgba(250,204,21,0.95)", shadowBlur: 16 },
+        emphasis: { scale: 1.55, itemStyle: { color: "#000000", borderColor: "#FACC15", borderWidth: 3, shadowColor: "rgba(250,204,21,1)", shadowBlur: 22 } },
         tooltip: { trigger: "item", formatter: (params) => transmissionTooltipHtml(params.data?.transmission || {}) },
         z: 14,
       }] : []),

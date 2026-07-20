@@ -13,7 +13,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { BarChart3, ChevronDown, Download, FileSpreadsheet, Plus, RefreshCw, Trash2 } from "lucide-react";
+import { BarChart3, Calendar, ChevronDown, Download, FileSpreadsheet, Info, Plus, RefreshCw, Trash2 } from "lucide-react";
 
 import AppShell from "../components/layout/AppShell";
 import CalendarInput from "../components/ui/CalendarInput";
@@ -98,6 +98,8 @@ const defaultVoltageDateTime = (daysBack, timeText) => `${addDays(todayIso(), da
 const formatApiDateTime = (value) => String(value || "").replace("T", " ");
 const VOLTAGE_MASTER_STORAGE_KEY = "mis_voltage_master_points_v1";
 const VOLTAGE_REACTOR_MAP_STORAGE_KEY = "mis_voltage_reactor_station_map_v1";
+const MIS_PLANNED_OUTAGE_ELEMENT_TYPE = "GENERATING_UNIT";
+const MIS_PLANNED_OUTAGE_DEFAULT_DATE = addDays(todayIso(), 1);
 
 const getVoltageLevel = (stationName) => {
   const match = String(stationName || "").match(/(\d+(?:\.\d+)?)\s*kV/i);
@@ -187,6 +189,20 @@ export default function MISReport() {
   const [reactorError, setReactorError] = useState("");
   const [reactorResult, setReactorResult] = useState(null);
   const [reactorHover, setReactorHover] = useState(null);
+  const [misPlannedOutageUnits, setMisPlannedOutageUnits] = useState([]);
+  const [misPlannedOutageEntries, setMisPlannedOutageEntries] = useState([]);
+  const [misPlannedOutageLoading, setMisPlannedOutageLoading] = useState(false);
+  const [misPlannedOutageSaving, setMisPlannedOutageSaving] = useState(false);
+  const [misPlannedOutageError, setMisPlannedOutageError] = useState("");
+  const [misPlannedOutageEditId, setMisPlannedOutageEditId] = useState(null);
+  const [misPlannedOutageForm, setMisPlannedOutageForm] = useState({
+    element_type: MIS_PLANNED_OUTAGE_ELEMENT_TYPE,
+    unit_name: "",
+    planned_outage_from_date: MIS_PLANNED_OUTAGE_DEFAULT_DATE,
+    planned_outage_to_date: MIS_PLANNED_OUTAGE_DEFAULT_DATE,
+    reason: "",
+    remarks: "",
+  });
   const chartsRef = useRef(null);
 
   const visibleSeries = result?.series || [];
@@ -398,6 +414,31 @@ export default function MISReport() {
     }
   }, [voltageReactorMap]);
 
+  useEffect(() => {
+    const loadPlannedOutageData = async () => {
+      try {
+        setMisPlannedOutageLoading(true);
+        setMisPlannedOutageError("");
+        const [unitRes, entryRes] = await Promise.all([
+          API.getMisPlannedOutageUnitNames(MIS_PLANNED_OUTAGE_ELEMENT_TYPE),
+          API.getMisPlannedOutageEntries(MIS_PLANNED_OUTAGE_ELEMENT_TYPE),
+        ]);
+        if (unitRes.success) setMisPlannedOutageUnits(unitRes.units || []);
+        else setMisPlannedOutageUnits([]);
+        if (entryRes.success) setMisPlannedOutageEntries(entryRes.rows || []);
+        else setMisPlannedOutageEntries([]);
+      } catch (err) {
+        console.error("Planned outage master load failed:", err);
+        setMisPlannedOutageError(err.message || "Planned outage data could not be loaded.");
+        setMisPlannedOutageUnits([]);
+        setMisPlannedOutageEntries([]);
+      } finally {
+        setMisPlannedOutageLoading(false);
+      }
+    };
+    loadPlannedOutageData();
+  }, []);
+
   const updateRange = (id, patch) => {
     setRanges((prev) => prev.map((range) => (range.id === id ? { ...range, ...patch } : range)));
   };
@@ -408,6 +449,68 @@ export default function MISReport() {
 
   const updateOutageCompareRange = (id, patch) => {
     setOutageCompareRanges((prev) => prev.map((range) => (range.id === id ? { ...range, ...patch } : range)));
+  };
+
+  const resetMisPlannedOutageForm = () => {
+    setMisPlannedOutageEditId(null);
+    setMisPlannedOutageForm({
+      element_type: MIS_PLANNED_OUTAGE_ELEMENT_TYPE,
+      unit_name: "",
+      planned_outage_from_date: MIS_PLANNED_OUTAGE_DEFAULT_DATE,
+      planned_outage_to_date: MIS_PLANNED_OUTAGE_DEFAULT_DATE,
+      reason: "",
+      remarks: "",
+    });
+  };
+
+  const loadMisPlannedOutageEntries = async () => {
+    try {
+      const res = await API.getMisPlannedOutageEntries(MIS_PLANNED_OUTAGE_ELEMENT_TYPE);
+      if (res.success) {
+        setMisPlannedOutageEntries(res.rows || []);
+      }
+    } catch (err) {
+      console.error("Planned outage entries reload failed:", err);
+    }
+  };
+
+  const saveMisPlannedOutageEntry = async () => {
+    const payload = {
+      ...misPlannedOutageForm,
+      element_type: MIS_PLANNED_OUTAGE_ELEMENT_TYPE,
+      unit_name: String(misPlannedOutageForm.unit_name || "").trim(),
+      planned_outage_from_date: String(misPlannedOutageForm.planned_outage_from_date || "").trim(),
+      planned_outage_to_date: String(misPlannedOutageForm.planned_outage_to_date || "").trim(),
+      reason: String(misPlannedOutageForm.reason || "").trim(),
+      remarks: String(misPlannedOutageForm.remarks || "").trim(),
+    };
+    try {
+      setMisPlannedOutageSaving(true);
+      setMisPlannedOutageError("");
+      const res = misPlannedOutageEditId
+        ? await API.updateMisPlannedOutageEntry(misPlannedOutageEditId, payload)
+        : await API.createMisPlannedOutageEntry(payload);
+      if (!res.success) throw new Error(res.message || "Unable to save planned outage.");
+      await loadMisPlannedOutageEntries();
+      resetMisPlannedOutageForm();
+    } catch (err) {
+      console.error("Planned outage save failed:", err);
+      setMisPlannedOutageError(err.message || "Planned outage entry could not be saved.");
+    } finally {
+      setMisPlannedOutageSaving(false);
+    }
+  };
+
+  const editMisPlannedOutageEntry = (entry) => {
+    setMisPlannedOutageEditId(entry.id);
+    setMisPlannedOutageForm({
+      element_type: entry.element_type || MIS_PLANNED_OUTAGE_ELEMENT_TYPE,
+      unit_name: entry.unit_name || "",
+      planned_outage_from_date: entry.planned_outage_from_date || entry.planned_outage_date || MIS_PLANNED_OUTAGE_DEFAULT_DATE,
+      planned_outage_to_date: entry.planned_outage_to_date || entry.planned_outage_from_date || entry.planned_outage_date || MIS_PLANNED_OUTAGE_DEFAULT_DATE,
+      reason: entry.reason || "",
+      remarks: entry.remarks || "",
+    });
   };
 
   const runReport = async () => {
@@ -1637,6 +1740,206 @@ export default function MISReport() {
                   </div>
                 </div>
               )}
+            </div>
+          </div>
+        </div>
+
+        <div className="theme-glass-card p-3 mb-3 bg-white" style={{ borderRadius: "18px" }}>
+          <div className="d-flex align-items-start justify-content-between gap-3 flex-wrap mb-3">
+            <div>
+              <h3 className="h6 fw-bold mb-0 text-dark d-flex align-items-center gap-2">
+                <Calendar size={16} className="text-success" />
+                <span>Planned Outage Master</span>
+              </h3>
+              <p className="small text-muted mb-0" style={{ fontSize: "0.72rem" }}>
+                CRMS generating-unit master with future outage From and To dates. Edits keep the old values in history.
+              </p>
+            </div>
+            <div className="d-flex align-items-center gap-2 flex-wrap">
+              <span className="badge rounded-pill text-success border border-success-subtle bg-success-subtle px-3 py-2" style={{ fontSize: "0.68rem" }}>
+                {misPlannedOutageEntries.length} planned outage row(s)
+              </span>
+              <button
+                type="button"
+                className="btn btn-sm theme-btn-outline d-flex align-items-center gap-1"
+                onClick={async () => {
+                  setMisPlannedOutageLoading(true);
+                  try {
+                    const [unitRes, entryRes] = await Promise.all([
+                      API.getMisPlannedOutageUnitNames(MIS_PLANNED_OUTAGE_ELEMENT_TYPE),
+                      API.getMisPlannedOutageEntries(MIS_PLANNED_OUTAGE_ELEMENT_TYPE),
+                    ]);
+                    if (unitRes.success) setMisPlannedOutageUnits(unitRes.units || []);
+                    if (entryRes.success) setMisPlannedOutageEntries(entryRes.rows || []);
+                    setMisPlannedOutageError("");
+                  } catch (err) {
+                    setMisPlannedOutageError(err.message || "Planned outage data could not be refreshed.");
+                  } finally {
+                    setMisPlannedOutageLoading(false);
+                  }
+                }}
+                disabled={misPlannedOutageLoading}
+              >
+                <RefreshCw size={13} className={misPlannedOutageLoading ? "animate-spin-custom" : ""} />
+                Refresh
+              </button>
+            </div>
+          </div>
+
+          {misPlannedOutageError && (
+            <div className="alert alert-warning py-2 small mb-3">{misPlannedOutageError}</div>
+          )}
+
+          <div className="row g-3">
+            <div className="col-12 col-lg-4">
+              <div className="rounded-3 border bg-light p-3 h-100">
+                <div className="fw-bold text-dark mb-2">{misPlannedOutageEditId ? "Edit outage entry" : "Add outage entry"}</div>
+                <div className="mb-2">
+                  <label className="form-label small fw-bold text-secondary mb-1">Unit name</label>
+                  <select
+                    className="form-control theme-input"
+                    value={misPlannedOutageForm.unit_name}
+                    onChange={(event) => setMisPlannedOutageForm((current) => ({ ...current, unit_name: event.target.value }))}
+                    disabled={misPlannedOutageLoading}
+                  >
+                    <option value="">
+                      {misPlannedOutageLoading ? "Loading CRMS unit master..." : "Select generating unit"}
+                    </option>
+                    {misPlannedOutageUnits.map((unit) => (
+                      <option key={`${unit.id || ""}-${unit.name}`} value={unit.name}>{unit.name}</option>
+                    ))}
+                  </select>
+                  <div className="text-muted mt-1" style={{ fontSize: "0.68rem" }}>
+                    {misPlannedOutageUnits.length
+                      ? `${misPlannedOutageUnits.length} active units fetched from the CRMS generating-unit master.`
+                      : "No units received. Use Refresh after confirming backend connectivity to CRMS."}
+                  </div>
+                </div>
+                <div className="mb-2">
+                  <label className="form-label small fw-bold text-secondary mb-1">Planned outage period</label>
+                  <CalendarInput
+                    mode="range"
+                    className="form-control theme-input"
+                    value={misPlannedOutageForm.planned_outage_from_date}
+                    endValue={misPlannedOutageForm.planned_outage_to_date}
+                    minDate={todayIso()}
+                    placeholder="Select From and To dates"
+                    onRangeChange={(start, end) => setMisPlannedOutageForm((current) => ({
+                      ...current,
+                      planned_outage_from_date: start,
+                      planned_outage_to_date: end,
+                    }))}
+                  />
+                  <div className="text-muted mt-1" style={{ fontSize: "0.68rem" }}>
+                    Select the From date first, then the To date.
+                  </div>
+                </div>
+                <div className="mb-3">
+                  <label className="form-label small fw-bold text-secondary mb-1">Reason</label>
+                  <textarea
+                    className="form-control theme-input"
+                    rows={4}
+                    value={misPlannedOutageForm.reason}
+                    onChange={(event) => setMisPlannedOutageForm((current) => ({ ...current, reason: event.target.value }))}
+                    placeholder="Enter planned outage reason"
+                  />
+                </div>
+                <div className="d-flex gap-2">
+                  <button
+                    type="button"
+                    className="btn theme-btn-action flex-fill d-flex align-items-center justify-content-center gap-2"
+                    onClick={saveMisPlannedOutageEntry}
+                    disabled={misPlannedOutageSaving || misPlannedOutageLoading}
+                  >
+                    <RefreshCw size={13} className={misPlannedOutageSaving ? "animate-spin-custom" : ""} />
+                    {misPlannedOutageEditId ? "Update" : "Save"}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-sm theme-btn-outline"
+                    onClick={resetMisPlannedOutageForm}
+                    disabled={misPlannedOutageSaving}
+                  >
+                    Clear
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div className="col-12 col-lg-8">
+              <div className="rounded-3 border bg-white p-2 h-100">
+                {misPlannedOutageLoading ? (
+                  <div className="d-flex align-items-center justify-content-center py-5 text-muted fw-semibold">
+                    <div className="spinner-border text-success spinner-border-sm me-2" role="status" />
+                    Loading outage data...
+                  </div>
+                ) : !misPlannedOutageEntries.length ? (
+                  <div className="text-center py-5 text-muted">
+                    <Info size={26} className="mb-2 text-secondary opacity-50" />
+                    <p className="small mb-0">No planned outage entries saved yet.</p>
+                  </div>
+                ) : (
+                  <div className="table-responsive" style={{ maxHeight: 430, overflowY: "auto" }}>
+                    <table className="table table-sm align-middle table-hover mb-0" style={{ fontSize: "0.72rem" }}>
+                      <thead style={{ position: "sticky", top: 0, zIndex: 1, background: "#F8FAFC" }}>
+                        <tr>
+                          <th>Unit</th>
+                          <th>Outage period</th>
+                          <th>Reason</th>
+                          <th>History</th>
+                          <th className="text-end">Action</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {misPlannedOutageEntries.map((entry) => (
+                          <tr key={entry.id}>
+                            <td className="fw-bold text-dark">{entry.unit_name || "-"}</td>
+                            <td className="fw-semibold text-success-emphasis" style={{ whiteSpace: "nowrap" }}>
+                              {formatDisplayDate(entry.planned_outage_from_date || entry.planned_outage_date) || "-"}
+                              <span className="text-muted mx-1">to</span>
+                              {formatDisplayDate(entry.planned_outage_to_date || entry.planned_outage_from_date || entry.planned_outage_date) || "-"}
+                            </td>
+                            <td style={{ minWidth: 220 }}>{entry.reason || "-"}</td>
+                            <td style={{ minWidth: 180 }}>
+                              {entry.history?.length ? (
+                                <details>
+                                  <summary className="text-primary" style={{ cursor: "pointer" }}>
+                                    {entry.history.length} old version(s)
+                                  </summary>
+                                  <div className="mt-2 d-grid gap-1">
+                                    {entry.history.slice().reverse().map((item, index) => (
+                                      <div key={`${entry.id}-history-${index}`} className="rounded border bg-light p-2">
+                                        <div className="fw-bold text-dark">
+                                          {formatDisplayDate(item.planned_outage_from_date || item.planned_outage_date) || "-"}
+                                          <span className="text-muted mx-1">to</span>
+                                          {formatDisplayDate(item.planned_outage_to_date || item.planned_outage_from_date || item.planned_outage_date) || "-"}
+                                        </div>
+                                        <div className="text-muted" style={{ whiteSpace: "normal" }}>{item.reason || "-"}</div>
+                                        <div className="text-secondary" style={{ fontSize: "0.65rem" }}>{item.changed_at || "-"}</div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </details>
+                              ) : (
+                                <span className="text-muted">No history</span>
+                              )}
+                            </td>
+                            <td className="text-end">
+                              <button
+                                type="button"
+                                className="btn btn-sm theme-btn-outline d-inline-flex align-items-center gap-1"
+                                onClick={() => editMisPlannedOutageEntry(entry)}
+                              >
+                                Edit
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </div>

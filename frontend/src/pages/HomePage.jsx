@@ -165,14 +165,14 @@ export default function HomePage() {
             <Button size="small" variant="outlined" href="/psp-dashboard" sx={{ borderRadius: "999px", textTransform: "none", fontWeight: 800 }}>Open PSP Dashboard</Button>
           }>
             <Box sx={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 1 }}>
-          {nldcCards.map((item, index) => (
+              {nldcCards.map((item, index) => (
                 <Box key={item.key || item.label || index} sx={{ p: 1.2, borderRadius: "18px", border: "1px solid #D7E4F6", background: "#fff" }}>
                   <Typography sx={{ fontSize: 11, fontWeight: 900, color: "#334155", mb: 0.5 }}>{item.label || item.key || "Region"}</Typography>
                   <Typography sx={{ fontSize: 18, fontWeight: 950, color: "#0057B7" }}>
-                    {fmt(pick(item, ["value", "max_demand", "demand", "peak"], 0))} MW
+                    {fmt(item?.max?.value ?? pick(item, ["value", "max_demand", "demand", "peak"], 0))} MW
                   </Typography>
                   <Typography sx={{ fontSize: 10, fontWeight: 700, color: "#64748B", mt: 0.4 }}>
-                    {pick(item, ["date", "max_date", "time", "max_time"], "-")}
+                    {[item?.max?.date, item?.max?.time].filter(Boolean).join(" | ") || pick(item, ["date", "max_date", "time", "max_time"], "-")}
                   </Typography>
                 </Box>
               ))}

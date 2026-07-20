@@ -39,6 +39,7 @@ import ExpandLessIcon from "@mui/icons-material/ExpandLess";
 export default function ReplacementManagement() {
 
   const [pendingLeaves, setPendingLeaves] = useState([]);
+  const [assignedReplacements, setAssignedReplacements] = useState([]);
   const [candidates, setCandidates] = useState([]);
   const [selectedLeave, setSelectedLeave] = useState(null);
 
@@ -62,6 +63,7 @@ export default function ReplacementManagement() {
 
   useEffect(() => {
     fetchPendingLeaves();
+    fetchAssignedReplacements();
     fetchPendingSIC();
   }, []);
 
@@ -103,6 +105,15 @@ export default function ReplacementManagement() {
       params: { roleFilter: filterValue }
     });
     setCandidates(res.data || []);
+  };
+
+  const fetchAssignedReplacements = async () => {
+    try {
+      const res = await api.get("/replacement/assigned");
+      setAssignedReplacements(res.data || []);
+    } catch (err) {
+      console.error(err);
+    }
   };
 
   const openCandidateDialog = async (leave) => {
@@ -161,6 +172,7 @@ export default function ReplacementManagement() {
       setSicDialogOpen(true);
 
       fetchPendingLeaves();
+      fetchAssignedReplacements();
 
     } catch (err) {
       console.error(err);
@@ -229,7 +241,7 @@ export default function ReplacementManagement() {
   const otherShift = candidates.filter(c => c.source === "otherShift");
 
 
-  const renderCard = (c, index) => (
+  const renderCard = (c) => (
     <Paper
       onClick={() => assignReplacement(c.employeeId)}
       sx={{
@@ -244,19 +256,44 @@ export default function ReplacementManagement() {
         }
       }}
     >
-      <Typography fontWeight={600}>{c.name}</Typography>
+      <Box sx={{ display: "flex", alignItems: "flex-start", gap: 1 }}>
+        <Chip
+          label={c.serialNo || "-"}
+          size="small"
+          sx={{ minWidth: 30, fontWeight: 900, background: "#E8F1FF", color: "#0057B7" }}
+        />
+        <Box sx={{ minWidth: 0 }}>
+          <Typography fontWeight={700}>{c.name}</Typography>
+          <Typography variant="caption" color="text.secondary">
+            {c.designation} · {c.employeeId}
+          </Typography>
+        </Box>
+      </Box>
 
-      <Typography variant="caption" color="text.secondary">
-        {c.designation}
-      </Typography>
-
-      <Typography variant="caption" display="block">
-        Duty: {c.assignedDuty || "-"}
-      </Typography>
-
-      <Typography variant="caption">
-        Score: {c.score}
-      </Typography>
+      {c.source === "replacement" ? (
+        <Box sx={{ mt: 1.2, display: "grid", gap: .45 }}>
+          <Typography variant="caption" display="block">
+            Last {c.requiredDuty || "matching"} duty: <strong>{c.lastMatchingDutyDate ? dayjs(c.lastMatchingDutyDate).format("DD MMM YYYY") : "Never recorded"}</strong>
+          </Typography>
+          <Typography variant="caption" display="block">
+            Days since last duty: <strong>{c.daysSinceMatchingDuty ?? "-"}</strong>
+          </Typography>
+          <Typography variant="caption" display="block">
+            No. of denied duties: <strong>{c.denialCount ?? c.denialCount90Days ?? 0}</strong>
+          </Typography>
+        </Box>
+      ) : (
+        <Box sx={{ mt: 1.2, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 1 }}>
+          <Box sx={{ p: .8, borderRadius: 1.5, background: "#F1F5F9" }}>
+            <Typography variant="caption" color="text.secondary" display="block">Duty on leave date</Typography>
+            <Typography variant="caption" fontWeight={800}>{c.assignedDuty || "-"}</Typography>
+          </Box>
+          <Box sx={{ p: .8, borderRadius: 1.5, background: "#F1F5F9" }}>
+            <Typography variant="caption" color="text.secondary" display="block">Next-day duty</Typography>
+            <Typography variant="caption" fontWeight={800}>{c.nextDayDuty || "-"}</Typography>
+          </Box>
+        </Box>
+      )}
     </Paper>
   );
 
@@ -381,6 +418,73 @@ export default function ReplacementManagement() {
             </TableContainer>
 
           </Paper>
+        </AccordionDetails>
+      </Accordion>
+
+      <Accordion
+        defaultExpanded
+        sx={{
+          borderRadius: 3,
+          boxShadow: "0 4px 20px rgba(0,0,0,0.08)",
+          overflow: "hidden",
+          mb: 3
+        }}
+      >
+        <AccordionSummary
+          expandIcon={<ExpandMoreIcon />}
+          sx={{ background: "linear-gradient(90deg,#071F5A,#0057B7)", color: "white", px: 3 }}
+        >
+          <Typography variant="h6" fontWeight={600}>
+            Assigned Replacement Duties
+          </Typography>
+        </AccordionSummary>
+        <AccordionDetails>
+          <TableContainer>
+            <Table size="small">
+              <TableHead>
+                <TableRow sx={{ background: "#EAF2FF" }}>
+                  <TableCell><strong>Leave employee</strong></TableCell>
+                  <TableCell><strong>Date / Duty</strong></TableCell>
+                  <TableCell><strong>Replacement employee</strong></TableCell>
+                  <TableCell><strong>Decision</strong></TableCell>
+                  <TableCell align="right"><strong>Action</strong></TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {assignedReplacements.map((item) => (
+                  <TableRow key={item.id} hover>
+                    <TableCell>
+                      <Typography variant="body2" fontWeight={700}>{item.name}</Typography>
+                      <Typography variant="caption" color="text.secondary">{item.groupName} · {item.leaveType}</Typography>
+                    </TableCell>
+                    <TableCell>
+                      <Typography variant="body2">{dayjs(item.date).format("DD MMM YYYY")}</Typography>
+                      <Typography variant="caption" fontWeight={800}>{item.assignedDuty || "-"}</Typography>
+                    </TableCell>
+                    <TableCell>
+                      <Typography variant="body2" fontWeight={700}>{item.replacement?.name || "-"}</Typography>
+                      <Typography variant="caption" color="text.secondary">{item.replacement?.employeeId || "-"}</Typography>
+                    </TableCell>
+                    <TableCell>
+                      <Chip
+                        size="small"
+                        label={item.notificationStatus}
+                        color={item.notificationStatus === "Denied" ? "error" : item.notificationStatus === "Accepted" ? "success" : "warning"}
+                      />
+                    </TableCell>
+                    <TableCell align="right">
+                      <Button size="small" variant="outlined" onClick={() => openCandidateDialog(item)}>
+                        Change assignment
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+                {!assignedReplacements.length && (
+                  <TableRow><TableCell colSpan={5} align="center">No assigned replacement duties</TableCell></TableRow>
+                )}
+              </TableBody>
+            </Table>
+          </TableContainer>
         </AccordionDetails>
       </Accordion>
 
@@ -584,13 +688,13 @@ export default function ReplacementManagement() {
           {/* SECTION 1 â€” Recommended */}
 
           <Typography variant="subtitle2" sx={{ mb: 1 }}>
-            Recommended (Same Shift)
+            Replacement-tagged personnel · required duty: {candidates[0]?.requiredDuty || "-"}
           </Typography>
 
           <Grid container spacing={2}>
-            {recommended.map((c, index) => (
+            {recommended.map((c) => (
               <Grid item xs={12} md={4} key={c.employeeId}>
-                {renderCard(c, index)}
+                {renderCard(c)}
               </Grid>
             ))}
           </Grid>
@@ -602,9 +706,9 @@ export default function ReplacementManagement() {
           </Typography>
 
           <Grid container spacing={2}>
-            {sameShift.map((c, index) => (
+            {sameShift.map((c) => (
               <Grid item xs={12} md={4} key={c.employeeId}>
-                {renderCard(c, index)}
+                {renderCard(c)}
               </Grid>
             ))}
           </Grid>
@@ -616,9 +720,9 @@ export default function ReplacementManagement() {
           </Typography>
 
           <Grid container spacing={2}>
-            {otherShift.map((c, index) => (
+            {otherShift.map((c) => (
               <Grid item xs={12} md={4} key={c.employeeId}>
-                {renderCard(c, index)}
+                {renderCard(c)}
               </Grid>
             ))}
           </Grid>

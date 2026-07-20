@@ -54,9 +54,13 @@ export default function CalendarInput({
   mode = "single",
   endValue = "",
   onRangeChange,
+  minDate = "",
+  maxDate = "",
 }) {
   const selectedDate = parseIsoDate(value);
   const endDate = parseIsoDate(endValue);
+  const minimumDate = parseIsoDate(minDate);
+  const maximumDate = parseIsoDate(maxDate);
   const [open, setOpen] = useState(false);
   const [viewDate, setViewDate] = useState(selectedDate || new Date());
   const [rangeStep, setRangeStep] = useState("start");
@@ -142,6 +146,7 @@ export default function CalendarInput({
   };
 
   const selectDate = (date) => {
+    if ((minimumDate && date < minimumDate) || (maximumDate && date > maximumDate)) return;
     const iso = toIsoDate(date);
     if (isRange) {
       if (rangeStep === "start" || !value || (value && endValue)) {
@@ -244,6 +249,7 @@ export default function CalendarInput({
               const rangeEnd = iso === endIso;
               const inRange = isRange && rangeStartTime && rangeEndTime && date.getTime() > Math.min(rangeStartTime, rangeEndTime) && date.getTime() < Math.max(rangeStartTime, rangeEndTime);
               const today = iso === todayIso;
+              const dateDisabled = (minimumDate && date < minimumDate) || (maximumDate && date > maximumDate);
               return (
                 <button
                   key={iso}
@@ -254,8 +260,10 @@ export default function CalendarInput({
                     ...(inRange ? styles.rangeDay : {}),
                     ...(today ? styles.todayDay : {}),
                     ...(selected || rangeEnd ? styles.selectedDay : {}),
+                    ...(dateDisabled ? styles.disabledDay : {}),
                   }}
                   onClick={() => selectDate(date)}
+                  disabled={dateDisabled}
                 >
                   {date.getDate()}
                 </button>
@@ -389,6 +397,7 @@ const styles = {
     cursor: "pointer",
   },
   mutedDay: { color: "#a7b0bd", fontWeight: 800 },
+  disabledDay: { color: "#cbd5e1", background: "#f8fafc", cursor: "not-allowed", boxShadow: "none" },
   todayDay: { boxShadow: "inset 0 -2px 0 #facc15" },
   selectedDay: {
     background: "#21c6b8",

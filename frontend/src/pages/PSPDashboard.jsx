@@ -15,6 +15,7 @@ import {
   Info,
   Clock,
   ArrowLeft,
+  Download,
   PieChart as PieChartIcon
 } from "lucide-react";
 import {
@@ -480,7 +481,12 @@ export default function PSPDashboard() {
   const [nldcGenerationDate, setNldcGenerationDate] = useState(defaultNldcDemandEnd);
   const [nldcGenerationRows, setNldcGenerationRows] = useState([]);
   const [nldcGenerationComponents, setNldcGenerationComponents] = useState([]);
+  const [nldcMaximumGenerationMix, setNldcMaximumGenerationMix] = useState(null);
+  const [nldcGenerationMixModes, setNldcGenerationMixModes] = useState({});
+  const [nldcGenerationMixMode, setNldcGenerationMixMode] = useState("peak_generation");
+  const [nldcAllIndiaDemand, setNldcAllIndiaDemand] = useState(null);
   const [nldcGenerationLoading, setNldcGenerationLoading] = useState(false);
+  const [nldcGenerationDownloading, setNldcGenerationDownloading] = useState(false);
   const [nldcGenerationError, setNldcGenerationError] = useState("");
   const [selectedState, setSelectedState] = useState(null);
   const [stationModalOpen, setStationModalOpen] = useState(false);
@@ -654,6 +660,9 @@ export default function PSPDashboard() {
       }
       setNldcGenerationRows(res.rows || []);
       setNldcGenerationComponents(res.components || []);
+      setNldcMaximumGenerationMix(res.maximum_generation_mix || null);
+      setNldcGenerationMixModes(res.generation_mix_modes || {});
+      setNldcAllIndiaDemand(res.all_india_demand || null);
       if (res.date) {
         setNldcGenerationDate(res.date);
       }
@@ -662,8 +671,31 @@ export default function PSPDashboard() {
       setNldcGenerationError(err.message || "NLDC generation breakup could not be loaded.");
       setNldcGenerationRows([]);
       setNldcGenerationComponents([]);
+      setNldcMaximumGenerationMix(null);
+      setNldcGenerationMixModes({});
+      setNldcAllIndiaDemand(null);
     } finally {
       setNldcGenerationLoading(false);
+    }
+  };
+
+  const downloadNldcGenerationExcel = async () => {
+    try {
+      setNldcGenerationDownloading(true);
+      const blob = await API.downloadIndia15MinGenerationBreakup(nldcGenerationDate);
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `all_india_demand_contribution_${nldcGenerationDate || "latest"}.xlsx`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error("Error downloading generation contribution Excel:", err);
+      setNldcGenerationError(err.message || "Excel download could not be prepared.");
+    } finally {
+      setNldcGenerationDownloading(false);
     }
   };
 
@@ -1131,6 +1163,11 @@ export default function PSPDashboard() {
   const visibleNldcGenerationComponents = NLDC_GENERATION_COMPONENTS.filter((component) =>
     nldcGenerationRows.some((row) => Number(row[component.key] || 0) !== 0)
   );
+  const selectedNldcGenerationMix = nldcGenerationMixModes[nldcGenerationMixMode] || nldcMaximumGenerationMix;
+  const nldcMaximumGenerationMixData = [
+    { name: "Solar", value: Number(selectedNldcGenerationMix?.solar_generation || 0), share: Number(selectedNldcGenerationMix?.solar_share || 0), color: "#F59E0B" },
+    { name: "Non-Solar", value: Number(selectedNldcGenerationMix?.non_solar_generation || 0), share: Number(selectedNldcGenerationMix?.non_solar_share || 0), color: "#08103A" },
+  ];
   const nldcDemandYears = yearsInRange(nldcDemandStartDate, nldcDemandEndDate);
   const nldcDemandYearlyEntries = nldcDemandMode === "yearly"
     ? visibleNldcDemandLines.flatMap((line) => {
@@ -3169,6 +3206,10 @@ export default function PSPDashboard() {
                           <RefreshCw size={12} className={nldcGenerationLoading ? "animate-spin-custom" : ""} />
                           <span>Load</span>
                         </button>
+                        <button className="btn theme-btn-primary theme-btn-mini d-flex align-items-center gap-2" onClick={downloadNldcGenerationExcel} disabled={nldcGenerationLoading || nldcGenerationDownloading || !nldcGenerationRows.length} style={{ height: "32px" }}>
+                          <Download size={12} />
+                          <span>{nldcGenerationDownloading ? "Preparing..." : "Excel"}</span>
+                        </button>
                       </div>
                     </div>
 
@@ -3189,6 +3230,55 @@ export default function PSPDashboard() {
                         );
                       })}
                     </div>
+
+                    {Number(selectedNldcGenerationMix?.total_generation || 0) > 0 && (
+                      <>
+                      <div className="d-flex align-items-center gap-1 flex-wrap mb-2">
+                        {[
+                          ["peak_generation", "Peak Generation"],
+                          ["solar_max_demand", "Solar Max Demand"],
+                          ["non_solar_max_demand", "Non-Solar Max Demand"],
+                        ].map(([mode, label]) => (
+                          <button
+                            type="button"
+                            key={`generation-mix-mode-${mode}`}
+                            className={`btn theme-btn-mini ${nldcGenerationMixMode === mode ? "theme-btn-primary" : "theme-btn-outline"}`}
+                            onClick={() => setNldcGenerationMixMode(mode)}
+                            style={{ fontSize: "0.72rem" }}
+                          >
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+                      <div className="row g-2 mb-3">
+                        <div className="col-12">
+                          <div className="rounded border border-light-subtle h-100 p-3" style={{ background: "linear-gradient(135deg, #F8FAFC 0%, #FFF7E6 100%)" }}>
+                            <div className="small text-uppercase fw-bold text-secondary mb-1">{selectedNldcGenerationMix.label || "Generation mix"}</div>
+                            <div className="d-flex align-items-end gap-2 mb-1">
+                              <span className="fw-bold text-dark" style={{ fontSize: "1.45rem" }}>{formatMw(selectedNldcGenerationMix.total_generation)} MW</span>
+                              <span className="small text-muted mb-1">generation at {selectedNldcGenerationMix.timestamp || "-"}, Block {selectedNldcGenerationMix.block || "-"}</span>
+                            </div>
+                            {Number(selectedNldcGenerationMix?.demand_value || 0) > 0 && (
+                              <div className="small fw-bold text-success-emphasis">
+                                Demand: {formatMw(selectedNldcGenerationMix.demand_value)} MW at {selectedNldcGenerationMix.demand_time || "-"}
+                              </div>
+                            )}
+                            {nldcMaximumGenerationMixData.map((item) => (
+                              <div key={`max-mix-${item.name}`} className="mt-3">
+                                <div className="d-flex justify-content-between gap-3 mb-1" style={{ fontSize: "0.76rem" }}>
+                                  <span className="fw-bold" style={{ color: item.color }}>{item.name}</span>
+                                  <span className="fw-bold text-dark">{formatMw(item.value)} MW · {item.share.toFixed(1)}%</span>
+                                </div>
+                                <div className="progress" style={{ height: "9px", background: "#E2E8F0" }}>
+                                  <div className="progress-bar" style={{ width: `${Math.max(0, Math.min(100, item.share))}%`, background: item.color }} />
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                      </>
+                    )}
 
                     {nldcGenerationLoading ? (
                       <div className="d-flex align-items-center justify-content-center py-5">
@@ -3224,6 +3314,12 @@ export default function PSPDashboard() {
                                       <span>Total</span>
                                       <span>{formatMw(total)} MW</span>
                                     </div>
+                                    {Number(nldcAllIndiaDemand?.value || 0) > 0 && (
+                                      <div className="mt-1 pt-1 d-flex justify-content-between fw-bold" style={{ fontSize: "0.74rem", color: "#03624C" }}>
+                                        <span>All India Demand (Daily Max)</span>
+                                        <span>{formatMw(nldcAllIndiaDemand.value)} MW at {nldcAllIndiaDemand.time || "-"}</span>
+                                      </div>
+                                    )}
                                   </div>
                                 );
                               }}
