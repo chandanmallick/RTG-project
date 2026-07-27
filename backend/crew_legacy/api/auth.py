@@ -14,6 +14,12 @@ from crew_legacy.admin_logic.auth_utils import (
     verify_password,
 )
 from crew_legacy.database.database_mongo import employee_collection, login_history_collection, page_access_collection
+from crew_legacy.admin_logic.two_factor import (
+    consume_otp_challenge,
+    create_otp_challenge,
+    requires_two_factor,
+    resend_otp_challenge,
+)
 
 IST = timezone(timedelta(hours=5, minutes=30))
 MAX_FAILED_LOGINS = 5
@@ -27,6 +33,7 @@ PAGE_CATALOG = [
     ("frequency_report", "Frequency Data Analysis", "/frequency-report"),
     ("outage_analysis", "S/D Analysis", "/outage-analysis"),
     ("mis_report", "Generic Reports", "/mis-report"),
+    ("nldc_plots", "MIS — NLDC Plots", "/mis/nldc-plots"),
     ("dso_evening_report", "DSO Evening Report", "/report-preparation/dso-evening"),
     ("dso_morning_report", "DSO Morning Report", "/report-preparation/dso-morning"),
     ("old_logbook", "Old Logbook", "/old-logbook"),
@@ -43,6 +50,7 @@ PAGE_CATALOG = [
     ("database_sync", "Database Sync", "/database-sync"),
     ("psp_admin", "PSP Settings", "/psp-admin"),
     ("user_access", "User Access Control", "/admin/user-access"),
+    ("mail_settings", "Mail & Two-Factor Authentication Settings", "/admin/mail-settings"),
     ("profile", "My Profile", "/crew/profile"),
 ]
 
@@ -91,6 +99,15 @@ class LoginRequest(BaseModel):
     password: str
 
 
+class OtpVerifyRequest(BaseModel):
+    challenge_id: str
+    otp: str
+
+
+class OtpResendRequest(BaseModel):
+    challenge_id: str
+
+
 def _login_key(data: LoginRequest, request: Request):
     return f"{request.client.host}:{data.userId}".lower()
 
@@ -121,6 +138,33 @@ def _record_login_failure(user_id: str, name: str | None = None):
         "loginTime": datetime.utcnow(),
         "createdOn": datetime.utcnow(),
     })
+
+
+def _complete_login(user: dict, request: Request):
+    token = create_access_token({
+        "employeeId": user["userId"],
+        "role": user.get("role", "user"),
+    })
+    login_history_collection.insert_one({
+        "employeeId": user.get("userId"),
+        "name": user.get("name"),
+        "role": user.get("role"),
+        "loginTime": datetime.utcnow(),
+        "logoutTime": None,
+        "ip": request.client.host if request.client else None,
+        "userAgent": request.headers.get("user-agent"),
+        "status": "Success",
+        "twoFactorVerified": requires_two_factor(user),
+        "createdOn": datetime.utcnow(),
+    })
+    return {
+        "access_token": token,
+        "employeeId": user["userId"],
+        "role": user.get("role", "user"),
+        "name": user.get("name"),
+        "profilePhoto": user.get("profilePhoto"),
+        "permissions": _ensure_access(str(user["userId"])),
+    }
 
 
 @router.post("/login")
@@ -154,31 +198,26 @@ def login(data: LoginRequest, request: Request):
 
     _clear_failed_login(data, request)
 
-    token = create_access_token({
-        "employeeId": user["userId"],
-        "role": user.get("role", "user"),
-    })
+    if requires_two_factor(user):
+        return create_otp_challenge(user, request)
+    return _complete_login(user, request)
 
-    login_history_collection.insert_one({
-        "employeeId": user.get("userId"),
-        "name": user.get("name"),
-        "role": user.get("role"),
-        "loginTime": datetime.utcnow(),
-        "logoutTime": None,
-        "ip": request.client.host,
-        "userAgent": request.headers.get("user-agent"),
-        "status": "Success",
-        "createdOn": datetime.utcnow(),
-    })
 
-    return {
-        "access_token": token,
-        "employeeId": user["userId"],
-        "role": user.get("role", "user"),
-        "name": user.get("name"),
-        "profilePhoto": user.get("profilePhoto"),
-        "permissions": _ensure_access(str(user["userId"])),
-    }
+@router.post("/login/verify-otp")
+def verify_login_otp(data: OtpVerifyRequest, request: Request):
+    otp = str(data.otp or "").strip()
+    if len(otp) != 6 or not otp.isdigit():
+        raise HTTPException(400, "Enter the 6-digit verification code")
+    user_id = consume_otp_challenge(data.challenge_id, otp)
+    user = employee_collection.find_one({"userId": user_id})
+    if not user or user.get("isActive") is False:
+        raise HTTPException(401, "Account is unavailable")
+    return _complete_login(user, request)
+
+
+@router.post("/login/resend-otp")
+def resend_login_otp(data: OtpResendRequest):
+    return resend_otp_challenge(data.challenge_id)
 
 
 @router.get("/me")

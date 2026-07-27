@@ -103,6 +103,13 @@ export default function DepartmentChart() {
           </Stack>
           {!!node.data.heads?.length && <Typography sx={{ mt: 1, fontSize: 10.5, color: "#334155" }}><strong>{typeLabel} Head:</strong> {node.data.heads.map((item) => item.name).join(", ")}</Typography>}
           {!!node.data.juniors?.length && <Typography sx={{ mt: 0.4, fontSize: 10.5, color: "#475569" }}><strong>Function Junior:</strong> {node.data.juniors.map((item) => item.name).join(", ")}</Typography>}
+          {!!node.data.shiftGroups?.length && (
+            <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mt: 1 }}>
+              {node.data.shiftGroups.map((name) => (
+                <Chip key={name} label={name} size="small" sx={{ height: 20, fontSize: 9, fontWeight: 900, bgcolor: "#E8F5F1", color: "#03624C" }} />
+              ))}
+            </Stack>
+          )}
         </Box>
       );
     }

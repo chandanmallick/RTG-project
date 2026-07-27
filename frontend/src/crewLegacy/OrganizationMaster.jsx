@@ -18,6 +18,11 @@ const EMPTY = {
   isActive: true,
 };
 
+const EMPTY_SHIFT_MAPPING = {
+  groupName: "",
+  organizationUnitId: "",
+};
+
 const TYPE_LABELS = {
   department: "Department",
   vertical: "Vertical",
@@ -28,6 +33,11 @@ const TYPE_LABELS = {
 export default function OrganizationMaster() {
   const [units, setUnits] = useState([]);
   const [employees, setEmployees] = useState([]);
+  const [shiftGroups, setShiftGroups] = useState([]);
+  const [shiftTargets, setShiftTargets] = useState([]);
+  const [shiftMappings, setShiftMappings] = useState([]);
+  const [shiftMapping, setShiftMapping] = useState(EMPTY_SHIFT_MAPPING);
+  const [shiftOpen, setShiftOpen] = useState(false);
   const [form, setForm] = useState(EMPTY);
   const [editId, setEditId] = useState(null);
   const [open, setOpen] = useState(false);
@@ -41,6 +51,18 @@ export default function OrganizationMaster() {
       ]);
       setUnits(unitResponse.data || []);
       setEmployees(employeeResponse.data || []);
+      try {
+        const mappingResponse = await api.get("/admin/organization/shift-groups");
+        setShiftGroups(mappingResponse.data?.activeGroups || []);
+        setShiftTargets(mappingResponse.data?.organizationUnits || []);
+        setShiftMappings(mappingResponse.data?.mappings || []);
+      } catch {
+        // Shift-group mapping is optional and must never prevent the existing
+        // organization-unit and employee options from loading.
+        setShiftGroups([]);
+        setShiftTargets([]);
+        setShiftMappings([]);
+      }
     } catch (error) {
       setNotice({ severity: "error", text: error?.response?.data?.detail || "Organization master could not be loaded." });
     }
@@ -129,6 +151,36 @@ export default function OrganizationMaster() {
     }
   };
 
+  const openShiftMapping = (mapping = null) => {
+    setShiftMapping(mapping ? {
+      groupName: mapping.groupName || "",
+      organizationUnitId: mapping.organizationUnitId || "",
+    } : EMPTY_SHIFT_MAPPING);
+    setShiftOpen(true);
+  };
+
+  const saveShiftMapping = async () => {
+    try {
+      await api.post("/admin/organization/shift-groups/attach", shiftMapping);
+      setNotice({ severity: "success", text: "Shift-group reporting unit updated." });
+      setShiftOpen(false);
+      await load();
+    } catch (error) {
+      setNotice({ severity: "error", text: error?.response?.data?.detail || "Shift group could not be attached." });
+    }
+  };
+
+  const removeShiftMapping = async (mapping) => {
+    if (!window.confirm(`Detach ${mapping.groupName} from ${mapping.organizationUnitName}?`)) return;
+    try {
+      await api.delete(`/admin/organization/shift-groups/${mapping.id}`);
+      setNotice({ severity: "success", text: "Shift group detached." });
+      await load();
+    } catch (error) {
+      setNotice({ severity: "error", text: error?.response?.data?.detail || "Shift group could not be detached." });
+    }
+  };
+
   const employeeSelect = (label, field) => (
     <FormControl size="small" fullWidth>
       <InputLabel shrink>{label}</InputLabel>
@@ -169,9 +221,14 @@ export default function OrganizationMaster() {
               Department → Vertical/Section → Function → Employee
             </Typography>
           </Box>
-          <Button variant="contained" startIcon={<Plus size={16} />} onClick={openNew} sx={{ bgcolor: "white", color: "#0057B7" }}>
-            Add organization unit
-          </Button>
+          <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+            <Button variant="contained" startIcon={<Network size={16} />} onClick={() => openShiftMapping()} sx={{ bgcolor: "#E8F5F1", color: "#03624C" }}>
+              Attach shift group
+            </Button>
+            <Button variant="contained" startIcon={<Plus size={16} />} onClick={openNew} sx={{ bgcolor: "white", color: "#0057B7" }}>
+              Add organization unit
+            </Button>
+          </Stack>
         </Stack>
       </Paper>
 
@@ -200,6 +257,40 @@ export default function OrganizationMaster() {
           </TableBody>
         </Table>
       </TableContainer>
+
+      <Paper elevation={0} sx={{ mt: 2, border: "1px solid #BFE6DB", borderRadius: 3, overflow: "hidden" }}>
+        <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ px: 2, py: 1.5, bgcolor: "#E8F5F1" }}>
+          <Box>
+            <Typography sx={{ fontWeight: 900, color: "#03624C" }}>Shift-group reporting</Typography>
+            <Typography sx={{ fontSize: 12, color: "#475569" }}>Each active shift group reports to one Department, Vertical, Section or Function—not to an employee or unit head.</Typography>
+          </Box>
+          <Button variant="contained" size="small" onClick={() => openShiftMapping()} sx={{ bgcolor: "#03624C" }}>Attach shift group</Button>
+        </Stack>
+        <Table size="small">
+          <TableHead><TableRow>
+            <TableCell><strong>Shift group</strong></TableCell>
+            <TableCell><strong>Reports to organization unit</strong></TableCell>
+            <TableCell><strong>Unit type</strong></TableCell>
+            <TableCell align="right"><strong>Action</strong></TableCell>
+          </TableRow></TableHead>
+          <TableBody>
+            {shiftMappings.map((mapping) => (
+              <TableRow key={mapping.id} hover>
+                <TableCell sx={{ fontWeight: 900 }}>{mapping.groupName}</TableCell>
+                <TableCell>{mapping.organizationUnitName || "-"}</TableCell>
+                <TableCell><Chip size="small" label={TYPE_LABELS[mapping.organizationUnitType] || mapping.organizationUnitType || "-"} /></TableCell>
+                <TableCell align="right">
+                  <Button size="small" onClick={() => openShiftMapping(mapping)}>Change</Button>
+                  <Button size="small" color="error" onClick={() => removeShiftMapping(mapping)}>Detach</Button>
+                </TableCell>
+              </TableRow>
+            ))}
+            {!shiftMappings.length && (
+              <TableRow><TableCell colSpan={4} align="center" sx={{ py: 3, color: "#64748B" }}>No shift group is attached to the organization hierarchy.</TableCell></TableRow>
+            )}
+          </TableBody>
+        </Table>
+      </Paper>
 
       <Dialog open={open} onClose={() => setOpen(false)} fullWidth maxWidth="md">
         <DialogTitle>{editId ? "Update" : "Add"} organization unit</DialogTitle>
@@ -246,6 +337,47 @@ export default function OrganizationMaster() {
           </Box>
         </DialogContent>
         <DialogActions><Button onClick={() => setOpen(false)}>Cancel</Button><Button variant="contained" onClick={save}>Save mapping</Button></DialogActions>
+      </Dialog>
+
+      <Dialog open={shiftOpen} onClose={() => setShiftOpen(false)} fullWidth maxWidth="sm">
+        <DialogTitle>Attach shift group to organization</DialogTitle>
+        <DialogContent dividers>
+          <Stack spacing={2} sx={{ pt: 1 }}>
+            <TextField
+              select
+              size="small"
+              label="Active shift group"
+              value={shiftMapping.groupName}
+              onChange={(event) => setShiftMapping((current) => ({ ...current, groupName: event.target.value }))}
+              fullWidth
+            >
+              {shiftGroups.map((name) => <MenuItem key={name} value={name}>{name}</MenuItem>)}
+            </TextField>
+            <TextField
+              select
+              size="small"
+              label="Reports to"
+              value={shiftMapping.organizationUnitId}
+              onChange={(event) => setShiftMapping((current) => ({ ...current, organizationUnitId: event.target.value }))}
+              helperText="Select a Department, Vertical, Section or Function. Its configured heads become the approval hierarchy."
+              fullWidth
+            >
+              {shiftTargets.map((unit) => (
+                <MenuItem key={unit.id} value={unit.id}>{unit.name} ({TYPE_LABELS[unit.unitType]})</MenuItem>
+              ))}
+            </TextField>
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setShiftOpen(false)}>Cancel</Button>
+          <Button
+            variant="contained"
+            disabled={!shiftMapping.groupName || !shiftMapping.organizationUnitId}
+            onClick={saveShiftMapping}
+          >
+            Save reporting mapping
+          </Button>
+        </DialogActions>
       </Dialog>
     </Box>
   );

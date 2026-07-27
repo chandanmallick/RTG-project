@@ -216,7 +216,7 @@ export default function CrewDutyRoster() {
         rosterId: rosterId || undefined, startDate, endDate, data: rosterData,
         header, instructions, distribution, signedBy: person(signedBy), leaveAuthority: person(leaveAuthority), isFinal: makeFinal,
       });
-      setRosterId(response.rosterId); setIsFinal(makeFinal);
+      setRosterId(response.rosterId); setIsFinal(makeFinal); setCalendarPushed(false);
       notify("success", response.message); await loadReferenceData();
     } catch (error) { notify("error", error.response?.data?.detail || "Unable to save the roster."); }
     finally { setBusy(false); }
@@ -246,8 +246,9 @@ export default function CrewDutyRoster() {
   };
 
   const push = async () => {
-    if (!rosterId || !isFinal) return notify("warning", "Save the roster as final before publishing it.");
-    if (!window.confirm("Publish this final roster to the duty calendar?")) return;
+    if (!rosterId) return notify("warning", "Save the roster as draft or final before publishing it.");
+    const rosterType = isFinal ? "final" : "draft";
+    if (!window.confirm(`Publish this ${rosterType} roster to the duty calendar?`)) return;
     setBusy(true);
     try { const response = await crewApi.pushRoster(rosterId); setCalendarPushed(true); notify("success", response.message); await loadReferenceData(); }
     catch (error) { notify("error", error.response?.data?.detail || "Unable to publish roster."); }
@@ -276,6 +277,7 @@ export default function CrewDutyRoster() {
   const isGenerateDisabled = busy || isFinal || !startDate || !endDate;
   const isSaveDraftDisabled = busy || isFinal || !rosterData.length;
   const isSaveFinalDisabled = busy || isFinal || !rosterData.length;
+  const isPublishDraftDisabled = busy || !rosterId || isFinal || calendarPushed;
   const isDownloadDisabled = !rosterData.length;
 
   return (
@@ -472,7 +474,7 @@ export default function CrewDutyRoster() {
               sx={{ fontWeight: 900, background: "#D1FAE5", color: "#03624C", borderRadius: "6px" }}
             />
           )}
-          {isFinal && !calendarPushed && (
+          {rosterId && !calendarPushed && (
             <Button
               onClick={push}
               disabled={busy}
@@ -488,7 +490,7 @@ export default function CrewDutyRoster() {
                 "&:hover": { background: "#008B58" }
               }}
             >
-              Publish
+              {isFinal ? "Publish Final Roster" : "Publish Draft Roster"}
             </Button>
           )}
           <Button
@@ -675,6 +677,29 @@ export default function CrewDutyRoster() {
               <Save size={16} />
             </Box>
           </Box>
+
+          {/* Publish the currently saved draft to the duty calendar. */}
+          <Button
+            onClick={push}
+            disabled={isPublishDraftDisabled}
+            variant="contained"
+            startIcon={<Send size={16} />}
+            sx={{
+              height: 42,
+              px: 2.4,
+              borderRadius: "8px",
+              backgroundColor: "#0057B7",
+              color: "#FFFFFF",
+              fontWeight: 800,
+              fontSize: 13,
+              textTransform: "none",
+              boxShadow: isPublishDraftDisabled ? "none" : "0 3px 10px rgba(0, 87, 183, 0.18)",
+              "&:hover": { backgroundColor: "#00479A" },
+              "&.Mui-disabled": { backgroundColor: "#F1F5F9", color: "#94A3B8" },
+            }}
+          >
+            {calendarPushed && !isFinal ? "DRAFT PUBLISHED" : "PUBLISH DRAFT"}
+          </Button>
 
           {/* Button 3: SAVE FINAL */}
           <Box

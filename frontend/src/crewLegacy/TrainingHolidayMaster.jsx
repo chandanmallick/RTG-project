@@ -24,12 +24,20 @@ DialogActions,
 Accordion,
 AccordionSummary,
 AccordionDetails,
+Alert,
+Chip,
+CircularProgress,
 } from "@mui/material"
 
 import { ExpandLess, ExpandMore  } from "@mui/icons-material"
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
+import { useAuth } from "../auth/AuthContext";
 
 export default function TrainingHolidayMaster(){
+const { user } = useAuth()
+const trainingAccess = user?.permissions?.crew_training || {}
+const canViewTrainingPage = Boolean(trainingAccess.view)
+const canManageTraining = Boolean(trainingAccess.write)
 
 /* ================= BASIC VARIABLES ================= */
 
@@ -94,12 +102,16 @@ const [selectedEmployees,setSelectedEmployees]=useState([])
 
 const [pendingList,setPendingList]=useState([])
 const [selectedRows,setSelectedRows]=useState([])
+const [replacementChoices,setReplacementChoices]=useState({})
+const [replacementCandidates,setReplacementCandidates]=useState({})
+const [candidateLoading,setCandidateLoading]=useState({})
 
 /* ================= HISTORY ================= */
 
 const [history,setHistory]=useState([])
 const [historyFY,setHistoryFY]=useState("")
 const [historyEmployee,setHistoryEmployee]=useState("")
+const [notice,setNotice]=useState(null)
 
 /* ================= FETCH HOLIDAY ================= */
 
@@ -113,8 +125,8 @@ console.error(err)
 }
 
 useEffect(()=>{
-fetchHoliday()
-},[selectedYear])
+if(canViewTrainingPage) fetchHoliday()
+},[selectedYear,canViewTrainingPage])
 
 /* ================= SAVE HOLIDAY ================= */
 
@@ -154,8 +166,8 @@ console.error(err)
 }
 
 useEffect(()=>{
-fetchTraining()
-},[selectedFY])
+if(canViewTrainingPage) fetchTraining()
+},[selectedFY,canViewTrainingPage])
 
 /* ================= SAVE TRAINING ================= */
 
@@ -204,11 +216,15 @@ return list
 
 }
 
-const fetchCalendarDuty = async(trainingName)=>{
+const fetchCalendarDuty = async(trainingName, fallbackStartDate = "", fallbackEndDate = "")=>{
 
 const trainingObj = trainingList.find(
 t=>t.trainingName===trainingName
-)
+ ) || (fallbackStartDate ? {
+  trainingName,
+  startDate: fallbackStartDate,
+  endDate: fallbackEndDate || fallbackStartDate
+ } : null)
 
 if(!trainingObj) return
 
@@ -218,6 +234,7 @@ const res = await api.get(
 
 setCalendarData(res.data)
 setCalendarDates(generateDates(trainingObj.startDate,trainingObj.endDate))
+setSelectedEmployees([])
 
 setCalendarOpen(true)
 
@@ -235,16 +252,21 @@ t=>t.trainingName===selectedTraining
 
 await api.post("/training-assign/nominate",{
 date:trainingObj.startDate,
+startDate:trainingObj.startDate,
+endDate:trainingObj.endDate,
 trainingName:selectedTraining,
 employees:selectedEmployees
 })
 
 setCalendarOpen(false)
+setSelectedEmployees([])
+setNotice({severity:"success",text:"Training nomination sent through each employee's reporting hierarchy."})
 
 fetchPending()
+fetchHistory()
 
 }catch(err){
-console.error(err)
+setNotice({severity:"error",text:err?.response?.data?.detail || err?.message || "Training nomination could not be saved."})
 }
 
 }
@@ -257,7 +279,20 @@ try{
 
 const res = await api.get("/training-assign/pending")
 
-setPendingList(res.data || [])
+const rows=res.data || []
+setPendingList(rows)
+setReplacementChoices((current)=>{
+const next={}
+rows.forEach((row)=>{
+next[row.id]=current[row.id] || {
+replacementRequired:Boolean(row.replacementRequired),
+replacementEmployeeId:row.replacementEmployee?.employeeId || "",
+assignActingSIC:Boolean(row.actingSICEmployee?.employeeId),
+actingSICEmployeeId:row.actingSICEmployee?.employeeId || ""
+}
+})
+return next
+})
 
 }catch(err){
 console.error(err)
@@ -269,16 +304,48 @@ useEffect(()=>{
 fetchPending()
 },[])
 
+const loadReplacementCandidates = async(row)=>{
+if(replacementCandidates[row.id] || candidateLoading[row.id]) return
+setCandidateLoading((current)=>({...current,[row.id]:true}))
+try{
+const res=await api.get(`/training-assign/replacement-candidates/${row.id}`)
+setReplacementCandidates((current)=>({...current,[row.id]:res.data?.candidates || []}))
+}catch(err){
+setNotice({severity:"error",text:err?.response?.data?.detail || "Replacement candidates could not be loaded."})
+}finally{
+setCandidateLoading((current)=>({...current,[row.id]:false}))
+}
+}
+
+const updateReplacementChoice=(row,field,value)=>{
+setReplacementChoices((current)=>({
+...current,
+[row.id]:{
+replacementRequired:false,
+replacementEmployeeId:"",
+assignActingSIC:false,
+actingSICEmployeeId:"",
+...(current[row.id] || {}),
+[field]:value
+}
+}))
+}
+
 /* ================= APPROVE ================= */
 
 const approveTraining = async()=>{
 
+try{
 await api.post("/training-assign/approve",{
 ids:selectedRows,
-user:"DIC"
+replacementDecisions:selectedRows.map((id)=>({id,...(replacementChoices[id] || {})}))
 })
-
-fetchPending()
+setSelectedRows([])
+setNotice({severity:"success",text:"Selected nominations approved and forwarded to the next reporting authority."})
+await Promise.all([fetchPending(),fetchHistory()])
+}catch(err){
+setNotice({severity:"error",text:err?.response?.data?.detail || err?.message || "Training approval could not be completed."})
+}
 
 }
 
@@ -311,8 +378,8 @@ setHistory(res.data || [])
 }
 
 useEffect(()=>{
-fetchHistory()
-},[historyFY,historyEmployee])
+if(canViewTrainingPage) fetchHistory()
+},[historyFY,historyEmployee,canViewTrainingPage])
 
 /* ================= UI ================= */
 
@@ -323,11 +390,14 @@ return(
 {/* HEADER */}
 
 <Typography variant="h4" sx={{mb:4,fontWeight:600}}>
-Training & Holiday Management
+{canViewTrainingPage ? "Training & Holiday Management" : "Training Approval Inbox"}
 </Typography>
+
+{notice && <Alert severity={notice.severity} onClose={()=>setNotice(null)} sx={{mb:2}}>{notice.text}</Alert>}
 
 {/* ================= HOLIDAY ================= */}
 
+{canViewTrainingPage && (
 <Accordion
   defaultExpanded
   sx={{
@@ -377,6 +447,7 @@ Training & Holiday Management
           <TextField
             select
             label="Year"
+            disabled={!canManageTraining}
             fullWidth
             value={selectedYear}
             onChange={(e) => setSelectedYear(e.target.value)}
@@ -394,6 +465,7 @@ Training & Holiday Management
 
           <TextField
             type="date"
+            disabled={!canManageTraining}
             fullWidth
             value={holiday.date}
             onChange={(e) =>
@@ -407,6 +479,7 @@ Training & Holiday Management
 
           <TextField
             label="Holiday Name"
+            disabled={!canManageTraining}
             fullWidth
             value={holiday.holidayName}
             onChange={(e) =>
@@ -420,6 +493,7 @@ Training & Holiday Management
 
           <TextField
             label="Hindi Name"
+            disabled={!canManageTraining}
             fullWidth
             value={holiday.holidayNameHindi}
             onChange={(e) =>
@@ -436,6 +510,7 @@ Training & Holiday Management
 
           <Button
             variant="contained"
+            disabled={!canManageTraining}
             fullWidth
             sx={{
               height: 56,
@@ -502,9 +577,11 @@ Training & Holiday Management
   </AccordionDetails>
 
 </Accordion>
+)}
 
 {/* ================= TRAINING ================= */}
 
+{canViewTrainingPage && (
 <Accordion
   defaultExpanded
   sx={{
@@ -553,6 +630,7 @@ Training & Holiday Management
         <Grid item xs={3}>
           <TextField
             label="Training"
+            disabled={!canManageTraining}
             fullWidth
             value={training.trainingName}
             onChange={(e) =>
@@ -564,6 +642,7 @@ Training & Holiday Management
         <Grid item xs={2}>
           <TextField
             type="date"
+            disabled={!canManageTraining}
             fullWidth
             value={training.startDate}
             onChange={(e) =>
@@ -575,6 +654,7 @@ Training & Holiday Management
         <Grid item xs={2}>
           <TextField
             type="date"
+            disabled={!canManageTraining}
             fullWidth
             value={training.endDate}
             onChange={(e) =>
@@ -586,6 +666,7 @@ Training & Holiday Management
         <Grid item xs={2}>
           <Button
             variant="contained"
+            disabled={!canManageTraining}
             fullWidth
             sx={{
               height: 56,
@@ -641,9 +722,11 @@ Training & Holiday Management
   </AccordionDetails>
 
 </Accordion>
+)}
 
 {/* ================= ASSIGN ================= */}
 
+{canManageTraining && (
 <Accordion
   defaultExpanded
   sx={{
@@ -718,6 +801,7 @@ Training & Holiday Management
   </AccordionDetails>
 
 </Accordion>
+)}
 
 
 {/* ############### Duty Matrix Popup (Full Section) */}
@@ -725,7 +809,7 @@ Training & Holiday Management
 
 <Dialog open={calendarOpen} maxWidth="lg" fullWidth>
 
-<DialogTitle>Duty Calendar</DialogTitle>
+<DialogTitle>Select shift or non-shift employees</DialogTitle>
 
 <DialogContent>
 
@@ -733,13 +817,16 @@ Training & Holiday Management
 
 <Box key={group} sx={{mb:4}}>
 
-<Typography variant="h6">{group}</Typography>
+<Typography variant="h6" sx={{display:"flex",alignItems:"center",gap:1}}>
+{group}
+<Chip size="small" label={`${calendarData[group].length} employees`} />
+</Typography>
 
 <Table size="small">
 
 <TableHead>
 <TableRow>
-<TableCell>Name</TableCell>
+<TableCell>Name / designation</TableCell>
 
 {calendarDates.map(date => (
 <TableCell key={date} align="center">
@@ -757,7 +844,12 @@ Training & Holiday Management
 
 <TableRow key={emp.employeeId} hover>
 
-<TableCell>{emp.name}</TableCell>
+<TableCell>
+<Typography sx={{fontWeight:800}}>{emp.name || emp.employeeId}</Typography>
+<Typography variant="caption" color="text.secondary">
+{emp.designation || "Designation not set"} · {emp.employeeId}
+</Typography>
+</TableCell>
 
 {calendarDates.map(date => {
 
@@ -779,7 +871,14 @@ shift==="OFF" ? "#FFEBEE" :
 }}
 >
 
+<Typography sx={{fontWeight:shift==="Training" ? 900 : 500}}>
 {shift}
+</Typography>
+{duty?.trainingName && (
+<Typography variant="caption" sx={{display:"block",maxWidth:130,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",color:"#6A1B9A"}}>
+{duty.trainingName}
+</Typography>
+)}
 
 </TableCell>
 
@@ -838,6 +937,7 @@ Cancel
 <Button
 variant="contained"
 onClick={nominateTraining}
+disabled={!canManageTraining}
 >
 Nominate Selected
 </Button>
@@ -886,9 +986,11 @@ Nominated Employees (Pending)
 
 <TableCell></TableCell>
 <TableCell sx={{fontWeight:600}}>Training</TableCell>
-<TableCell sx={{fontWeight:600}}>Date</TableCell>
+<TableCell sx={{fontWeight:600}}>Period</TableCell>
 <TableCell sx={{fontWeight:600}}>Employee</TableCell>
 <TableCell sx={{fontWeight:600}}>Status</TableCell>
+<TableCell sx={{fontWeight:600}}>Approval route</TableCell>
+<TableCell sx={{fontWeight:600,minWidth:300}}>Replacement / Acting SIC</TableCell>
 <TableCell sx={{fontWeight:600}}>Duty</TableCell>
 
 </TableRow>
@@ -900,7 +1002,7 @@ Nominated Employees (Pending)
 {pendingList.length===0 ?
 
 <TableRow>
-<TableCell colSpan={6} align="center">
+<TableCell colSpan={8} align="center">
 No pending nominations
 </TableCell>
 </TableRow>
@@ -921,6 +1023,7 @@ sx={{
 
 <Checkbox
 checked={selectedRows.includes(row.id)}
+disabled={!row.canApprove}
 onChange={(e)=>{
 
 if(e.target.checked){
@@ -942,13 +1045,109 @@ selectedRows.filter(id=>id!==row.id)
 
 <TableCell>{row.trainingName}</TableCell>
 
-<TableCell>{row.trainingDate}</TableCell>
+<TableCell>{row.startDate}{row.endDate && row.endDate!==row.startDate ? ` to ${row.endDate}` : ""}</TableCell>
 
 <TableCell>
-{row.employeeName || row.employeeId}
+<Typography sx={{fontWeight:800}}>{row.employeeName || row.employeeId}</Typography>
+<Typography variant="caption" color="text.secondary">{row.employeeDesignation || row.employeeId}</Typography>
 </TableCell>
 
 <TableCell>{row.status}</TableCell>
+
+<TableCell>
+<Typography sx={{fontSize:12,fontWeight:800}}>
+{row.currentApproverName ? `Awaiting ${row.currentApproverName}` : "Hierarchy completed"}
+</Typography>
+<Typography variant="caption" color="text.secondary">
+{row.currentApproverLevel || "Final approval"} · {row.approvalProgress}
+</Typography>
+</TableCell>
+
+<TableCell sx={{verticalAlign:"top",minWidth:300}}>
+{row.isShiftEmployee ? (
+<Box sx={{display:"grid",gap:1}}>
+<Typography variant="caption" sx={{fontWeight:800,color:"#03624C"}}>
+{row.groupName || "Shift group"}{row.isGroupSIC ? " · SIC going to training" : ""}
+</Typography>
+<Box sx={{display:"flex",alignItems:"center",gap:.5}}>
+<Checkbox
+size="small"
+checked={Boolean(replacementChoices[row.id]?.replacementRequired)}
+onChange={(e)=>{
+updateReplacementChoice(row,"replacementRequired",e.target.checked)
+if(e.target.checked) loadReplacementCandidates(row)
+}}
+/>
+<Typography sx={{fontSize:12,fontWeight:800}}>Replacement duty required</Typography>
+</Box>
+{replacementChoices[row.id]?.replacementRequired && (
+<TextField
+select
+size="small"
+fullWidth
+label="Replacement employee"
+value={replacementChoices[row.id]?.replacementEmployeeId || ""}
+onChange={(e)=>updateReplacementChoice(row,"replacementEmployeeId",e.target.value)}
+SelectProps={{onOpen:()=>loadReplacementCandidates(row)}}
+>
+{candidateLoading[row.id] && <MenuItem disabled><CircularProgress size={15} sx={{mr:1}}/>Loading employees…</MenuItem>}
+{row.replacementEmployee?.employeeId && !(replacementCandidates[row.id] || []).some((item)=>item.employeeId===row.replacementEmployee.employeeId) && (
+<MenuItem value={row.replacementEmployee.employeeId}>{row.replacementEmployee.name} ({row.replacementEmployee.employeeId})</MenuItem>
+)}
+{(replacementCandidates[row.id] || []).map((candidate)=>(
+<MenuItem key={candidate.employeeId} value={candidate.employeeId} sx={{display:"block",whiteSpace:"normal"}}>
+<Typography sx={{fontSize:12,fontWeight:800}}>{candidate.name} ({candidate.employeeId})</Typography>
+<Typography variant="caption" color={candidate.hasConflict ? "error" : "text.secondary"}>
+{candidate.source}{candidate.groupName ? ` · ${candidate.groupName}` : ""} · {candidate.dutySummary}
+{candidate.hasConflict ? " · Leave/training conflict" : ""}
+</Typography>
+</MenuItem>
+))}
+</TextField>
+)}
+{row.isGroupSIC && (
+<>
+<Box sx={{display:"flex",alignItems:"center",gap:.5}}>
+<Checkbox
+size="small"
+checked={Boolean(replacementChoices[row.id]?.actingSICEmployeeId)}
+onChange={(e)=>{
+updateReplacementChoice(row,"assignActingSIC",e.target.checked)
+if(!e.target.checked) updateReplacementChoice(row,"actingSICEmployeeId","")
+else loadReplacementCandidates(row)
+}}
+/>
+<Typography sx={{fontSize:12,fontWeight:800}}>Assign Acting SIC</Typography>
+</Box>
+{replacementChoices[row.id]?.assignActingSIC && (
+<TextField
+select
+size="small"
+fullWidth
+label="Acting SIC employee"
+value={replacementChoices[row.id]?.actingSICEmployeeId || ""}
+onChange={(e)=>updateReplacementChoice(row,"actingSICEmployeeId",e.target.value)}
+SelectProps={{onOpen:()=>loadReplacementCandidates(row)}}
+>
+<MenuItem value=""><em>Select Acting SIC</em></MenuItem>
+{row.actingSICEmployee?.employeeId && !(replacementCandidates[row.id] || []).some((item)=>item.employeeId===row.actingSICEmployee.employeeId) && (
+<MenuItem value={row.actingSICEmployee.employeeId}>{row.actingSICEmployee.name} ({row.actingSICEmployee.employeeId})</MenuItem>
+)}
+{(replacementCandidates[row.id] || []).map((candidate)=>(
+<MenuItem key={candidate.employeeId} value={candidate.employeeId} sx={{display:"block",whiteSpace:"normal"}}>
+<Typography sx={{fontSize:12,fontWeight:800}}>{candidate.name} ({candidate.employeeId})</Typography>
+<Typography variant="caption" color={candidate.hasConflict ? "error" : "text.secondary"}>
+{candidate.source}{candidate.groupName ? ` · ${candidate.groupName}` : ""} · {candidate.dutySummary}
+</Typography>
+</MenuItem>
+))}
+</TextField>
+)}
+</>
+)}
+</Box>
+) : <Typography variant="caption" color="text.secondary">Non-shift employee</Typography>}
+</TableCell>
 
 <TableCell>
 
@@ -956,7 +1155,7 @@ selectedRows.filter(id=>id!==row.id)
 variant="outlined"
 size="small"
 sx={{borderRadius:2}}
-onClick={()=>fetchCalendarDuty(row.trainingName)}
+onClick={()=>fetchCalendarDuty(row.trainingName,row.startDate,row.endDate)}
 >
 View Duty
 </Button>
@@ -980,16 +1179,16 @@ variant="contained"
 color="success"
 sx={{borderRadius:2,fontWeight:600}}
 onClick={approveTraining}
+disabled={
+!selectedRows.length ||
+selectedRows.some((id)=>{
+const choice=replacementChoices[id] || {}
+return (choice.replacementRequired && !choice.replacementEmployeeId) ||
+(choice.assignActingSIC && !choice.actingSICEmployeeId)
+})
+}
 >
-Approve (DIC)
-</Button>
-
-<Button
-variant="contained"
-sx={{borderRadius:2,fontWeight:600}}
-onClick={finalizeTraining}
->
-Finalize (Admin)
+Approve & Forward
 </Button>
 
 </Box>
@@ -1002,6 +1201,7 @@ Finalize (Admin)
 
 {/* ############### History Section */}
 
+{canViewTrainingPage && (
 <Accordion
   defaultExpanded
   sx={{
@@ -1070,6 +1270,7 @@ sx={{minWidth:200}}
 <TableCell sx={{fontWeight:600}}>Date</TableCell>
 <TableCell sx={{fontWeight:600}}>Employee</TableCell>
 <TableCell sx={{fontWeight:600}}>Status</TableCell>
+<TableCell sx={{fontWeight:600}}>Approval progress</TableCell>
 
 </TableRow>
 
@@ -1080,7 +1281,7 @@ sx={{minWidth:200}}
 {history.length===0 ?
 
 <TableRow>
-<TableCell colSpan={4} align="center">
+<TableCell colSpan={5} align="center">
 No history found
 </TableCell>
 </TableRow>
@@ -1101,9 +1302,11 @@ sx={{
 
 <TableCell>{row.trainingDate}</TableCell>
 
-<TableCell>{row.employeeId}</TableCell>
+<TableCell>{row.employeeName || row.employeeId}<br/><Typography variant="caption">{row.employeeId}</Typography></TableCell>
 
 <TableCell>{row.status}</TableCell>
+
+<TableCell>{row.approvalProgress || "-"}</TableCell>
 
 </TableRow>
 
@@ -1120,6 +1323,7 @@ sx={{
 </AccordionDetails>
 
 </Accordion>
+)}
 
 </Box>
 

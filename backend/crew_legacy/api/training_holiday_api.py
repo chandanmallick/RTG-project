@@ -1,7 +1,9 @@
 ﻿from fastapi import APIRouter, HTTPException
 from bson import ObjectId
+from fastapi import Depends
 from datetime import datetime
 from crew_legacy.database.database_mongo import holiday_master_collection, training_master_collection
+from crew_legacy.admin_logic.auth_utils import get_authenticated_user, require_page_write
 
 router = APIRouter()
 
@@ -11,7 +13,8 @@ router = APIRouter()
 # =====================================================
 
 @router.post("/holiday")
-def create_holiday(data: dict):
+def create_holiday(data: dict, user=Depends(get_authenticated_user)):
+    require_page_write(user, "crew_training")
 
     if not data.get("year") or not data.get("date") or not data.get("holidayName"):
         raise HTTPException(status_code=400, detail="Year, Date & Holiday Name required")
@@ -49,7 +52,8 @@ def get_holidays(year: int):
 
 
 @router.put("/holiday/{holiday_id}")
-def update_holiday(holiday_id: str, data: dict):
+def update_holiday(holiday_id: str, data: dict, user=Depends(get_authenticated_user)):
+    require_page_write(user, "crew_training")
 
     holiday_master_collection.update_one(
         {"_id": ObjectId(holiday_id)},
@@ -68,7 +72,8 @@ def update_holiday(holiday_id: str, data: dict):
 
 
 @router.delete("/holiday/{holiday_id}")
-def delete_holiday(holiday_id: str):
+def delete_holiday(holiday_id: str, user=Depends(get_authenticated_user)):
+    require_page_write(user, "crew_training")
 
     holiday_master_collection.delete_one(
         {"_id": ObjectId(holiday_id)}
@@ -82,7 +87,8 @@ def delete_holiday(holiday_id: str):
 # =====================================================
 
 @router.post("/training")
-def create_training(data: dict):
+def create_training(data: dict, user=Depends(get_authenticated_user)):
+    require_page_write(user, "crew_training")
 
     if not data.get("financialYear") or not data.get("trainingName"):
         raise HTTPException(status_code=400, detail="Financial Year & Training Name required")
@@ -126,7 +132,8 @@ def get_training(financialYear: str):
 
 
 @router.put("/training/{training_id}")
-def update_training(training_id: str, data: dict):
+def update_training(training_id: str, data: dict, user=Depends(get_authenticated_user)):
+    require_page_write(user, "crew_training")
 
     training_master_collection.update_one(
         {"_id": ObjectId(training_id)},
@@ -146,7 +153,8 @@ def update_training(training_id: str, data: dict):
 
 
 @router.delete("/training/{training_id}")
-def delete_training(training_id: str):
+def delete_training(training_id: str, user=Depends(get_authenticated_user)):
+    require_page_write(user, "crew_training")
 
     training_master_collection.delete_one(
         {"_id": ObjectId(training_id)}

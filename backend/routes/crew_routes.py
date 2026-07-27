@@ -261,7 +261,9 @@ def save_roster(payload: dict):
             raise HTTPException(404, "Roster not found")
         if existing.get("isFinal"):
             raise HTTPException(400, "A final roster cannot be modified")
-        document["calendarPushed"] = existing.get("calendarPushed", False)
+        # Any saved change invalidates the previously published calendar
+        # snapshot. The updated draft/final roster must be published again.
+        document["calendarPushed"] = False
         rosters.update_one({"_id": existing["_id"]}, {"$set": document})
         result_id = existing["_id"]
     else:
@@ -343,8 +345,8 @@ def push_roster(roster_id: str):
     roster = rosters.find_one({"_id": object_id})
     if not roster:
         raise HTTPException(404, "Roster not found")
-    if not roster.get("isFinal"):
-        raise HTTPException(400, "Only a final roster can be pushed to the calendar")
+    is_final = bool(roster.get("isFinal"))
+    roster_type = "FINAL" if is_final else "DRAFT"
     start_date, end_date = roster.get("startDate"), roster.get("endDate")
     employee_daily.delete_many({"date": {"$gte": start_date, "$lte": end_date}, "dataSource": "Roster"})
     details_by_group = {item.get("groupName"): item for item in roster.get("groupDetails", [])}
@@ -366,7 +368,7 @@ def push_roster(roster_id: str):
                     "name": person.get("name"), "designation": person.get("designation"),
                     "groupName": group.get("groupName"), "updatedOn": datetime.now(timezone.utc),
                     "isSIC": emp_id == employee_id(sic), "attachedRosterId": roster_id,
-                    "rosterVersion": roster_id, "isFinalRoster": True, "rosterType": "FINAL",
+                    "rosterVersion": roster_id, "isFinalRoster": is_final, "rosterType": roster_type,
                 }
                 if existing.get("leaveStatus") not in {"Approved", "Pending", "Applied", "Forwarded by SIC"} and not existing.get("trainingName"):
                     shift = SHIFT_NAMES.get(duty_code, duty_code)
@@ -388,7 +390,7 @@ def push_roster(roster_id: str):
     update_shift_records(roster)
     rosters.update_many({"_id": {"$ne": object_id}, "calendarPushed": True}, {"$set": {"calendarPushed": False}})
     rosters.update_one({"_id": object_id}, {"$set": {"calendarPushed": True, "pushedOn": datetime.now(timezone.utc)}})
-    return {"message": "Final roster pushed to the duty calendar"}
+    return {"message": f"{roster_type.title()} roster published to the duty calendar"}
 
 
 @router.get("/calendar")
@@ -435,13 +437,70 @@ def calendar_view(start_date: str = Query(...), end_date: str = Query(...)):
             "trainingName": 1,
             "replacementDuty": 1,
             "replacementFor": 1,
+            "isActingSIC": 1,
+            "actingSICFor": 1,
+            "actingSICGroup": 1,
+        },
+    ))
+    # A replacement can be selected from employees who are not members of the
+    # published shift roster. Fetch those assignments separately so the leave
+    # employee's calendar cell can still show who is covering the duty.
+    replacement_records = list(employee_daily.find(
+        {
+            "date": {"$gte": start_date, "$lte": end_date},
+            "replacementDuty": True,
+            "replacementFor": {"$exists": True, "$nin": [None, ""]},
+        },
+        {
+            "_id": 0,
+            "employeeId": 1,
+            "name": 1,
+            "date": 1,
+            "assignedDuty": 1,
+            "groupName": 1,
+            "replacementMode": 1,
+            "replacementDuty": 1,
+            "replacementFor": 1,
         },
     ))
     replacement_map = {}
-    for record in records:
+    replacement_for_map = {}
+    replacement_ids_without_name = set()
+    for record in replacement_records:
         replacement_for = record.get("replacementFor") if record.get("replacementDuty") else None
         if replacement_for:
-            replacement_map[(employee_id(replacement_for), record.get("date"))] = {"employeeId": employee_id(record), "name": record.get("name")}
+            replacement_id = employee_id(record)
+            replacement_map[(employee_id(replacement_for), record.get("date"))] = {
+                "employeeId": replacement_id,
+                "name": record.get("name"),
+                "mode": record.get("replacementMode"),
+                "shift": record.get("assignedDuty"),
+                "groupName": record.get("groupName"),
+            }
+            replacement_for_map[(replacement_id, record.get("date"))] = {
+                "employeeId": employee_id(replacement_for),
+                "name": replacement_for.get("name"),
+            }
+            if replacement_id and not record.get("name"):
+                replacement_ids_without_name.add(replacement_id)
+
+    if replacement_ids_without_name:
+        replacement_names = {
+            employee_id(item): item.get("name")
+            for item in employees.find(
+                {
+                    "$or": [
+                        {"userId": {"$in": list(replacement_ids_without_name)}},
+                        {"employeeId": {"$in": list(replacement_ids_without_name)}},
+                    ]
+                },
+                {"_id": 0, "userId": 1, "employeeId": 1, "name": 1},
+            )
+        }
+        for replacement in replacement_map.values():
+            if not replacement.get("name"):
+                replacement["name"] = replacement_names.get(replacement.get("employeeId"))
+
     daily = defaultdict(dict)
     for record in records:
         emp_id, date = employee_id(record), record.get("date")
@@ -450,6 +509,10 @@ def calendar_view(start_date: str = Query(...), end_date: str = Query(...)):
                 "shift": record.get("assignedDuty") or "-", "leaveType": record.get("leaveType"),
                 "leaveStatus": record.get("leaveStatus"), "trainingName": record.get("trainingName"),
                 "replacementEmployee": replacement_map.get((emp_id, date)),
+                "replacementFor": replacement_for_map.get((emp_id, date)),
+                "isActingSIC": bool(record.get("isActingSIC")),
+                "actingSICFor": record.get("actingSICFor"),
+                "actingSICGroup": record.get("actingSICGroup"),
             }
     dates = []
     while start <= end:
@@ -463,7 +526,7 @@ def calendar_view(start_date: str = Query(...), end_date: str = Query(...)):
             crew.append({
                 "employeeId": emp_id, "name": person.get("name"), "designation": person.get("designation"),
                 "IsSIC": person.get("IsSIC", False),
-                "duties": {date: daily.get((emp_id, date), {"shift": "-", "leaveType": None, "leaveStatus": None, "trainingName": None, "replacementEmployee": None}) for date in dates},
+                "duties": {date: daily.get((emp_id, date), {"shift": "-", "leaveType": None, "leaveStatus": None, "trainingName": None, "replacementEmployee": None, "replacementFor": None}) for date in dates},
             })
         output.append({"groupName": group_name, "employees": crew})
     return output

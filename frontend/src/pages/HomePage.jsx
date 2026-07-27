@@ -6,6 +6,7 @@ import PSPFrequencyCheckTiles from "../components/ui/PSPFrequencyCheckTiles";
 import PSPComparisonBar from "../components/ui/PSPComparisonBar";
 import API from "../services/api";
 import crewApi from "../crewLegacy/api";
+import { DutyNotificationBoard } from "../components/crew/DutyNotifications";
 
 const fmt = (value, digits = 0) => Number(value || 0).toLocaleString("en-IN", { maximumFractionDigits: digits, minimumFractionDigits: digits });
 
@@ -159,6 +160,7 @@ export default function HomePage() {
               <span>Tomorrow duty snapshot</span>
               <ArrowRight size={14} />
             </Box>
+            <DutyNotificationBoard limit={2} />
           </SectionCard>
 
           <SectionCard title="NLDC Data" subtitle="Last Day Demand trend & frequency Stat" icon={TrendingUp} action={

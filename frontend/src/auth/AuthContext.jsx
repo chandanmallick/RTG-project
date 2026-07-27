@@ -46,13 +46,33 @@ export function AuthProvider({ children }) {
 
   useEffect(() => { refreshSession(); }, [refreshSession]);
 
-  const login = useCallback(async (userId, password) => {
-    const { data } = await axios.post(`${BASE_URL}/crew/auth/login`, { userId, password });
+  const establishSession = useCallback((data) => {
     localStorage.setItem("portalToken", data.access_token);
     const session = { ...data, employeeId: data.employeeId, permissions: data.permissions || {} };
     setUser(session);
     persistSession(session);
     return session;
+  }, []);
+
+  const login = useCallback(async (userId, password) => {
+    const { data } = await axios.post(`${BASE_URL}/crew/auth/login`, { userId, password });
+    if (data.requires_otp) return data;
+    return establishSession(data);
+  }, [establishSession]);
+
+  const verifyOtp = useCallback(async (challengeId, otp) => {
+    const { data } = await axios.post(`${BASE_URL}/crew/auth/login/verify-otp`, {
+      challenge_id: challengeId,
+      otp,
+    });
+    return establishSession(data);
+  }, [establishSession]);
+
+  const resendOtp = useCallback(async (challengeId) => {
+    const { data } = await axios.post(`${BASE_URL}/crew/auth/login/resend-otp`, {
+      challenge_id: challengeId,
+    });
+    return data;
   }, []);
 
   const logout = useCallback(async () => {
@@ -66,7 +86,10 @@ export function AuthProvider({ children }) {
     }
   }, []);
 
-  const value = useMemo(() => ({ user, loading, login, logout, refreshSession }), [user, loading, login, logout, refreshSession]);
+  const value = useMemo(
+    () => ({ user, loading, login, verifyOtp, resendOtp, logout, refreshSession }),
+    [user, loading, login, verifyOtp, resendOtp, logout, refreshSession],
+  );
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 

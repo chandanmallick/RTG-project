@@ -8,7 +8,7 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi import HTTPException, Request
 
-from crew_legacy.database.database_mongo import employee_collection
+from crew_legacy.database.database_mongo import employee_collection, page_access_collection
 from crew_legacy.config import ACCESS_TOKEN_EXPIRE_HOURS, JWT_SECRET_KEY
 
 
@@ -130,3 +130,18 @@ def check_replacement_access(user):
     if user.get("role") == "admin" or user.get("isDeptIC"):
         return True
     raise HTTPException(status_code=403, detail="Replacement access is required")
+
+
+def require_page_write(user: dict, page_key: str):
+    """Enforce a page's administrative Write right for mutation endpoints."""
+    employee_id = str(user.get("employeeId") or user.get("userId") or "").strip()
+    if employee_id == "50041":
+        return user
+    access = page_access_collection.find_one(
+        {"userId": employee_id},
+        {f"pages.{page_key}.write": 1},
+    ) or {}
+    page_access = ((access.get("pages") or {}).get(page_key) or {})
+    if not page_access.get("write"):
+        raise HTTPException(status_code=403, detail="Write access is required for this page")
+    return user

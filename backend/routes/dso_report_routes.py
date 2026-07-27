@@ -20,6 +20,8 @@ from routes.pipeline_routes import (
 
 router = APIRouter(prefix="/api/dso-reports", tags=["DSO Report Preparation"])
 COLLECTION = "dso_reports"
+INDIA_1_MIN_COLLECTION = "India 1 min Data"
+INDIA_1_MIN_FIELDS = ("india_demand", "thermal", "hydro", "wind", "solar", "gas", "nuclear")
 STATES = ("BIHAR", "JHARKHAND", "DVC", "ODISHA", "WB", "SIKKIM")
 
 STATE_COLUMNS = {
@@ -56,6 +58,12 @@ def collection():
 
 def master_collection():
     return MongoService().db["pipeline_config"]
+
+
+def india_1_min_collection():
+    result = MongoService().db[INDIA_1_MIN_COLLECTION]
+    result.create_index("date", unique=True)
+    return result
 
 
 def compact(value):
@@ -216,10 +224,11 @@ MORNING_HEADERS = {
     "gas": ("GAS",),
     "thermal": ("THERMAL",),
     "hydro": ("HYDRO",),
+    "nuclear": ("NUCLEAR", "NUC"),
 }
 
 
-def parse_morning_scada(contents, report_date):
+def parse_morning_scada(contents, report_date=None):
     workbook = openpyxl.load_workbook(io.BytesIO(contents), read_only=False, data_only=True)
     sheet = next((item for item in workbook.worksheets if item.title.lower() != "_config"), None)
     if not sheet:
@@ -234,7 +243,7 @@ def parse_morning_scada(contents, report_date):
                 continue
             if canonical == "india_demand" and group != "ALLINDIA":
                 continue
-            if canonical in {"solar", "wind", "gas", "thermal", "hydro"} and group != "ALLINDIA":
+            if canonical in {"solar", "wind", "gas", "thermal", "hydro", "nuclear"} and group != "ALLINDIA":
                 continue
             if any(header == alias or alias in header for alias in aliases):
                 mapping[canonical] = column
@@ -244,25 +253,27 @@ def parse_morning_scada(contents, report_date):
     missing = sorted(required - set(mapping))
     if missing:
         raise ValueError(f"Required morning SCADA columns are missing: {', '.join(missing)}")
-    yesterday = date.fromisoformat(report_date)
-    today = yesterday + timedelta(days=1)
+    yesterday = date.fromisoformat(report_date) if report_date else None
+    today = yesterday + timedelta(days=1) if yesterday else None
     rows = []
     # Row 3 contains only measurement keys. Operational samples start at row 4.
     for row_number in range(4, sheet.max_row + 1):
         raw_dt = sheet.cell(row_number, 1).value
         if not isinstance(raw_dt, datetime):
             continue
-        if raw_dt.date() < yesterday or raw_dt.date() > today:
-            continue
-        if raw_dt.date() == today and (raw_dt.hour > 6 or (raw_dt.hour == 6 and raw_dt.minute > 59)):
-            continue
+        if yesterday:
+            if raw_dt.date() < yesterday or raw_dt.date() > today:
+                continue
+            if raw_dt.date() == today and (raw_dt.hour > 6 or (raw_dt.hour == 6 and raw_dt.minute > 59)):
+                continue
         record = {"datetime": raw_dt, "time": raw_dt.strftime("%H:%M"), "date": raw_dt.date().isoformat()}
         for canonical, column in mapping.items():
             if canonical != "time":
                 record[canonical] = numeric(sheet.cell(row_number, column).value)
         rows.append(record)
     if not rows:
-        raise ValueError("No samples were found from yesterday 00:00 through today 06:59.")
+        window = " from yesterday 00:00 through today 06:59" if report_date else ""
+        raise ValueError(f"No operational samples were found{window}.")
     return rows, {
         "sheet": sheet.title,
         "header_rows": [1, 2],
@@ -272,6 +283,70 @@ def parse_morning_scada(contents, report_date):
         "first_timestamp": rows[0]["datetime"].isoformat(),
         "last_timestamp": rows[-1]["datetime"].isoformat(),
     }
+
+
+def save_india_1_min_rows(rows, source_file_name, source):
+    """Store one normalized Mongo document per calendar day.
+
+    Replacing the whole document is intentional: a morning upload first stores
+    the current day through 06:59, and the next upload replaces it with that
+    day's complete 00:00-23:59 series.
+    """
+    grouped = {}
+    for row in rows:
+        day = row.get("date")
+        raw_dt = row.get("datetime")
+        if not day or not isinstance(raw_dt, datetime):
+            continue
+        sample = {
+            "timestamp": raw_dt.replace(second=0, microsecond=0).isoformat(),
+            "time": raw_dt.strftime("%H:%M"),
+        }
+        for field in INDIA_1_MIN_FIELDS:
+            sample[field] = numeric(row.get(field))
+        grouped.setdefault(day, {})[sample["timestamp"]] = sample
+
+    saved = []
+    now = datetime.utcnow().isoformat()
+    store = india_1_min_collection()
+    for day, timestamp_rows in grouped.items():
+        samples = sorted(timestamp_rows.values(), key=lambda item: item["timestamp"])
+        if not samples:
+            continue
+        populated_fields = [
+            field for field in INDIA_1_MIN_FIELDS
+            if any(sample.get(field) is not None for sample in samples)
+        ]
+        document = {
+            "doc_type": "india_1_min_data",
+            "date": day,
+            "resolution_minutes": 1,
+            "sample_count": len(samples),
+            "coverage_start": samples[0]["timestamp"],
+            "coverage_end": samples[-1]["timestamp"],
+            "is_complete_day": (
+                samples[0]["time"] == "00:00"
+                and samples[-1]["time"] == "23:59"
+                and len(samples) >= 1_400
+            ),
+            "fields": populated_fields,
+            "samples": samples,
+            "source": {
+                "type": source,
+                "file_name": source_file_name,
+            },
+            "updated_at": now,
+        }
+        store.replace_one({"date": day}, document, upsert=True)
+        saved.append({
+            "date": day,
+            "sample_count": len(samples),
+            "coverage_start": document["coverage_start"],
+            "coverage_end": document["coverage_end"],
+            "is_complete_day": document["is_complete_day"],
+            "fields": populated_fields,
+        })
+    return sorted(saved, key=lambda item: item["date"])
 
 
 def series_extreme(rows, field, mode):
@@ -493,12 +568,21 @@ def build_results(rows, limits):
     state_results = {}
     for state in STATES:
         schedule_field, actual_field = f"{state}.schedule", f"{state}.actual"
-        max_schedule, max_schedule_time, _ = extrema(rows, schedule_field, "max")
-        max_actual, max_actual_time, _ = extrema(rows, actual_field, "max")
-        atc = numeric((limits.get(state) or {}).get("atc"))
-        if state == "DVC" and atc is not None and atc < 0:
-            min_actual, _, _ = extrema(rows, actual_field, "min")
-            actual_violation = round(atc - min_actual, 3) if min_actual is not None and min_actual < atc else None
+        state_limits = limits.get(state) or {}
+        ttc = numeric(state_limits.get("ttc"))
+        atc = numeric(state_limits.get("atc"))
+        # Negative TTC/ATC represents export/reverse flow. In that direction,
+        # the highest transfer magnitude is the most-negative schedule/actual,
+        # so all extrema and limit comparisons must be reversed.
+        reverse_flow = (
+            (atc is not None and atc < 0)
+            or (atc is None and ttc is not None and ttc < 0)
+        )
+        extreme_mode = "min" if reverse_flow else "max"
+        max_schedule, max_schedule_time, _ = extrema(rows, schedule_field, extreme_mode)
+        max_actual, max_actual_time, _ = extrema(rows, actual_field, extreme_mode)
+        if reverse_flow:
+            actual_violation = round(atc - max_actual, 3) if max_actual is not None and atc is not None and max_actual < atc else None
         else:
             actual_violation = round(max_actual - atc, 3) if max_actual is not None and atc is not None and max_actual > atc else None
         low_row = rows[min_frequency_index] if min_frequency_index is not None else {}
@@ -506,8 +590,9 @@ def build_results(rows, limits):
         low_actual, low_schedule = low_row.get(actual_field), low_row.get(schedule_field)
         high_actual, high_schedule = high_row.get(actual_field), high_row.get(schedule_field)
         state_results[state] = {
-            "ttc_limit_mw": numeric((limits.get(state) or {}).get("ttc")),
+            "ttc_limit_mw": ttc,
             "atc_limit_mw": atc,
+            "flow_direction": "reverse" if reverse_flow else "forward",
             "max_schedule_mw": max_schedule,
             "max_schedule_time": max_schedule_time,
             "max_actual_mw": max_actual,
@@ -549,6 +634,55 @@ async def save_master(payload: dict):
     return {"success": True, "limits": limits, "updated_at": now}
 
 
+@router.get("/india-1-min/dates")
+async def get_india_1_min_dates():
+    rows = list(india_1_min_collection().find(
+        {},
+        {
+            "_id": 0,
+            "date": 1,
+            "sample_count": 1,
+            "coverage_start": 1,
+            "coverage_end": 1,
+            "is_complete_day": 1,
+            "fields": 1,
+            "updated_at": 1,
+        },
+    ).sort("date", -1))
+    return {"success": True, "dates": rows}
+
+
+@router.get("/india-1-min/data/{data_date}")
+async def get_india_1_min_data(data_date: str):
+    try:
+        date.fromisoformat(data_date)
+    except ValueError as exc:
+        raise HTTPException(400, "Date must use YYYY-MM-DD format.") from exc
+    document = india_1_min_collection().find_one({"date": data_date}, {"_id": 0})
+    return {"success": True, "data": document}
+
+
+@router.post("/india-1-min/upload")
+async def upload_india_1_min_data(file: UploadFile = File(...)):
+    try:
+        contents = await file.read()
+        if not contents:
+            raise ValueError("The uploaded SCADA workbook is empty.")
+        rows, input_summary = parse_morning_scada(contents)
+        saved_dates = save_india_1_min_rows(rows, file.filename, "NLDC Plots manual upload")
+        if not saved_dates:
+            raise ValueError("No All India one-minute samples were available to save.")
+        return {
+            "success": True,
+            "saved_dates": saved_dates,
+            "input_summary": input_summary,
+        }
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(502, f"India one-minute data upload failed: {exc}") from exc
+
+
 @router.post("/process")
 async def process_report(
     report_date: str = Form(...),
@@ -571,6 +705,12 @@ async def process_report(
         now = datetime.utcnow().isoformat()
         if report_type == "morning":
             rows, input_summary = parse_morning_scada(contents, report_date)
+            morning_results = build_morning_results(rows, report_date)
+            india_1_min_saved_dates = save_india_1_min_rows(
+                rows,
+                file.filename,
+                "DSO Morning report preparation",
+            )
             document = {
                 "doc_type": "processed_report",
                 "report_type": report_type,
@@ -581,7 +721,8 @@ async def process_report(
                 "signoff_name": sic_name.strip(),
                 "source_file_name": file.filename,
                 "input_summary": input_summary,
-                "morning_results": build_morning_results(rows, report_date),
+                "india_1_min_saved_dates": india_1_min_saved_dates,
+                "morning_results": morning_results,
                 "processed_at": now,
             }
         else:

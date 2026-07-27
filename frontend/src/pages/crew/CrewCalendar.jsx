@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useRef, useState, memo, useCallback } from "react";
 import {
-  Alert, Box, Button, Chip, CircularProgress, Paper, Stack, Table, TableBody,
-  TableCell, TableHead, TableRow, Typography,
+  Alert, Box, Button, Chip, CircularProgress, Dialog, DialogContent, DialogTitle,
+  IconButton, Paper, Stack, Table, TableBody, TableCell, TableHead, TableRow, Typography,
 } from "@mui/material";
-import { CalendarDays, ChevronLeft, ChevronRight, RefreshCw, Users } from "lucide-react";
+import { ArrowLeftRight, CalendarDays, ChevronLeft, ChevronRight, RefreshCw, Users, X } from "lucide-react";
 
 import AppShell from "../../components/layout/AppShell";
 import GlassCard from "../../components/ui/GlassCard";
+import DutyReassignmentPanel from "../../components/crew/DutyReassignmentPanel";
 import crewApi from "../../services/crewApi";
 
 const iso = (date) => {
@@ -41,20 +42,23 @@ const displayDate = (dateStr) => new Intl.DateTimeFormat("en-IN", { day: "2-digi
 const weekday = (dateStr) => new Intl.DateTimeFormat("en-IN", { weekday: "short" }).format(parseLocalDate(dateStr));
 
 const shiftStyle = (duty) => {
-  const leave = duty?.leaveStatus;
-  if (leave === "Approved") return { background: "#FCE7F3", color: "#9D174D", border: "#F9A8D4" };
-  if (leave === "Forwarded by SIC") return { background: "#FFEDD5", color: "#9A3412", border: "#FDBA74" };
-  if (leave === "Applied" || leave === "Pending") return { background: "#FEF9C3", color: "#854D0E", border: "#FDE047" };
-  if (duty?.trainingName) return { background: "#EDE9FE", color: "#5B21B6", border: "#C4B5FD" };
-  return ({
-    Morning: { background: "#E0F2FE", color: "#075985", border: "#7DD3FC" },
-    Evening: { background: "#FFF7ED", color: "#9A3412", border: "#FDBA74" },
-    Night: { background: "#ECFDF5", color: "#065F46", border: "#6EE7B7" },
-    OFF: { background: "#FEE2E2", color: "#991B1B", border: "#FCA5A5" },
-  })[duty?.shift] || { background: "#F8FAFC", color: "#64748B", border: "#E2E8F0" };
+  const leave = String(duty?.leaveStatus || "").trim().toLowerCase();
+  const shift = String(duty?.shift || "").trim().toUpperCase();
+  const activeLeave = leave && !["rejected", "cancelled", "canceled", "withdrawn"].includes(leave);
+
+  if (activeLeave) return { background: "#FDE8EC", color: "#C62828", border: "#F3A8B3" };
+  if (duty?.trainingName || shift.includes("TRAINING") || shift.includes("TOUR")) {
+    return { background: "#F0E7FA", color: "#6A1B9A", border: "#CDB4EA" };
+  }
+
+  if (["MORNING", "M1", "M2"].includes(shift)) return { background: "#E7F6E9", color: "#000000", border: "#A9DDB2" };
+  if (["EVENING", "E1", "E2"].includes(shift)) return { background: "#FFF4CC", color: "#000000", border: "#E8D184" };
+  if (["NIGHT", "N1", "N2"].includes(shift)) return { background: "#E4F2FF", color: "#000000", border: "#A7CFEF" };
+  if (["OFF", "O1", "O2"].includes(shift)) return { background: "#ECEFF3", color: "#000000", border: "#C9D0D9" };
+  return { background: "#F8FAFC", color: "#000000", border: "#D6DEE8" };
 };
 
-const EmployeeRow = memo(({ person, groupName, active, dates, selectedColumn, onSelectRow }) => {
+const EmployeeRow = memo(({ person, groupName, active, dates, selectedColumn, onSelectRow, onSelectDuty }) => {
   return (
     <TableRow hover onClick={() => onSelectRow(person.employeeId)} sx={{ cursor: "pointer", background: active ? "#F0FDFA" : person.IsSIC ? "#F8FFFC" : "#FFF" }}>
       <TableCell sx={{ position: "sticky", left: 0, zIndex: 2, minWidth: 235, background: active ? "#D1FAE5" : person.IsSIC ? "#ECFDF5" : "#FFF", borderRight: "1px solid #E2E8F0" }}>
@@ -65,11 +69,36 @@ const EmployeeRow = memo(({ person, groupName, active, dates, selectedColumn, on
         const palette = shiftStyle(duty);
         const columnActive = selectedColumn === date;
         return <TableCell key={date} align="center" sx={{ p: .7, background: active ? "#F0FDFA" : columnActive ? "#F0FDF4" : "#FFF" }}>
-          <Paper elevation={0} sx={{ minHeight: 50, px: .7, py: .65, borderRadius: 2.2, background: palette.background, color: palette.color, border: `1px solid ${palette.border}`, display: "flex", flexDirection: "column", justifyContent: "center" }}>
+          <Paper
+            role="button"
+            tabIndex={0}
+            aria-label={`${person.name || person.employeeId}, ${date}, ${duty.shift || "no duty"}`}
+            onClick={(event) => {
+              event.stopPropagation();
+              onSelectDuty({ person, groupName, date, duty });
+            }}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                event.stopPropagation();
+                onSelectDuty({ person, groupName, date, duty });
+              }
+            }}
+            elevation={0}
+            className="crew-calendar-duty-cell"
+            style={{
+              "--crew-duty-background": palette.background,
+              "--crew-duty-color": palette.color,
+              "--crew-duty-border": palette.border,
+            }}
+            sx={{ minHeight: 50, px: .7, py: .65, display: "flex", flexDirection: "column", justifyContent: "center", cursor: "pointer", "&:hover": { boxShadow: "0 0 0 2px rgba(0,87,183,.18)" } }}
+          >
             <Typography sx={{ fontSize: 12.5, fontWeight: 900 }}>{duty.shift || "-"}</Typography>
             {duty.leaveStatus && <Typography sx={{ fontSize: 9.5, fontWeight: 800, lineHeight: 1.2 }}>{duty.leaveType || "Leave"} · {duty.leaveStatus}</Typography>}
             {duty.trainingName && <Typography sx={{ fontSize: 9.5, fontWeight: 800 }}>{duty.trainingName}</Typography>}
-            {duty.replacementEmployee?.name && <Typography sx={{ fontSize: 9.5, fontWeight: 800 }}>By {duty.replacementEmployee.name}</Typography>}
+            {duty.replacementEmployee?.name && <Typography sx={{ fontSize: 9.5, fontWeight: 900, color: "#0057B7" }}>Replacement: {duty.replacementEmployee.name}</Typography>}
+            {duty.replacementFor?.name && <Typography sx={{ fontSize: 9.5, fontWeight: 900, color: "#0057B7" }}>For: {duty.replacementFor.name}</Typography>}
+            {duty.isActingSIC && <Typography sx={{ fontSize: 9.5, fontWeight: 900, color: "#6A1B9A" }}>Acting SIC · {duty.actingSICGroup || groupName}</Typography>}
           </Paper>
         </TableCell>;
       })}
@@ -86,6 +115,8 @@ export default function CrewCalendar() {
   const [error, setError] = useState("");
   const [selectedRow, setSelectedRow] = useState("");
   const [selectedColumn, setSelectedColumn] = useState("");
+  const [exchangeOpen, setExchangeOpen] = useState(false);
+  const [selectedDuty, setSelectedDuty] = useState(null);
   const loadIdRef = useRef(0);
 
   const dates = useMemo(() => {
@@ -145,6 +176,12 @@ export default function CrewCalendar() {
     setSelectedRow(employeeId);
   }, []);
 
+  const handleSelectDuty = useCallback((selection) => {
+    setSelectedRow(selection.person.employeeId);
+    setSelectedColumn(selection.date);
+    setSelectedDuty(selection);
+  }, []);
+
   return (
     <AppShell>
       <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: { xs: "flex-start", md: "center" }, gap: 2, flexWrap: "wrap" }}>
@@ -157,6 +194,7 @@ export default function CrewCalendar() {
           <Chip icon={<Users size={16} />} label={`${totalCrew} crew`} sx={{ fontWeight: 800, background: "#ECFDF5", color: "#03624C" }} />
           {!!activeCrewCount && <Chip label={`${activeCrewCount} visible`} sx={{ fontWeight: 800, background: "#EEF2FF", color: "#3730A3" }} />}
           <Button variant="outlined" startIcon={<RefreshCw size={16} />} onClick={load} sx={{ borderRadius: 3, textTransform: "none", fontWeight: 800 }}>Refresh</Button>
+          <Button variant="contained" startIcon={<ArrowLeftRight size={16} />} onClick={() => setExchangeOpen(true)} sx={{ borderRadius: 3, textTransform: "none", fontWeight: 850, background: "#0057B7" }}>Duty exchange / reassignment</Button>
         </Stack>
       </Box>
 
@@ -201,6 +239,7 @@ export default function CrewCalendar() {
                       dates={dates}
                       selectedColumn={selectedColumn}
                       onSelectRow={handleSelectRow}
+                      onSelectDuty={handleSelectDuty}
                     />
                   ))
                 ])}
@@ -209,6 +248,78 @@ export default function CrewCalendar() {
           </Box>
         )}
       </GlassCard>
+
+      <Dialog open={Boolean(selectedDuty)} onClose={() => setSelectedDuty(null)} fullWidth maxWidth="xs">
+        <DialogTitle sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", color: "#0F172A", fontWeight: 900 }}>
+          Duty details
+          <IconButton onClick={() => setSelectedDuty(null)}><X size={19} /></IconButton>
+        </DialogTitle>
+        <DialogContent dividers sx={{ p: 2.5 }}>
+          {selectedDuty && (
+            <Stack spacing={1.5}>
+              <Box>
+                <Typography sx={{ fontSize: 18, fontWeight: 900, color: "#0F172A" }}>{selectedDuty.person.name || selectedDuty.person.employeeId}</Typography>
+                <Typography sx={{ color: "#64748B", fontWeight: 700 }}>{selectedDuty.person.designation || "—"} · {selectedDuty.person.employeeId}</Typography>
+              </Box>
+              <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+                <Chip label={displayDate(selectedDuty.date)} sx={{ fontWeight: 800 }} />
+                <Chip label={selectedDuty.groupName} sx={{ fontWeight: 800 }} />
+                <Chip label={selectedDuty.duty.shift || "No duty"} sx={{ fontWeight: 900, color: "#0057B7", background: "#E8F1FF" }} />
+              </Stack>
+              {selectedDuty.duty.leaveStatus && (
+                <Alert severity="info">
+                  {selectedDuty.duty.leaveType || "Leave"} · {selectedDuty.duty.leaveStatus}
+                </Alert>
+              )}
+              {selectedDuty.duty.replacementEmployee?.name && (
+                <Paper variant="outlined" sx={{ p: 1.5, borderColor: "#93C5FD", background: "#EFF6FF" }}>
+                  <Typography sx={{ fontSize: 11, fontWeight: 900, color: "#64748B", textTransform: "uppercase" }}>Replacement duty assigned to</Typography>
+                  <Typography sx={{ mt: .4, fontSize: 16, fontWeight: 900, color: "#0057B7" }}>
+                    {selectedDuty.duty.replacementEmployee.name}
+                    {selectedDuty.duty.replacementEmployee.employeeId ? ` (${selectedDuty.duty.replacementEmployee.employeeId})` : ""}
+                  </Typography>
+                </Paper>
+              )}
+              {selectedDuty.duty.replacementFor?.name && (
+                <Paper variant="outlined" sx={{ p: 1.5, borderColor: "#93C5FD", background: "#EFF6FF" }}>
+                  <Typography sx={{ fontSize: 11, fontWeight: 900, color: "#64748B", textTransform: "uppercase" }}>Replacement duty for</Typography>
+                  <Typography sx={{ mt: .4, fontSize: 16, fontWeight: 900, color: "#0057B7" }}>
+                    {selectedDuty.duty.replacementFor.name}
+                    {selectedDuty.duty.replacementFor.employeeId ? ` (${selectedDuty.duty.replacementFor.employeeId})` : ""}
+                  </Typography>
+                </Paper>
+              )}
+              {selectedDuty.duty.isActingSIC && (
+                <Paper variant="outlined" sx={{ p: 1.5, borderColor: "#C4B5FD", background: "#F5F3FF" }}>
+                  <Typography sx={{ fontSize: 11, fontWeight: 900, color: "#64748B", textTransform: "uppercase" }}>Acting Shift In-Charge</Typography>
+                  <Typography sx={{ mt: .4, fontSize: 15, fontWeight: 900, color: "#6A1B9A" }}>
+                    {selectedDuty.duty.actingSICGroup || selectedDuty.groupName}
+                    {selectedDuty.duty.actingSICFor?.name ? ` in place of ${selectedDuty.duty.actingSICFor.name}` : ""}
+                  </Typography>
+                </Paper>
+              )}
+              {!selectedDuty.duty.leaveStatus && !selectedDuty.duty.replacementEmployee?.name && !selectedDuty.duty.replacementFor?.name && !selectedDuty.duty.isActingSIC && (
+                <Typography sx={{ color: "#64748B" }}>This is a regular roster duty.</Typography>
+              )}
+            </Stack>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={exchangeOpen} onClose={() => setExchangeOpen(false)} fullWidth maxWidth="lg">
+        <DialogTitle sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", color: "#0F172A", fontWeight: 900 }}>
+          Duty exchange and reassignment
+          <IconButton onClick={() => setExchangeOpen(false)}><X size={19} /></IconButton>
+        </DialogTitle>
+        <DialogContent dividers sx={{ p: { xs: 1.5, md: 2.5 }, background: "#F8FAFC" }}>
+          <DutyReassignmentPanel
+            initialDate={selectedColumn || today}
+            onChanged={() => {
+              load();
+            }}
+          />
+        </DialogContent>
+      </Dialog>
     </AppShell>
   );
 }

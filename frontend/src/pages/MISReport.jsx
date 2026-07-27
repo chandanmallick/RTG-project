@@ -1389,7 +1389,7 @@ export default function MISReport() {
                 Generator Outage Category Output
               </h2>
               <p className="small text-muted mb-0">
-                Portal outage data mapped with unit_data.Unit_Name. Includes units with capacity greater than 500 MW.
+                Portal outage data mapped with unit_data.Unit_Name. Includes units with capacity greater than 499 MW.
               </p>
             </div>
             <div className="d-flex gap-2">

@@ -24,6 +24,8 @@ training_master_collection = db["training_master_collection"]   ### Training db
 
 leave_request_collection = db["leave_request_collection"]  ### Leave
 system_settings_collection = db["system_setting"]
+mail_notification_settings_collection = db["mail_notification_settings"]
+login_otp_challenge_collection = db["login_otp_challenges"]
 
 training_nomination_history_collection = db["training_nomination_history_collection"]
 compensatory_off_collection = db["compensatory_off_collection"]
@@ -33,8 +35,10 @@ deleted_leave_collection = db["deleted_leave_collection"]
 login_history_collection = db["login_history_collection"]
 page_access_collection = db["page_access_control"]
 organization_unit_collection = db["organization_unit_master"]
+organization_shift_group_collection = db["organization_shift_group_mapping"]
 duty_denial_collection = db["duty_denial_collection"]
 duty_notification_collection = db["duty_notification_collection"]
+duty_switch_collection = db["duty_switch_collection"]
 employee_shift_history = db["employee_shift_history"]
 
 duty_notification_collection =db["duty_notification_collection"]

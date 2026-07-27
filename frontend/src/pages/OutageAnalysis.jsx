@@ -12,7 +12,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { Check, ChevronDown, ChevronUp, Pencil, Plus, RefreshCw, Search, Trash2, X } from "lucide-react";
+import { Check, ChevronDown, ChevronUp, Copy, Download, Pencil, Plus, RefreshCw, Search, Trash2, X } from "lucide-react";
 
 import AppShell from "../components/layout/AppShell";
 import CalendarInput from "../components/ui/CalendarInput";
@@ -78,6 +78,12 @@ const parseTableTime = (value) => {
   const parsed = new Date(String(value).replace(" ", "T"));
   return Number.isNaN(parsed.getTime()) ? null : parsed.getTime();
 };
+
+const escapeHtml = (value) => String(value ?? "")
+  .replace(/&/g, "&amp;")
+  .replace(/</g, "&lt;")
+  .replace(/>/g, "&gt;")
+  .replace(/"/g, "&quot;");
 
 const emptyResult = {
   summary: {},
@@ -173,18 +179,35 @@ function MultiSelectFilter({ title, options = [], selected = [], onChange, loadi
   );
 }
 
-function SummaryList({ title, rows = [], valueKey = "count" }) {
+function SummaryList({ title, rows = [], valueKey = "count", showDuration = false }) {
   const max = Math.max(1, ...rows.map((row) => Number(row[valueKey] || 0)));
   return (
     <div style={styles.panel}>
       <div style={styles.panelTitle}>{title}</div>
+      {showDuration && (
+        <div style={styles.rankColumnsHeader}>
+          <span>Name</span>
+          <span>Count</span>
+          <span>Total period</span>
+          <span>Total S/D hours</span>
+        </div>
+      )}
       <div style={styles.rankList}>
         {rows.slice(0, 8).map((row) => (
           <div key={row.name} style={styles.rankItem}>
-            <div style={styles.rankTop}>
-              <span>{row.name}</span>
-              <strong>{formatNumber(row[valueKey])}</strong>
-            </div>
+            {showDuration ? (
+              <div style={styles.rankColumns}>
+                <span title={row.name}>{row.name}</span>
+                <strong>{formatNumber(row[valueKey])}</strong>
+                <strong>{formatHours(row.total_duration_hours)}</strong>
+                <strong>{Number(row.total_duration_hours || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>
+              </div>
+            ) : (
+              <div style={styles.rankTop}>
+                <span>{row.name}</span>
+                <strong>{formatNumber(row[valueKey])}</strong>
+              </div>
+            )}
             <div style={styles.track}>
               <div style={{ ...styles.fill, width: `${(Number(row[valueKey] || 0) / max) * 100}%` }} />
             </div>
@@ -224,6 +247,7 @@ export default function OutageAnalysis() {
   const [result, setResult] = useState(emptyResult);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [exportMessage, setExportMessage] = useState("");
   const [categoryName, setCategoryName] = useState("");
   const [categoryKeywords, setCategoryKeywords] = useState("");
   const [editingCategoryId, setEditingCategoryId] = useState("");
@@ -462,7 +486,10 @@ export default function OutageAnalysis() {
     const summary = new Map();
     filteredRows.forEach((row) => {
       const name = row.requesting_entity || "Unspecified";
-      summary.set(name, { name, count: (summary.get(name)?.count || 0) + 1 });
+      const item = summary.get(name) || { name, count: 0, total_duration_hours: 0 };
+      item.count += 1;
+      item.total_duration_hours += Number(row.duration_hours || 0);
+      summary.set(name, item);
     });
     return Array.from(summary.values()).sort((a, b) => b.count - a.count);
   }, [filteredRows]);
@@ -566,6 +593,87 @@ export default function OutageAnalysis() {
     if (tableSort.key !== key) return "";
     return tableSort.direction === "asc" ? " ↑" : " ↓";
   };
+  const reportSummaryRows = (rows) => [
+    ["Name", "Outage Count", "Total S/D Hours", "Total S/D Period"],
+    ...rows.map((row) => [
+      row.name,
+      row.count,
+      Number(row.total_duration_hours || 0).toFixed(2),
+      formatHours(row.total_duration_hours),
+    ]),
+  ];
+
+  const downloadExcelReport = () => {
+    const detailData = [
+      tableColumns.map((column) => column.label),
+      ...sortedTableRows.map((row) => tableColumns.map((column) => tableTextValue(row, column.key))),
+    ];
+    const tableHtml = (title, rows) => `
+      <h2>${escapeHtml(title)}</h2>
+      <table border="1" cellspacing="0" cellpadding="5">
+        ${rows.map((row, rowIndex) => `
+          <tr>${row.map((cell) => rowIndex === 0
+            ? `<th style="background:#EAF2FF;color:#0B55B8;font-weight:bold">${escapeHtml(cell)}</th>`
+            : `<td>${escapeHtml(cell)}</td>`
+          ).join("")}</tr>
+        `).join("")}
+      </table>
+      <br />
+    `;
+    const html = `
+      <html>
+        <head><meta charset="utf-8" /></head>
+        <body>
+          <h1>Outage Analysis Report</h1>
+          <p>Period: ${escapeHtml(startDate)} to ${escapeHtml(endDate)}</p>
+          ${tableHtml("Top Custom Categories", reportSummaryRows(customCategorySummary))}
+          ${tableHtml("Top Requesting Entities", reportSummaryRows(requestingSummary))}
+          ${tableHtml("Outage Detail", detailData)}
+        </body>
+      </html>
+    `;
+    const blob = new Blob([html], { type: "application/vnd.ms-excel;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `Outage_Analysis_${startDate}_to_${endDate}.xls`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+    setExportMessage("Excel report downloaded.");
+  };
+
+  const copyReportTable = async () => {
+    const toTsv = (title, rows) => [
+      title,
+      ...rows.map((row) => row.map((cell) => String(cell ?? "").replace(/\t|\r?\n/g, " ")).join("\t")),
+    ].join("\n");
+    const detailData = [
+      tableColumns.map((column) => column.label),
+      ...sortedTableRows.map((row) => tableColumns.map((column) => tableTextValue(row, column.key))),
+    ];
+    const text = [
+      `Outage Analysis Report (${startDate} to ${endDate})`,
+      toTsv("Top Custom Categories", reportSummaryRows(customCategorySummary)),
+      toTsv("Top Requesting Entities", reportSummaryRows(requestingSummary)),
+      toTsv("Outage Detail", detailData),
+    ].join("\n\n");
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      const textarea = document.createElement("textarea");
+      textarea.value = text;
+      textarea.style.position = "fixed";
+      textarea.style.opacity = "0";
+      document.body.appendChild(textarea);
+      textarea.select();
+      document.execCommand("copy");
+      document.body.removeChild(textarea);
+    }
+    setExportMessage("Filtered report copied as a table.");
+  };
+
   const setColumnFilter = (key, value) => {
     setTableColumnFilters((current) => ({ ...current, [key]: value }));
   };
@@ -863,9 +971,9 @@ export default function OutageAnalysis() {
         </div>
 
         <div style={styles.gridThree}>
-          <SummaryList title="Top Custom Categories" rows={customCategorySummary} />
+          <SummaryList title="Top Custom Categories" rows={customCategorySummary} showDuration />
           <SummaryList title="Top Outage Types" rows={outageTypeSummary} />
-          <SummaryList title="Top Requesting Entities" rows={requestingSummary} />
+          <SummaryList title="Top Requesting Entities" rows={requestingSummary} showDuration />
         </div>
 
         <div style={styles.tablePanel}>
@@ -875,6 +983,14 @@ export default function OutageAnalysis() {
               <div style={styles.panelSubtext}>Filtered records with category, outage time, revival status, duration, and reason.</div>
             </div>
             <div style={styles.tableControls}>
+              <div style={styles.exportActions}>
+                <button type="button" style={styles.compactSecondaryButton} onClick={downloadExcelReport} disabled={!sortedTableRows.length}>
+                  <Download size={15} /> Excel
+                </button>
+                <button type="button" style={styles.compactNeutralButton} onClick={copyReportTable} disabled={!sortedTableRows.length}>
+                  <Copy size={15} /> Copy table
+                </button>
+              </div>
               <select value={tableMode} onChange={(event) => setTableMode(event.target.value)} style={styles.tableSelect}>
                 <option value="filtered">Show as per above filters</option>
                 <option value="all">Show all fetched data</option>
@@ -884,6 +1000,7 @@ export default function OutageAnalysis() {
                 {sourceSummaryText ? ` | ${sourceSummaryText}` : ""}
                 {result.generated_at ? ` | Generated ${result.generated_at}` : ""}
               </div>
+              {exportMessage && <div style={styles.exportMessage}>{exportMessage}</div>}
             </div>
           </div>
           <div style={styles.tableWrap}>
@@ -1003,17 +1120,21 @@ const styles = {
   emptyText: { fontSize: 13, fontWeight: 700, color: "#64748b", background: "#f8fafc", border: "1px dashed #cbd5e1", borderRadius: 8, padding: 12 },
   categoryPreview: { display: "flex", alignItems: "center", flexWrap: "wrap", gap: 6, marginTop: 8 },
   previewChip: { display: "inline-flex", borderRadius: 999, background: "#e9f7f2", color: "#03624C", padding: "5px 9px", fontSize: 11, fontWeight: 900 },
-  gridThree: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(270px, 1fr))", gap: 12 },
+  gridThree: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(360px, 1fr))", gap: 12 },
   rankList: { display: "grid", gap: 12, marginTop: 14 },
   rankItem: { display: "grid", gap: 6 },
   rankTop: { display: "flex", justifyContent: "space-between", gap: 12, fontSize: 12, fontWeight: 800 },
+  rankColumnsHeader: { display: "grid", gridTemplateColumns: "minmax(110px,1fr) 48px 82px 92px", gap: 8, alignItems: "end", marginTop: 12, paddingBottom: 6, borderBottom: "1px solid #E2E8F0", color: "#64748B", fontSize: 9.5, fontWeight: 900, textTransform: "uppercase" },
+  rankColumns: { display: "grid", gridTemplateColumns: "minmax(110px,1fr) 48px 82px 92px", gap: 8, alignItems: "center", color: "#1F2937", fontSize: 11, fontWeight: 800 },
   track: { height: 8, borderRadius: 8, background: "#e8eef5", overflow: "hidden" },
   fill: { height: "100%", borderRadius: 8, background: "#03624C" },
   tablePanel: { background: "#fff", border: "1px solid #dfe7ef", borderRadius: 8, padding: 16 },
   tableHeader: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginBottom: 12 },
   tableControls: { display: "flex", alignItems: "center", justifyContent: "flex-end", flexWrap: "wrap", gap: 10 },
+  exportActions: { display: "flex", alignItems: "center", justifyContent: "flex-end", flexWrap: "wrap", gap: 8 },
   tableSelect: { height: 36, borderRadius: 8, border: "1px solid #cbd5e1", background: "#fff", padding: "0 10px", fontSize: 12, fontWeight: 800, color: "#1f2937" },
   meta: { fontSize: 12, fontWeight: 700, color: "#64748b" },
+  exportMessage: { fontSize: 11, fontWeight: 800, color: "#03624C", textAlign: "right" },
   tableWrap: { overflow: "auto", maxHeight: 620, border: "1px solid rgba(175, 196, 234, 0.72)", borderRadius: 8, background: "#fff" },
   table: { width: "100%", minWidth: 1180, borderCollapse: "separate", borderSpacing: 0, fontSize: 12 },
   th: { position: "sticky", top: 0, zIndex: 2, background: "#EAF1FF", color: "#0B55B8", padding: "12px 14px", textAlign: "left", fontSize: 11, fontWeight: 900, textTransform: "uppercase", borderBottom: "1px solid rgba(175, 196, 234, 0.72)", verticalAlign: "middle" },

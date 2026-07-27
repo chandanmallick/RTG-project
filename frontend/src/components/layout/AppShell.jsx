@@ -1,5 +1,6 @@
 import { Box } from "@mui/material";
 import TopNavbar from "./TopNavbar";
+import CrewTableTools from "../crew/CrewTableTools";
 
 export default function AppShell({ children }) {
   return (
@@ -16,6 +17,7 @@ export default function AppShell({ children }) {
         gap: 2.5,
       }}
     >
+      <CrewTableTools />
       {/* Top Navigation Menu Bar */}
       <TopNavbar />
 

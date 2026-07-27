@@ -182,7 +182,7 @@ export default function Dashboard() {
 
     return (
       <svg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" style={{ width: "100%", height: 120, display: "block" }}>
-        <polyline points={points} fill="none" stroke="rgba(255,255,255,.95)" strokeWidth="5" strokeLinecap="round" strokeLinejoin="round" />
+        <polyline points={points} fill="none" stroke="#0057B7" strokeWidth="5" strokeLinecap="round" strokeLinejoin="round" />
       </svg>
     );
   };
@@ -333,21 +333,21 @@ export default function Dashboard() {
             p:2,
             borderRadius:3,
             mb:2,
-            background:
-              notifications.length === 0
-                ? "#e0e0e0"                         // Grey (no data)
-                : notifications.some(n => n.status === "Pending")
-                  ? "linear-gradient(135deg,#ff9800,#ff5722)"   // Orange (new)
-                  : "linear-gradient(135deg,#43a047,#66bb6a)",   // Green (accepted)
-            color: notifications.length === 0 ? "#000" : "#fff"
+            background: "#FFFFFF",
+            border: notifications.some(n => n.status === "Pending")
+              ? "1px solid #F6C453"
+              : "1px solid #D7E4F6",
+            boxShadow: "0 7px 20px rgba(15,23,42,0.06)",
+            backgroundImage: "none !important",
+            color: "#0F172A"
           }}>
 
-            <Typography fontWeight="bold" mb={1}>
+            <Typography fontWeight="bold" mb={1} sx={{ color: "#0F172A" }}>
               Duty Assignments & Approvals
             </Typography>
 
             {notifications.length === 0 && (
-              <Typography variant="body2">
+              <Typography variant="body2" sx={{ color: "#475569" }}>
                 No pending assignments
               </Typography>
             )}
@@ -355,31 +355,33 @@ export default function Dashboard() {
             {visibleNotifications.map(n => (
 
               <Box key={n._id} sx={{
-                background:"rgba(255,255,255,0.15)",
+                background: n.status === "Pending" ? "#FFF8E1" : "#F8FAFC",
+                border: n.status === "Pending" ? "1px solid #F6C453" : "1px solid #E2E8F0",
+                backgroundImage: "none !important",
                 p:1.5,
                 borderRadius:2,
                 mb:1
               }}>
 
-                <Typography fontWeight="bold">
+                <Typography fontWeight="bold" sx={{ color: "#0F172A" }}>
                   {n.date}
                 </Typography>
 
-                <Typography variant="body2">
+                <Typography variant="body2" sx={{ color: "#1E293B" }}>
                   Shift: {n.assignedDuty || "-"}
                 </Typography>
 
                 {n.viewerRole === "Controlling Officer" && (
-                  <Typography variant="body2">
+                  <Typography variant="body2" sx={{ color: "#1E293B" }}>
                     Assigned to: {n.employeeName || n.employeeId}
                   </Typography>
                 )}
 
-                <Typography variant="caption">
+                <Typography variant="caption" sx={{ color: "#475569", display: "block" }}>
                   Status: {n.status} · Viewing as {n.viewerRole || "Employee"}
                 </Typography>
 
-                <Typography variant="caption" display="block">
+                <Typography variant="caption" display="block" sx={{ color: "#475569" }}>
                   Deny allowed till: {dayjs(n.cutoffTime).format("DD MMM HH:mm")}
                 </Typography>
 
@@ -411,7 +413,7 @@ export default function Dashboard() {
                         setDenyDialog(true);
                       }}
                     >
-                      Deny
+                      Decline
                     </Button>
                   ) : (
                     <Chip
@@ -471,7 +473,7 @@ export default function Dashboard() {
 
           <Dialog open={denyDialog} onClose={()=>setDenyDialog(false)}>
 
-            <DialogTitle>Deny Duty</DialogTitle>
+            <DialogTitle>Decline Replacement Duty</DialogTitle>
 
             <DialogContent>
 
@@ -481,7 +483,7 @@ export default function Dashboard() {
 
               <TextField
                 fullWidth
-                label="Reason"
+                label="Reason for declining"
                 value={denyReason}
                 onChange={(e)=>setDenyReason(e.target.value)}
               />
@@ -507,7 +509,7 @@ export default function Dashboard() {
                   fetchNotifications();
                 }}
               >
-                Confirm Deny
+                Confirm Decline
               </Button>
 
             </DialogActions>
@@ -545,16 +547,18 @@ export default function Dashboard() {
             p:2.5,
             mb:2,
             borderRadius:4,
-            color:"#fff",
+            color:"#0F172A",
             position:"relative",
             overflow:"hidden",
             height:180,
-            background:"linear-gradient(135deg,#6a11cb,#2575fc)" // ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â°ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¸ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚ÂÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¥ gradient bg
+            background:"#EFF6FF",
+            backgroundImage:"none !important",
+            border:"1px solid #BFDBFE"
           }}>
 
             {/* TEXT */}
-            <Typography variant="caption">Leave Trend</Typography>
-            <Typography variant="h5" fontWeight="bold">
+            <Typography variant="caption" sx={{ color: "#334155", fontWeight: 800 }}>Leave Trend</Typography>
+            <Typography variant="h5" fontWeight="bold" sx={{ color: "#0F172A" }}>
               {leaveAnalytics.leaveCount || 0}
             </Typography>
 

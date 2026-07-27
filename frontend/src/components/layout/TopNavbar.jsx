@@ -36,7 +36,6 @@ import {
   ChevronDown,
   Search,
   Mail,
-  Bell,
   PhoneCall,
   MapPin,
   GraduationCap,
@@ -47,11 +46,12 @@ import {
 } from "lucide-react";
 import { useAuth } from "../../auth/AuthContext";
 import { pageKeyForPath } from "../../auth/pageAccess";
+import { DutyNotificationBell } from "../crew/DutyNotifications";
 
 // Reusable premium Dropdown Item component
-function DropdownItem({ title, description, icon: Icon, iconColor, iconBg, path, active, onClick }) {
+function DropdownItem({ title, description, icon: Icon, iconColor, iconBg, path, active, onClick, allowWorkflowAccess = false }) {
   const { user } = useAuth();
-  if (user?.permissions?.[pageKeyForPath(path)]?.view === false) return null;
+  if (!allowWorkflowAccess && user?.permissions?.[pageKeyForPath(path)]?.view === false) return null;
   return (
     <Box
       onClick={() => onClick(path)}
@@ -152,7 +152,8 @@ export default function TopNavbar() {
   
   const isMISActive = 
     location.pathname === "/psp-dashboard" || 
-    location.pathname === "/rtg-dashboard";
+    location.pathname === "/rtg-dashboard" ||
+    location.pathname === "/mis/nldc-plots";
     
   const isAnalyticsActive =
     location.pathname === "/psp-report-checking" ||
@@ -167,7 +168,8 @@ export default function TopNavbar() {
   const isAdminActive =
     location.pathname === "/database-sync" ||
     location.pathname === "/psp-admin" ||
-    location.pathname === "/admin/user-access";
+    location.pathname === "/admin/user-access" ||
+    location.pathname === "/admin/mail-settings";
 
   // Reusable framer-motion properties
   const dropdownMotionProps = {
@@ -346,6 +348,16 @@ export default function TopNavbar() {
                     iconBg="#E8F5F1"
                     path="/rtg-dashboard"
                     active={location.pathname === "/rtg-dashboard"}
+                    onClick={handleNavigate}
+                  />
+                  <DropdownItem
+                    title="NLDC Plots"
+                    description="All India one-minute demand and generation"
+                    icon={Activity}
+                    iconColor="#0057B7"
+                    iconBg="#EAF2FF"
+                    path="/mis/nldc-plots"
+                    active={location.pathname === "/mis/nldc-plots"}
                     onClick={handleNavigate}
                   />
                 </Box>
@@ -669,12 +681,14 @@ export default function TopNavbar() {
                         />
                         <DropdownItem
                           title="Holiday & Training"
+                          description="Training approval inbox and administration"
                           icon={GraduationCap}
                           iconColor="#9B59B6"
                           iconBg="#F5EEF8"
                           path="/crew/training"
                           active={location.pathname === "/crew/training"}
                           onClick={handleNavigate}
+                          allowWorkflowAccess
                         />
                         <DropdownItem
                           title="Roster"
@@ -820,6 +834,16 @@ export default function TopNavbar() {
                     active={location.pathname === "/admin/user-access"}
                     onClick={handleNavigate}
                   />
+                  <DropdownItem
+                    title="Mail & 2FA Settings"
+                    description="Configure replacement-duty mail delivery"
+                    icon={Mail}
+                    iconColor="#0057B7"
+                    iconBg="#EAF2FF"
+                    path="/admin/mail-settings"
+                    active={location.pathname === "/admin/mail-settings"}
+                    onClick={handleNavigate}
+                  />
                 </Box>
               </motion.div>
             )}
@@ -880,21 +904,8 @@ export default function TopNavbar() {
           </Badge>
         </IconButton>
 
-        {/* Notification Icon */}
-        <IconButton
-          sx={{
-            color: "#64748B",
-            p: 1.1,
-            backgroundColor: "#F8FAFC",
-            border: "1px solid #E2E8F0",
-            borderRadius: "12px",
-            "&:hover": { color: "#03624C", backgroundColor: "#F1F7F6" }
-          }}
-        >
-          <Badge color="error" variant="dot">
-            <Bell size={18} />
-          </Badge>
-        </IconButton>
+        {/* Actionable replacement-duty notifications */}
+        <DutyNotificationBell />
 
         {/* Contact CTA Button (Mockup style) */}
         <Button

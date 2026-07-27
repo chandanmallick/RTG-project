@@ -61,7 +61,7 @@ class OutageCategoryRange(BaseModel):
 class OutageCategoryRequest(BaseModel):
     ranges: list[OutageCategoryRange] = []
 
-MIN_OUTAGE_CATEGORY_UNIT_CAPACITY_MW = 500.0
+MIN_OUTAGE_CATEGORY_UNIT_CAPACITY_MW = 499.0
 
 class LegacySSLAdapter(requests.adapters.HTTPAdapter):
     def __init__(self, ssl_context=None, **kwargs):

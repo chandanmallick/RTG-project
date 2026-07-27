@@ -15,7 +15,14 @@ axios.interceptors.request.use((config) => {
 
   const isMutation = !["GET", "HEAD", "OPTIONS"].includes(method);
   const isAuthRequest = url.includes("/crew/auth/login") || url.includes("/crew/auth/logout") || url.includes("/crew/auth/admin/access");
-  if (isMutation && !isAuthRequest) {
+  // Reading a notification and accepting/declining one's own replacement duty
+  // are personal workflow actions. Their authorization is enforced by the
+  // backend against the logged-in employee, independent of page Write access.
+  const isPersonalWorkflowAction =
+    url.includes("/crew/notifications/read/") ||
+    url.includes("/crew/replacement/notifications/accept/") ||
+    url.includes("/crew/replacement/notifications/deny/");
+  if (isMutation && !isAuthRequest && !isPersonalWorkflowAction) {
     const access = storedPermissions()[pageKeyForPath()];
     if (access && !access.write) {
       const error = new Error("This page is read-only for your account.");
@@ -954,6 +961,23 @@ const API = {
 
   deleteDsoReport: async (reportType, reportDate) => {
     const res = await axios.delete(`${BASE_URL}/dso-reports/${reportType}/${reportDate}`);
+    return res.data;
+  },
+
+  getIndiaOneMinuteDates: async () => {
+    const res = await axios.get(`${BASE_URL}/dso-reports/india-1-min/dates`);
+    return res.data;
+  },
+
+  getIndiaOneMinuteData: async (dataDate) => {
+    const res = await axios.get(`${BASE_URL}/dso-reports/india-1-min/data/${dataDate}`);
+    return res.data;
+  },
+
+  uploadIndiaOneMinuteData: async (file) => {
+    const form = new FormData();
+    form.append("file", file);
+    const res = await axios.post(`${BASE_URL}/dso-reports/india-1-min/upload`, form);
     return res.data;
   },
 

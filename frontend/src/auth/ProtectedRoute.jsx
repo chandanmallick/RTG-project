@@ -3,7 +3,7 @@ import { Navigate, useLocation, useNavigate } from "react-router-dom";
 import { HelpCircle, LogOut, LockKeyhole, Mail } from "lucide-react";
 import { useAuth } from "./AuthContext";
 
-export default function ProtectedRoute({ pageKey, children }) {
+export default function ProtectedRoute({ pageKey, children, allowWorkflowAccess = false }) {
   const { user, loading, logout } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
@@ -14,6 +14,16 @@ export default function ProtectedRoute({ pageKey, children }) {
   if (!user) return <Navigate to="/login" replace state={{ from: location.pathname }} />;
   const access = user.permissions?.[pageKey];
   if (!access?.view) {
+    if (allowWorkflowAccess) {
+      return (
+        <Box className="permission-workflow-only">
+          <Alert severity="info" sx={{ borderRadius: 0 }}>
+            Approval inbox only: page administration and data-entry actions remain restricted.
+          </Alert>
+          {children}
+        </Box>
+      );
+    }
     return (
       <Box sx={{ minHeight: "100vh", display: "grid", placeItems: "center", p: 3, background: "linear-gradient(180deg, #F8FAFC 0%, #EEF4FB 100%)" }}>
         <Paper elevation={0} sx={{ width: "min(620px, 100%)", p: { xs: 3, sm: 4 }, border: "1px solid #D9E7F7", borderRadius: 4 }}>

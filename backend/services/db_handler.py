@@ -60,6 +60,10 @@ class MongoService:
             "dso_reports"
         ]
 
+        self.india_1_min_data_collection = self.db[
+            "India 1 min Data"
+        ]
+
         self.nldc_psp_demand_collection = self.db[
             "NLDC_PSP_Demand"
         ]
@@ -94,6 +98,9 @@ class MongoService:
 
         if "dso_reports" not in self.db.list_collection_names():
             self.db.create_collection("dso_reports")
+
+        if "India 1 min Data" not in self.db.list_collection_names():
+            self.db.create_collection("India 1 min Data")
 
     # 🔥 UPSERT LOGIC (CORE)
     def upsert_data(self, df: pd.DataFrame):

@@ -10,7 +10,12 @@ from crew_legacy.admin_logic.dropdown import (
 )
 
 from bson import ObjectId
-from crew_legacy.database.database_mongo import employee_collection, organization_unit_collection
+from crew_legacy.database.database_mongo import (
+    employee_collection,
+    organization_shift_group_collection,
+    organization_unit_collection,
+    roster_group_collection,
+)
 from crew_legacy.admin_logic.dropdown import dropdown_collection
 from crew_legacy.database.database_mongo import DutyLeave_collection, system_settings_collection
 
@@ -356,6 +361,108 @@ def get_organization_units():
     return [serialize_org_unit(item, employee_names, parent_names) for item in units]
 
 
+organization_shift_group_collection.create_index(
+    [("groupName", 1)],
+    unique=True,
+    name="organization_shift_group_unique",
+)
+
+
+@router.get("/organization/shift-groups")
+def get_organization_shift_groups():
+    active_group_names = sorted({
+        str(item.get("groupName") or "").strip()
+        for item in roster_group_collection.find(
+            {"isActive": {"$ne": False}},
+            {"groupName": 1},
+        )
+        if str(item.get("groupName") or "").strip()
+    })
+    units = list(organization_unit_collection.find(
+        {
+            "isActive": {"$ne": False},
+            "unitType": {"$in": ["department", "vertical", "section", "function"]},
+        },
+        {"name": 1, "unitType": 1},
+    ).sort([("unitType", 1), ("name", 1)]))
+    unit_map = {str(item["_id"]): item for item in units}
+    mappings = []
+    for item in organization_shift_group_collection.find({}).sort("groupName", 1):
+        unit_id = str(item.get("organizationUnitId") or "")
+        unit = unit_map.get(unit_id)
+        mappings.append({
+            "id": str(item["_id"]),
+            "groupName": item.get("groupName"),
+            "organizationUnitId": unit_id,
+            "organizationUnitName": (unit or {}).get("name") or item.get("organizationUnitName"),
+            "organizationUnitType": (unit or {}).get("unitType") or item.get("organizationUnitType"),
+            "isGroupActive": item.get("groupName") in active_group_names,
+            "updatedAt": item.get("updatedAt"),
+        })
+    return {
+        "activeGroups": active_group_names,
+        "organizationUnits": [{
+            "id": str(item["_id"]),
+            "name": item.get("name"),
+            "unitType": item.get("unitType"),
+        } for item in units],
+        "mappings": mappings,
+    }
+
+
+@router.post("/organization/shift-groups/attach")
+def attach_organization_shift_group(data: dict):
+    group_name = str(data.get("groupName") or "").strip()
+    unit_id = str(data.get("organizationUnitId") or "").strip()
+    if not group_name or not ObjectId.is_valid(unit_id):
+        raise HTTPException(400, "Active shift group and reporting organization unit are required")
+    active_group = roster_group_collection.find_one({
+        "groupName": group_name,
+        "isActive": {"$ne": False},
+    })
+    if not active_group:
+        raise HTTPException(404, "Active shift group not found")
+    unit = organization_unit_collection.find_one({
+        "_id": ObjectId(unit_id),
+        "isActive": {"$ne": False},
+        "unitType": {"$in": ["department", "vertical", "section", "function"]},
+    })
+    if not unit:
+        raise HTTPException(404, "Department, Vertical, Section or Function not found")
+    now = datetime.utcnow()
+    organization_shift_group_collection.update_one(
+        {"groupName": group_name},
+        {
+            "$set": {
+                "groupName": group_name,
+                "organizationUnitId": unit["_id"],
+                "organizationUnitName": unit.get("name"),
+                "organizationUnitType": unit.get("unitType"),
+                "updatedAt": now,
+            },
+            "$setOnInsert": {"createdAt": now},
+        },
+        upsert=True,
+    )
+    # Remove the short-lived embedded representation, if it was saved before
+    # shift-group reporting was moved into this dedicated mapping collection.
+    organization_unit_collection.update_many(
+        {"shiftGroupNames": group_name},
+        {"$pull": {"shiftGroupNames": group_name}},
+    )
+    return {"message": f"{group_name} now reports to {unit.get('name')}"}
+
+
+@router.delete("/organization/shift-groups/{mapping_id}")
+def detach_organization_shift_group(mapping_id: str):
+    if not ObjectId.is_valid(mapping_id):
+        raise HTTPException(400, "Invalid shift-group mapping")
+    result = organization_shift_group_collection.delete_one({"_id": ObjectId(mapping_id)})
+    if not result.deleted_count:
+        raise HTTPException(404, "Shift-group mapping not found")
+    return {"message": "Shift group detached from the organization hierarchy"}
+
+
 @router.post("/organization/resolve-employee")
 def resolve_organization_employee(data: dict):
     resolved = resolve_employee_organization(
@@ -442,6 +549,12 @@ def get_organization_tree():
     for employee in employees:
         for function_id in normalize_list(employee.get("functionIds")):
             members.setdefault(function_id, []).append(employee)
+    shift_groups_by_unit = {}
+    for mapping in organization_shift_group_collection.find({}):
+        unit_id = str(mapping.get("organizationUnitId") or "")
+        group_name = str(mapping.get("groupName") or "").strip()
+        if unit_id and group_name:
+            shift_groups_by_unit.setdefault(unit_id, []).append(group_name)
 
     def person_node(employee):
         return {
@@ -478,6 +591,7 @@ def get_organization_tree():
                 "id": unit_id,
                 "name": unit.get("name"),
                 "unitType": unit.get("unitType"),
+                "shiftGroups": sorted(shift_groups_by_unit.get(unit_id, [])),
                 "heads": [
                     {"userId": value, "name": employee_map.get(value, {}).get("name") or value}
                     for value in head_ids

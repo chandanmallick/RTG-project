@@ -3,6 +3,7 @@ import api from "./api";
 import dayjs from "dayjs";
 
 import {
+  Alert,
   Box,
   Paper,
   Typography,
@@ -35,11 +36,13 @@ import {
 
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import ExpandLessIcon from "@mui/icons-material/ExpandLess";
+import DutyReassignmentPanel from "../components/crew/DutyReassignmentPanel";
 
 export default function ReplacementManagement() {
 
   const [pendingLeaves, setPendingLeaves] = useState([]);
   const [assignedReplacements, setAssignedReplacements] = useState([]);
+  const [decisionAudit, setDecisionAudit] = useState([]);
   const [candidates, setCandidates] = useState([]);
   const [selectedLeave, setSelectedLeave] = useState(null);
 
@@ -60,10 +63,22 @@ export default function ReplacementManagement() {
   const [pendingSIC, setPendingSIC] = useState([]);
   const [halfDuty, setHalfDuty] = useState(false);
   const [candidateFilter, setCandidateFilter] = useState("auto");
+  const [switchDate, setSwitchDate] = useState(dayjs().format("YYYY-MM-DD"));
+  const [switchOptions, setSwitchOptions] = useState([]);
+  const [switchEmployeeId, setSwitchEmployeeId] = useState("");
+  const [switchDuty, setSwitchDuty] = useState("");
+  const [switchGroup, setSwitchGroup] = useState("");
+  const [switchReason, setSwitchReason] = useState("");
+  const [switchLeaveId, setSwitchLeaveId] = useState("");
+  const [switchHistory, setSwitchHistory] = useState([]);
+  const [switchNotice, setSwitchNotice] = useState(null);
+  const [switchSaving, setSwitchSaving] = useState(false);
+  const [canSwitchDuty, setCanSwitchDuty] = useState(true);
 
   useEffect(() => {
     fetchPendingLeaves();
     fetchAssignedReplacements();
+    fetchDecisionAudit();
     fetchPendingSIC();
   }, []);
 
@@ -107,12 +122,95 @@ export default function ReplacementManagement() {
     setCandidates(res.data || []);
   };
 
+  const fetchDutySwitchOptions = async () => {
+    try {
+      const [optionResult, historyResult] = await Promise.all([
+        api.get("/replacement/duty-switch/options", { params: { date: switchDate } }),
+        api.get("/replacement/duty-switch/history", { params: { startDate: dayjs(switchDate).subtract(30, "day").format("YYYY-MM-DD"), endDate: switchDate } }),
+      ]);
+      setSwitchOptions(optionResult.data || []);
+      setSwitchHistory(historyResult.data || []);
+      setCanSwitchDuty(true);
+      setSwitchNotice(null);
+    } catch (err) {
+      setSwitchOptions([]);
+      setSwitchHistory([]);
+      setCanSwitchDuty(false);
+      if (err.response?.status !== 403) {
+        setSwitchNotice({ severity: "error", text: err.response?.data?.detail || "Duty-switch data could not be loaded." });
+      }
+    }
+  };
+
+  const selectedSwitchEmployee = switchOptions.find((item) => item.employeeId === switchEmployeeId);
+  const selectedSwitchLeave = pendingLeaves.find((item) => item.id === switchLeaveId);
+  const dutyChoices = [...new Set([
+    ...switchOptions.map((item) => item.assignedDuty),
+    "M1", "M2", "E1", "E2", "N1", "N2", "O1", "O2",
+  ].filter(Boolean))];
+  const groupChoices = [...new Set(switchOptions.map((item) => item.groupName).filter(Boolean))];
+  const leavesForSwitchDate = pendingLeaves.filter((item) => item.date === switchDate);
+
+  const saveDutySwitch = async () => {
+    if (!switchEmployeeId || !switchReason.trim()) {
+      setSwitchNotice({ severity: "warning", text: "Select an employee and enter the reason." });
+      return;
+    }
+    if (!switchLeaveId && !switchDuty) {
+      setSwitchNotice({ severity: "warning", text: "Select the new duty or link an approved leave." });
+      return;
+    }
+    setSwitchSaving(true);
+    try {
+      if (switchLeaveId) {
+        await api.put(`/replacement/assign/${switchLeaveId}`, {
+          replacementEmployeeId: switchEmployeeId,
+          mode: "normal",
+          halfDuty: false,
+          reason: switchReason.trim(),
+        });
+      } else {
+        await api.put("/replacement/duty-switch", {
+          date: switchDate,
+          employeeId: switchEmployeeId,
+          assignedDuty: switchDuty,
+          groupName: switchGroup || selectedSwitchEmployee?.groupName,
+          reason: switchReason.trim(),
+        });
+      }
+      setSwitchNotice({ severity: "success", text: switchLeaveId ? "Leave replacement and duty switch assigned." : "Duty changed and recorded." });
+      setSwitchEmployeeId("");
+      setSwitchDuty("");
+      setSwitchGroup("");
+      setSwitchReason("");
+      setSwitchLeaveId("");
+      await Promise.all([fetchDutySwitchOptions(), fetchPendingLeaves(), fetchAssignedReplacements(), fetchDecisionAudit()]);
+    } catch (err) {
+      setSwitchNotice({ severity: "error", text: err.response?.data?.detail || "Duty change could not be saved." });
+    } finally {
+      setSwitchSaving(false);
+    }
+  };
+
   const fetchAssignedReplacements = async () => {
     try {
       const res = await api.get("/replacement/assigned");
       setAssignedReplacements(res.data || []);
     } catch (err) {
       console.error(err);
+    }
+  };
+
+  const fetchDecisionAudit = async () => {
+    try {
+      const params = {};
+      if (startDate) params.startDate = startDate;
+      if (endDate) params.endDate = endDate;
+      if (employeeId) params.employeeId = employeeId;
+      const res = await api.get("/replacement/assignment-audit", { params });
+      setDecisionAudit(res.data || []);
+    } catch (err) {
+      console.error("Failed to load replacement decision audit", err);
     }
   };
 
@@ -173,6 +271,7 @@ export default function ReplacementManagement() {
 
       fetchPendingLeaves();
       fetchAssignedReplacements();
+      fetchDecisionAudit();
 
     } catch (err) {
       console.error(err);
@@ -305,22 +404,170 @@ export default function ReplacementManagement() {
     <Box sx={{ p: 3 }}>
 
       {/* HEADER */}
-      <Paper
+      <Box
         sx={{
           p: 3,
           mb: 3,
           borderRadius: 3,
-          background: "linear-gradient(90deg,#1e3c72,#2a5298)",
+          background: "linear-gradient(105deg,#08103A 0%,#0057B7 65%,#0F6FDB 100%)",
           color: "white"
         }}
       >
-        <Typography variant="h5" fontWeight="bold">
+        <Typography variant="h5" fontWeight="bold" sx={{ color: "#FFFFFF" }}>
           Replacement Management
         </Typography>
-        <Typography variant="body2">
+        <Typography variant="body2" sx={{ color: "rgba(255,255,255,.88)" }}>
           Manage leave replacements and SIC assignments
         </Typography>
-      </Paper>
+      </Box>
+
+      <DutyReassignmentPanel onChanged={() => {
+        fetchPendingLeaves();
+        fetchAssignedReplacements();
+        fetchDecisionAudit();
+      }} />
+
+      {false && canSwitchDuty && (
+        <Accordion
+          defaultExpanded
+          sx={{ borderRadius: 3, boxShadow: "0 4px 20px rgba(0,0,0,0.08)", overflow: "hidden", mb: 3 }}
+        >
+          <AccordionSummary
+            expandIcon={<ExpandMoreIcon />}
+            sx={{ background: "linear-gradient(90deg,#08103A,#0057B7)", color: "white", px: 3 }}
+          >
+            <Box>
+              <Typography variant="h6" fontWeight={700}>Duty Switching & Reassignment</Typography>
+              <Typography variant="caption">For Leave Approving Authority and administrators. Every change is recorded.</Typography>
+            </Box>
+          </AccordionSummary>
+          <AccordionDetails sx={{ p: 2.5 }}>
+            {switchNotice && <Alert severity={switchNotice.severity} onClose={() => setSwitchNotice(null)} sx={{ mb: 2 }}>{switchNotice.text}</Alert>}
+            <Grid container spacing={2}>
+              <Grid item xs={12} md={3}>
+                <TextField
+                  fullWidth
+                  size="small"
+                  type="date"
+                  label="Duty date"
+                  InputLabelProps={{ shrink: true }}
+                  value={switchDate}
+                  onChange={(event) => {
+                    setSwitchDate(event.target.value);
+                    setSwitchEmployeeId("");
+                    setSwitchLeaveId("");
+                    setSwitchDuty("");
+                  }}
+                />
+              </Grid>
+              <Grid item xs={12} md={5}>
+                <FormControl fullWidth size="small">
+                  <InputLabel>Employee to reassign</InputLabel>
+                  <Select
+                    label="Employee to reassign"
+                    value={switchEmployeeId}
+                    onChange={(event) => {
+                      const employee = switchOptions.find((item) => item.employeeId === event.target.value);
+                      setSwitchEmployeeId(event.target.value);
+                      setSwitchGroup(employee?.groupName || "");
+                    }}
+                  >
+                    {switchOptions.map((item) => (
+                      <MenuItem key={item.employeeId} value={item.employeeId} disabled={item.onLeave}>
+                        {item.name || item.employeeId} ({item.employeeId}) · {item.assignedDuty || "No duty"} · {item.groupName || "No group"}{item.onLeave ? " · On leave" : ""}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              </Grid>
+              <Grid item xs={12} md={4}>
+                <FormControl fullWidth size="small">
+                  <InputLabel>Link approved leave (optional)</InputLabel>
+                  <Select
+                    label="Link approved leave (optional)"
+                    value={switchLeaveId}
+                    onChange={(event) => {
+                      const leave = pendingLeaves.find((item) => item.id === event.target.value);
+                      setSwitchLeaveId(event.target.value);
+                      if (leave) {
+                        setSwitchDuty(leave.assignedDuty || "");
+                        setSwitchGroup(leave.groupName || "");
+                      }
+                    }}
+                  >
+                    <MenuItem value="">Manual duty change only</MenuItem>
+                    {leavesForSwitchDate.map((leave) => (
+                      <MenuItem key={leave.id} value={leave.id}>
+                        Replace {leave.name} · {leave.assignedDuty || "Duty"} · {leave.groupName}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              </Grid>
+              <Grid item xs={12} md={3}>
+                <FormControl fullWidth size="small" disabled={Boolean(switchLeaveId)}>
+                  <InputLabel>New duty</InputLabel>
+                  <Select label="New duty" value={switchDuty} onChange={(event) => setSwitchDuty(event.target.value)}>
+                    {dutyChoices.map((duty) => <MenuItem key={duty} value={duty}>{duty}</MenuItem>)}
+                  </Select>
+                </FormControl>
+              </Grid>
+              <Grid item xs={12} md={3}>
+                <FormControl fullWidth size="small" disabled={Boolean(switchLeaveId)}>
+                  <InputLabel>New group</InputLabel>
+                  <Select label="New group" value={switchGroup} onChange={(event) => setSwitchGroup(event.target.value)}>
+                    {groupChoices.map((group) => <MenuItem key={group} value={group}>{group}</MenuItem>)}
+                  </Select>
+                </FormControl>
+              </Grid>
+              <Grid item xs={12} md={4}>
+                <TextField fullWidth size="small" label="Reason for duty change" value={switchReason} onChange={(event) => setSwitchReason(event.target.value)} />
+              </Grid>
+              <Grid item xs={12} md={2}>
+                <Button fullWidth variant="contained" disabled={switchSaving || !switchEmployeeId} onClick={saveDutySwitch} sx={{ height: 40, background: "#0057B7", fontWeight: 800 }}>
+                  {switchSaving ? "Saving..." : switchLeaveId ? "Assign replacement" : "Change duty"}
+                </Button>
+              </Grid>
+            </Grid>
+
+            {selectedSwitchEmployee && (
+              <Alert severity="info" sx={{ mt: 2 }}>
+                Current assignment: <strong>{selectedSwitchEmployee.assignedDuty || "-"}</strong> in <strong>{selectedSwitchEmployee.groupName || "-"}</strong>.
+                {selectedSwitchLeave && <> The selected leave duty <strong>{selectedSwitchLeave.assignedDuty || "-"}</strong> will be assigned and the employee’s previous duty will be retained in the audit.</>}
+              </Alert>
+            )}
+
+            <Typography sx={{ mt: 2.5, mb: 1, fontWeight: 900, color: "#0F172A" }}>Recent duty changes</Typography>
+            <TableContainer sx={{ maxHeight: 280, border: "1px solid #E2E8F0", borderRadius: 2 }}>
+              <Table size="small" stickyHeader>
+                <TableHead>
+                  <TableRow>
+                    <TableCell>Date</TableCell>
+                    <TableCell>Employee</TableCell>
+                    <TableCell>Previous</TableCell>
+                    <TableCell>Changed to</TableCell>
+                    <TableCell>Reason</TableCell>
+                    <TableCell>Changed by</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {switchHistory.map((item) => (
+                    <TableRow key={item._id} hover>
+                      <TableCell sx={{ whiteSpace: "nowrap" }}>{dayjs(item.date).format("DD MMM YYYY")}</TableCell>
+                      <TableCell><Typography variant="body2" fontWeight={800}>{item.employeeName || item.employeeId}</Typography><Typography variant="caption">{item.employeeId}</Typography></TableCell>
+                      <TableCell>{item.previous?.assignedDuty || "-"} · {item.previous?.groupName || "-"}</TableCell>
+                      <TableCell>{item.updated?.assignedDuty || "-"} · {item.updated?.groupName || "-"}</TableCell>
+                      <TableCell>{item.reason || "-"}</TableCell>
+                      <TableCell><Typography variant="body2">{item.changedByName || item.changedBy}</Typography><Typography variant="caption">{item.changedOn ? dayjs(item.changedOn).format("DD MMM HH:mm") : ""}</Typography></TableCell>
+                    </TableRow>
+                  ))}
+                  {!switchHistory.length && <TableRow><TableCell colSpan={6} align="center">No duty changes recorded in this period.</TableCell></TableRow>}
+                </TableBody>
+              </Table>
+            </TableContainer>
+          </AccordionDetails>
+        </Accordion>
+      )}
 
       {/* ========================= */}
       {/* PENDING LEAVES */}
@@ -468,7 +715,7 @@ export default function ReplacementManagement() {
                     <TableCell>
                       <Chip
                         size="small"
-                        label={item.notificationStatus}
+                        label={item.notificationStatus === "Denied" ? "Declined" : item.notificationStatus}
                         color={item.notificationStatus === "Denied" ? "error" : item.notificationStatus === "Accepted" ? "success" : "warning"}
                       />
                     </TableCell>
@@ -482,6 +729,85 @@ export default function ReplacementManagement() {
                 {!assignedReplacements.length && (
                   <TableRow><TableCell colSpan={5} align="center">No assigned replacement duties</TableCell></TableRow>
                 )}
+              </TableBody>
+            </Table>
+          </TableContainer>
+        </AccordionDetails>
+      </Accordion>
+
+      <Accordion
+        defaultExpanded
+        sx={{ borderRadius: 3, boxShadow: "0 4px 20px rgba(0,0,0,0.08)", overflow: "hidden", mb: 3 }}
+      >
+        <AccordionSummary
+          expandIcon={<ExpandMoreIcon />}
+          sx={{ background: "linear-gradient(90deg,#08103A,#0057B7)", color: "white", px: 3 }}
+        >
+          <Typography variant="h6" fontWeight={600}>Replacement Duty Decision Board</Typography>
+        </AccordionSummary>
+        <AccordionDetails>
+          <Box sx={{ display: "flex", gap: 1, mb: 2, flexWrap: "wrap" }}>
+            <TextField type="date" size="small" label="From" InputLabelProps={{ shrink: true }} value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+            <TextField type="date" size="small" label="To" InputLabelProps={{ shrink: true }} value={endDate} onChange={(e) => setEndDate(e.target.value)} />
+            <TextField size="small" label="Replacement employee ID" value={employeeId} onChange={(e) => setEmployeeId(e.target.value)} />
+            <Button variant="contained" onClick={fetchDecisionAudit}>Refresh Board</Button>
+          </Box>
+          <TableContainer>
+            <Table size="small">
+              <TableHead>
+                <TableRow sx={{ background: "#EAF2FF" }}>
+                  <TableCell><strong>Date / Duty</strong></TableCell>
+                  <TableCell><strong>Replacement Employee</strong></TableCell>
+                  <TableCell><strong>Replaced Employee</strong></TableCell>
+                  <TableCell><strong>Reporting Officer(s)</strong></TableCell>
+                  <TableCell><strong>Decision</strong></TableCell>
+                  <TableCell><strong>Decision Audit</strong></TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {decisionAudit.map((item) => {
+                  const shownStatus = item.status === "Denied" ? "Declined" : item.status;
+                  const statusColor = item.status === "Denied" ? "error" : item.status === "Accepted" ? "success" : item.status === "Pending" ? "warning" : "default";
+                  return (
+                    <TableRow key={item.id} hover>
+                      <TableCell>
+                        <Typography variant="body2" fontWeight={800}>{item.date ? dayjs(item.date).format("DD MMM YYYY") : "-"}</Typography>
+                        <Typography variant="caption">{item.assignedDuty || "-"} · {item.assignmentMode || "normal"}</Typography>
+                      </TableCell>
+                      <TableCell>
+                        <Typography variant="body2" fontWeight={700}>{item.employeeName || "-"}</Typography>
+                        <Typography variant="caption" color="text.secondary">{item.employeeId || "-"}</Typography>
+                      </TableCell>
+                      <TableCell>
+                        <Typography variant="body2">{item.replacedEmployeeName || "-"}</Typography>
+                        <Typography variant="caption" color="text.secondary">{item.groupName || "-"} · {item.leaveType || "-"}</Typography>
+                      </TableCell>
+                      <TableCell>
+                        <Typography variant="caption">{(item.controllerNames || []).join(", ") || "Not mapped"}</Typography>
+                      </TableCell>
+                      <TableCell>
+                        <Chip size="small" label={shownStatus || "Pending"} color={statusColor} />
+                        {item.autoAccepted && <Typography display="block" variant="caption" color="success.main" fontWeight={800}>Auto-accepted at cutoff</Typography>}
+                        {item.reason && <Typography display="block" variant="caption" color="error.main">{item.reason}</Typography>}
+                        {item.mailDelivery?.status && (
+                          <Typography display="block" variant="caption" color={item.mailDelivery.status === "sent" ? "success.main" : "text.secondary"} fontWeight={700}>
+                            Mail: {item.mailDelivery.status} ({item.mailDelivery.recipientCount || 0} recipients)
+                          </Typography>
+                        )}
+                      </TableCell>
+                      <TableCell sx={{ minWidth: 260 }}>
+                        {(item.decisionHistory || []).length ? (item.decisionHistory || []).map((entry, index) => (
+                          <Typography key={`${item.id}-${index}`} variant="caption" display="block" sx={{ mb: .35 }}>
+                            <strong>{entry.action === "Denied" ? "Declined" : entry.action}</strong> by {entry.actedByName || entry.actedBy || "-"} ({entry.actorRole || "-"})
+                            {entry.actedAt ? ` · ${dayjs(entry.actedAt).format("DD MMM YYYY HH:mm")}` : ""}
+                            {entry.reason ? ` · ${entry.reason}` : ""}
+                          </Typography>
+                        )) : <Typography variant="caption" color="text.secondary">Awaiting employee decision</Typography>}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+                {!decisionAudit.length && <TableRow><TableCell colSpan={6} align="center">No replacement-duty decisions recorded.</TableCell></TableRow>}
               </TableBody>
             </Table>
           </TableContainer>

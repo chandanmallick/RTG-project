@@ -36,6 +36,31 @@ def employee_id_filter(employee_id: str) -> dict:
     return {"$regex": rf"^\s*{re.escape(clean_id(employee_id))}\s*$"}
 
 
+def organization_leave_observer_ids(employee: dict) -> list[str]:
+    """Reporting officers and HOD resolved from the Organization Master."""
+    employee_id = clean_id(employee.get("userId") or employee.get("employeeId"))
+    values = []
+    try:
+        from crew_legacy.api.admin_api import resolve_employee_organization
+        resolved = resolve_employee_organization(
+            employee.get("manualFunctionIds", employee.get("functionIds")),
+            employee_id,
+        )
+        values.extend(resolved.get("reportingOfficerIds") or [])
+        values.extend([
+            resolved.get("intermediaryReportingId"),
+            resolved.get("hodId"),
+        ])
+    except Exception:
+        stored = employee.get("reportingOfficerIds") or employee.get("reportingOfficerId") or []
+        values.extend(stored if isinstance(stored, list) else [stored])
+        values.extend([employee.get("intermediaryReportingId"), employee.get("hodId")])
+    return [
+        value for value in dict.fromkeys(clean_id(item) for item in values)
+        if value and value != employee_id
+    ]
+
+
 def daily_record(employee_id: str, date_str: str):
     return employee_daily_collection.find_one({
         "employeeId": employee_id_filter(employee_id),
@@ -814,18 +839,39 @@ def apply_leave_v2(data: dict, user=Depends(get_authenticated_user)):
                 )
                 raise HTTPException(409, f"The selected C-OFF credit was just used for another request on {item['date']}")
 
-        sic = employee_daily_collection.find_one({
-            "date": item["date"], "groupName": item["groupName"], "isSIC": True,
-        })
-        if sic:
-            notified_sics.add(clean_id(sic.get("employeeId")))
+        group_supervisors = employee_daily_collection.find({
+            "date": item["date"],
+            "$or": [
+                {"groupName": item["groupName"], "isSIC": True},
+                {
+                    "isActingSIC": True,
+                    "$or": [
+                        {"groupName": item["groupName"]},
+                        {"actingSICGroup": item["groupName"]},
+                    ],
+                },
+            ],
+        }, {"employeeId": 1})
+        notified_sics.update(
+            clean_id(record.get("employeeId"))
+            for record in group_supervisors
+            if clean_id(record.get("employeeId"))
+        )
 
-    if notified_sics:
+    leave_observers = set(organization_leave_observer_ids(employee))
+    leave_observers.update(notified_sics)
+    leave_observers.discard(employee_id)
+    if leave_observers:
+        groups = ", ".join(sorted({item["groupName"] for item in prepared if item.get("groupName")})) or "Not mapped"
+        date_text = dates[0] if len(dates) == 1 else f"{dates[0]} to {dates[-1]}"
         notify_all(
             email_list=[],
-            employee_ids=list(notified_sics),
-            subject="Leave application pending SIC review",
-            message=f"{employee.get('name')} applied for {len(inserted_ids)} leave day(s).",
+            employee_ids=sorted(leave_observers),
+            subject="Leave application under your team",
+            message=(
+                f"{employee.get('name')} ({employee_id}) applied for "
+                f"{len(inserted_ids)} leave day(s): {date_text}. Group: {groups}."
+            ),
             ref_id=leave_group_id,
             action="VIEW_LEAVE",
             type="LEAVE",

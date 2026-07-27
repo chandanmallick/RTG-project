@@ -17,6 +17,7 @@ const PSPAdmin = lazy(() => import("./pages/PSPAdmin"));
 const PSPReportChecking = lazy(() => import("./pages/PSPReportChecking"));
 const FrequencyReport = lazy(() => import("./pages/FrequencyReport"));
 const MISReport = lazy(() => import("./pages/MISReport"));
+const NLDCPlots = lazy(() => import("./pages/NLDCPlots"));
 const DSOReportPreparation = lazy(() => import("./pages/DSOReportPreparation"));
 const DSOMorningReport = lazy(() => import("./pages/DSOMorningReport"));
 const OutageAnalysis = lazy(() => import("./pages/OutageAnalysis"));
@@ -38,6 +39,7 @@ const CrewProfile = lazy(() => import("./crewLegacy/Profile"));
 const CrewLoginAudit = lazy(() => import("./crewLegacy/AdminLoginHistory"));
 const Login = lazy(() => import("./pages/Login"));
 const UserAccessControl = lazy(() => import("./pages/UserAccessControl"));
+const MailSettings = lazy(() => import("./pages/MailSettings"));
 
 const protectedPage = (pageKey, element) => <ProtectedRoute pageKey={pageKey}>{element}</ProtectedRoute>;
 
@@ -113,6 +115,11 @@ export default function App() {
         />
 
         <Route
+          path="/mis/nldc-plots"
+          element={protectedPage("nldc_plots", <NLDCPlots />)}
+        />
+
+        <Route
           path="/report-preparation/dso-evening"
           element={protectedPage("dso_evening_report", <DSOReportPreparation reportType="evening" />)}
         />
@@ -154,10 +161,18 @@ export default function App() {
 
         <Route path="/crew/user-context" element={<Navigate to="/admin/user-access" replace />} />
         <Route path="/admin/user-access" element={protectedPage("user_access", <UserAccessControl />)} />
+        <Route path="/admin/mail-settings" element={protectedPage("mail_settings", <MailSettings />)} />
         <Route path="/crew/dashboard" element={protectedPage("crew_dashboard", <CrewLegacyShell><CrewDashboard /></CrewLegacyShell>)} />
         <Route path="/crew/leave" element={protectedPage("crew_leave", <CrewLegacyShell><CrewLeave /></CrewLegacyShell>)} />
         <Route path="/crew/replacement" element={protectedPage("crew_replacement", <CrewLegacyShell><CrewReplacement /></CrewLegacyShell>)} />
-        <Route path="/crew/training" element={protectedPage("crew_training", <CrewLegacyShell><CrewTraining /></CrewLegacyShell>)} />
+        <Route
+          path="/crew/training"
+          element={(
+            <ProtectedRoute pageKey="crew_training" allowWorkflowAccess>
+              <CrewLegacyShell><CrewTraining /></CrewLegacyShell>
+            </ProtectedRoute>
+          )}
+        />
         <Route path="/crew/employees" element={protectedPage("crew_employees", <CrewLegacyShell><CrewEmployees /></CrewLegacyShell>)} />
         <Route path="/crew/dropdowns" element={protectedPage("crew_admin", <CrewLegacyShell><CrewDropdowns /></CrewLegacyShell>)} />
         <Route path="/crew/duty-leave-types" element={protectedPage("crew_admin", <CrewLegacyShell><CrewDutyLeaveTypes /></CrewLegacyShell>)} />

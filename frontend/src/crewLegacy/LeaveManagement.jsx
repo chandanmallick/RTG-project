@@ -323,8 +323,17 @@ export default function LeaveManagement() {
             <Typography sx={{ fontSize: 12.5, color: "#64748B", fontWeight: 700 }}>
               Select multiple rows to approve and forward, or to finalize them in one step.
             </Typography>
-            {(hasSicActions || hasFinalActions) && (
-              <Stack direction="row" spacing={1} sx={{ flexWrap: "wrap" }}>
+            <Stack direction="row" spacing={1} sx={{ flexWrap: "wrap" }}>
+              <Button
+                size="small"
+                variant="outlined"
+                startIcon={<CalendarDays size={14} />}
+                onClick={() => window.open("/crew/calendar", "crew-duty-calendar", "popup=yes,width=1500,height=900,resizable=yes,scrollbars=yes")}
+              >
+                Open duty calendar
+              </Button>
+              {(hasSicActions || hasFinalActions) && (
+                <>
                 {hasSicActions && (
                   <>
                     <Button size="small" variant="contained" disabled={!selectedSicLeaves.length} startIcon={<Send size={14} />} onClick={sicForwardBulk}>
@@ -345,8 +354,9 @@ export default function LeaveManagement() {
                     </Button>
                   </>
                 )}
-              </Stack>
-            )}
+                </>
+              )}
+            </Stack>
           </Box>
         )}
         <TableContainer sx={{ maxHeight: completedTable ? 360 : 480, border: "1px solid #E2E8F0", borderRadius: 2 }}>
@@ -362,7 +372,7 @@ export default function LeaveManagement() {
                     />
                   </TableCell>
                 )}
-                <TableCell>Employee</TableCell><TableCell>Date</TableCell><TableCell>Group</TableCell><TableCell>Duty Type</TableCell><TableCell>Leave</TableCell>
+                <TableCell>Employee</TableCell><TableCell>Date</TableCell><TableCell>Group</TableCell><TableCell>Duty Type</TableCell><TableCell>Other persons on leave</TableCell><TableCell>Leave</TableCell>
                 <TableCell>SIC</TableCell><TableCell>Final Authority</TableCell><TableCell>Replacement</TableCell><TableCell>Final Status</TableCell>{hasActionColumn && <TableCell align="right">Action</TableCell>}
               </TableRow>
             </TableHead>
@@ -382,6 +392,20 @@ export default function LeaveManagement() {
                     {leave.assignedDuty && leave.dutyType && leave.assignedDuty !== leave.dutyType && (
                       <Typography sx={{ fontSize: 10.5, color: "#64748B" }}>{leave.assignedDuty}</Typography>
                     )}
+                  </TableCell>
+                  <TableCell sx={{ minWidth: 170 }}>
+                    {leave.othersOnLeave?.length ? (
+                      <Stack direction="row" spacing={0.5} useFlexGap flexWrap="wrap">
+                        {leave.othersOnLeave.map((person) => (
+                          <Chip
+                            key={`${leave.id}-${person.employeeId}`}
+                            label={`${person.name || person.employeeId}${person.employeeId ? ` (${person.employeeId})` : ""}`}
+                            size="small"
+                            sx={{ height: 23, color: "#B91C1C", background: "#FFF1F2", border: "1px solid #FECDD3", fontWeight: 800, fontSize: 10.5 }}
+                          />
+                        ))}
+                      </Stack>
+                    ) : <Typography sx={{ color: "#94A3B8", fontSize: 11 }}>None</Typography>}
                   </TableCell>
                   <TableCell sx={{ fontWeight: 800 }}>{leave.leaveType}</TableCell>
                   <TableCell><StatusChip value={leave.sicApprovalStatus} /></TableCell><TableCell><StatusChip value={leave.deptApprovalStatus} /></TableCell>
@@ -413,7 +437,7 @@ export default function LeaveManagement() {
                   </TableCell>}
                 </TableRow>
               ))}
-              {!items.length && <TableRow><TableCell colSpan={completedTable ? (hasActionColumn ? 10 : 9) : 11} align="center" sx={{ py: 4, color: "#94A3B8" }}>No records</TableCell></TableRow>}
+              {!items.length && <TableRow><TableCell colSpan={completedTable ? (hasActionColumn ? 11 : 10) : 12} align="center" sx={{ py: 4, color: "#94A3B8" }}>No records</TableCell></TableRow>}
             </TableBody>
           </Table>
         </TableContainer>
