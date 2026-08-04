@@ -90,7 +90,24 @@ const searchSvg = `
     <path d="m20 20-3.5-3.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path>
   </svg>`;
 
+const removeTableTools = (table) => {
+  table.querySelectorAll(".crew-column-tools, .crew-column-search-popover").forEach((node) => node.remove());
+  table.querySelectorAll("thead th").forEach((header) => {
+    delete header.dataset.crewTableTools;
+    header.style.removeProperty("position");
+  });
+  [...(table.tBodies?.[0]?.rows || [])].forEach((row) => {
+    row.style.removeProperty("display");
+  });
+  table.classList.remove("crew-smart-table");
+  tableState.delete(table);
+};
+
 const enhanceTable = (table) => {
+  if (table?.dataset?.crewTableTools === "off") {
+    removeTableTools(table);
+    return;
+  }
   const headerRow = table.tHead?.rows?.[0];
   if (!headerRow) return;
   const headers = [...headerRow.cells];

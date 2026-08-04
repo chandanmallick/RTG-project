@@ -1,6 +1,7 @@
 import ssl
 import requests
 import urllib3
+from concurrent.futures import ThreadPoolExecutor, as_completed
 urllib3.disable_warnings(
     urllib3.exceptions.InsecureRequestWarning
 )
@@ -71,6 +72,13 @@ def get_legacy_session():
 
 
 class RTGDashboardService:
+
+    HISTORICAL_METRICS = {
+        "schedule": "Schedule",
+        "dc": "DC",
+        "cap_on_bar": "Capacity on Bar",
+        "actual_gen": "Actual",
+    }
 
     @staticmethod
     def _mask_config(config):
@@ -146,6 +154,326 @@ class RTGDashboardService:
         except (TypeError, ValueError):
 
             return 0
+
+    @staticmethod
+    def _snapshot_local_time(value):
+        if not value:
+            return None
+        if isinstance(value, str):
+            try:
+                value = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            except ValueError:
+                return None
+        if ZoneInfo:
+            if value.tzinfo is None:
+                value = value.replace(tzinfo=ZoneInfo("UTC"))
+            return value.astimezone(ZoneInfo("Asia/Kolkata"))
+        return value
+
+    @staticmethod
+    def _plant_label(row):
+        name = (
+            row.get("station_name")
+            or row.get("station")
+            or row.get("plant_name")
+            or row.get("utility_name")
+            or "Unknown plant"
+        )
+        plant_id = row.get("plant_id") or row.get("rtg_plant_id")
+        return f"{name} ({plant_id})" if plant_id else str(name)
+
+    @staticmethod
+    def _historical_group(row, selections):
+        utility_type = str(row.get("utility_type") or "").strip().upper()
+        state_name = str(row.get("state_name") or "").strip()
+        is_state = utility_type in {"STATE", "STATE_IPP"}
+        for selection in selections:
+            if selection.startswith("STATE:"):
+                selected_state = selection.split(":", 1)[1]
+                if is_state and state_name.casefold() == selected_state.casefold():
+                    return selected_state
+            elif selection == "ISGS" and utility_type == "ISGS":
+                return "ISGS"
+            elif selection == "IPP" and utility_type == "IPP":
+                return "IPP"
+        return None
+
+    @staticmethod
+    def historical_options():
+        db = MongoService()
+        latest = db.rtg_dashboard_collection.find_one(
+            {}, {"_id": 0, "data": 1}, sort=[("snapshot_time", -1)]
+        ) or {}
+        states = sorted({
+            str(row.get("state_name") or "").strip()
+            for row in latest.get("data", [])
+            if str(row.get("utility_type") or "").strip().upper()
+            in {"STATE", "STATE_IPP"}
+            and str(row.get("state_name") or "").strip()
+        })
+        return {
+            "states": states,
+            "metrics": [
+                {"value": key, "label": label}
+                for key, label in RTGDashboardService.HISTORICAL_METRICS.items()
+            ],
+            "intervals": [5, 15],
+        }
+
+    @staticmethod
+    def _series_from_payload(payload, keys):
+        source = payload
+        if isinstance(payload, dict):
+            source = next(
+                (payload.get(key) for key in keys if isinstance(payload.get(key), list)),
+                [],
+            )
+        if not isinstance(source, list):
+            return []
+        return [RTGDashboardService._to_number(value) for value in source]
+
+    @staticmethod
+    def _resample_day(series, interval_minutes):
+        target_points = 1440 // interval_minutes
+        if not series:
+            return [None] * target_points
+        source_minutes = 1440 / len(series)
+        values = []
+        for target_index in range(target_points):
+            start_minute = target_index * interval_minutes
+            end_minute = start_minute + interval_minutes
+            indexes = [
+                index for index in range(len(series))
+                if start_minute <= index * source_minutes < end_minute
+            ]
+            if indexes:
+                values.append(round(sum(series[index] for index in indexes) / len(indexes), 3))
+            else:
+                source_index = min(int(start_minute / source_minutes), len(series) - 1)
+                values.append(series[source_index])
+        return values
+
+    @staticmethod
+    def _fetch_api_historical_matrix(
+        start, end, metrics, selections, plant_wise, interval_minutes
+    ):
+        db = MongoService()
+        latest = db.rtg_dashboard_collection.find_one(
+            {}, {"_id": 0, "data": 1}, sort=[("snapshot_time", -1)]
+        ) or {}
+        plants = []
+        for row in latest.get("data", []):
+            group = RTGDashboardService._historical_group(row, selections)
+            plant_id = row.get("plant_id") or row.get("rtg_plant_id")
+            if group and plant_id:
+                plants.append({"id": str(plant_id), "label": RTGDashboardService._plant_label(row), "group": group})
+        unique_plants = {plant["id"]: plant for plant in plants}
+        plants = list(unique_plants.values())
+        if not plants:
+            raise RuntimeError("No RTG plants matched the selected entities")
+
+        config = PipelineConfigService().get_config("RTG") or {}
+        required = ("rtg_token_url", "rtg_username", "rtg_password")
+        if not all(config.get(key) for key in required):
+            raise RuntimeError("RTG historical API authentication is not configured")
+        token = TokenService.get_token(
+            config["rtg_token_url"], config["rtg_username"], config["rtg_password"]
+        )
+        headers = {"Authorization": f"Token {token}", "Content-Type": "application/json"}
+        urls = {
+            "schedule": str(config.get("rtg_schedule_url") or "https://rtgapi.grid-india.in/sendData/wbes-data/").rstrip("/") + "/",
+            "actual": str(config.get("rtg_scada_url") or "https://rtgapi.grid-india.in/sendData/scada-data/").rstrip("/") + "/",
+            "cap": str(config.get("rtg_cap_on_bar_url") or "https://rtgapi.grid-india.in/sendData/cap-on-bar/").rstrip("/") + "/",
+        }
+        dates = []
+        current = start
+        while current <= end:
+            dates.append(current.isoformat())
+            current += timedelta(days=1)
+
+        needs_schedule = any(metric in metrics for metric in ("schedule", "dc"))
+        needs_actual = "actual_gen" in metrics
+        needs_cap = "cap_on_bar" in metrics
+
+        def fetch_one(date_value, plant):
+            result = {metric: [] for metric in metrics}
+            session = get_legacy_session()
+            if needs_schedule:
+                response = session.get(f'{urls["schedule"]}{date_value}/{plant["id"]}/', headers=headers, verify=False, timeout=20)
+                response.raise_for_status()
+                payload = response.json() or {}
+                if "schedule" in metrics:
+                    result["schedule"] = RTGDashboardService._series_from_payload(payload, ("schedule",))
+                if "dc" in metrics:
+                    result["dc"] = RTGDashboardService._series_from_payload(payload, ("dc",))
+            if needs_actual:
+                response = session.get(f'{urls["actual"]}{date_value}/{plant["id"]}/', headers=headers, verify=False, timeout=20)
+                response.raise_for_status()
+                result["actual_gen"] = RTGDashboardService._series_from_payload(response.json(), ("actual", "data", "scada", "values"))
+            if needs_cap:
+                response = session.get(f'{urls["cap"]}{date_value}/{plant["id"]}/', headers=headers, verify=False, timeout=20)
+                response.raise_for_status()
+                result["cap_on_bar"] = RTGDashboardService._series_from_payload(response.json(), ("cap_on_bar", "data", "values"))
+            return date_value, plant, {
+                metric: RTGDashboardService._resample_day(result[metric], interval_minutes)
+                for metric in metrics
+            }
+
+        fetched = {}
+        errors = []
+        with ThreadPoolExecutor(max_workers=12) as executor:
+            futures = [executor.submit(fetch_one, date_value, plant) for date_value in dates for plant in plants]
+            for future in as_completed(futures):
+                try:
+                    date_value, plant, series = future.result()
+                    fetched[(date_value, plant["id"])] = (plant, series)
+                except Exception as exc:
+                    errors.append(str(exc))
+        if not fetched:
+            raise RuntimeError(errors[0] if errors else "RTG historical APIs returned no data")
+
+        entities = sorted(
+            {plant["label"] if plant_wise else plant["group"] for plant in plants}
+        )
+        columns = []
+        for entity in entities:
+            for metric in metrics:
+                columns.append({
+                    "key": f"c{len(columns) + 1}", "entity": entity,
+                    "scope": next((p["group"] for p in plants if (p["label"] if plant_wise else p["group"]) == entity), entity),
+                    "metric": metric,
+                    "label": f'{entity} - {RTGDashboardService.HISTORICAL_METRICS[metric]} (MW)',
+                })
+        rows = []
+        points = 1440 // interval_minutes
+        for date_value in dates:
+            for index in range(points):
+                timestamp = datetime.strptime(date_value, "%Y-%m-%d") + timedelta(minutes=index * interval_minutes)
+                output = {"date": timestamp.strftime("%d-%m-%Y"), "time": timestamp.strftime("%H:%M"), "timestamp": timestamp.isoformat()}
+                for column in columns:
+                    values = []
+                    for plant in plants:
+                        entity = plant["label"] if plant_wise else plant["group"]
+                        item = fetched.get((date_value, plant["id"]))
+                        if entity == column["entity"] and item:
+                            value = item[1][column["metric"]][index]
+                            if value is not None:
+                                values.append(value)
+                    output[column["key"]] = round(sum(values), 2) if values else None
+                rows.append(output)
+        return {
+            "start_date": start.isoformat(), "end_date": end.isoformat(),
+            "interval_minutes": interval_minutes, "plant_wise": bool(plant_wise),
+            "selections": selections, "metrics": metrics, "columns": columns, "rows": rows,
+            "source": "RTG historical APIs", "warnings": len(errors),
+        }
+
+    @staticmethod
+    def fetch_historical_matrix(
+        start_date,
+        end_date,
+        metrics=None,
+        selections=None,
+        plant_wise=False,
+        interval_minutes=15,
+    ):
+        start = datetime.strptime(start_date, "%Y-%m-%d").date()
+        end = datetime.strptime(end_date, "%Y-%m-%d").date()
+        if end < start:
+            raise ValueError("End date cannot be before start date")
+        if (end - start).days > 31:
+            raise ValueError("Select a date range of 31 days or less")
+
+        valid_metrics = RTGDashboardService.HISTORICAL_METRICS
+        metrics = [item for item in (metrics or list(valid_metrics)) if item in valid_metrics]
+        if not metrics:
+            raise ValueError("Select at least one data field")
+        selections = selections or ["ISGS", "IPP"]
+        interval_minutes = 5 if int(interval_minutes) == 5 else 15
+
+        try:
+            return RTGDashboardService._fetch_api_historical_matrix(
+                start, end, metrics, selections, plant_wise, interval_minutes
+            )
+        except Exception as api_error:
+            print(f"RTG historical API fetch failed; using stored snapshots: {api_error}")
+
+        db = MongoService()
+        end_exclusive = end + timedelta(days=1)
+        query = {
+            "$or": [
+                {"snapshot_date": {"$gte": start.isoformat(), "$lt": end_exclusive.isoformat()}},
+                {"snapshot_time": {
+                    "$gte": datetime.combine(start, time.min) - timedelta(hours=5, minutes=30),
+                    "$lt": datetime.combine(end_exclusive, time.min) - timedelta(hours=5, minutes=30),
+                }},
+            ]
+        }
+        snapshots = db.rtg_dashboard_collection.find(
+            query, {"_id": 0, "snapshot_time": 1, "data": 1}
+        ).sort("snapshot_time", 1)
+
+        bucket_values = {}
+        column_meta = {}
+        for snapshot in snapshots:
+            local_time = RTGDashboardService._snapshot_local_time(snapshot.get("snapshot_time"))
+            if not local_time or not (start <= local_time.date() <= end):
+                continue
+            minute = (local_time.minute // interval_minutes) * interval_minutes
+            bucket = local_time.replace(minute=minute, second=0, microsecond=0)
+            grouped = {}
+            for row in snapshot.get("data", []):
+                group = RTGDashboardService._historical_group(row, selections)
+                if not group:
+                    continue
+                entity = RTGDashboardService._plant_label(row) if plant_wise else group
+                grouped.setdefault(entity, {metric: 0.0 for metric in metrics})
+                for metric in metrics:
+                    grouped[entity][metric] += RTGDashboardService._to_number(row.get(metric))
+                column_meta[entity] = {
+                    "entity": entity,
+                    "scope": group,
+                    "plant_wise": bool(plant_wise),
+                }
+            # A later snapshot inside the same 5/15-minute bucket is authoritative.
+            bucket_values[bucket] = grouped
+
+        entities = sorted(column_meta, key=lambda value: (column_meta[value]["scope"], value))
+        columns = []
+        for entity in entities:
+            for metric in metrics:
+                key = f"c{len(columns) + 1}"
+                columns.append({
+                    "key": key,
+                    "label": f"{entity} - {valid_metrics[metric]} (MW)",
+                    "entity": entity,
+                    "scope": column_meta[entity]["scope"],
+                    "metric": metric,
+                })
+
+        rows = []
+        for bucket in sorted(bucket_values):
+            values = bucket_values[bucket]
+            output = {
+                "date": bucket.strftime("%d-%m-%Y"),
+                "time": bucket.strftime("%H:%M"),
+                "timestamp": bucket.isoformat(),
+            }
+            for column in columns:
+                value = values.get(column["entity"], {}).get(column["metric"])
+                output[column["key"]] = round(value, 2) if value is not None else None
+            rows.append(output)
+
+        return {
+            "start_date": start.isoformat(),
+            "end_date": end.isoformat(),
+            "interval_minutes": interval_minutes,
+            "plant_wise": bool(plant_wise),
+            "selections": selections,
+            "metrics": metrics,
+            "columns": columns,
+            "rows": rows,
+        }
 
     @staticmethod
     def fetch_snapshot():

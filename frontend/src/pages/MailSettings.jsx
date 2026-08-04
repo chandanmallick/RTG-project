@@ -48,6 +48,12 @@ export default function MailSettings() {
     twoFactor: { ...(current.twoFactor || {}), mode, configuredMode: mode },
   }));
   const updateCredential = (field, value) => setCredentials((current) => ({ ...current, [field]: value }));
+  const updateTemplate = (key, field, value) => setSettings((current) => ({
+    ...current,
+    templates: (current.templates || []).map((template) => (
+      template.key === key ? { ...template, [field]: value } : template
+    )),
+  }));
 
   const save = async () => {
     setSaving(true);
@@ -65,6 +71,7 @@ export default function MailSettings() {
           clientId: credentials.clientId,
           clientSecret: credentials.clientSecret,
           twoFactorMode: settings.twoFactor?.configuredMode || settings.twoFactor?.mode || "off",
+          templates: settings.templates || [],
         },
         { headers: headers() },
       );
@@ -141,20 +148,12 @@ export default function MailSettings() {
               <Stack spacing={2}>
                 <FormControlLabel
                   control={<Switch checked={Boolean(settings.enabled)} onChange={(event) => update("enabled", event.target.checked)} />}
-                  label={<Typography fontWeight={850}>Send mail when replacement duty is assigned</Typography>}
+                  label={<Typography fontWeight={850}>Enable workflow email delivery</Typography>}
                 />
                 <TextField fullWidth label="Sender mailbox" value={settings.sender || ""} onChange={(event) => update("sender", event.target.value)} helperText="Mailbox authorized for Microsoft Graph sendMail." />
-                <TextField fullWidth label="Subject template" value={settings.subjectTemplate || ""} onChange={(event) => update("subjectTemplate", event.target.value)} />
-                <TextField fullWidth multiline minRows={6} label="Mail body template" value={settings.bodyTemplate || ""} onChange={(event) => update("bodyTemplate", event.target.value)} />
                 <Box>
-                  <Typography sx={{ fontSize: 11, color: "#64748B", fontWeight: 800, mb: .8 }}>AVAILABLE PLACEHOLDERS</Typography>
-                  <Stack direction="row" useFlexGap flexWrap="wrap" gap={.7}>
-                    {(settings.allowedPlaceholders || []).map((item) => <Chip key={item} size="small" label={`{${item}}`} variant="outlined" />)}
-                  </Stack>
+                  <Typography sx={{ fontSize: 12.5, color: "#64748B" }}>This is the master delivery switch. Each workflow template below can also be enabled or disabled independently.</Typography>
                 </Box>
-                <Button variant="contained" startIcon={<Save size={16} />} onClick={save} disabled={saving} sx={{ alignSelf: "flex-start", bgcolor: "#0057B7", fontWeight: 900, textTransform: "none" }}>
-                  {saving ? "Saving..." : "Save mail settings"}
-                </Button>
               </Stack>
             </Paper>
 
@@ -202,6 +201,36 @@ export default function MailSettings() {
               <Alert icon={<KeyRound size={18} />} severity={settings.credentialsConfigured ? "success" : "warning"} sx={{ mt: 2 }}>
                 {settings.credentialsConfigured ? "Microsoft Graph credentials are configured. Leave a field blank to retain it." : "Enter all three credentials, sender mailbox, enable mail, then save."}
               </Alert>
+            </Paper>
+
+            <Paper variant="outlined" sx={{ p: 2.2, borderRadius: 3, borderColor: "#CFE1F8", gridColumn: "1 / -1" }}>
+              <Box sx={{ mb: 2 }}>
+                <Typography sx={{ fontSize: 18, fontWeight: 950, color: "#08103A" }}>Workflow mail templates</Typography>
+                <Typography sx={{ mt: .35, fontSize: 12.5, color: "#64748B" }}>Correct the subject or mail body whenever required. A disabled template continues to create portal notifications but does not send email.</Typography>
+              </Box>
+              <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", xl: "repeat(2,minmax(0,1fr))" }, gap: 1.5 }}>
+                {(settings.templates || []).map((template) => (
+                  <Paper key={template.key} variant="outlined" sx={{ p: 1.8, borderRadius: 2.5, borderColor: template.enabled ? "#AFCDF3" : "#E2E8F0", bgcolor: template.enabled ? "#F8FBFF" : "#F8FAFC" }}>
+                    <FormControlLabel
+                      control={<Switch checked={Boolean(template.enabled)} onChange={(event) => updateTemplate(template.key, "enabled", event.target.checked)} />}
+                      label={<Typography sx={{ fontWeight: 900, color: "#0F172A" }}>{template.label}</Typography>}
+                    />
+                    <Stack spacing={1.3} sx={{ mt: 1 }}>
+                      <TextField size="small" fullWidth label="Subject template" value={template.subjectTemplate || ""} onChange={(event) => updateTemplate(template.key, "subjectTemplate", event.target.value)} />
+                      <TextField size="small" fullWidth multiline minRows={4} label="Mail body template" value={template.bodyTemplate || ""} onChange={(event) => updateTemplate(template.key, "bodyTemplate", event.target.value)} />
+                    </Stack>
+                  </Paper>
+                ))}
+              </Box>
+              <Box sx={{ mt: 2 }}>
+                <Typography sx={{ fontSize: 11, color: "#64748B", fontWeight: 800, mb: .8 }}>AVAILABLE PLACEHOLDERS</Typography>
+                <Stack direction="row" useFlexGap flexWrap="wrap" gap={.7}>
+                  {(settings.allowedPlaceholders || []).map((item) => <Chip key={item} size="small" label={`{${item}}`} variant="outlined" />)}
+                </Stack>
+              </Box>
+              <Button variant="contained" startIcon={<Save size={16} />} onClick={save} disabled={saving} sx={{ mt: 2, bgcolor: "#0057B7", fontWeight: 900, textTransform: "none" }}>
+                {saving ? "Saving..." : "Save mail and template settings"}
+              </Button>
             </Paper>
           </Box>
         )}

@@ -145,3 +145,18 @@ def require_page_write(user: dict, page_key: str):
     if not page_access.get("write"):
         raise HTTPException(status_code=403, detail="Write access is required for this page")
     return user
+
+
+def require_page_view(user: dict, page_key: str):
+    """Enforce a page's View right for page-specific read endpoints."""
+    employee_id = str(user.get("employeeId") or user.get("userId") or "").strip()
+    if employee_id == "50041":
+        return user
+    access = page_access_collection.find_one(
+        {"userId": employee_id},
+        {f"pages.{page_key}.view": 1},
+    ) or {}
+    page_access = ((access.get("pages") or {}).get(page_key) or {})
+    if not page_access.get("view"):
+        raise HTTPException(status_code=403, detail="View access is required for this page")
+    return user

@@ -24,9 +24,11 @@ from routes.rtg_dashboard_routes import router as rtg_dashboard_router
 from routes.psp_routes import router as psp_router
 from routes.frequency_routes import router as frequency_router
 from routes.old_logbook_routes import router as old_logbook_router
+from routes.outage_ml_routes import router as outage_ml_router
 from routes.crew_routes import router as crew_router
 from routes.crew_legacy_routes import router as crew_legacy_router
 from routes.dso_report_routes import router as dso_report_router
+from routes.plant_deviation_routes import router as plant_deviation_router
 
 import urllib3
 
@@ -121,6 +123,10 @@ app.include_router(
 )
 
 app.include_router(
+    outage_ml_router
+)
+
+app.include_router(
     crew_router
 )
 
@@ -130,6 +136,10 @@ app.include_router(
 
 app.include_router(
     dso_report_router
+)
+
+app.include_router(
+    plant_deviation_router
 )
 
 @app.on_event("startup")

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, BackgroundTasks
+from fastapi import APIRouter, BackgroundTasks, Depends
 from pydantic import BaseModel
 from datetime import date, timedelta, datetime
 import io
@@ -22,11 +22,21 @@ from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import column_index_from_string
 from fastapi.responses import StreamingResponse
 from routes.old_logbook_routes import COLLECTION_CONFIG, OLD_LOGBOOK_DB, clean_text, combine_fields, parse_logbook_date, to_jsonable
+from crew_legacy.admin_logic.auth_utils import get_authenticated_user, require_page_view, require_page_write
 
 router = APIRouter(
     prefix="/api/psp",
     tags=["PSP"]
 )
+
+
+def require_psp_settings_write(user=Depends(get_authenticated_user)):
+    """PSP source synchronization and configuration use PSP Settings rights."""
+    return require_page_write(user, "psp_admin")
+
+
+def require_psp_settings_view(user=Depends(get_authenticated_user)):
+    return require_page_view(user, "psp_admin")
 
 PSP_PEAK_BASELINES = {
     "BIHAR": {
@@ -498,7 +508,7 @@ async def get_sync_progress():
     except Exception as e:
         return {"success": False, "message": str(e)}
 
-@router.post("/run-range")
+@router.post("/run-range", dependencies=[Depends(require_psp_settings_write)])
 async def run_psp_range(req: DateRangeRequest, background_tasks: BackgroundTasks):
     try:
         start_dt = date.fromisoformat(req.start_date)
@@ -523,7 +533,7 @@ async def run_psp_range(req: DateRangeRequest, background_tasks: BackgroundTasks
         "message": f"Sync task triggered in background from {req.start_date} to {req.end_date}."
     }
 
-@router.post("/sync-date/{date_str}")
+@router.post("/sync-date/{date_str}", dependencies=[Depends(require_psp_settings_write)])
 async def sync_single_date(date_str: str):
     try:
         dt = date.fromisoformat(date_str)
@@ -623,7 +633,7 @@ async def get_nldc_demand_sync_progress():
     except Exception as e:
         return {"success": False, "message": str(e)}
 
-@router.post("/nldc-demand/run-range")
+@router.post("/nldc-demand/run-range", dependencies=[Depends(require_psp_settings_write)])
 async def run_nldc_demand_range(req: DateRangeRequest, background_tasks: BackgroundTasks):
     try:
         start_dt = date.fromisoformat(req.start_date)
@@ -651,7 +661,7 @@ async def run_nldc_demand_range(req: DateRangeRequest, background_tasks: Backgro
         "message": f"NLDC PSP demand sync started from {req.start_date} to {req.end_date}."
     }
 
-@router.post("/nldc-demand/sync-date/{date_str}")
+@router.post("/nldc-demand/sync-date/{date_str}", dependencies=[Depends(require_psp_settings_write)])
 async def sync_nldc_demand_date(date_str: str):
     try:
         dt = date.fromisoformat(date_str)
@@ -955,7 +965,7 @@ async def get_india_15_min_demand_sync_progress():
     except Exception as e:
         return {"success": False, "message": str(e)}
 
-@router.post("/india-15-min-demand/run-range")
+@router.post("/india-15-min-demand/run-range", dependencies=[Depends(require_psp_settings_write)])
 async def run_india_15_min_demand_range(req: DateRangeRequest, background_tasks: BackgroundTasks):
     try:
         start_dt = date.fromisoformat(req.start_date)
@@ -983,7 +993,7 @@ async def run_india_15_min_demand_range(req: DateRangeRequest, background_tasks:
         "message": f"India 15 Min demand sync started from {req.start_date} to {req.end_date}."
     }
 
-@router.post("/india-15-min-demand/sync-date/{date_str}")
+@router.post("/india-15-min-demand/sync-date/{date_str}", dependencies=[Depends(require_psp_settings_write)])
 async def sync_india_15_min_demand_date(date_str: str):
     try:
         dt = date.fromisoformat(date_str)
@@ -1384,7 +1394,7 @@ async def get_all_state_demand_sync_progress():
     except Exception as e:
         return {"success": False, "message": str(e)}
 
-@router.post("/all-state-demand/run-range")
+@router.post("/all-state-demand/run-range", dependencies=[Depends(require_psp_settings_write)])
 async def run_all_state_demand_range(req: DateRangeRequest, background_tasks: BackgroundTasks):
     try:
         start_dt = date.fromisoformat(req.start_date)
@@ -1412,7 +1422,7 @@ async def run_all_state_demand_range(req: DateRangeRequest, background_tasks: Ba
         "message": f"All State demand sync started from {req.start_date} to {req.end_date}."
     }
 
-@router.post("/all-state-demand/sync-date/{date_str}")
+@router.post("/all-state-demand/sync-date/{date_str}", dependencies=[Depends(require_psp_settings_write)])
 async def sync_all_state_demand_date(date_str: str):
     try:
         dt = date.fromisoformat(date_str)
@@ -1429,7 +1439,7 @@ async def sync_all_state_demand_date(date_str: str):
             "message": str(e)
         }
 
-@router.post("/refresh-sources")
+@router.post("/refresh-sources", dependencies=[Depends(require_psp_settings_write)])
 async def refresh_psp_sources(date_str: str = None):
     try:
         target_date = date.fromisoformat(date_str) if date_str else date.today() - timedelta(days=1)
@@ -1454,7 +1464,7 @@ async def refresh_psp_sources(date_str: str = None):
         traceback.print_exc()
         return {"success": False, "message": str(e)}
 
-@router.get("/config")
+@router.get("/config", dependencies=[Depends(require_psp_settings_view)])
 async def get_psp_config():
     config_service = PipelineConfigService()
     config = config_service.get_config("PSP")
@@ -1521,7 +1531,7 @@ async def get_psp_config():
         "config": config
     }
 
-@router.post("/config")
+@router.post("/config", dependencies=[Depends(require_psp_settings_write)])
 async def save_psp_config(req: PSPConfigRequest):
     try:
         db = MongoService()
@@ -1561,7 +1571,7 @@ async def save_psp_config(req: PSPConfigRequest):
             "message": str(e)
         }
 
-@router.get("/portfolio-mapping")
+@router.get("/portfolio-mapping", dependencies=[Depends(require_psp_settings_view)])
 async def get_psp_portfolio_mapping():
     try:
         db = MongoService()
@@ -1580,7 +1590,7 @@ async def get_psp_portfolio_mapping():
     except Exception as e:
         return {"success": False, "message": str(e), "data": []}
 
-@router.put("/portfolio-mapping")
+@router.put("/portfolio-mapping", dependencies=[Depends(require_psp_settings_write)])
 async def save_psp_portfolio_mapping(rows: list[PSPPortfolioMappingRow]):
     try:
         db = MongoService()
@@ -1613,7 +1623,7 @@ async def save_psp_portfolio_mapping(rows: list[PSPPortfolioMappingRow]):
     except Exception as e:
         return {"success": False, "message": str(e)}
 
-@router.get("/portfolio-curve-headers")
+@router.get("/portfolio-curve-headers", dependencies=[Depends(require_psp_settings_view)])
 async def get_psp_portfolio_curve_headers(date_str: str = None):
     return await get_psp_curve_headers(date_str)
 
@@ -3151,7 +3161,7 @@ def build_generation_outage_changes(yesterday_rows, day_before_rows):
         "net_mw": round(restored_mw - tripped_mw, 2),
     }
 
-@router.get("/power-system-base")
+@router.get("/power-system-base", dependencies=[Depends(require_psp_settings_view)])
 async def get_power_system_base(date_str: str = None):
     db = MongoService()
     target_date_str = date_str or date.today().strftime("%Y-%m-%d")
@@ -3161,7 +3171,7 @@ async def get_power_system_base(date_str: str = None):
         "rows": get_power_system_base_rows(db, target_date_str)
     }
 
-@router.put("/power-system-base")
+@router.put("/power-system-base", dependencies=[Depends(require_psp_settings_write)])
 async def save_power_system_base(req: PSPPowerSystemBaseRequest):
     try:
         date.fromisoformat(req.effective_date)

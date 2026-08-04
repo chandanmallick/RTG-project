@@ -32,7 +32,7 @@ def get_legacy_session():
 class DataProcessor:
 
     @staticmethod
-    def run_pipeline():
+    def run_pipeline(assign_legacy_plant_ids=True):
 
         session = get_legacy_session()
 
@@ -128,7 +128,8 @@ class DataProcessor:
 
         final_df = final_df.rename(columns=settings.RENAME_MAP)
 
-        final_df["plant_id"] = final_df.FK_REPORTING_STAGE.astype(str).str.zfill(5).map("RTG_ER{}".format)
+        if assign_legacy_plant_ids:
+            final_df["plant_id"] = final_df.FK_REPORTING_STAGE.astype(str).str.zfill(5).map("RTG_ER{}".format)
         final_df["region_name"] = "ERLDC"
         final_df["effective_capacity"] = final_df.installed_capacity
 

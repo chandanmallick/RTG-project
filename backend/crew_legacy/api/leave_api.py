@@ -61,6 +61,87 @@ def organization_leave_observer_ids(employee: dict) -> list[str]:
     ]
 
 
+def direct_reporting_officer_ids(employee: dict) -> list[str]:
+    """Resolve only the employee's direct reporting officer(s)."""
+    employee_id = clean_id(employee.get("userId") or employee.get("employeeId"))
+    values = []
+    try:
+        from crew_legacy.api.admin_api import resolve_employee_organization
+        resolved = resolve_employee_organization(
+            employee.get("manualFunctionIds", employee.get("functionIds")),
+            employee_id,
+        )
+        values.extend(resolved.get("reportingOfficerIds") or [])
+    except Exception:
+        stored = employee.get("reportingOfficerIds") or employee.get("reportingOfficerId") or []
+        values.extend(stored if isinstance(stored, list) else [stored])
+    return [
+        value for value in dict.fromkeys(clean_id(item) for item in values)
+        if value and value != employee_id
+    ]
+
+
+def employee_by_id(employee_id: str) -> dict:
+    employee_id = clean_id(employee_id)
+    if not employee_id:
+        return {}
+    return employee_collection.find_one({
+        "$or": [
+            {"userId": employee_id_filter(employee_id)},
+            {"employeeId": employee_id_filter(employee_id)},
+        ]
+    }) or {}
+
+
+def recipient_emails(employee_ids) -> list[str]:
+    emails = []
+    seen = set()
+    for employee_id in employee_ids or []:
+        employee = employee_by_id(employee_id)
+        email = clean_id(employee.get("gmail") or employee.get("email") or employee.get("mailId"))
+        key = email.lower()
+        if email and "@" in email and key not in seen:
+            seen.add(key)
+            emails.append(email)
+    return emails
+
+
+def group_sic_ids(date_str: str, group_name: str) -> list[str]:
+    records = employee_daily_collection.find({
+        "date": date_str,
+        "$or": [
+            {"groupName": group_name, "isSIC": True},
+            {
+                "isActingSIC": True,
+                "$or": [
+                    {"groupName": group_name},
+                    {"actingSICGroup": group_name},
+                ],
+            },
+        ],
+    }, {"employeeId": 1})
+    return list(dict.fromkeys(
+        clean_id(record.get("employeeId"))
+        for record in records
+        if clean_id(record.get("employeeId"))
+    ))
+
+
+def administrator_ids() -> list[str]:
+    records = employee_collection.find({
+        "$or": [
+            {"userId": "50041"},
+            {"employeeId": "50041"},
+            {"role": {"$regex": "^admin$", "$options": "i"}},
+            {"isAdmin": True},
+        ]
+    }, {"userId": 1, "employeeId": 1})
+    values = [clean_id(item.get("userId") or item.get("employeeId")) for item in records]
+    if "50041" not in values:
+        values.append("50041")
+    return [value for value in dict.fromkeys(values) if value]
+
+
 def daily_record(employee_id: str, date_str: str):
     return employee_daily_collection.find_one({
         "employeeId": employee_id_filter(employee_id),
@@ -674,7 +755,15 @@ def apply_leave(data: dict, user=Depends(get_authenticated_user)):
 
         ref_id=leave_group_id,
         action="VIEW_LEAVE",
-        type="LEAVE"
+        type="LEAVE",
+        template_key="leave_applied",
+        template_values={
+            "employee_name": emp.get("name"),
+            "employee_id": employee_id,
+            "leave_count": len(dates),
+            "leave_dates": dates[0] if len(dates) == 1 else f"{dates[0]} to {dates[-1]}",
+            "group_name": group_name,
+        },
     )
     return {
         "message": "Leave applied successfully",
@@ -858,16 +947,16 @@ def apply_leave_v2(data: dict, user=Depends(get_authenticated_user)):
             if clean_id(record.get("employeeId"))
         )
 
-    leave_observers = set(organization_leave_observer_ids(employee))
-    leave_observers.update(notified_sics)
-    leave_observers.discard(employee_id)
-    if leave_observers:
+    # Application-stage notification is intentionally limited to the SIC(s)
+    # responsible for the affected shift group.
+    notified_sics.discard(employee_id)
+    if notified_sics:
         groups = ", ".join(sorted({item["groupName"] for item in prepared if item.get("groupName")})) or "Not mapped"
         date_text = dates[0] if len(dates) == 1 else f"{dates[0]} to {dates[-1]}"
         notify_all(
-            email_list=[],
-            employee_ids=sorted(leave_observers),
-            subject="Leave application under your team",
+            email_list=recipient_emails(sorted(notified_sics)),
+            employee_ids=sorted(notified_sics),
+            subject="Leave application for SIC review",
             message=(
                 f"{employee.get('name')} ({employee_id}) applied for "
                 f"{len(inserted_ids)} leave day(s): {date_text}. Group: {groups}."
@@ -875,6 +964,14 @@ def apply_leave_v2(data: dict, user=Depends(get_authenticated_user)):
             ref_id=leave_group_id,
             action="VIEW_LEAVE",
             type="LEAVE",
+            template_key="leave_applied",
+            template_values={
+                "employee_name": employee.get("name"),
+                "employee_id": employee_id,
+                "leave_count": len(inserted_ids),
+                "leave_dates": date_text,
+                "group_name": groups,
+            },
         )
 
     return {"message": "Leave application submitted to the Shift-in-Charge", "leaveRecords": inserted_ids}
@@ -976,23 +1073,39 @@ def sic_forward_bulk(data: dict, user=Depends(get_authenticated_user)):
             "userId": employee_id_filter(dept_ic_id)
         }) if dept_ic_id else None
 
-        dept_email = dept_ic_emp.get("gmail") if dept_ic_emp else None
+        # After SIC approval: notify the employee, DIC, and the DIC's direct
+        # reporting officer(s), by both mail and portal notification.
+        forward_recipient_ids = [clean_id(leave.get("employeeId"))]
+        if dept_ic_id:
+            forward_recipient_ids.append(dept_ic_id)
+        if dept_ic_emp:
+            forward_recipient_ids.extend(direct_reporting_officer_ids(dept_ic_emp))
+        forward_recipient_ids = [
+            value for value in dict.fromkeys(forward_recipient_ids) if value
+        ]
 
-        # ðŸ”¥ NOTIFY DEPT IC
         notify_all(
-            email_list=[dept_email] if dept_email else [],
-            employee_ids=[dept_ic_id] if dept_ic_id else [],
-            subject="Leave Forwarded by SIC",
+            email_list=recipient_emails(forward_recipient_ids),
+            employee_ids=forward_recipient_ids,
+            subject="Leave Approved and Forwarded by SIC",
             message=f"""
-            Leave forwarded for approval
+            Leave approved by SIC and forwarded for final approval
 
             Name: {leave.get('name')}
+            Employee ID: {leave.get('employeeId')}
             Date: {leave.get('date')}
             Type: {leave.get('leaveType')}
             """,
             ref_id=str(leave["_id"]),
             action="VIEW_LEAVE",
-            type="LEAVE"
+            type="LEAVE",
+            template_key="leave_sic_forwarded",
+            template_values={
+                "employee_name": leave.get("name"),
+                "employee_id": leave.get("employeeId"),
+                "leave_date": leave.get("date"),
+                "leave_type": leave.get("leaveType"),
+            },
         )
 
         updated_count += 1
@@ -1005,6 +1118,7 @@ def sic_forward_bulk(data: dict, user=Depends(get_authenticated_user)):
 def sic_reject_bulk(data: dict, user=Depends(get_authenticated_user)):
 
     leave_ids = data.get("leaveIds", [])
+    comment = clean_id(data.get("comment"))[:1000]
 
     if not leave_ids:
         raise HTTPException(400, "No leave selected")
@@ -1032,7 +1146,7 @@ def sic_reject_bulk(data: dict, user=Depends(get_authenticated_user)):
             "date": leave["date"]
         })
 
-        if not duty or not duty.get("isSIC"):
+        if not is_admin(user) and (not duty or not duty.get("isSIC")):
             continue
 
         # Skip already rejected
@@ -1040,14 +1154,27 @@ def sic_reject_bulk(data: dict, user=Depends(get_authenticated_user)):
             continue
 
         # ðŸ”¥ UPDATE
+        rejected_on = datetime.utcnow()
+        rejection = {
+            "stage": "SIC",
+            "comment": comment,
+            "rejectedBy": clean_id(user.get("employeeId")),
+            "rejectedByRole": "Administrator" if is_admin(user) else "SIC",
+            "rejectedOn": rejected_on,
+        }
         leave_request_collection.update_one(
             {"_id": leave["_id"]},
             {
                 "$set": {
                     "sicApprovalStatus": "Rejected",
                     "finalStatus": "Rejected",
-                    "updatedOn": datetime.utcnow()
-                }
+                    "rejectionComment": comment,
+                    "rejectedBy": rejection["rejectedBy"],
+                    "rejectedByRole": rejection["rejectedByRole"],
+                    "rejectedOn": rejected_on,
+                    "updatedOn": rejected_on,
+                },
+                "$push": {"rejectionHistory": rejection},
             }
         )
 
@@ -1080,10 +1207,19 @@ def sic_reject_bulk(data: dict, user=Depends(get_authenticated_user)):
 
             Date: {leave.get('date')}
             Type: {leave.get('leaveType')}
+            Comment: {comment or 'No comment provided'}
             """,
             ref_id=str(leave["_id"]),
             action="VIEW_LEAVE",
-            type="LEAVE"
+            type="LEAVE",
+            template_key="leave_sic_rejected",
+            template_values={
+                "employee_name": leave.get("name"),
+                "employee_id": leave.get("employeeId"),
+                "leave_date": leave.get("date"),
+                "leave_type": leave.get("leaveType"),
+                "comment": comment or "No comment provided",
+            },
         )
 
         updated += 1
@@ -1168,27 +1304,41 @@ def approve_leave_bulk(data: dict, user=Depends(get_authenticated_user)):
 
         mark_comp_off_used(leave)
 
-        # ðŸ”¥ GET EMP EMAIL
-        emp = employee_collection.find_one({
-            "userId": leave["employeeId"]
-        })
+        # After DIC final approval: notify the employee, group SIC/acting SIC,
+        # the DIC's direct reporting officer(s), and administrator(s).
+        dept_ic_id = leave_authority_id(leave)
+        dept_ic_emp = employee_by_id(dept_ic_id)
+        final_recipient_ids = [clean_id(leave.get("employeeId"))]
+        final_recipient_ids.extend(group_sic_ids(leave.get("date"), leave.get("groupName")))
+        if dept_ic_emp:
+            final_recipient_ids.extend(direct_reporting_officer_ids(dept_ic_emp))
+        final_recipient_ids.extend(administrator_ids())
+        final_recipient_ids = [
+            value for value in dict.fromkeys(final_recipient_ids) if value
+        ]
 
-        emp_email = emp.get("gmail") if emp else None
-
-        # ðŸ”¥ NOTIFY EMPLOYEE
         notify_all(
-            email_list=[emp_email] if emp_email else [],
-            employee_ids=[leave["employeeId"]],
-            subject="Leave Approved",
+            email_list=recipient_emails(final_recipient_ids),
+            employee_ids=final_recipient_ids,
+            subject="Leave Finally Approved by DIC",
             message=f"""
-            Your leave has been approved
+            Leave has received final approval from the DIC
 
+            Name: {leave.get('name')}
+            Employee ID: {leave.get('employeeId')}
             Date: {leave.get('date')}
             Type: {leave.get('leaveType')}
             """,
             ref_id=str(leave["_id"]),
             action="VIEW_LEAVE",
-            type="LEAVE"
+            type="LEAVE",
+            template_key="leave_dic_approved",
+            template_values={
+                "employee_name": leave.get("name"),
+                "employee_id": leave.get("employeeId"),
+                "leave_date": leave.get("date"),
+                "leave_type": leave.get("leaveType"),
+            },
         )
 
         updated_count += 1
@@ -1204,6 +1354,7 @@ def approve_leave_bulk(data: dict, user=Depends(get_authenticated_user)):
 def reject_bulk(data: dict, user=Depends(get_authenticated_user)):
 
     leave_ids = data.get("leaveIds", [])
+    comment = clean_id(data.get("comment"))[:1000]
 
     if not leave_ids:
         raise HTTPException(400, "No leave selected")
@@ -1230,14 +1381,27 @@ def reject_bulk(data: dict, user=Depends(get_authenticated_user)):
             continue
 
         # ðŸ”¥ UPDATE DB
+        rejected_on = datetime.utcnow()
+        rejection = {
+            "stage": "DIC",
+            "comment": comment,
+            "rejectedBy": clean_id(user.get("employeeId")),
+            "rejectedByRole": "Administrator" if is_admin(user) else "DIC",
+            "rejectedOn": rejected_on,
+        }
         leave_request_collection.update_one(
             {"_id": leave["_id"]},
             {
                 "$set": {
                     "deptApprovalStatus": "Rejected",
                     "finalStatus": "Rejected",
-                    "updatedOn": datetime.utcnow()
-                }
+                    "rejectionComment": comment,
+                    "rejectedBy": rejection["rejectedBy"],
+                    "rejectedByRole": rejection["rejectedByRole"],
+                    "rejectedOn": rejected_on,
+                    "updatedOn": rejected_on,
+                },
+                "$push": {"rejectionHistory": rejection},
             }
         )
 
@@ -1270,10 +1434,19 @@ def reject_bulk(data: dict, user=Depends(get_authenticated_user)):
 
             Date: {leave.get('date')}
             Type: {leave.get('leaveType')}
+            Comment: {comment or 'No comment provided'}
             """,
             ref_id=str(leave["_id"]),
             action="VIEW_LEAVE",
-            type="LEAVE"
+            type="LEAVE",
+            template_key="leave_dic_rejected",
+            template_values={
+                "employee_name": leave.get("name"),
+                "employee_id": leave.get("employeeId"),
+                "leave_date": leave.get("date"),
+                "leave_type": leave.get("leaveType"),
+                "comment": comment or "No comment provided",
+            },
         )
 
         updated += 1
@@ -1355,6 +1528,11 @@ def get_leave_list(
             "sicReplacementRequired": r.get("sicReplacementRequired", r.get("replacementRequired", False)),
             "dicReplacementRequired": r.get("dicReplacementRequired"),
             "replacementDecisionHistory": r.get("replacementDecisionHistory", []),
+            "rejectionHistory": r.get("rejectionHistory", []),
+            "rejectionComment": r.get("rejectionComment"),
+            "rejectedBy": r.get("rejectedBy"),
+            "rejectedByRole": r.get("rejectedByRole"),
+            "rejectedOn": r.get("rejectedOn"),
             "reason": r.get("reason"),
             "compOffId": r.get("compOffId"),
             "createdOn": r.get("createdOn"),

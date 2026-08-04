@@ -151,8 +151,6 @@ class MongoService:
         # -------------------------------------------------
         # GROUP STAGE DATA
         # -------------------------------------------------
-        df.to_excel("C:/Users/50041/Downloads/RTG Codebase/RTG Codebase/Outage/Test.xlsx")
-
         grouped = df.groupby(
             ["plant_id"],
             as_index=False

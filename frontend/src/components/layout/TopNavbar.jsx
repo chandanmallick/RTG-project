@@ -39,6 +39,7 @@ import {
   PhoneCall,
   MapPin,
   GraduationCap,
+  BrainCircuit,
   UserCheck,
   Settings2,
   CalendarRange,
@@ -159,6 +160,7 @@ export default function TopNavbar() {
     location.pathname === "/psp-report-checking" ||
     location.pathname === "/frequency-report" ||
     location.pathname === "/outage-analysis" ||
+    location.pathname === "/outage-analysis/ml-training" ||
     location.pathname === "/mis-report";
 
   const isReportPreparationActive = location.pathname.startsWith("/report-preparation/");
@@ -444,6 +446,16 @@ export default function TopNavbar() {
                     onClick={handleNavigate}
                   />
                   <DropdownItem
+                    title="ML Training Centre"
+                    description="Train outage classification and restoration models"
+                    icon={BrainCircuit}
+                    iconColor="#0057B8"
+                    iconBg="#EAF2FF"
+                    path="/outage-analysis/ml-training"
+                    active={location.pathname === "/outage-analysis/ml-training"}
+                    onClick={handleNavigate}
+                  />
+                  <DropdownItem
                     title="Generic Reports"
                     description="Spreadsheet and PDF MIS reports"
                     icon={FileText}
@@ -522,6 +534,26 @@ export default function TopNavbar() {
                     active={location.pathname === "/report-preparation/dso-morning"}
                     onClick={handleNavigate}
                   />
+                  <DropdownItem
+                    title="PSP Highlights"
+                    description="Operational highlights report and downloads"
+                    icon={TrendingUp}
+                    iconColor="#0057B7"
+                    iconBg="#EAF2FF"
+                    path="/report-preparation/psp-highlights"
+                    active={location.pathname === "/report-preparation/psp-highlights"}
+                    onClick={handleNavigate}
+                  />
+                  <DropdownItem
+                    title="Plant Deviation from I/C - MOP"
+                    description="Thermal and hydro plant deviation report"
+                    icon={Activity}
+                    iconColor="#0057B7"
+                    iconBg="#EAF2FF"
+                    path="/report-preparation/plant-deviation"
+                    active={location.pathname === "/report-preparation/plant-deviation"}
+                    onClick={handleNavigate}
+                  />
                 </Box>
               </motion.div>
             )}
@@ -585,7 +617,7 @@ export default function TopNavbar() {
                 >
                   {caretElement}
                   <Grid container spacing={2.5}>
-                    {/* Left side: Leave Module */}
+                    {/* Left side: Crew user workflows */}
                     <Grid item xs={5.2} sx={{ display: "flex", flexDirection: "column" }}>
                       <Typography
                         sx={{
@@ -597,7 +629,7 @@ export default function TopNavbar() {
                           textTransform: "uppercase"
                         }}
                       >
-                        Leave Module
+                        User Module
                       </Typography>
                       <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
                         <DropdownItem
@@ -626,6 +658,16 @@ export default function TopNavbar() {
                           path="/crew/leave"
                           active={location.pathname === "/crew/leave"}
                           onClick={handleNavigate}
+                        />
+                        <DropdownItem
+                          title="Replacement"
+                          icon={Wrench}
+                          iconColor="#16A085"
+                          iconBg="#E8F8F5"
+                          path="/crew/replacement"
+                          active={location.pathname === "/crew/replacement"}
+                          onClick={handleNavigate}
+                          allowWorkflowAccess
                         />
                       </Box>
                     </Grid>
@@ -690,15 +732,33 @@ export default function TopNavbar() {
                           onClick={handleNavigate}
                           allowWorkflowAccess
                         />
-                        <DropdownItem
-                          title="Roster"
-                          icon={CalendarRange}
-                          iconColor="#E67E22"
-                          iconBg="#FEF4EA"
-                          path="/crew/roster"
-                          active={location.pathname === "/crew/roster"}
-                          onClick={handleNavigate}
-                        />
+                        {(user?.permissions?.crew_roster?.view !== false
+                          || user?.permissions?.crew_presentation?.view !== false) && (
+                          <Box sx={{ p: .65, border: "1px solid #D9E6F5", borderRadius: "12px", background: "#F8FBFF" }}>
+                            <Typography sx={{ px: 1, pt: .3, pb: .45, fontSize: 10, fontWeight: 900, color: "#0057B7", letterSpacing: ".06em", textTransform: "uppercase" }}>
+                              Roster
+                            </Typography>
+                            <DropdownItem
+                              title="Shift Duty Roster"
+                              icon={CalendarRange}
+                              iconColor="#E67E22"
+                              iconBg="#FEF4EA"
+                              path="/crew/roster"
+                              active={location.pathname === "/crew/roster"}
+                              onClick={handleNavigate}
+                            />
+                            <DropdownItem
+                              title="Morning Presentation"
+                              description="Monthly two-day presentation cycle"
+                              icon={CalendarRange}
+                              iconColor="#0057B7"
+                              iconBg="#EAF2FF"
+                              path="/crew/morning-presentation"
+                              active={location.pathname === "/crew/morning-presentation"}
+                              onClick={handleNavigate}
+                            />
+                          </Box>
+                        )}
                         <DropdownItem
                           title="Group Management"
                           icon={Settings}
@@ -716,15 +776,6 @@ export default function TopNavbar() {
                           iconBg="#EAF2FF"
                           path="/crew/dropdowns"
                           active={location.pathname === "/crew/dropdowns"}
-                          onClick={handleNavigate}
-                        />
-                        <DropdownItem
-                          title="Replacement"
-                          icon={Wrench}
-                          iconColor="#16A085"
-                          iconBg="#E8F8F5"
-                          path="/crew/replacement"
-                          active={location.pathname === "/crew/replacement"}
                           onClick={handleNavigate}
                         />
                       </Box>

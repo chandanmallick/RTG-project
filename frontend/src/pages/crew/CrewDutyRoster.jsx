@@ -305,7 +305,7 @@ export default function CrewDutyRoster() {
           </div>
 
           {/* Compact Duty Roster Table */}
-          <table className="crew-roster-print-table" style={{ width: "100%", borderCollapse: "collapse", tableLayout: "auto", fontSize: "10px", fontFamily: "Arial, sans-serif" }}>
+          <table data-crew-table-tools="off" className="crew-roster-print-table" style={{ width: "100%", borderCollapse: "collapse", tableLayout: "auto", fontSize: "10px", fontFamily: "Arial, sans-serif" }}>
             <thead>
               <tr>
                 <th style={{ border: "1px solid #000000", padding: "4px 6px", background: "#E8E8E8", fontWeight: 800, textAlign: "center" }}>Group</th>
@@ -390,9 +390,9 @@ export default function CrewDutyRoster() {
             ))}
           </div>
 
-          {/* Special Instructions section */}
-          <div className="crew-roster-print-notes" style={{ marginTop: "15px", fontSize: "10px", fontFamily: "Arial, sans-serif" }}>
-            <strong>Special Instructions:</strong>
+          {/* Bilingual Special Instructions section */}
+          <div className="crew-roster-print-notes" style={{ marginTop: "15px", fontSize: "10px", fontFamily: '"Nirmala UI", "Noto Sans Devanagari", Arial, sans-serif' }}>
+            <strong>विशेष निर्देश / Special Instructions:</strong>
             <div style={{ marginTop: "4px" }}>
               {(instructions || lastPublishedRoster?.instructions || DEFAULT_INSTRUCTIONS).split("\n").map((line, lIdx) => (
                 <div key={lIdx} style={{ marginBottom: "2.5px", lineHeight: "1.4", color: "#000000" }}>{line}</div>
@@ -919,7 +919,7 @@ export default function CrewDutyRoster() {
           </Box>
         ) : (
           <Box sx={{ overflow: "auto" }}>
-            <Table size="small" stickyHeader>
+            <Table size="small" stickyHeader data-crew-table-tools="off">
               <TableHead>
                 <TableRow>
                   <TableCell sx={{ position: "sticky", left: 0, zIndex: 5, minWidth: 170, background: "#F8FAFC", fontWeight: 900, borderRight: "1px solid #E2E8F0" }}>
@@ -991,8 +991,8 @@ export default function CrewDutyRoster() {
 
       {/* 5. SPECIAL INSTRUCTIONS SECTION */}
       <Box sx={{ mt: 1 }}>
-        <Typography sx={{ fontWeight: 800, fontSize: 16, color: "#334155", mb: 1.5 }}>
-          Special Instructions
+        <Typography sx={{ fontWeight: 800, fontSize: 16, color: "#334155", mb: 1.5, fontFamily: '"Nirmala UI", "Noto Sans Devanagari", Inter, sans-serif' }}>
+          विशेष निर्देश / Special Instructions
         </Typography>
         <TextField
           value={instructions}

@@ -9,6 +9,9 @@ client = MongoClient(MONGO_URI)
 db = client[DATABASE_NAME]
 
 employee_collection = db["employees"]
+designation_master_collection = db["designation_master"]
+morning_presentation_config_collection = db["morning_presentation_config"]
+morning_presentation_roster_collection = db["morning_presentation_roster"]
 DutyLeave_collection= db["DutyLeaveTypes"]
 roster_group_collection = db["roster_group_history"]
 roster_master_collection = db["roster_master_collection"]

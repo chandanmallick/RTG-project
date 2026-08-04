@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import dayjs from "dayjs";
 import DatePicker from "react-multi-date-picker";
 import {
@@ -9,7 +9,13 @@ import {
   Checkbox,
   Chip,
   CircularProgress,
+  Collapse,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
   FormControl,
+  FormControlLabel,
   InputLabel,
   MenuItem,
   Paper,
@@ -22,10 +28,12 @@ import {
   TableHead,
   TableRow,
   TextField,
+  Tooltip,
   Typography,
 } from "@mui/material";
 import { CalendarDays, CheckCircle2, GripVertical, RefreshCw, Send, ShieldCheck, User } from "lucide-react";
 import api from "./api";
+import crewApi from "../services/crewApi";
 
 const employeeIdOf = (employee) => String(employee?.employeeId || employee?.userId || "").trim();
 const statusColor = (status) => ({
@@ -38,8 +46,20 @@ const statusColor = (status) => ({
   Pending: "warning",
 }[status] || "default");
 
+const compactDutyStyle = (duty = {}) => {
+  const leave = String(duty.leaveStatus || "").toLowerCase();
+  const shift = String(duty.shift || "").toUpperCase();
+  if (leave && !["rejected", "cancelled", "canceled", "withdrawn"].includes(leave)) return { bg: "#FDE8EC", color: "#C62828", border: "#F3A8B3" };
+  if (duty.trainingName || shift.includes("TRAINING") || shift.includes("TOUR")) return { bg: "#F0E7FA", color: "#6A1B9A", border: "#CDB4EA" };
+  if (["MORNING", "M1", "M2"].includes(shift)) return { bg: "#E7F6E9", color: "#000", border: "#A9DDB2" };
+  if (["EVENING", "E1", "E2"].includes(shift)) return { bg: "#FFF4CC", color: "#000", border: "#E8D184" };
+  if (["NIGHT", "N1", "N2"].includes(shift)) return { bg: "#E4F2FF", color: "#000", border: "#A7CFEF" };
+  if (["OFF", "O1", "O2"].includes(shift)) return { bg: "#ECEFF3", color: "#000", border: "#C9D0D9" };
+  return { bg: "#F8FAFC", color: "#000", border: "#D6DEE8" };
+};
+
 function StatusChip({ value }) {
-  return <Chip size="small" label={value || "Pending"} color={statusColor(value)} variant="outlined" sx={{ fontWeight: 800 }} />;
+  return <Chip size="small" label={value === "Forwarded" ? "Approved & Forwarded" : value || "Pending"} color={statusColor(value)} variant="outlined" sx={{ fontWeight: 800 }} />;
 }
 
 function SectionTitle({ icon: Icon, title, subtitle, count }) {
@@ -73,6 +93,23 @@ export default function LeaveManagement() {
   const [replacementChoices, setReplacementChoices] = useState({});
   const [completedFrom, setCompletedFrom] = useState(dayjs().subtract(1, "day").format("YYYY-MM-DD"));
   const [completedTo, setCompletedTo] = useState("");
+  const [workflowView, setWorkflowView] = useState("table");
+  const [approvalRoster, setApprovalRoster] = useState([]);
+  const [approvalDates, setApprovalDates] = useState([]);
+  const [approvalFrom, setApprovalFrom] = useState("");
+  const [approvalTo, setApprovalTo] = useState("");
+  const [approvalCalendarLoading, setApprovalCalendarLoading] = useState(false);
+  const [approvalCalendarError, setApprovalCalendarError] = useState("");
+  const [rejectDialog, setRejectDialog] = useState({ open: false, stage: "sic", leaves: [] });
+  const [rejectComment, setRejectComment] = useState("");
+  const [activeSection, setActiveSection] = useState(null);
+
+  const openSection = (section) => {
+    setActiveSection(section);
+    window.setTimeout(() => {
+      document.getElementById(`leave-workspace-${section}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 180);
+  };
 
   const loadLeaves = async () => {
     const { data } = await api.get("/leave/list", {
@@ -226,13 +263,28 @@ export default function LeaveManagement() {
     { leaves: [{ id: leave.id, replacementRequired: replacementChoice(leave, "sic") }] },
     "Approved and forwarded to Leave Approving Authority.",
   );
-  const sicReject = (leave) => act("/leave/sic-reject-bulk", { leaveIds: [leave.id] }, "Leave rejected by SIC.");
+  const openRejectDialog = (stage, targetLeaves) => {
+    setRejectComment("");
+    setRejectDialog({ open: true, stage, leaves: targetLeaves });
+  };
+  const confirmReject = async () => {
+    const targetLeaves = rejectDialog.leaves || [];
+    if (!targetLeaves.length) return;
+    const isSicStage = rejectDialog.stage === "sic";
+    setRejectDialog((current) => ({ ...current, open: false }));
+    await act(
+      isSicStage ? "/leave/sic-reject-bulk" : "/leave/reject-bulk",
+      { leaveIds: targetLeaves.map((leave) => leave.id), comment: rejectComment.trim() },
+      isSicStage ? "Leave rejected by SIC." : "Leave rejected by DIC.",
+    );
+  };
+  const sicReject = (leave) => openRejectDialog("sic", [leave]);
   const finalApprove = (leave) => act(
     "/leave/approve-bulk",
     { leaves: [{ id: leave.id, replacementRequired: replacementChoice(leave, "dic") }] },
     "Leave approved.",
   );
-  const finalReject = (leave) => act("/leave/reject-bulk", { leaveIds: [leave.id] }, "Leave rejected.");
+  const finalReject = (leave) => openRejectDialog("dic", [leave]);
 
   const pending = useMemo(() => leaves.filter((leave) => !["Approved", "Rejected", "Withdrawn", "Cancelled"].includes(leave.finalStatus)), [leaves]);
   const completed = useMemo(() => leaves.filter((leave) => ["Approved", "Rejected", "Withdrawn", "Cancelled"].includes(leave.finalStatus)), [leaves]);
@@ -248,6 +300,101 @@ export default function LeaveManagement() {
     () => selectedWorkflowLeaves.filter((leave) => leave.canFinalAct),
     [selectedWorkflowLeaves],
   );
+  const calendarLeaves = useMemo(() => {
+    const actionable = pending.filter((leave) => leave.canSICAct || leave.canFinalAct);
+    if (role.isAdmin || role.isDeptIC || role.isLeaveAuthority) return actionable;
+    if (role.isSIC) {
+      return actionable.filter((leave) => leave.canSICAct && leave.groupName === role.groupName);
+    }
+    return [];
+  }, [pending, role]);
+  const calendarOverlayLeaves = useMemo(() => {
+    if (role.isAdmin || role.isDeptIC || role.isLeaveAuthority) return leaves;
+    if (role.isSIC) return leaves.filter((leave) => leave.groupName === role.groupName);
+    return [];
+  }, [leaves, role]);
+  const pendingCalendarRange = useMemo(() => {
+    const dates = calendarLeaves.map((leave) => leave.date).filter(Boolean).sort();
+    const fallback = dayjs().format("YYYY-MM-DD");
+    return { start: dates[0] || fallback, end: dates[dates.length - 1] || dates[0] || fallback };
+  }, [calendarLeaves]);
+  const effectiveApprovalFrom = approvalFrom || pendingCalendarRange.start;
+  const effectiveApprovalTo = approvalTo || pendingCalendarRange.end;
+  const visibleCalendarLeaves = useMemo(() => calendarLeaves.filter((leave) => (
+    (!effectiveApprovalFrom || leave.date >= effectiveApprovalFrom)
+    && (!effectiveApprovalTo || leave.date <= effectiveApprovalTo)
+  )), [calendarLeaves, effectiveApprovalFrom, effectiveApprovalTo]);
+  const calendarDates = useMemo(
+    () => Array.from(new Set(calendarLeaves.map((leave) => leave.date).filter(Boolean))).sort(),
+    [calendarLeaves],
+  );
+  const calendarGroups = useMemo(
+    () => Array.from(new Set(calendarLeaves.map((leave) => leave.groupName || "Unmapped"))).sort((a, b) => a.localeCompare(b, undefined, { numeric: true })),
+    [calendarLeaves],
+  );
+
+  useEffect(() => {
+    if (workflowView !== "calendar") return;
+    let cancelled = false;
+    const loadApprovalRoster = async () => {
+      setApprovalCalendarLoading(true);
+      setApprovalCalendarError("");
+      try {
+        const start = effectiveApprovalFrom;
+        const end = effectiveApprovalTo >= start ? effectiveApprovalTo : start;
+        const chunks = [];
+        let cursor = dayjs(start);
+        const finalDate = dayjs(end);
+        while (cursor.isBefore(finalDate) || cursor.isSame(finalDate, "day")) {
+          const proposedEnd = cursor.add(44, "day");
+          const chunkEnd = proposedEnd.isAfter(finalDate) ? finalDate : proposedEnd;
+          chunks.push([cursor.format("YYYY-MM-DD"), chunkEnd.format("YYYY-MM-DD")]);
+          cursor = chunkEnd.add(1, "day");
+        }
+        const responses = await Promise.all(chunks.map(([from, to]) => crewApi.calendar(from, to)));
+        if (cancelled) return;
+
+        const groupMap = new Map();
+        responses.flat().forEach((group) => {
+          if (!groupMap.has(group.groupName)) groupMap.set(group.groupName, new Map());
+          const employeeMap = groupMap.get(group.groupName);
+          (group.employees || []).forEach((person) => {
+            const key = String(person.employeeId || "");
+            const current = employeeMap.get(key) || { ...person, duties: {} };
+            current.duties = { ...(current.duties || {}), ...(person.duties || {}) };
+            employeeMap.set(key, current);
+          });
+        });
+
+        let groups = Array.from(groupMap.entries()).map(([groupName, employeeMap]) => ({
+          groupName,
+          employees: Array.from(employeeMap.values()).sort((a, b) => Number(Boolean(b.IsSIC)) - Number(Boolean(a.IsSIC))),
+        })).sort((a, b) => a.groupName.localeCompare(b.groupName, undefined, { numeric: true }));
+        if (role.isSIC && !role.isAdmin && !role.isDeptIC && !role.isLeaveAuthority) {
+          groups = groups.filter((group) => group.groupName === role.groupName);
+        }
+
+        const dates = [];
+        let dateCursor = dayjs(start);
+        while (dateCursor.isBefore(finalDate) || dateCursor.isSame(finalDate, "day")) {
+          dates.push(dateCursor.format("YYYY-MM-DD"));
+          dateCursor = dateCursor.add(1, "day");
+        }
+        setApprovalRoster(groups);
+        setApprovalDates(dates);
+      } catch (error) {
+        if (!cancelled) {
+          setApprovalRoster([]);
+          setApprovalDates([]);
+          setApprovalCalendarError(error.response?.data?.detail || "Leave calendar could not be loaded.");
+        }
+      } finally {
+        if (!cancelled) setApprovalCalendarLoading(false);
+      }
+    };
+    loadApprovalRoster();
+    return () => { cancelled = true; };
+  }, [workflowView, effectiveApprovalFrom, effectiveApprovalTo, role]);
   const usedCompOffIds = rows.map((row) => row.compOffId).filter(Boolean);
 
   const toggleWorkflowSelection = (leaveId, checked) => {
@@ -264,6 +411,27 @@ export default function LeaveManagement() {
     }
     setSelectedWorkflowIds(pending.filter((leave) => leave.canSICAct || leave.canFinalAct).map((leave) => leave.id));
   };
+  const toggleCalendarDate = (date, checked) => {
+    const ids = visibleCalendarLeaves.filter((leave) => leave.date === date).map((leave) => leave.id);
+    setSelectedWorkflowIds((current) => checked
+      ? Array.from(new Set([...current, ...ids]))
+      : current.filter((id) => !ids.includes(id)));
+  };
+  const toggleAllCalendarSelection = (checked) => {
+    const ids = visibleCalendarLeaves.map((leave) => leave.id);
+    setSelectedWorkflowIds((current) => checked
+      ? Array.from(new Set([...current, ...ids]))
+      : current.filter((id) => !ids.includes(id)));
+  };
+  const calendarEmployeeLeaveIds = (employeeId) => visibleCalendarLeaves
+    .filter((leave) => String(leave.employeeId) === String(employeeId))
+    .map((leave) => leave.id);
+  const toggleCalendarEmployee = (employeeId, checked) => {
+    const ids = calendarEmployeeLeaveIds(employeeId);
+    setSelectedWorkflowIds((current) => checked
+      ? Array.from(new Set([...current, ...ids]))
+      : current.filter((id) => !ids.includes(id)));
+  };
   const sicForwardBulk = () => {
     if (!selectedSicLeaves.length) return setNotice({ severity: "warning", text: "Select one or more SIC-pending leaves first." });
     return act(
@@ -274,11 +442,7 @@ export default function LeaveManagement() {
   };
   const sicRejectBulk = () => {
     if (!selectedSicLeaves.length) return setNotice({ severity: "warning", text: "Select one or more SIC-pending leaves first." });
-    return act(
-      "/leave/sic-reject-bulk",
-      { leaveIds: selectedSicLeaves.map((leave) => leave.id) },
-      "Leave rejected by SIC.",
-    );
+    return openRejectDialog("sic", selectedSicLeaves);
   };
   const finalApproveBulk = () => {
     if (!selectedFinalLeaves.length) return setNotice({ severity: "warning", text: "Select one or more forwarded leaves first." });
@@ -290,11 +454,7 @@ export default function LeaveManagement() {
   };
   const finalRejectBulk = () => {
     if (!selectedFinalLeaves.length) return setNotice({ severity: "warning", text: "Select one or more forwarded leaves first." });
-    return act(
-      "/leave/reject-bulk",
-      { leaveIds: selectedFinalLeaves.map((leave) => leave.id) },
-      "Leave rejected.",
-    );
+    return openRejectDialog("dic", selectedFinalLeaves);
   };
   const refreshCompleted = async () => {
     if (completedFrom && completedTo && completedTo < completedFrom) {
@@ -310,12 +470,216 @@ export default function LeaveManagement() {
     }
   };
 
+  const workflowCalendar = () => {
+    const hasSicActions = calendarLeaves.some((leave) => leave.canSICAct);
+    const hasFinalActions = calendarLeaves.some((leave) => leave.canFinalAct);
+    return (
+      <Box sx={{ display: "grid", gap: 1.2 }}>
+        <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 1.5, flexWrap: "wrap" }}>
+          <Typography sx={{ color: "#64748B", fontSize: 11.5, fontWeight: 700 }}>
+            {role.isSIC && !role.isAdmin && !role.isDeptIC
+              ? `${role.groupName || "Your shift"} only · tick leave-date boxes to approve.`
+              : "All shift groups · tick leave-date boxes for bulk approval."}
+          </Typography>
+          <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
+            {hasSicActions && <>
+              <Button size="small" variant="contained" disabled={!selectedSicLeaves.length} startIcon={<Send size={14} />} onClick={sicForwardBulk}>Approve & Forward ({selectedSicLeaves.length})</Button>
+              <Button size="small" color="error" variant="outlined" disabled={!selectedSicLeaves.length} onClick={sicRejectBulk}>Reject ({selectedSicLeaves.length})</Button>
+            </>}
+            {hasFinalActions && <>
+              <Button size="small" color="success" variant="contained" disabled={!selectedFinalLeaves.length} startIcon={<CheckCircle2 size={14} />} onClick={finalApproveBulk}>DIC Final Approve ({selectedFinalLeaves.length})</Button>
+              <Button size="small" color="error" variant="outlined" disabled={!selectedFinalLeaves.length} onClick={finalRejectBulk}>Reject ({selectedFinalLeaves.length})</Button>
+            </>}
+          </Stack>
+        </Box>
+
+        <TableContainer sx={{ maxHeight: 430, border: "1px solid #CBD5E1", borderRadius: 2, background: "#FFFFFF" }}>
+          <Table size="small" stickyHeader sx={{ minWidth: Math.max(760, 150 + calendarDates.length * 180), tableLayout: "fixed" }}>
+            <TableHead>
+              <TableRow>
+                <TableCell sx={{ width: 150, position: "sticky", left: 0, zIndex: 4, background: "#EAF2FF", color: "#0057B7", fontWeight: 950 }}>Shift group</TableCell>
+                {calendarDates.map((date) => {
+                  const ids = visibleCalendarLeaves.filter((leave) => leave.date === date).map((leave) => leave.id);
+                  const selectedCount = ids.filter((id) => selectedWorkflowIds.includes(id)).length;
+                  return (
+                    <TableCell key={date} align="center" sx={{ width: 180, background: "#EAF2FF", color: "#0F172A", p: .65 }}>
+                      <Stack direction="row" justifyContent="center" alignItems="center" spacing={.25}>
+                        <Checkbox size="small" checked={ids.length > 0 && selectedCount === ids.length} indeterminate={selectedCount > 0 && selectedCount < ids.length} onChange={(event) => toggleCalendarDate(date, event.target.checked)} />
+                        <Box><Typography sx={{ fontSize: 11.5, fontWeight: 950 }}>{dayjs(date).format("DD MMM")}</Typography><Typography sx={{ color: "#64748B", fontSize: 9.5, fontWeight: 750 }}>{dayjs(date).format("ddd")}</Typography></Box>
+                      </Stack>
+                    </TableCell>
+                  );
+                })}
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {calendarGroups.map((group) => (
+                <TableRow key={group}>
+                  <TableCell sx={{ position: "sticky", left: 0, zIndex: 2, background: "#F8FAFC", color: "#0F172A", fontWeight: 950, borderRight: "1px solid #CBD5E1" }}>{group}</TableCell>
+                  {calendarDates.map((date) => {
+                    const cellLeaves = calendarLeaves.filter((leave) => (leave.groupName || "Unmapped") === group && leave.date === date);
+                    return (
+                      <TableCell key={`${group}-${date}`} sx={{ p: .55, verticalAlign: "top", background: cellLeaves.length ? "#FFF8FA" : "#FFFFFF" }}>
+                        <Stack spacing={.55}>
+                          {cellLeaves.map((leave) => {
+                            const selected = selectedWorkflowIds.includes(leave.id);
+                            const stage = leave.canSICAct ? "SIC review" : "DIC final";
+                            return (
+                              <Box key={leave.id} sx={{ p: .65, borderRadius: 1.5, border: `1px solid ${selected ? "#0057B7" : "#FECDD3"}`, background: selected ? "#EAF2FF" : "#FFF1F2", transition: "all .18s ease" }}>
+                                <Stack direction="row" alignItems="flex-start" spacing={.35}>
+                                  <Checkbox size="small" checked={selected} onChange={(event) => toggleWorkflowSelection(leave.id, event.target.checked)} sx={{ p: .25 }} />
+                                  <Box sx={{ minWidth: 0, flex: 1 }}>
+                                    <Typography noWrap title={leave.name} sx={{ color: "#0F172A", fontSize: 10.5, fontWeight: 950 }}>{leave.name}</Typography>
+                                    <Typography noWrap sx={{ color: "#64748B", fontSize: 9.2, fontWeight: 700 }}>{leave.dutyType || leave.assignedDuty || "-"} · {leave.leaveType} · {stage}</Typography>
+                                  </Box>
+                                </Stack>
+                                <Stack direction="row" alignItems="center" spacing={.15} sx={{ pl: .3, mt: .15 }}>
+                                  <Checkbox size="small" checked={replacementChoice(leave, leave.canSICAct ? "sic" : "dic")} onChange={(event) => setReplacementChoice(leave, leave.canSICAct ? "sic" : "dic", event.target.checked)} sx={{ p: .2 }} />
+                                  <Typography sx={{ color: "#64748B", fontSize: 8.8, fontWeight: 800 }}>Replacement required</Typography>
+                                </Stack>
+                              </Box>
+                            );
+                          })}
+                        </Stack>
+                      </TableCell>
+                    );
+                  })}
+                </TableRow>
+              ))}
+              {!calendarLeaves.length && <TableRow><TableCell colSpan={Math.max(2, calendarDates.length + 1)} align="center" sx={{ py: 5, color: "#64748B", fontWeight: 750 }}>No leave is awaiting your approval.</TableCell></TableRow>}
+            </TableBody>
+          </Table>
+        </TableContainer>
+      </Box>
+    );
+  };
+
+  const rosterWorkflowCalendar = () => {
+    const hasSicActions = visibleCalendarLeaves.some((leave) => leave.canSICAct);
+    const hasFinalActions = visibleCalendarLeaves.some((leave) => leave.canFinalAct);
+    const selectedVisibleCount = visibleCalendarLeaves.filter((leave) => selectedWorkflowIds.includes(leave.id)).length;
+    const allVisibleSelected = visibleCalendarLeaves.length > 0 && selectedVisibleCount === visibleCalendarLeaves.length;
+    const leaveByEmployeeDate = new Map(calendarOverlayLeaves.map((leave) => [`${leave.employeeId}:${leave.date}`, leave]));
+    return (
+      <Box sx={{ display: "grid", gap: 1.1 }}>
+        <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 1, flexWrap: "wrap" }}>
+          <Stack direction="row" spacing={.7} useFlexGap flexWrap="wrap" alignItems="center">
+            <TextField size="small" type="date" label="From" value={effectiveApprovalFrom} onChange={(event) => { const value = event.target.value; setApprovalFrom(value); if (effectiveApprovalTo < value) setApprovalTo(value); }} InputLabelProps={{ shrink: true }} inputProps={{ max: effectiveApprovalTo || undefined }} sx={{ width: 145 }} />
+            <TextField size="small" type="date" label="To" value={effectiveApprovalTo} onChange={(event) => { const value = event.target.value; setApprovalTo(value); if (value < effectiveApprovalFrom) setApprovalFrom(value); }} InputLabelProps={{ shrink: true }} inputProps={{ min: effectiveApprovalFrom || undefined }} sx={{ width: 145 }} />
+            <Button size="small" variant="text" onClick={() => { setApprovalFrom(""); setApprovalTo(""); }}>Pending dates</Button>
+            <FormControlLabel
+              sx={{ ml: .25, mr: 0 }}
+              control={<Checkbox size="small" checked={allVisibleSelected} indeterminate={selectedVisibleCount > 0 && !allVisibleSelected} disabled={!visibleCalendarLeaves.length} onChange={(event) => toggleAllCalendarSelection(event.target.checked)} />}
+              label={<Typography sx={{ fontSize: 10.8, fontWeight: 900 }}>Select all leaves ({visibleCalendarLeaves.length})</Typography>}
+            />
+          </Stack>
+          <Typography sx={{ color: "#64748B", fontSize: 10.8, fontWeight: 750 }}>
+            {role.isSIC && !role.isAdmin && !role.isDeptIC ? `${role.groupName || "Your shift"} · complete crew view` : "All shift groups · complete crew view"}. Tick only highlighted leave cells.
+          </Typography>
+          <Stack direction="row" spacing={.7} useFlexGap flexWrap="wrap">
+            {hasSicActions && <>
+              <Button size="small" variant="contained" disabled={!selectedSicLeaves.length} startIcon={<Send size={13} />} onClick={sicForwardBulk}>Approve & Forward ({selectedSicLeaves.length})</Button>
+              <Button size="small" color="error" variant="outlined" disabled={!selectedSicLeaves.length} onClick={sicRejectBulk}>Reject ({selectedSicLeaves.length})</Button>
+            </>}
+            {hasFinalActions && <>
+              <Button size="small" color="success" variant="contained" disabled={!selectedFinalLeaves.length} startIcon={<CheckCircle2 size={13} />} onClick={finalApproveBulk}>DIC Final Approve ({selectedFinalLeaves.length})</Button>
+              <Button size="small" color="error" variant="outlined" disabled={!selectedFinalLeaves.length} onClick={finalRejectBulk}>Reject ({selectedFinalLeaves.length})</Button>
+            </>}
+          </Stack>
+        </Box>
+
+        <Box sx={{ display: "flex", alignItems: "center", gap: 1.2, flexWrap: "wrap", px: 1, py: .65, borderRadius: 1.5, border: "1px solid #BFDBFE", background: "#F8FBFF" }}>
+          <Stack direction="row" alignItems="center" spacing={.25}><Checkbox size="small" disabled sx={{ p: 0, "& .MuiSvgIcon-root": { fontSize: 15 } }} /><Typography sx={{ fontSize: 10, color: "#475569" }}>Tick a leave cell, date heading, or employee checkbox to select visible leave for approval/rejection.</Typography></Stack>
+          <Stack direction="row" alignItems="center" spacing={.45}><Box sx={{ width: 17, height: 17, borderRadius: .7, display: "grid", placeItems: "center", color: "#FFF", background: "#D97706", fontSize: 8, fontWeight: 950 }}>R</Box><Typography sx={{ fontSize: 10, color: "#475569" }}>Amber R = replacement required; grey R = not required. DIC may change SIC's choice.</Typography></Stack>
+        </Box>
+
+        {approvalCalendarError && <Alert severity="error">{approvalCalendarError}</Alert>}
+        {approvalCalendarLoading ? (
+          <Box sx={{ minHeight: 220, display: "grid", placeItems: "center" }}><CircularProgress size={28} /></Box>
+        ) : (
+          <TableContainer sx={{ maxHeight: "min(68vh, 700px)", border: "1px solid #CBD5E1", borderRadius: 2, background: "#FFFFFF" }}>
+            <Table size="small" stickyHeader sx={{ minWidth: Math.max(900, 170 + approvalDates.length * 92), tableLayout: "fixed" }}>
+              <TableHead>
+                <TableRow>
+                  <TableCell sx={{ width: 170, position: "sticky", left: 0, zIndex: 5, py: .4, background: "#EAF2FF", color: "#0057B7", fontSize: 10.5, fontWeight: 950 }}>Employee</TableCell>
+                  {approvalDates.map((date) => {
+                    const ids = visibleCalendarLeaves.filter((leave) => leave.date === date).map((leave) => leave.id);
+                    const selectedCount = ids.filter((id) => selectedWorkflowIds.includes(id)).length;
+                    return <TableCell key={date} align="center" sx={{ width: 92, p: .25, background: "#EAF2FF" }}><Stack direction="row" justifyContent="center" alignItems="center" spacing={0}><Checkbox size="small" disabled={!ids.length} checked={ids.length > 0 && selectedCount === ids.length} indeterminate={selectedCount > 0 && selectedCount < ids.length} onChange={(event) => toggleCalendarDate(date, event.target.checked)} sx={{ p: .2 }} /><Box><Typography sx={{ fontSize: 9.5, fontWeight: 950 }}>{dayjs(date).format("DD MMM")}</Typography><Typography sx={{ color: "#64748B", fontSize: 8 }}>{dayjs(date).format("ddd")}</Typography></Box></Stack></TableCell>;
+                  })}
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {approvalRoster.map((group) => <Fragment key={group.groupName}>
+                  <TableRow key={`${group.groupName}-heading`}><TableCell colSpan={approvalDates.length + 1} sx={{ position: "sticky", left: 0, zIndex: 2, py: .3, px: 1, background: "#EAF8F3", color: "#03624C", fontSize: 10.5, fontWeight: 950 }}>{group.groupName}</TableCell></TableRow>
+                  {(group.employees || []).map((person) => (
+                    <TableRow key={`${group.groupName}-${person.employeeId}`} sx={{ height: 31 }}>
+                      <TableCell sx={{ position: "sticky", left: 0, zIndex: 2, py: .25, px: .7, background: person.IsSIC ? "#ECFDF5" : "#FFFFFF", borderRight: "1px solid #CBD5E1" }}>
+                        <Stack direction="row" alignItems="center" spacing={.25}>
+                          <Checkbox
+                            size="small"
+                            disabled={!calendarEmployeeLeaveIds(person.employeeId).length}
+                            checked={calendarEmployeeLeaveIds(person.employeeId).length > 0 && calendarEmployeeLeaveIds(person.employeeId).every((id) => selectedWorkflowIds.includes(id))}
+                            indeterminate={calendarEmployeeLeaveIds(person.employeeId).some((id) => selectedWorkflowIds.includes(id)) && !calendarEmployeeLeaveIds(person.employeeId).every((id) => selectedWorkflowIds.includes(id))}
+                            onChange={(event) => toggleCalendarEmployee(person.employeeId, event.target.checked)}
+                            inputProps={{ "aria-label": `Select all visible leave for ${person.name || person.employeeId}` }}
+                            sx={{ p: 0, mr: .15, "& .MuiSvgIcon-root": { fontSize: 14 } }}
+                          />
+                          <Box sx={{ minWidth: 0 }}><Typography noWrap title={person.name} sx={{ fontSize: 9.7, fontWeight: 950 }}>{person.name || person.employeeId}</Typography><Typography noWrap sx={{ color: "#64748B", fontSize: 7.8 }}>{person.designation || "-"}</Typography></Box>{person.IsSIC && <Chip label="SIC" size="small" sx={{ height: 15, fontSize: 7.5, fontWeight: 950, background: "#D1FAE5", color: "#03624C" }} />}
+                        </Stack>
+                      </TableCell>
+                      {approvalDates.map((date) => {
+                        const duty = person.duties?.[date] || { shift: "-" };
+                        const palette = compactDutyStyle(duty);
+                        const leave = leaveByEmployeeDate.get(`${person.employeeId}:${date}`);
+                        const actionable = Boolean(leave?.canSICAct || leave?.canFinalAct);
+                        const selected = actionable && selectedWorkflowIds.includes(leave.id);
+                        const sicForwarded = leave?.sicApprovalStatus === "Forwarded" || duty.leaveStatus === "Forwarded by SIC";
+                        const decisions = leave?.replacementDecisionHistory || [];
+                        const sicDecision = decisions.find((entry) => entry.stage === "SIC");
+                        const dicDecision = decisions.find((entry) => entry.stage === "DIC");
+                        const rejection = (leave?.rejectionHistory || []).slice(-1)[0];
+                        const replacementStage = leave?.canSICAct ? "sic" : "dic";
+                        const replacementChecked = actionable ? replacementChoice(leave, replacementStage) : false;
+                        const timeline = leave ? (
+                          <Box sx={{ p: .35 }}>
+                            <Typography sx={{ fontSize: 11, fontWeight: 950 }}>{leave.name} · {leave.leaveType}</Typography>
+                            <Typography sx={{ mt: .45, fontSize: 10 }}>Applied: {leave.createdOn ? dayjs(leave.createdOn).format("DD MMM YYYY, HH:mm") : "Time not recorded"}</Typography>
+                            <Typography sx={{ fontSize: 10 }}>SIC: {sicForwarded ? "Approved & Forwarded" : leave.sicApprovalStatus || "Pending"}{sicDecision?.decidedOn ? ` · ${dayjs(sicDecision.decidedOn).format("DD MMM YYYY, HH:mm")}` : ""}</Typography>
+                            <Typography sx={{ fontSize: 10 }}>DIC: {leave.deptApprovalStatus || "Pending"}{dicDecision?.decidedOn ? ` · ${dayjs(dicDecision.decidedOn).format("DD MMM YYYY, HH:mm")}` : ""}</Typography>
+                            {rejection && <Typography sx={{ mt: .35, color: "#FCA5A5", fontSize: 10 }}>Rejected by {rejection.rejectedByRole || rejection.stage}: {rejection.comment || "No comment"}{rejection.rejectedOn ? ` · ${dayjs(rejection.rejectedOn).format("DD MMM YYYY, HH:mm")}` : ""}</Typography>}
+                          </Box>
+                        ) : "";
+                        return (
+                          <TableCell key={`${person.employeeId}-${date}`} align="center" sx={{ p: .2 }}>
+                            <Tooltip title={timeline} arrow placement="top">
+                              <Box sx={{ minHeight: 27, px: .18, py: .18, borderRadius: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: .05, background: selected ? "#DBEAFE" : palette.bg, color: palette.color, border: `1px solid ${actionable ? selected ? "#0057B7" : "#EF4444" : palette.border}` }}>
+                                {actionable && <Checkbox size="small" checked={Boolean(selected)} onChange={(event) => toggleWorkflowSelection(leave.id, event.target.checked)} sx={{ p: 0, color: "#DC2626", "&.Mui-checked": { color: "#0057B7" }, "& .MuiSvgIcon-root": { fontSize: 14 } }} />}
+                                <Box sx={{ minWidth: 0, flex: 1 }}><Typography sx={{ fontSize: 8.6, lineHeight: 1.05, fontWeight: 950 }}>{duty.shift || "-"}</Typography>{duty.leaveStatus && <Typography noWrap sx={{ maxWidth: 52, mx: "auto", fontSize: 6.5, lineHeight: 1.05, fontWeight: 900 }}>{duty.leaveType || "Leave"} · {sicForwarded ? "Approved & Forwarded" : duty.leaveStatus}</Typography>}</Box>
+                                {actionable && <Tooltip title={`Replacement required: ${replacementChecked ? "Yes" : "No"}`} arrow><Box component="button" type="button" aria-label="Toggle replacement required" aria-pressed={replacementChecked} onClick={(event) => { event.stopPropagation(); setReplacementChoice(leave, replacementStage, !replacementChecked); }} sx={{ width: 17, minWidth: 17, height: 17, p: 0, borderRadius: .7, border: `1px solid ${replacementChecked ? "#D97706" : "#94A3B8"}`, color: replacementChecked ? "#FFFFFF" : "#64748B", background: replacementChecked ? "#D97706" : "#FFFFFF", fontSize: 8, fontWeight: 950, cursor: "pointer" }}>R</Box></Tooltip>}
+                              </Box>
+                            </Tooltip>
+                          </TableCell>
+                        );
+                      })}
+                    </TableRow>
+                  ))}
+                </Fragment>)}
+                {!approvalRoster.length && <TableRow><TableCell colSpan={Math.max(2, approvalDates.length + 1)} align="center" sx={{ py: 5, color: "#64748B" }}>No published shift roster is available for this leave period.</TableCell></TableRow>}
+              </TableBody>
+            </Table>
+          </TableContainer>
+        )}
+      </Box>
+    );
+  };
+
   const workflowTable = (items, completedTable = false) => {
     const selectionEnabled = !completedTable;
     const selectableItems = items.filter((leave) => leave.canSICAct || leave.canFinalAct);
     const hasSicActions = items.some((leave) => leave.canSICAct);
     const hasFinalActions = items.some((leave) => leave.canFinalAct);
-    const hasActionColumn = !completedTable || items.some((leave) => leave.canCancel || leave.canDeleteMaster);
+    const hasActionColumn = !completedTable || items.some((leave) => leave.canCancel || leave.canDeleteMaster || (leave.isSIC && leave.finalStatus === "Approved"));
     return (
       <Box sx={{ display: "grid", gap: 1.2 }}>
         {!completedTable && (
@@ -324,14 +688,6 @@ export default function LeaveManagement() {
               Select multiple rows to approve and forward, or to finalize them in one step.
             </Typography>
             <Stack direction="row" spacing={1} sx={{ flexWrap: "wrap" }}>
-              <Button
-                size="small"
-                variant="outlined"
-                startIcon={<CalendarDays size={14} />}
-                onClick={() => window.open("/crew/calendar", "crew-duty-calendar", "popup=yes,width=1500,height=900,resizable=yes,scrollbars=yes")}
-              >
-                Open duty calendar
-              </Button>
               {(hasSicActions || hasFinalActions) && (
                 <>
                 {hasSicActions && (
@@ -429,6 +785,19 @@ export default function LeaveManagement() {
                   {hasActionColumn && <TableCell align="right" sx={{ minWidth: 280 }}>
                     <Stack direction="row" spacing={0.7} justifyContent="flex-end">
                       {leave.canCancel && <Button size="small" color="warning" variant="outlined" onClick={() => cancelLeave(leave)}>Cancel leave</Button>}
+                      {completedTable && leave.isSIC && leave.finalStatus === "Approved" && (
+                        <Button
+                          size="small"
+                          variant="outlined"
+                          startIcon={<ShieldCheck size={14} />}
+                          onClick={() => {
+                            const params = new URLSearchParams({ action: "assign-sic", leaveId: String(leave.id), date: leave.date || "" });
+                            window.location.assign(`/crew/replacement?${params.toString()}`);
+                          }}
+                        >
+                          Assign acting SIC
+                        </Button>
+                      )}
                       {leave.canSICAct && <><Button size="small" variant="contained" startIcon={<Send size={14} />} onClick={() => sicForward(leave)}>Approve & Forward</Button><Button size="small" color="error" variant="outlined" onClick={() => sicReject(leave)}>Reject</Button></>}
                       {leave.canFinalAct && <><Button size="small" color="success" variant="contained" startIcon={<CheckCircle2 size={14} />} onClick={() => finalApprove(leave)}>Final approve</Button><Button size="small" color="error" variant="outlined" onClick={() => finalReject(leave)}>Reject</Button></>}
                       {leave.canDeleteMaster && <Button size="small" color="error" variant="contained" onClick={() => deleteMaster(leave)}>Delete master</Button>}
@@ -449,12 +818,35 @@ export default function LeaveManagement() {
 
   return (
     <Box className="ui-kit-page" sx={{ display: "grid", gap: 2.5 }}>
-      <Paper sx={{ p: 3, color: "#fff", background: "linear-gradient(135deg,#08103A,#0057B7 70%,#0F6FDB)", border: 0 }}>
-        <Box sx={{ display: "flex", alignItems: "center", gap: 1.5 }}><CalendarDays size={28} /><Box><Typography sx={{ fontSize: 24, fontWeight: 950 }}>Leave Application & Approval</Typography><Typography sx={{ fontSize: 12.5, opacity: .82 }}>Employee → Shift-in-Charge → Leave Approving Authority</Typography></Box></Box>
-      </Paper>
+      <Box sx={{ p: 3, mb: 3, borderRadius: 3, background: "linear-gradient(105deg,#08103A 0%,#0057B7 65%,#0F6FDB 100%)", color: "white" }}>
+        <Typography variant="h5" fontWeight="bold" sx={{ color: "#FFFFFF" }}>
+          Leave Application &amp; Approval
+        </Typography>
+        <Typography variant="body2" sx={{ color: "rgba(255,255,255,.88)" }}>
+          Employee → Shift-in-Charge → Leave Approving Authority
+        </Typography>
+      </Box>
 
       {notice && <Alert severity={notice.severity} onClose={() => setNotice(null)}>{notice.text}</Alert>}
 
+      <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "repeat(3, minmax(0, 1fr))" }, gap: 2 }}>
+        {[
+          { key: "apply", title: "Apply Leave", subtitle: "Select employee, dates and leave type", count: null, color: "#0057B7", tint: "#EAF2FF" },
+          { key: "pending", title: "Pending Leave Workflow", subtitle: "Review, approve, forward or reject", count: pending.length, color: "#17876D", tint: "#EAF8F3" },
+          { key: "completed", title: "Completed Leave", subtitle: "Approved, rejected and cancelled records", count: completed.length, color: "#4338CA", tint: "#EEF2FF" },
+        ].map((tile) => (
+          <Paper key={tile.key} component="button" type="button" elevation={0} onClick={() => openSection(tile.key)} sx={{ width: "100%", minHeight: 118, p: 2.2, borderRadius: 3, textAlign: "left", cursor: "pointer", border: `1px solid ${activeSection === tile.key ? tile.color : "#D7E3F4"}`, background: activeSection === tile.key ? tile.tint : "#FFFFFF", boxShadow: activeSection === tile.key ? `0 12px 28px ${tile.color}22` : "0 5px 18px rgba(15,23,42,.06)", transition: "transform .22s ease, box-shadow .22s ease, border-color .22s ease, background .22s ease", "&:hover": { transform: "translateY(-3px)", borderColor: tile.color, boxShadow: `0 14px 30px ${tile.color}26` } }}>
+            <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 2 }}>
+              <Box><Typography sx={{ color: "#0F172A", fontSize: 16, fontWeight: 950 }}>{tile.title}</Typography><Typography sx={{ mt: .65, color: "#64748B", fontSize: 11.5, fontWeight: 650 }}>{tile.subtitle}</Typography></Box>
+              {tile.count !== null && <Box sx={{ minWidth: 42, height: 42, px: 1, borderRadius: 2.2, display: "grid", placeItems: "center", color: "#FFFFFF", background: tile.color, fontSize: 18, fontWeight: 950 }}>{tile.count}</Box>}
+            </Box>
+            <Typography sx={{ mt: 1.4, color: tile.color, fontSize: 11.5, fontWeight: 900 }}>{activeSection === tile.key ? "Workspace open" : "Click to open"}</Typography>
+          </Paper>
+        ))}
+      </Box>
+
+      <Collapse in={activeSection === "apply"} timeout={420} unmountOnExit>
+      <Box id="leave-workspace-apply" sx={{ display: "grid", gap: 2.5, scrollMarginTop: 110 }}>
       <Paper sx={{ p: 2.5 }}>
         <SectionTitle icon={User} title="Apply Leave" subtitle={role.isSIC && !role.isAdmin ? `As SIC, you may apply for members of ${role.groupName}.` : "Select one continuous duty-date range."} />
         <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "1fr 1fr auto" }, gap: 1.5, alignItems: "center" }}>
@@ -480,7 +872,26 @@ export default function LeaveManagement() {
         <Box sx={{ display: "flex", justifyContent: "flex-end", mt: 1.5 }}><Button variant="contained" startIcon={<Send size={16} />} onClick={submit} disabled={working}>Submit to SIC</Button></Box>
       </Paper>}
 
-      <Paper sx={{ p: 2.5 }}><SectionTitle icon={ShieldCheck} title="Pending Leave Workflow" subtitle="Actions appear only for the employee, assigned SIC, or configured Leave Approving Authority." count={pending.length} />{workflowTable(pending)}</Paper>
+      </Box>
+      </Collapse>
+
+      <Collapse in={activeSection === "pending"} timeout={420} unmountOnExit>
+      <Box id="leave-workspace-pending" sx={{ scrollMarginTop: 110 }}>
+      <Paper sx={{ p: 2.5 }}>
+        <SectionTitle icon={ShieldCheck} title="Pending Leave Workflow" subtitle="SIC sees only their shift group; DIC and administrators can review all mapped shifts." count={pending.length} />
+        {(role.isSIC || role.isDeptIC || role.isLeaveAuthority || role.isAdmin) && (
+          <Stack direction="row" spacing={1} sx={{ mb: 1.5 }}>
+            <Button size="small" variant={workflowView === "table" ? "contained" : "outlined"} onClick={() => setWorkflowView("table")}>Table view</Button>
+            <Button size="small" variant={workflowView === "calendar" ? "contained" : "outlined"} startIcon={<CalendarDays size={14} />} onClick={() => setWorkflowView("calendar")}>Leave calendar</Button>
+          </Stack>
+        )}
+        {workflowView === "calendar" && (role.isSIC || role.isDeptIC || role.isLeaveAuthority || role.isAdmin) ? rosterWorkflowCalendar() : workflowTable(pending)}
+      </Paper>
+      </Box>
+      </Collapse>
+
+      <Collapse in={activeSection === "completed"} timeout={420} unmountOnExit>
+      <Box id="leave-workspace-completed" sx={{ scrollMarginTop: 110 }}>
       <Paper sx={{ p: 2.5 }}>
         <SectionTitle icon={CheckCircle2} title="Completed Leave" subtitle="Approved, rejected, withdrawn, and cancelled applications. Default view starts from yesterday." count={completed.length} />
         <Stack direction={{ xs: "column", sm: "row" }} spacing={1.2} alignItems={{ sm: "center" }} sx={{ mb: 1.5 }}>
@@ -491,6 +902,21 @@ export default function LeaveManagement() {
         </Stack>
         {workflowTable(completed, true)}
       </Paper>
+      </Box>
+      </Collapse>
+      <Dialog open={rejectDialog.open} onClose={() => setRejectDialog((current) => ({ ...current, open: false }))} fullWidth maxWidth="sm">
+        <DialogTitle sx={{ fontWeight: 950 }}>{rejectDialog.stage === "sic" ? "Reject leave at SIC stage" : "Reject leave at DIC stage"}</DialogTitle>
+        <DialogContent>
+          <Typography sx={{ mb: 1.5, color: "#64748B", fontSize: 12 }}>
+            {rejectDialog.leaves.length} leave record(s) selected. The comment will be recorded with the rejecting officer and timestamp.
+          </Typography>
+          <TextField autoFocus fullWidth multiline minRows={3} label="Rejection comment (optional)" value={rejectComment} onChange={(event) => setRejectComment(event.target.value)} inputProps={{ maxLength: 1000 }} />
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2 }}>
+          <Button onClick={() => setRejectDialog((current) => ({ ...current, open: false }))}>Cancel</Button>
+          <Button color="error" variant="contained" onClick={confirmReject}>Reject leave</Button>
+        </DialogActions>
+      </Dialog>
       {working && <Box sx={{ position: "fixed", inset: 0, zIndex: 1700, display: "grid", placeItems: "center", background: "rgba(8,16,58,.16)", pointerEvents: "none" }}><CircularProgress /></Box>}
     </Box>
   );

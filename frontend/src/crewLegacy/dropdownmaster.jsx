@@ -15,6 +15,7 @@ import {
   TableHead,
   TableRow
 } from "@mui/material";
+import DesignationMasterPanel from "./DesignationMasterPanel";
 
 export default function DropdownMaster() {
 
@@ -61,8 +62,10 @@ export default function DropdownMaster() {
   return (
     <Box>
       <Typography variant="h5" gutterBottom>
-        Dropdown Master
+        Dropdown Management
       </Typography>
+
+      <DesignationMasterPanel />
 
       <Paper sx={{ p: 3, mb: 4 }}>
         <Grid container spacing={2}>

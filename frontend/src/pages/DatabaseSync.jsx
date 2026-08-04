@@ -1,955 +1,441 @@
-import { useEffect, useState } from "react";
-
+import { useEffect, useMemo, useState } from "react";
 import {
+  Alert,
+  Autocomplete,
   Box,
-  Grid,
-  Typography,
+  Button,
+  Checkbox,
+  Chip,
+  CircularProgress,
+  FormControl,
+  InputAdornment,
+  MenuItem,
+  Paper,
+  Select,
+  Stack,
   Table,
+  TableBody,
+  TableCell,
+  TableContainer,
   TableHead,
   TableRow,
-  TableCell,
-  TableBody,
-  Checkbox,
+  TextField,
+  Typography,
 } from "@mui/material";
+import {
+  CheckCheck,
+  Database,
+  ArrowLeftRight,
+  RefreshCw,
+  Search,
+  ServerCog,
+  LockKeyhole,
+  UploadCloud,
+} from "lucide-react";
 
-import StorageRoundedIcon from "@mui/icons-material/StorageRounded";
-import AutorenewRoundedIcon from "@mui/icons-material/AutorenewRounded";
-import CompareArrowsRoundedIcon from "@mui/icons-material/CompareArrowsRounded";
-import SyncRoundedIcon from "@mui/icons-material/SyncRounded";
-import SaveRoundedIcon from "@mui/icons-material/SaveRounded";
-import SearchRoundedIcon from "@mui/icons-material/SearchRounded";
-
-import API from "../services/api";
-
-// LAYOUT
 import AppShell from "../components/layout/AppShell";
 import PlantMappingGrid from "../components/PlantMappingGrid";
-
-// UI
-import GradientButton from "../components/ui/GradientButton";
-import StatCard from "../components/ui/StatCard";
-import PremiumTable from "../components/ui/PremiumTable";
-import SectionAccordion from "../components/ui/SectionAccordion";
-import PremiumInput from "../components/ui/PremiumInput";
-import StatusChip from "../components/ui/StatusChip";
-import GlassCard from "../components/ui/GlassCard";
-
-// POPUP
+import API from "../services/api";
 import { showModernPopup } from "../components/ui/ModernPopup";
 
+const STATUS_STYLE = {
+  MATCHED: { color: "#047857", bgcolor: "#DCFCE7", label: "Matched" },
+  REVIEW: { color: "#B45309", bgcolor: "#FEF3C7", label: "Review" },
+  UNMATCHED: { color: "#B91C1C", bgcolor: "#FEE2E2", label: "Unmatched" },
+  RTG_ONLY: { color: "#1D4ED8", bgcolor: "#DBEAFE", label: "RTG only" },
+};
+
+const formatNumber = (value) => (
+  value === null || value === undefined || value === ""
+    ? "—"
+    : Number(value).toLocaleString("en-IN", { maximumFractionDigits: 2 })
+);
+
+function SummaryCard({ label, value, color = "#0057B7" }) {
+  return (
+    <Paper elevation={0} sx={{ minWidth: 135, px: 1.6, py: 1.15, border: "1px solid #D9E7F7", borderRadius: 2.5, bgcolor: "#fff" }}>
+      <Typography sx={{ color: "#64748B", fontSize: 10.5, fontWeight: 800, textTransform: "uppercase" }}>{label}</Typography>
+      <Typography sx={{ mt: 0.15, color, fontSize: 21, lineHeight: 1.1, fontWeight: 900 }}>{value || 0}</Typography>
+    </Paper>
+  );
+}
+
 export default function DatabaseSync() {
-  // =====================================
-  // STATES
-  // =====================================
+  const [rows, setRows] = useState([]);
+  const [rtgMaster, setRtgMaster] = useState([]);
+  const [summary, setSummary] = useState({});
+  const [selected, setSelected] = useState(new Set());
+  const [choices, setChoices] = useState({});
+  const [createFlags, setCreateFlags] = useState({});
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState("ALL");
+  const [loading, setLoading] = useState(false);
+  const [committing, setCommitting] = useState(false);
+  const [updatingRtg, setUpdatingRtg] = useState("");
+  const [error, setError] = useState("");
+  const [mapData, setMapData] = useState([]);
+  const [mapSearch, setMapSearch] = useState("");
+  const [mapLoading, setMapLoading] = useState(false);
 
-  const [data, setData] = useState([]);
+  const applyReview = (response) => {
+    if (!response?.success) throw new Error(response?.message || "Unable to prepare the comparison.");
+    const nextRows = response.rows || [];
+    setRows(nextRows);
+    setRtgMaster(response.rtg_master || []);
+    setSummary(response.summary || {});
+    setChoices(Object.fromEntries(nextRows.map((row) => [row.review_id, row.selected_rtg_plant_id || ""])));
+    setCreateFlags({});
+    setSelected(new Set());
+  };
 
-  const [selected, setSelected] =
-    useState([]);
-
-  const [stageData, setStageData] =
-    useState([]);
-
-  const [mapData, setMapData] =
-    useState([]);
-
-  const [loading, setLoading] =
-    useState(false);
-
-  const [unitSearch, setUnitSearch] =
-    useState("");
-
-  const [stageSearch, setStageSearch] =
-    useState("");
-
-  const [stationSearch, setStationSearch] =
-    useState("");
-
-  const [stateSearch, setStateSearch] =
-    useState("");
-
-  // =====================================
-  // FETCH MAP TABLE
-  // =====================================
-
-  const fetchMapData = async () => {
+  const loadReview = async () => {
     try {
-      const res =
-        await API.fetchMapTable();
-
-      setMapData(res?.data || []);
+      setLoading(true);
+      setError("");
+      applyReview(await API.getDatabaseSyncReview());
     } catch (err) {
-      console.error(err);
-
-      showModernPopup({
-        type: "error",
-        title: "Map Table",
-        subtitle: "Unable To Load",
-      });
+      setError(err.response?.data?.detail || err.message || "Unable to load staged comparison.");
+    } finally {
+      setLoading(false);
     }
   };
 
-  // =====================================
-  // FETCH CHANGES
-  // =====================================
-
-  const fetchData = async () => {
+  const refreshReview = async () => {
     try {
       setLoading(true);
-
-      const res =
-        await API.fetchDbChanges();
-
-      setData(res?.changes || []);
-
-      await fetchMapData();
-
+      setError("");
+      const response = await API.refreshDatabaseSyncReview();
+      applyReview(response);
       showModernPopup({
         type: "success",
-        title: "Database Sync",
-        subtitle: "Latest Changes Loaded",
-        description: `Loaded ${res?.changes?.length || 0} unit-level changes from the live RTG portal pipeline.`,
+        title: "Staging refreshed",
+        subtitle: "Reporting data compared with RTG master",
+        description: `${response.summary?.reporting_units || 0} units and ${response.summary?.rtg_master_records || 0} RTG plants are ready for review.`,
       });
     } catch (err) {
-      console.error(err);
-
-      showModernPopup({
-        type: "error",
-        title: "Fetch Failed",
-        subtitle: "Unable To Fetch",
-        description: `Error details: ${err.response?.data?.message || err.message || "Failed to load live data updates."}`,
-      });
+      const message = err.response?.data?.detail || err.message || "Unable to fetch source APIs.";
+      setError(message);
+      showModernPopup({ type: "error", title: "API loading failed", subtitle: "Staging was not changed", description: message });
     } finally {
       setLoading(false);
     }
   };
 
-  // =====================================
-  // SELECT
-  // =====================================
-
-  const toggleSelect = (row) => {
-    const id = row.Unit_Number;
-
-    setSelected((prev) =>
-      prev.includes(id)
-        ? prev.filter((x) => x !== id)
-        : [...prev, id]
-    );
-  };
-
-  const selectAll = (e) => {
-    if (e.target.checked) {
-      setSelected(
-        data.map((d) => d.Unit_Number)
-      );
-    } else {
-      setSelected([]);
-    }
-  };
-
-  // =====================================
-  // COMMIT UNIT DATA
-  // =====================================
-
-  const commit = async () => {
+  const loadMapData = async () => {
     try {
-      if (selected.length === 0) {
-        showModernPopup({
-          type: "info",
-          title: "No Selection",
-          subtitle: "Please Select Records",
-          description: "Select one or more detected unit modifications from the grid list below to apply changes.",
-        });
-
-        return;
-      }
-
-      setLoading(true);
-
-      const selectedRows = data.filter(
-        (d) =>
-          selected.includes(d.Unit_Number)
-      );
-
-      const res =
-        await API.commitDbChanges(
-          selectedRows
-        );
-
-      if (res?.success) {
-        showModernPopup({
-          type: "success",
-          title: "Database Updated",
-          subtitle: "Records Successfully Synced",
-          description: `Committed ${selectedRows.length} unit records to MongoDB database.\nResult: ${res.result?.message || "Upsert completed"}.\nProcessed: ${res.result?.records_processed || selectedRows.length} records.`,
-        });
-
-        // REMOVE COMMITTED ROWS
-
-        setData((prev) =>
-          prev.filter(
-            (d) =>
-              !selected.includes(
-                d.Unit_Number
-              )
-          )
-        );
-
-        setSelected([]);
-
-        // AUTO REFRESH STAGE
-
-        await compareStageTable();
-
-        await fetchMapData();
-      }
-    } catch (err) {
-      console.error(err);
-
-      showModernPopup({
-        type: "error",
-        title: "Commit Failed",
-        subtitle: "Unable To Save",
-        description: `Error details: ${err.response?.data?.message || err.message || "Failed to save selected unit sync rows."}`,
-      });
+      setMapLoading(true);
+      const response = await API.fetchMapTable();
+      setMapData(response?.data || []);
     } finally {
-      setLoading(false);
+      setMapLoading(false);
     }
   };
-
-  // =====================================
-  // COMPARE STAGE
-  // =====================================
-
-  const compareStageTable =
-    async () => {
-      try {
-        const res =
-          await API.previewMapChanges();
-
-        const rows =
-          res?.changes || [];
-
-        setStageData(rows);
-
-        if (rows.length === 0) {
-          showModernPopup({
-            type: "info",
-            title: "Station Mapping",
-            subtitle: "No New Changes",
-            description: "Station mapping collections are currently up-to-date with active MongoDB unit data.",
-          });
-        } else {
-          showModernPopup({
-            type: "success",
-            title: "Mapping Compare",
-            subtitle: `${rows.length} Changes Found`,
-            description: `Detected ${rows.length} new stage structural changes between unit collections and station maps.`,
-          });
-        }
-      } catch (err) {
-        console.error(err);
-        showModernPopup({
-          type: "error",
-          title: "Compare Failed",
-          subtitle: "Comparison Error",
-          description: `Error details: ${err.response?.data?.message || err.message || "Unable to run stage structural comparisons."}`,
-        });
-      }
-    };
-
-  // =====================================
-  // COMMIT STAGE
-  // =====================================
-
-  const commitStageTable =
-    async () => {
-      try {
-        const res =
-          await API.commitMapChanges();
-
-        if (res?.success) {
-          showModernPopup({
-            type: "success",
-            title: "Station Mapping",
-            subtitle: "Successfully Updated",
-            description: `Successfully updated station mapping records from latest grouped unit data changes.\nProcessed: ${res.result?.updated || 0} stage mappings.`,
-          });
-
-          setStageData([]);
-
-          await fetchMapData();
-        }
-      } catch (err) {
-        console.error(err);
-
-        showModernPopup({
-          type: "error",
-          title: "Mapping Failed",
-          subtitle: "Unable To Update",
-          description: `Error details: ${err.response?.data?.message || err.message || "Could not save mapping modifications."}`,
-        });
-      }
-    };
-
-  // =====================================
-  const saveMapTable = async (dirtyRows) => {
-    try {
-      setLoading(true);
-
-      const payload = (dirtyRows || mapData).map(
-        (row) => ({
-          ...row,
-        })
-      );
-
-      const res =
-        await API.saveMapTable(payload);
-
-      if (res?.success) {
-        showModernPopup({
-          type: "success",
-          title: "Mapping Saved",
-          subtitle:
-            "Successfully Updated",
-          description: `Successfully saved ${payload.length} mapping configuration changes to MongoDB database.`,
-        });
-
-        await fetchMapData();
-      }
-    } catch (err) {
-      console.error(err);
-
-      showModernPopup({
-        type: "error",
-        title: "Save Failed",
-        subtitle:
-          "Unable To Save Mapping",
-      });
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const filteredUnitData = data.filter(
-    (row) =>
-      JSON.stringify(row)
-        .toLowerCase()
-        .includes(
-          unitSearch.toLowerCase()
-        )
-  );
-
-  const filteredStageData =
-    stageData.filter((row) =>
-      JSON.stringify(row)
-        .toLowerCase()
-        .includes(
-          stageSearch.toLowerCase()
-        )
-    );
-
-  // =====================================
-  // INIT
-  // =====================================
 
   useEffect(() => {
-    fetchMapData();
+    loadReview();
+    loadMapData();
   }, []);
+
+  const rtgById = useMemo(() => Object.fromEntries(rtgMaster.map((row) => [row.plant_id, row])), [rtgMaster]);
+  const filteredRows = useMemo(() => {
+    const query = search.trim().toLowerCase();
+    return rows.filter((row) => {
+      if (statusFilter !== "ALL" && row.status !== statusFilter) return false;
+      if (!query) return true;
+      return [
+        row.reporting_plant_name,
+        row.reporting_stage_name,
+        row.reporting_stage_id,
+        row.rtg_plant_name,
+        choices[row.review_id],
+        row.reporting_state_name,
+        row.rtg_state_name,
+      ].some((value) => String(value || "").toLowerCase().includes(query));
+    });
+  }, [rows, choices, search, statusFilter]);
+
+  const toggle = (reviewId) => {
+    setSelected((current) => {
+      const next = new Set(current);
+      if (next.has(reviewId)) next.delete(reviewId);
+      else next.add(reviewId);
+      return next;
+    });
+  };
+
+  const selectSuggested = () => {
+    setSelected(new Set(filteredRows
+      .filter((row) => row.reporting_stage_id && (choices[row.review_id] || createFlags[row.review_id]))
+      .map((row) => row.review_id)));
+  };
+
+  const selectAllVisible = (checked) => {
+    setSelected((current) => {
+      const next = new Set(current);
+      filteredRows.forEach((row) => {
+        if (!choices[row.review_id] && !createFlags[row.review_id]) return;
+        if (checked) next.add(row.review_id);
+        else next.delete(row.review_id);
+      });
+      return next;
+    });
+  };
+
+  const commitSelected = async () => {
+    const payload = rows
+      .filter((row) => selected.has(row.review_id))
+      .map((row) => ({
+        review_id: row.review_id,
+        selected_rtg_plant_id: choices[row.review_id] || "",
+        create_in_rtg: Boolean(createFlags[row.review_id]),
+      }));
+    if (!payload.length) {
+      showModernPopup({ type: "info", title: "Nothing selected", subtitle: "Select reviewed mappings to accept" });
+      return;
+    }
+    try {
+      setCommitting(true);
+      const response = await API.commitDatabaseSyncReview(payload);
+      if (response.errors?.length) throw new Error(response.errors.join("\n"));
+      showModernPopup({
+        type: "success",
+        title: "Mappings accepted",
+        subtitle: `${response.committed_mappings || 0} plant mappings committed`,
+        description: `${response.committed_units || 0} staged unit records were applied using RTG master plant IDs.${response.created_rtg_plants ? ` ${response.created_rtg_plants} new RTG plant was created and verified.` : ""}`,
+      });
+      await Promise.all([loadReview(), loadMapData()]);
+    } catch (err) {
+      showModernPopup({ type: "error", title: "Commit failed", subtitle: "No further rows were accepted", description: err.message });
+    } finally {
+      setCommitting(false);
+    }
+  };
+
+  const updateRtgStatic = async (row) => {
+    try {
+      setUpdatingRtg(row.review_id);
+      const response = await API.updateDatabaseSyncRtgStatic([{ review_id: row.review_id }]);
+      if (response.errors?.length) throw new Error(response.errors.join("\n"));
+      showModernPopup({
+        type: "success",
+        title: "RTG static data updated",
+        subtitle: `${row.rtg_plant_name || row.selected_rtg_plant_id} verified from RTG master`,
+        description: `Installed capacity and reporting-authoritative static fields were updated for ${response.updated_rtg_plants || 0} RTG plant.`,
+      });
+      await loadReview();
+    } catch (err) {
+      showModernPopup({
+        type: "error",
+        title: "RTG update failed",
+        subtitle: "The local locked mapping was not changed",
+        description: err.response?.data?.detail || err.message,
+      });
+    } finally {
+      setUpdatingRtg("");
+    }
+  };
+
+  const saveMapTable = async (dirtyRows) => {
+    try {
+      setMapLoading(true);
+      const response = await API.saveMapTable(dirtyRows);
+      if (!response?.success) throw new Error(response?.message || "Unable to save mapping fields.");
+      showModernPopup({ type: "success", title: "Mapping fields saved", subtitle: `${response.updated || 0} rows updated` });
+      await loadMapData();
+    } catch (err) {
+      showModernPopup({ type: "error", title: "Save failed", subtitle: err.message });
+    } finally {
+      setMapLoading(false);
+    }
+  };
+
+  const visibleSelectedCount = filteredRows.filter((row) => selected.has(row.review_id)).length;
 
   return (
     <AppShell>
-      {/* HERO */}
-
-      <GlassCard
-        sx={{
-          mb: 1.8,
-          p: 2,
-          background:
-            "linear-gradient(135deg, #022726 0%, #03624C 50%, #17876D 100%)",
-          color: "#fff",
-          position: "relative",
-          overflow: "hidden",
-        }}
-      >
-        <Box
-          sx={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            flexWrap: "wrap",
-            gap: 2
-          }}
-        >
-          <Box sx={{ display: "flex", alignItems: "center", gap: 2.5, flexWrap: "wrap" }}>
-            <Typography
-              sx={{
-                fontSize: 24,
-                fontWeight: 800,
-                lineHeight: 1,
-                letterSpacing: "-0.02em",
-              }}
-            >
-              RTG Data Sync Portal
-            </Typography>
-            <Typography
-              sx={{
-                fontSize: 13,
-                opacity: 0.85,
-                fontWeight: 700,
-              }}
-            >
-              Master Database Sync & Mapping
-            </Typography>
-          </Box>
+      <Box sx={{ borderRadius: 3, px: { xs: 2, md: 3 }, py: 2.2, color: "#fff", background: "linear-gradient(105deg, #08103A 0%, #0057B7 62%, #0F86D7 100%)", display: "flex", justifyContent: "space-between", alignItems: { xs: "flex-start", md: "center" }, flexDirection: { xs: "column", md: "row" }, gap: 2 }}>
+        <Box>
+          <Chip icon={<ServerCog size={13} />} label="MASTER DATA" size="small" sx={{ mb: 0.7, color: "#fff", bgcolor: "rgba(255,255,255,.12)", fontWeight: 800, "& .MuiChip-icon": { color: "#fff" } }} />
+          <Typography sx={{ fontSize: { xs: 23, md: 28 }, lineHeight: 1.1, fontWeight: 900 }}>RTG Data Sync Portal</Typography>
+          <Typography sx={{ mt: 0.5, color: "rgba(255,255,255,.82)", fontSize: 12.5 }}>Master Database Sync & Mapping — stage, compare, review, then accept.</Typography>
         </Box>
-      </GlassCard>
+        <Stack direction="row" spacing={1}>
+          <Button variant="outlined" startIcon={<RefreshCw size={16} />} onClick={loadReview} disabled={loading} sx={{ color: "#fff", borderColor: "rgba(255,255,255,.55)", fontWeight: 800 }}>Reload review</Button>
+          <Button variant="contained" startIcon={loading ? <CircularProgress size={15} color="inherit" /> : <Database size={16} />} onClick={refreshReview} disabled={loading} sx={{ bgcolor: "#fff", color: "#0057B7", fontWeight: 900 }}>Fetch APIs into staging</Button>
+        </Stack>
+      </Box>
 
-      {/* ===================================== */}
-      {/* DATA CHANGES */}
-      {/* ===================================== */}
+      {error && <Alert severity="error" sx={{ borderRadius: 2 }}>{error}</Alert>}
+      {!summary.generator_push_configured && (
+        <Alert severity="warning" sx={{ borderRadius: 2 }}>
+          Existing RTG mappings can be accepted. To create reporting-only plants in RTG, configure <b>rtg_generator_push_url</b> in the protected RTG pipeline configuration.
+        </Alert>
+      )}
 
-      <SectionAccordion
-        title="Data Changes"
-        subtitle="Detected unit-wise updates"
-        count={data.length}
-        actions={
-          <Box
-            sx={{
-              display: "flex",
-              alignItems: "center",
-              gap: 2,
-            }}
-          >
-            {/* KPI MINI TAGS */}
+      <Paper elevation={0} sx={{ p: 1.5, border: "1px solid #D9E7F7", borderRadius: 3 }}>
+        <Stack direction={{ xs: "column", lg: "row" }} spacing={1.2} alignItems={{ xs: "stretch", lg: "center" }}>
+          <Stack direction="row" spacing={1} sx={{ overflowX: "auto", pb: 0.25 }}>
+            <SummaryCard label="Reporting units" value={summary.reporting_units} />
+            <SummaryCard label="RTG master" value={summary.rtg_master_records} />
+            <SummaryCard label="Matched" value={summary.matched} color="#047857" />
+            <SummaryCard label="Needs review" value={summary.review} color="#B45309" />
+            <SummaryCard label="Unmatched" value={summary.unmatched} color="#B91C1C" />
+            <SummaryCard label="RTG only" value={summary.rtg_only} color="#1D4ED8" />
+          </Stack>
+          <Box sx={{ flex: 1 }} />
+          <Stack direction="row" spacing={1}>
+            <Button variant="outlined" startIcon={<ArrowLeftRight size={15} />} onClick={selectSuggested} disabled={!rows.length} sx={{ fontWeight: 800 }}>Select suggested</Button>
+            <Button variant="contained" startIcon={committing ? <CircularProgress size={14} color="inherit" /> : <CheckCheck size={15} />} onClick={commitSelected} disabled={!selected.size || committing} sx={{ bgcolor: "#006845", fontWeight: 900 }}>Accept selected ({selected.size})</Button>
+          </Stack>
+        </Stack>
+      </Paper>
 
-            <Box
-              sx={{
-                display: "flex",
-                gap: 1.2,
-                mr: 1,
-              }}
-            >
-              {/* TOTAL */}
-
-              <GlassCard
-                hover={false}
-                glow={false}
-                padding={1}
-                sx={{
-                  minWidth: 110,
-                  background:
-                    "rgba(255,255,255,0.12)",
-                  color: "#fff",
-                  border: "none",
-                  boxShadow: "none",
-                }}
-              >
-                <Typography
-                  sx={{
-                    fontSize: 11,
-                    opacity: 0.7,
-                  }}
-                >
-                  Total
-                </Typography>
-
-                <Typography
-                  sx={{
-                    fontSize: 22,
-                    fontWeight: 800,
-                  }}
-                >
-                  {data.length}
-                </Typography>
-              </GlassCard>
-
-              {/* NEW */}
-
-              <GlassCard
-                hover={false}
-                glow={false}
-                padding={1}
-                sx={{
-                  minWidth: 110,
-                  background:
-                    "rgba(34,197,94,0.18)",
-                  color: "#fff",
-                  border: "none",
-                  boxShadow: "none",
-                }}
-              >
-                <Typography
-                  sx={{
-                    fontSize: 11,
-                    opacity: 0.7,
-                  }}
-                >
-                  New
-                </Typography>
-
-                <Typography
-                  sx={{
-                    fontSize: 22,
-                    fontWeight: 800,
-                  }}
-                >
-                  {
-                    data.filter(
-                      (x) =>
-                        x.change_type ===
-                        "NEW"
-                    ).length
-                  }
-                </Typography>
-              </GlassCard>
-
-              {/* MODIFIED */}
-
-              <GlassCard
-                hover={false}
-                glow={false}
-                padding={1}
-                sx={{
-                  minWidth: 110,
-                  background:
-                    "rgba(245,158,11,0.18)",
-                  color: "#fff",
-                  border: "none",
-                  boxShadow: "none",
-                }}
-              >
-                <Typography
-                  sx={{
-                    fontSize: 11,
-                    opacity: 0.7,
-                  }}
-                >
-                  Modified
-                </Typography>
-
-                <Typography
-                  sx={{
-                    fontSize: 22,
-                    fontWeight: 800,
-                  }}
-                >
-                  {
-                    data.filter(
-                      (x) =>
-                        x.change_type ===
-                        "MODIFIED"
-                    ).length
-                  }
-                </Typography>
-              </GlassCard>
-            </Box>
-
-            <Box
-              sx={{
-                width: 260,
-              }}
-            >
-              <PremiumInput
-                placeholder="Search changes..."
-                value={unitSearch}
-                onChange={(e) =>
-                  setUnitSearch(
-                    e.target.value
-                  )
-                }
-                sx={{
-                  "& .MuiOutlinedInput-root": {
-                    background:
-                      "rgba(255,255,255,0.14)",
-
-                    color: "#fff",
-
-                    backdropFilter:
-                      "blur(14px)",
-
-                    "& fieldset": {
-                      borderColor:
-                        "rgba(255,255,255,0.18)",
-                    },
-                  },
-
-                  "& input": {
-                    color: "#fff",
-                  },
-
-                  "& input::placeholder": {
-                    color:
-                      "rgba(255,255,255,0.65)",
-                    opacity: 1,
-                  },
-                }}
-                InputProps={{
-                  startAdornment: (
-                    <SearchRoundedIcon
-                      sx={{
-                        mr: 1,
-                        fontSize: 18,
-                        opacity: 0.7,
-                      }}
-                    />
-                  ),
-                }}
-              />
-            </Box>
-
-            {/* ACTION BUTTONS */}
-
-            <GradientButton
-              variant="glass"
-              startIcon={<SyncRoundedIcon />}
-              onClick={(e) => {
-                e.stopPropagation();
-                fetchData();
-              }}
-            >
-              {loading
-                ? "Fetching..."
-                : "Fetch Data"}
-            </GradientButton>
-
-            <GradientButton
-              color="success"
-              startIcon={<SaveRoundedIcon />}
-              onClick={(e) => {
-                e.stopPropagation();
-                commit();
-              }}
-            >
-              Commit Changes
-            </GradientButton>
-          </Box>
-        }
-      >
-        <PremiumTable maxHeight="30vh">
-          <Table stickyHeader>
+      <Paper elevation={0} sx={{ border: "1px solid #D9E7F7", borderRadius: 3, overflow: "hidden" }}>
+        <Box sx={{ px: 1.5, py: 1.1, display: "flex", gap: 1, alignItems: "center", flexWrap: "wrap", bgcolor: "#F8FAFC", borderBottom: "1px solid #E2E8F0" }}>
+          <TextField size="small" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search reporting or RTG plant…" InputProps={{ startAdornment: <InputAdornment position="start"><Search size={14} /></InputAdornment> }} sx={{ width: 310, "& .MuiOutlinedInput-root": { height: 36, bgcolor: "#fff" } }} />
+          <FormControl size="small" sx={{ minWidth: 150 }}>
+            <Select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)} sx={{ height: 36, bgcolor: "#fff" }}>
+              <MenuItem value="ALL">All statuses</MenuItem>
+              {Object.entries(STATUS_STYLE).map(([value, style]) => <MenuItem key={value} value={value}>{style.label}</MenuItem>)}
+            </Select>
+          </FormControl>
+          <Typography sx={{ color: "#64748B", fontSize: 11.5, fontWeight: 700 }}>{filteredRows.length} rows · {visibleSelectedCount} selected in view</Typography>
+        </Box>
+        <TableContainer sx={{ maxHeight: "52vh" }}>
+          <Table stickyHeader size="small" sx={{ minWidth: 1450, "& .MuiTableCell-root": { borderRight: "1px solid #E2E8F0", py: 0.55 } }}>
             <TableHead>
               <TableRow>
-                <TableCell padding="checkbox">
-                  <Checkbox
-                    checked={
-                      data.length > 0 &&
-                      selected.length ===
-                        data.length
-                    }
-                    onChange={selectAll}
-                  />
-                </TableCell>
-
-                <TableCell>
-                  Plant
-                </TableCell>
-
-                <TableCell>
-                  Unit
-                </TableCell>
-
-                <TableCell>
-                  Stage
-                </TableCell>
-
-                <TableCell>
-                  Capacity
-                </TableCell>
-
-                <TableCell>
-                  State
-                </TableCell>
-
-                <TableCell>
-                  Owner
-                </TableCell>
-
-                <TableCell>
-                  Fuel
-                </TableCell>
-
-                <TableCell>
-                  Change
-                </TableCell>
+                <TableCell padding="checkbox"><Checkbox checked={filteredRows.length > 0 && filteredRows.every((row) => (!choices[row.review_id] && !createFlags[row.review_id]) || selected.has(row.review_id))} indeterminate={visibleSelectedCount > 0 && visibleSelectedCount < filteredRows.filter((row) => choices[row.review_id] || createFlags[row.review_id]).length} onChange={(event) => selectAllVisible(event.target.checked)} /></TableCell>
+                {["Status", "Reporting plant / stage", "Reporting details", "RTG master mapping", "RTG details", "Method", "Confidence", "Review"].map((label) => <TableCell key={label} sx={{ bgcolor: "#08103A", color: "#fff", fontWeight: 900, whiteSpace: "nowrap" }}>{label}</TableCell>)}
               </TableRow>
             </TableHead>
-
             <TableBody>
-              {(filteredUnitData || []).map(
-                (row, i) => (
-                  <TableRow
-                    hover
-                    key={i}
-                  >
-                    <TableCell padding="checkbox">
-                      <Checkbox
-                        checked={selected.includes(
-                          row.Unit_Number
+              {filteredRows.map((row) => {
+                const status = STATUS_STYLE[row.status] || STATUS_STYLE.REVIEW;
+                const choice = choices[row.review_id] || "";
+                const createInRtg = Boolean(createFlags[row.review_id]);
+                const selectedRtg = rtgById[choice] || (choice ? {
+                  plant_id: choice,
+                  plant_name: row.rtg_plant_name,
+                  installed_capacity: row.rtg_capacity_mw,
+                  state_name: row.rtg_state_name,
+                  owner_name: row.rtg_owner_name,
+                } : {});
+                const reportingCapacity = Number(row.reporting_capacity_mw);
+                const rtgCapacity = Number(selectedRtg.installed_capacity);
+                const capacityMismatch = Number.isFinite(reportingCapacity)
+                  && Number.isFinite(rtgCapacity)
+                  && Math.abs(reportingCapacity - rtgCapacity) > 0.01;
+                return (
+                  <TableRow key={row.review_id} hover sx={{ bgcolor: row.review_status === "ACCEPTED" ? "#F0FDF4" : "#fff" }}>
+                    <TableCell padding="checkbox"><Checkbox checked={selected.has(row.review_id)} disabled={!choice && !createInRtg} onChange={() => toggle(row.review_id)} /></TableCell>
+                    <TableCell><Chip size="small" label={status.label} sx={{ color: status.color, bgcolor: status.bgcolor, fontWeight: 900 }} />{row.review_status === "ACCEPTED" && <Chip size="small" label="Accepted" sx={{ ml: 0.5, color: "#047857", bgcolor: "#DCFCE7", fontWeight: 800 }} />}</TableCell>
+                    <TableCell sx={{ minWidth: 230 }}><Typography sx={{ fontSize: 12, color: "#0F172A", fontWeight: 900 }}>{row.reporting_plant_name || "—"}</Typography><Typography sx={{ fontSize: 10.5, color: "#64748B" }}>Stage {row.reporting_stage_name || "—"} · ID {row.reporting_stage_id || "—"} · {row.unit_count || 0} units</Typography></TableCell>
+                    <TableCell sx={{ minWidth: 190, fontSize: 11 }}><b>{formatNumber(row.reporting_capacity_mw)} MW</b><br />{row.reporting_state_name || "—"}<br />{row.reporting_owner_name || "—"}</TableCell>
+                    <TableCell sx={{ minWidth: 330 }}>
+                      <Autocomplete
+                        size="small"
+                        options={rtgMaster}
+                        value={choice ? selectedRtg : null}
+                        disabled={Boolean(row.mapping_locked)}
+                        disableClearable={Boolean(row.mapping_locked)}
+                        isOptionEqualToValue={(option, value) => option.plant_id === value.plant_id}
+                        getOptionLabel={(plant) => `${plant.plant_id || ""} — ${plant.plant_name || ""} (${formatNumber(plant.installed_capacity)} MW)`}
+                        onChange={(_, plant) => {
+                          const plantId = plant?.plant_id || "";
+                          setChoices((current) => ({ ...current, [row.review_id]: plantId }));
+                          setCreateFlags((current) => ({ ...current, [row.review_id]: false }));
+                          if (plantId) setSelected((current) => new Set(current).add(row.review_id));
+                        }}
+                        renderInput={(params) => (
+                          <TextField
+                            {...params}
+                            placeholder="Search RTG ID or plant name"
+                            sx={{
+                              "& .MuiOutlinedInput-root": { minHeight: 36, bgcolor: choice ? "#fff" : "#FFF7ED", fontSize: 11.5 },
+                            }}
+                          />
                         )}
-                        onChange={() =>
-                          toggleSelect(
-                            row
-                          )
-                        }
                       />
+                      {!row.mapping_locked && row.reporting_stage_id && !choice && (
+                        <Button
+                          size="small"
+                          variant={createInRtg ? "contained" : "outlined"}
+                          color={createInRtg ? "success" : "primary"}
+                          startIcon={<UploadCloud size={13} />}
+                          disabled={!summary.generator_push_configured}
+                          onClick={() => {
+                            setCreateFlags((current) => ({ ...current, [row.review_id]: !createInRtg }));
+                            setSelected((current) => {
+                              const next = new Set(current);
+                              if (!createInRtg) next.add(row.review_id); else next.delete(row.review_id);
+                              return next;
+                            });
+                          }}
+                          sx={{ mt: 0.55, fontSize: 10.5, fontWeight: 850 }}
+                        >
+                          {createInRtg ? "New RTG plant selected" : "Create as new RTG plant"}
+                        </Button>
+                      )}
+                      {row.mapping_locked && (
+                        <Stack direction="row" spacing={0.4} alignItems="center" sx={{ mt: 0.4, color: "#047857" }}>
+                          <LockKeyhole size={11} />
+                          <Typography sx={{ fontSize: 9.5, fontWeight: 800 }}>
+                            Saved reference — RTG ID is locked
+                          </Typography>
+                        </Stack>
+                      )}
+                      {row.candidates?.length > 1 && <Typography sx={{ mt: 0.35, color: "#64748B", fontSize: 9.5 }}>Suggested alternatives: {row.candidates.slice(0, 3).map((candidate) => `${candidate.plant_name} ${candidate.score}%`).join(" · ")}</Typography>}
                     </TableCell>
-
-                    <TableCell>
-                      {
-                        row.plant_name
-                      }
+                    <TableCell sx={{ minWidth: 190, fontSize: 11 }}><b>{formatNumber(selectedRtg.installed_capacity)} MW</b><br />{selectedRtg.state_name || "—"}<br />{selectedRtg.owner_name || "—"}</TableCell>
+                    <TableCell sx={{ fontSize: 10.5, color: "#475569" }}>
+                      {String(row.match_method || "").replaceAll("_", " ")}
+                      {row.current_rtg_plant_id && (
+                        <Typography sx={{ mt: 0.25, color: row.current_mapping_score >= 70 ? "#64748B" : "#B91C1C", fontSize: 9.5, fontWeight: 700 }}>
+                          Previous: {row.current_rtg_plant_id} ({formatNumber(row.current_mapping_score)}%)
+                        </Typography>
+                      )}
                     </TableCell>
-
-                    <TableCell>
-                      {
-                        row.Unit_Name
-                      }
-                    </TableCell>
-
-                    <TableCell>
-                      {
-                        row.STAGE_NAME
-                      }
-                    </TableCell>
-
-                    <TableCell>
-                      {
-                        row.installed_capacity
-                      }
-                    </TableCell>
-
-                    <TableCell>
-                      {
-                        row.state_name
-                      }
-                    </TableCell>
-
-                    <TableCell>
-                      {
-                        row.owner_name
-                      }
-                    </TableCell>
-
-                    <TableCell>
-                      {
-                        row.fuel_type
-                      }
-                    </TableCell>
-
-                    <TableCell>
-                      <StatusChip
-                        type={
-                          row.change_type
-                        }
-                      />
+                    <TableCell><Typography sx={{ color: row.confidence >= 85 ? "#047857" : (row.confidence >= 65 ? "#B45309" : "#B91C1C"), fontWeight: 900 }}>{formatNumber(row.confidence)}%</Typography></TableCell>
+                    <TableCell sx={{ minWidth: 145 }}>
+                      <Stack spacing={0.55} alignItems="flex-start">
+                        <Button size="small" variant={selected.has(row.review_id) ? "contained" : "outlined"} disabled={!choice && !createInRtg} onClick={() => toggle(row.review_id)} sx={{ minWidth: 78, fontWeight: 800 }}>{selected.has(row.review_id) ? "Selected" : "Accept"}</Button>
+                        {row.mapping_locked && capacityMismatch && (
+                          <Button
+                            size="small"
+                            variant="contained"
+                            color="warning"
+                            startIcon={updatingRtg === row.review_id ? <CircularProgress size={12} color="inherit" /> : <RefreshCw size={13} />}
+                            disabled={updatingRtg === row.review_id || !summary.generator_push_configured}
+                            onClick={() => updateRtgStatic(row)}
+                            sx={{ whiteSpace: "nowrap", fontSize: 10, fontWeight: 900 }}
+                          >
+                            Update RTG data
+                          </Button>
+                        )}
+                        {row.mapping_locked && capacityMismatch && (
+                          <Typography sx={{ color: "#B45309", fontSize: 9.5, fontWeight: 800 }}>
+                            {formatNumber(rtgCapacity)} → {formatNumber(reportingCapacity)} MW
+                          </Typography>
+                        )}
+                      </Stack>
                     </TableCell>
                   </TableRow>
-                )
-              )}
+                );
+              })}
+              {!filteredRows.length && <TableRow><TableCell colSpan={9} align="center" sx={{ py: 7, color: "#64748B" }}>{loading ? "Loading comparison…" : "Fetch the APIs into staging to prepare the comparison."}</TableCell></TableRow>}
             </TableBody>
           </Table>
-        </PremiumTable>
-      </SectionAccordion>
+        </TableContainer>
+      </Paper>
 
-      {/* ===================================== */}
-      {/* STAGE PREVIEW */}
-      {/* ===================================== */}
-
-      <SectionAccordion
-        title="Station Mapping Preview"
-        subtitle="Consolidated stage compare"
-        count={stageData.length}
-        actions={
-          <Box
-            sx={{
-              display: "flex",
-              gap: 1.5,
-            }}
-          >
-            <GradientButton
-              variant="glass"
-              onClick={(e) => {
-                e.stopPropagation();
-
-                compareStageTable();
-              }}
-            >
-              Compare Mapping
-            </GradientButton>
-
-            <GradientButton
-              color="success"
-              onClick={(e) => {
-                e.stopPropagation();
-
-                commitStageTable();
-              }}
-            >
-              Confirm Update
-            </GradientButton>
-          </Box>
-        }
-      >
-        <PremiumTable maxHeight="25vh">
-          <Table stickyHeader>
-            <TableHead>
-              <TableRow>
-                <TableCell>
-                  Plant
-                </TableCell>
-
-                <TableCell>
-                  Stage
-                </TableCell>
-
-                <TableCell>
-                  Owner
-                </TableCell>
-
-                <TableCell>
-                  Capacity
-                </TableCell>
-
-                <TableCell>
-                  Change
-                </TableCell>
-              </TableRow>
-            </TableHead>
-
-            <TableBody>
-              {(filteredStageData || []).map(
-                (row, i) => (
-                  <TableRow
-                    key={i}
-                    hover
-                  >
-                    <TableCell>
-                      {
-                        row.plant_name
-                      }
-                    </TableCell>
-
-                    <TableCell>
-                      {
-                        row.STAGE_NAME
-                      }
-                    </TableCell>
-
-                    <TableCell>
-                      {
-                        row.owner_name
-                      }
-                    </TableCell>
-
-                    <TableCell>
-                      {
-                        row.stage_installed_capacity
-                      }
-                    </TableCell>
-
-                    <TableCell>
-                      <StatusChip
-                        type={
-                          row.change_type
-                        }
-                      />
-                    </TableCell>
-                  </TableRow>
-                )
-              )}
-            </TableBody>
-          </Table>
-        </PremiumTable>
-      </SectionAccordion>
-
-      {/* ===================================== */}
-      {/* MAP TABLE */}
-      {/* ===================================== */}
-
-      <SectionAccordion
-        title="Station Mapping Table"
-        subtitle="Editable station mapping"
-        count={mapData.filter(r => !r.is_state).length}
-        actions={
-          <Box sx={{ width: 260 }} onClick={(e) => e.stopPropagation()}>
-            <PremiumInput
-              placeholder="Search stations..."
-              value={stationSearch}
-              onChange={(e) => setStationSearch(e.target.value)}
-              sx={{
-                "& .MuiOutlinedInput-root": {
-                  background: "rgba(255,255,255,0.14)",
-                  color: "#fff",
-                  backdropFilter: "blur(14px)",
-                  "& fieldset": { borderColor: "rgba(255,255,255,0.18)" },
-                },
-                "& input": { color: "#fff" },
-                "& input::placeholder": { color: "rgba(255,255,255,0.65)" },
-              }}
-              InputProps={{
-                startAdornment: (
-                  <SearchRoundedIcon sx={{ mr: 1, fontSize: 18, opacity: 0.7 }} />
-                ),
-              }}
-            />
-          </Box>
-        }
-      >
-        <Box sx={{ p: 0.5 }}>
-          <PlantMappingGrid
-            data={mapData.filter(r => !r.is_state)}
-            loading={loading}
-            onSave={saveMapTable}
-            maxHeight="40vh"
-            searchText={stationSearch}
-          />
-        </Box>
-      </SectionAccordion>
-
-      <SectionAccordion
-        title="State & System Mapping Table"
-        subtitle="Editable state & system frequency mapping"
-        count={mapData.filter(r => r.is_state).length}
-        actions={
-          <Box sx={{ width: 260 }} onClick={(e) => e.stopPropagation()}>
-            <PremiumInput
-              placeholder="Search states..."
-              value={stateSearch}
-              onChange={(e) => setStateSearch(e.target.value)}
-              sx={{
-                "& .MuiOutlinedInput-root": {
-                  background: "rgba(255,255,255,0.14)",
-                  color: "#fff",
-                  backdropFilter: "blur(14px)",
-                  "& fieldset": { borderColor: "rgba(255,255,255,0.18)" },
-                },
-                "& input": { color: "#fff" },
-                "& input::placeholder": { color: "rgba(255,255,255,0.65)" },
-              }}
-              InputProps={{
-                startAdornment: (
-                  <SearchRoundedIcon sx={{ mr: 1, fontSize: 18, opacity: 0.7 }} />
-                ),
-              }}
-            />
-          </Box>
-        }
-      >
-        <Box sx={{ p: 0.5 }}>
-          <PlantMappingGrid
-            data={mapData.filter(r => r.is_state)}
-            loading={loading}
-            onSave={saveMapTable}
-            maxHeight="30vh"
-            searchText={stateSearch}
-          />
-        </Box>
-      </SectionAccordion>
-
-      {/* Spacing spacer for easy scrolling to the bottom */}
-      <Box sx={{ height: 80, flexShrink: 0 }} />
+      <Paper elevation={0} sx={{ p: 1.5, border: "1px solid #D9E7F7", borderRadius: 3 }}>
+        <Stack direction={{ xs: "column", md: "row" }} justifyContent="space-between" spacing={1} sx={{ mb: 1 }}>
+          <Box><Typography sx={{ color: "#08103A", fontSize: 17, fontWeight: 900 }}>Operational Mapping Fields</Typography><Typography sx={{ color: "#64748B", fontSize: 11.5 }}>After accepting the RTG identity, maintain WBES, SCADA, CRMS and source selections here.</Typography></Box>
+          <TextField size="small" value={mapSearch} onChange={(event) => setMapSearch(event.target.value)} placeholder="Search accepted mappings…" InputProps={{ startAdornment: <InputAdornment position="start"><Search size={14} /></InputAdornment> }} sx={{ width: 290, "& .MuiOutlinedInput-root": { height: 36 } }} />
+        </Stack>
+        <PlantMappingGrid data={mapData} loading={mapLoading} onSave={saveMapTable} maxHeight="45vh" searchText={mapSearch} />
+      </Paper>
     </AppShell>
   );
 }

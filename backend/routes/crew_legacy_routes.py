@@ -11,6 +11,7 @@ from crew_legacy.api.replacement import router as replacement_router
 from crew_legacy.api.roster_api import router as roster_router
 from crew_legacy.api.training_assignment import router as training_assignment_router
 from crew_legacy.api.training_holiday_api import router as training_holiday_router
+from crew_legacy.api.morning_presentation import router as morning_presentation_router
 
 
 router = APIRouter(prefix="/api/crew")
@@ -25,3 +26,4 @@ router.include_router(replacement_router, prefix="/replacement")
 router.include_router(roster_router, prefix="/roster")
 router.include_router(training_assignment_router, prefix="/training-assign")
 router.include_router(training_holiday_router, prefix="/Training_holiday")
+router.include_router(morning_presentation_router)

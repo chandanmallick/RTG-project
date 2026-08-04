@@ -12,7 +12,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { Check, ChevronDown, ChevronUp, Copy, Download, Pencil, Plus, RefreshCw, Search, Trash2, X } from "lucide-react";
+import { BrainCircuit, Check, ChevronDown, ChevronUp, Copy, Download, Pencil, Plus, RefreshCw, Search, Trash2, X } from "lucide-react";
 
 import AppShell from "../components/layout/AppShell";
 import CalendarInput from "../components/ui/CalendarInput";
@@ -715,6 +715,13 @@ export default function OutageAnalysis() {
             <div style={styles.eyebrow}>CRMS Transmission Outage History</div>
             <h1 style={styles.title}>S/D Reason and Time Analysis</h1>
           </div>
+          <button
+            type="button"
+            style={{ ...styles.primaryButton, background: "#0057B8" }}
+            onClick={() => window.location.assign("/outage-analysis/ml-training")}
+          >
+            <BrainCircuit size={17} /> ML Training Centre
+          </button>
         </div>
 
         <div style={styles.toolbar}>

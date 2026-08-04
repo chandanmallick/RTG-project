@@ -11,7 +11,10 @@ from crew_legacy.admin_logic.notification_service import (
     DEFAULT_REPLACEMENT_BODY,
     DEFAULT_REPLACEMENT_SUBJECT,
     REPLACEMENT_MAIL_SETTINGS_ID,
+    MAIL_TEMPLATE_SETTINGS_ID,
+    WORKFLOW_MAIL_DEFAULTS,
     public_replacement_mail_settings,
+    workflow_mail_templates,
 )
 from crew_legacy.database.database_mongo import mail_notification_settings_collection
 from crew_legacy.admin_logic.two_factor import (
@@ -44,6 +47,13 @@ ALLOWED_PLACEHOLDERS = {
     "leave_designation",
     "leave_employee_id",
     "group_name",
+    "employee_name",
+    "employee_id",
+    "leave_count",
+    "leave_dates",
+    "leave_date",
+    "leave_type",
+    "comment",
 }
 REQUIRED_BODY_PLACEHOLDERS = {
     "replacement_person",
@@ -62,6 +72,7 @@ class ReplacementMailSettingsUpdate(BaseModel):
     clientId: str = Field(default="", max_length=200)
     clientSecret: str = Field(default="", max_length=1000)
     twoFactorMode: str = Field(default="off", max_length=20)
+    templates: list[dict] = Field(default_factory=list)
 
 
 ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
@@ -139,6 +150,7 @@ def get_replacement_mail_settings():
     return {
         **public_replacement_mail_settings(),
         "allowedPlaceholders": sorted(ALLOWED_PLACEHOLDERS),
+        "templates": list(workflow_mail_templates().values()),
         "twoFactor": {
             **two_factor_settings(),
             "readiness": two_factor_readiness(),
@@ -189,6 +201,30 @@ def update_replacement_mail_settings(
 
     _persist_graph_credentials(env_updates)
 
+    template_updates = {}
+    for item in payload.templates:
+        key = str(item.get("key") or "").strip()
+        if key not in WORKFLOW_MAIL_DEFAULTS:
+            raise HTTPException(400, detail=f"Unknown mail template: {key}")
+        subject = str(item.get("subjectTemplate") or "").strip()
+        body = str(item.get("bodyTemplate") or "").strip()
+        if not subject or not body:
+            raise HTTPException(400, detail=f"Subject and body are required for {WORKFLOW_MAIL_DEFAULTS[key]['label']}")
+        _validate_template(subject)
+        _validate_template(body)
+        template_updates[key] = {
+            "enabled": bool(item.get("enabled")),
+            "subjectTemplate": subject,
+            "bodyTemplate": body,
+        }
+
+    if template_updates:
+        mail_notification_settings_collection.update_one(
+            {"_id": MAIL_TEMPLATE_SETTINGS_ID},
+            {"$set": {"templates": template_updates, "updatedAt": datetime.utcnow(), "updatedBy": str(user.get("employeeId") or user.get("userId") or "ADMIN")}},
+            upsert=True,
+        )
+
     mail_notification_settings_collection.update_one(
         {"_id": REPLACEMENT_MAIL_SETTINGS_ID},
         {
@@ -211,6 +247,7 @@ def update_replacement_mail_settings(
     return {
         **public_replacement_mail_settings(),
         "allowedPlaceholders": sorted(ALLOWED_PLACEHOLDERS),
+        "templates": list(workflow_mail_templates().values()),
         "twoFactor": {
             **two_factor_settings(),
             "readiness": two_factor_readiness(),

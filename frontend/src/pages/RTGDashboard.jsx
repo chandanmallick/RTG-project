@@ -53,6 +53,7 @@ import RTGOutagePie from "../components/rtg/RTGOutagePie";
 import CapacityOnBarChart from "../components/rtg/CapacityOnBarChart";
 import RTGDayTrend from "../components/rtg/RTGDayTrend";
 import RTGSnapshotTrend from "../components/rtg/RTGSnapshotTrend";
+import RTGHistoricalDownload from "../components/rtg/RTGHistoricalDownload";
 
 import {
   ResponsiveContainer,
@@ -138,6 +139,8 @@ export default function RTGDashboard() {
   const [pipelineTab, setPipelineTab] = useState(0);
 
   const [selectedFilters, setSelectedFilters] = useState([]);
+
+  const [showHistoricalDownload, setShowHistoricalDownload] = useState(false);
 
   const [showOutageDialog, setShowOutageDialog] = useState(false);
 
@@ -399,8 +402,25 @@ export default function RTGDashboard() {
             {data.map((row, index) => (
               <tr key={index}>
                 {columns.map(col => (
-                  <td key={col} style={{ padding: "10px 14px", borderBottom: "1px solid rgba(0,0,0,0.05)", fontSize: 12, color: col === "status" ? (row[col] === "SUCCESS" ? "#16a34a" : "#dc2626") : "#475569", fontWeight: col === "status" ? 700 : 400, whiteSpace: "nowrap" }}>
-                    {typeof row[col] === "object" ? JSON.stringify(row[col]) : String(row[col])}
+                  <td
+                    key={col}
+                    style={{
+                      padding: "10px 14px",
+                      borderBottom: "1px solid rgba(0,0,0,0.05)",
+                      fontSize: 12,
+                      color: ["status", "push_status"].includes(col)
+                        ? (row[col] === "SUCCESS" ? "#16a34a" : "#dc2626")
+                        : "#475569",
+                      fontWeight: ["status", "push_status", "total_outage_mw"].includes(col) ? 700 : 400,
+                      whiteSpace: "nowrap",
+                      textAlign: typeof row[col] === "number" ? "right" : "left",
+                    }}
+                  >
+                    {typeof row[col] === "object"
+                      ? JSON.stringify(row[col])
+                      : (typeof row[col] === "number"
+                        ? Number(row[col]).toLocaleString("en-IN", { maximumFractionDigits: 2 })
+                        : String(row[col] ?? ""))}
                   </td>
                 ))}
               </tr>
@@ -972,217 +992,87 @@ export default function RTGDashboard() {
 
     <AppShell>
 
-      <GlassCard
+      <Box
         sx={{
-          mb: 1.8,
-          p: 2,
-          background:
-            "linear-gradient(135deg, #022726 0%, #03624C 50%, #17876D 100%)",
-          color: "#fff",
+          mb: 2.1,
+          px: 2.8,
+          py: 1.8,
+          borderRadius: "32px",
+          background: "linear-gradient(105deg, #08103A 0%, #0057B7 65%, #0F6FDB 100%)",
+          color: "#FFFFFF",
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: { xs: "stretch", md: "center" },
+          flexDirection: { xs: "column", md: "row" },
+          gap: 2,
         }}
       >
+        <Box>
+          <Typography sx={{ fontSize: 24, fontWeight: 600, lineHeight: 1.15 }}>RTG Dashboard</Typography>
+          <Typography sx={{ mt: 0.45, fontSize: 12, color: "rgba(255,255,255,.9)" }}>
+            Live generation, schedules, outages and operational trends
+          </Typography>
+        </Box>
+        <Box sx={{ display: "flex", gap: 1.2, alignItems: "center", flexWrap: { xs: "wrap", md: "nowrap" } }}>
+          <Autocomplete
+            multiple size="small" sx={{ width: { xs: "100%", md: 360 }, bgcolor: "white", borderRadius: 1 }} options={FILTER_OPTIONS}
+            value={FILTER_OPTIONS.filter((option) => selectedFilters.includes(option.value))}
+            getOptionLabel={(option) => option.label}
+            onChange={(_, value) => setSelectedFilters(value.map((item) => item.value))}
+            renderInput={(params) => <TextField {...params} placeholder="Filter Utility / State" />}
+          />
+          <GradientButton startIcon={<RefreshRoundedIcon />} onClick={refreshRTGData} sx={{ whiteSpace: "nowrap", bgcolor: "#08103A", minHeight: 42 }}>
+            Refresh RTG Data
+          </GradientButton>
+        </Box>
+      </Box>
 
-        <Box
+      <Box sx={{ display: "none" }}>
+        <Paper
+          component="button"
+          type="button"
+          onClick={() => setShowHistoricalDownload((open) => !open)}
+          elevation={0}
           sx={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            gap: 2,
-            flexDirection: {
-              xs: "column",
-              md: "row"
-            }
+            width: { xs: "100%", sm: 330 }, minHeight: 112, p: 2, textAlign: "left",
+            borderRadius: "15px", border: showHistoricalDownload ? "2px solid #0057B7" : "1px solid #BFE4D8",
+            background: showHistoricalDownload ? "#EDF5FF" : "linear-gradient(145deg,#FFFFFF,#F4FBF8)",
+            cursor: "pointer", transition: "all .2s ease", color: "#08103A",
+            "&:hover": { transform: "translateY(-2px)", boxShadow: "0 12px 26px rgba(0,87,183,.13)" },
           }}
         >
-
-          <Box sx={{ display: "flex", alignItems: "center", gap: 2.5, flexWrap: "wrap" }}>
-            <Typography
-              sx={{
-                fontSize: 24,
-                fontWeight: 800,
-                lineHeight: 1,
-                letterSpacing: "-0.02em"
-              }}
-            >
-              RTG Dashboard
-            </Typography>
-
-            <Box
-              sx={{
-                display: "flex",
-                flexWrap: "wrap",
-                gap: 1.2,
-                "@keyframes updatePulse": {
-                  "0%": {
-                    boxShadow:
-                      "0 0 0 0 rgba(239,68,68,0.48)"
-                  },
-                  "70%": {
-                    boxShadow:
-                      "0 0 0 8px rgba(239,68,68,0)"
-                  },
-                  "100%": {
-                    boxShadow:
-                      "0 0 0 0 rgba(239,68,68,0)"
-                  }
-                }
-              }}
-            >
-
-              {[
-                {
-                  label:
-                    "Actual Last Updated",
-                  value:
-                    formatUpdateTime(
-                      actualLastUpdated
-                    ),
-                  stale:
-                    actualUpdateStale
-                }
-              ].map(item => (
-
-                <Box
-                  key={item.label}
-                  sx={{
-                    px: 1.5,
-                    py: 0.9,
-                    borderRadius: "999px",
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 0.9,
-                    background:
-                      item.stale
-                        ? "rgba(254,242,242,0.96)"
-                        : "rgba(255,255,255,0.16)",
-                    color:
-                      item.stale
-                        ? "#DC2626"
-                        : "#fff",
-                    border:
-                      item.stale
-                        ? "1px solid rgba(248,113,113,0.55)"
-                        : "1px solid rgba(255,255,255,0.22)",
-                    backdropFilter:
-                      "blur(14px)",
-                    animation:
-                      item.stale
-                        ? "updatePulse 1.4s infinite"
-                        : "none"
-                  }}
-                >
-                  <Typography
-                    sx={{
-                      fontSize: 11,
-                      fontWeight: 850,
-                      opacity:
-                        item.stale
-                          ? 1
-                          : 0.82
-                    }}
-                  >
-                    {item.label}
-                  </Typography>
-
-                  <Typography
-                    sx={{
-                      fontSize: 12,
-                      fontWeight: 950,
-                      whiteSpace: "nowrap"
-                    }}
-                  >
-                    {item.value}
-                  </Typography>
-                </Box>
-
-              ))}
-
+          <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 1 }}>
+            <Typography sx={{ fontSize: 15, fontWeight: 900 }}>RTG Historical Data Download</Typography>
+            <Box sx={{ width: 38, height: 38, borderRadius: "50%", bgcolor: "#0057B7", color: "white", display: "grid", placeItems: "center" }}>
+              <Database size={19} />
             </Box>
           </Box>
+          <Typography sx={{ mt: 1, fontSize: 12, color: "#52647D" }}>
+            Schedule, DC, capacity and actual data matrix
+          </Typography>
+        </Paper>
+      </Box>
 
-          <Box
-            sx={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: {
-                xs: "flex-start",
-                md: "flex-end"
-              },
-              gap: 1.5,
-              flexWrap: "wrap",
-              maxWidth: {
-                xs: "100%",
-                md: 620
-              }
-            }}
-          >
-
-            <Autocomplete
-              multiple
-              size="small"
-              sx={{
-                width: {
-                  xs: "100%",
-                  sm: 360
-                },
-
-                "& .MuiOutlinedInput-root": {
-
-                  borderRadius: "16px",
-
-                  background:
-                    "rgba(255,255,255,0.9)",
-
-                  backdropFilter:
-                    "blur(10px)"
-                }
-              }}
-              options={FILTER_OPTIONS}
-              value={FILTER_OPTIONS.filter(
-                option =>
-                  selectedFilters.includes(
-                    option.value
-                  )
-              )}
-              getOptionLabel={(o) =>
-                o.label
-              }
-              onChange={(e,value)=>{
-
-                setSelectedFilters(
-
-                  value.map(
-                    x => x.value
-                  )
-
-                );
-
-              }}
-              renderInput={(params)=>(
-
-                <TextField
-                  {...params}
-                  label="Filter Utility / State"
-                />
-
-              )}
-            />
-
-            <GradientButton
-              startIcon={<RefreshRoundedIcon />}
-              onClick={refreshRTGData}
-              sx={{
-                whiteSpace: "nowrap"
-              }}
-            >
-              Refresh RTG Data
-            </GradientButton>
-
-          </Box>
-
+      <Paper
+        variant="outlined"
+        sx={{ display: "none" }}
+      >
+        <Box sx={{ px: 1.3, py: .75, borderRadius: "999px", bgcolor: actualUpdateStale ? "#FEF2F2" : "#ECFDF5", color: actualUpdateStale ? "#DC2626" : "#047857", fontSize: 12, fontWeight: 900 }}>
+          Actual Last Updated&nbsp;&nbsp;{formatUpdateTime(actualLastUpdated)}
         </Box>
-
-      </GlassCard>
+        <Box sx={{ display: "flex", gap: 1.2, alignItems: "center", flexWrap: "wrap" }}>
+          <Autocomplete
+            multiple size="small" sx={{ width: { xs: "100%", sm: 360 } }} options={FILTER_OPTIONS}
+            value={FILTER_OPTIONS.filter((option) => selectedFilters.includes(option.value))}
+            getOptionLabel={(option) => option.label}
+            onChange={(_, value) => setSelectedFilters(value.map((item) => item.value))}
+            renderInput={(params) => <TextField {...params} label="Filter Utility / State" />}
+          />
+          <GradientButton startIcon={<RefreshRoundedIcon />} onClick={refreshRTGData} sx={{ whiteSpace: "nowrap" }}>
+            Refresh RTG Data
+          </GradientButton>
+        </Box>
+      </Paper>
 
 
 
@@ -1262,13 +1152,47 @@ export default function RTGDashboard() {
               const rtgLog = pipelineLogs
                 .filter(l => l.process_name === "RTG_PUSH" && l.response_data)
                 .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))[0];
-              const tableData = [
+              const statusTable = [
                 ...(rtgLog?.response_data?.success_plants || []).map(i => ({ plant_name: i.plant_name, plant_id: i.plant_id, status: "SUCCESS", details: i.rtg_response ? JSON.stringify(i.rtg_response) : "Success" })),
                 ...(rtgLog?.response_data?.failed_plants || []).map(i => ({ plant_name: i.plant_name, plant_id: i.plant_id, status: "FAILED", details: i.error || "Unknown Error" }))
               ];
+              const successIds = new Set(
+                (rtgLog?.response_data?.success_plants || []).map(item => String(item.plant_id || ""))
+              );
+              const failedIds = new Set(
+                (rtgLog?.response_data?.failed_plants || []).map(item => String(item.plant_id || ""))
+              );
+              const payloadTable = (Array.isArray(rtgLog?.payload) ? rtgLog.payload : []).map(item => {
+                const total = [
+                  "planned_outage", "forced_outage", "fuel_shortage", "rsd", "commercial_issues",
+                ].reduce((sum, key) => sum + Number(item[key] || 0), 0);
+                const plantId = String(item.plant_id || "");
+                return {
+                  plant_name: item.plant_name || "",
+                  plant_id: plantId,
+                  planned_outage: Number(item.planned_outage || 0),
+                  forced_outage: Number(item.forced_outage || 0),
+                  fuel_shortage: Number(item.fuel_shortage || 0),
+                  rsd: Number(item.rsd || 0),
+                  commercial_issues: Number(item.commercial_issues || 0),
+                  total_outage_mw: total,
+                  push_status: successIds.has(plantId) ? "SUCCESS" : (failedIds.has(plantId) ? "FAILED" : "NOT_ATTEMPTED"),
+                };
+              });
+              const isOutage = selectedPipeline?.pipeline === "OUTAGE";
+              const tableData = isOutage
+                ? (rtgLog?.response_data?.final_outage_table || payloadTable)
+                : statusTable;
               return (
                 <GlassCard sx={{ p: 2.5 }}>
-                  <Typography sx={{ mb: 1.5, fontWeight: 700 }}>{selectedPipeline?.pipeline} Last Push Data</Typography>
+                  <Typography sx={{ mb: 0.4, fontWeight: 700 }}>
+                    {isOutage ? "Final Outage Data Pushed to RTG" : `${selectedPipeline?.pipeline} Last Push Data`}
+                  </Typography>
+                  {isOutage && (
+                    <Typography sx={{ mb: 1.5, color: "#64748B", fontSize: 11.5 }}>
+                      {tableData.length} plant outage record(s). Values are MW from the final outbound payload.
+                    </Typography>
+                  )}
                   {renderPipelineTable(tableData)}
                 </GlassCard>
               );
@@ -1304,11 +1228,40 @@ export default function RTGDashboard() {
 
       <Grid
         container
-        spacing={3}
+        spacing={2}
         sx={{ mb: 3 }}
       >
 
-        <Grid item xs={12} lg={3}>
+        <Grid item xs={12} md={5} lg={3} sx={{ order: 1 }}>
+          <Paper
+            component="button"
+            type="button"
+            onClick={() => setShowHistoricalDownload((open) => !open)}
+            elevation={0}
+            sx={{
+              width: "100%", height: "100%", minHeight: 220, p: 2.4, textAlign: "left",
+              borderRadius: "22px", border: showHistoricalDownload ? "2px solid #0057B7" : "1px solid #BFE4D8",
+              background: showHistoricalDownload ? "#EDF5FF" : "linear-gradient(145deg,#FFFFFF,#F1FAF7)",
+              cursor: "pointer", transition: "all .2s ease", color: "#08103A",
+              "&:hover": { transform: "translateY(-2px)", boxShadow: "0 14px 30px rgba(0,87,183,.13)" },
+            }}
+          >
+            <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 1.5 }}>
+              <Typography sx={{ fontSize: 18, fontWeight: 950 }}>RTG Historical Data Download</Typography>
+              <Box sx={{ width: 44, height: 44, borderRadius: "50%", bgcolor: "#0057B7", color: "white", display: "grid", placeItems: "center", flexShrink: 0 }}>
+                <Database size={21} />
+              </Box>
+            </Box>
+            <Typography sx={{ mt: 2, fontSize: 13, color: "#52647D", lineHeight: 1.55 }}>
+              Schedule, DC, Capacity on Bar and Actual data in entity-wise or plant-wise matrix format.
+            </Typography>
+            <Typography sx={{ mt: 2.2, fontSize: 11, fontWeight: 900, color: "#0057B7" }}>
+              {showHistoricalDownload ? "CLOSE DOWNLOAD WORKSPACE" : "OPEN DOWNLOAD WORKSPACE"}
+            </Typography>
+          </Paper>
+        </Grid>
+
+        <Grid item xs={12} md={7} lg={5} sx={{ order: 2 }}>
 
           <RTGDayTrend
             data={trendData}
@@ -1322,7 +1275,7 @@ export default function RTGDashboard() {
 
         </Grid>
 
-        <Grid item xs={12} lg={3}>
+        <Grid item xs={12} md={6} lg={4} sx={{ order: 4 }}>
 
           <Paper
             elevation={0}
@@ -1478,7 +1431,7 @@ export default function RTGDashboard() {
 
         </Grid>
 
-        <Grid item xs={12} lg={3}>
+        <Grid item xs={12} md={6} lg={4} sx={{ order: 5 }}>
 
           <Paper
             elevation={0}
@@ -1658,8 +1611,8 @@ export default function RTGDashboard() {
         </Grid>
 
         {/* ── PIPELINE MONITOR CARDS ── */}
-        <Grid item xs={12} lg={3}>
-          <Box sx={{ display: "flex", flexDirection: "column", gap: 1.5, height: "100%" }}>
+        <Grid item xs={12} lg={4} sx={{ order: 3 }}>
+          <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "repeat(2,minmax(0,1fr))" }, gap: 1.2, height: "100%", minHeight: 220 }}>
             {pipelineStatus.map((item) => {
               const success = item.last_status === "SUCCESS";
               return (
@@ -1725,7 +1678,32 @@ export default function RTGDashboard() {
           </Box>
         </Grid>
 
+        <Grid item xs={12} lg={4} sx={{ order: 6 }}>
+          <Paper elevation={0} sx={{ height: "100%", minHeight: 460, p: 2.5, borderRadius: "24px", border: "1px solid #E2E8F0", background: "linear-gradient(180deg,#FFFFFF,#F8FAFC)", boxShadow: "0 18px 44px rgba(15,23,42,.08)" }}>
+            <Typography sx={{ fontSize: 21, fontWeight: 950, color: "#0F172A" }}>Data Freshness</Typography>
+            <Typography sx={{ mt: .4, mb: 2, fontSize: 12, color: "#64748B", fontWeight: 750 }}>Latest timestamps for the filtered operational snapshot</Typography>
+            <Box sx={{ p: 1.8, borderRadius: 2.5, bgcolor: actualUpdateStale ? "#FEF2F2" : "#ECFDF5", border: `1px solid ${actualUpdateStale ? "#FECACA" : "#BBF7D0"}` }}>
+              <Typography sx={{ fontSize: 11, color: actualUpdateStale ? "#B91C1C" : "#047857", fontWeight: 850 }}>ACTUAL LAST UPDATED</Typography>
+              <Typography sx={{ mt: .7, fontSize: 22, color: actualUpdateStale ? "#DC2626" : "#047857", fontWeight: 950 }}>{formatUpdateTime(actualLastUpdated)}</Typography>
+            </Box>
+            <Box sx={{ mt: 2, display: "grid", gap: 1 }}>
+              {scheduleUpdateRows.map((row) => (
+                <Box key={`fresh-${row.label}`} sx={{ display: "flex", justifyContent: "space-between", gap: 2, py: 1.1, px: 1.2, borderBottom: "1px solid #EEF2F7" }}>
+                  <Typography sx={{ fontSize: 12, color: "#475569", fontWeight: 850 }}>{row.label}</Typography>
+                  <Typography sx={{ fontSize: 12, color: row.stale ? "#DC2626" : "#16A34A", fontWeight: 950 }}>{formatUpdateTime(row.updatedAt)}</Typography>
+                </Box>
+              ))}
+            </Box>
+          </Paper>
+        </Grid>
+
       </Grid>
+
+      {showHistoricalDownload && (
+        <Box sx={{ mb: 2.5, animation: "rtgDownloadOpen .24s ease-out", "@keyframes rtgDownloadOpen": { from: { opacity: 0, transform: "translateY(-8px)" }, to: { opacity: 1, transform: "translateY(0)" } } }}>
+          <RTGHistoricalDownload />
+        </Box>
+      )}
 
       <RTGSnapshotTrend
         date={snapshotTrendDate}

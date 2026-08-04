@@ -134,7 +134,11 @@ export default function PSPHighlightsReport({
   outageChangeData,
   portfolioData,
   highestRecords,
-  powerSystemData
+  powerSystemData,
+  selectedDate,
+  dateOptions = [],
+  onDateChange,
+  dateLoading = false
 }) {
   const reportRef = useRef(null);
   const summaryPageRef = useRef(null);
@@ -313,8 +317,8 @@ export default function PSPHighlightsReport({
       }}
       tabIndex="-1"
     >
-      <div className="modal-dialog modal-fullscreen-lg-down modal-xl modal-dialog-centered" style={{ maxWidth: "1180px" }}>
-        <div className="modal-content border-0 overflow-hidden" style={{ borderRadius: "18px", backgroundColor: "#F4F7FA" }}>
+      <div className="modal-dialog modal-fullscreen m-0">
+        <div className="modal-content border-0 overflow-hidden" style={{ borderRadius: 0, backgroundColor: "#F4F7FA" }}>
           <div
             className="modal-header border-0"
             style={{
@@ -329,6 +333,32 @@ export default function PSPHighlightsReport({
               </p>
             </div>
             <div className="d-flex align-items-center gap-2 flex-wrap justify-content-end">
+              {onDateChange && (
+                <div className="d-flex align-items-center gap-2">
+                  <label htmlFor="psp-highlights-date" className="small text-white fw-bold mb-0">
+                    Report date
+                  </label>
+                  <select
+                    id="psp-highlights-date"
+                    className="form-select form-select-sm"
+                    value={selectedDate || reportDate || ""}
+                    onChange={(event) => onDateChange(event.target.value)}
+                    disabled={dateLoading}
+                    style={{ minWidth: "155px", fontWeight: 800 }}
+                  >
+                    {!selectedDate && !reportDate && <option value="">Latest Date</option>}
+                    {reportDate && !dateOptions.some((item) => item.date === reportDate) && (
+                      <option value={reportDate}>{formatReportDate(reportDate)}</option>
+                    )}
+                    {dateOptions.map((item) => (
+                      <option key={item.date} value={item.date}>
+                        {formatReportDate(item.date)}
+                      </option>
+                    ))}
+                  </select>
+                  {dateLoading && <span className="spinner-border spinner-border-sm text-light" role="status" />}
+                </div>
+              )}
               {editing ? (
                 <>
                   <button type="button" className="btn btn-sm btn-light fw-bold" onClick={cancelEdits} style={{ fontSize: "0.76rem" }}>

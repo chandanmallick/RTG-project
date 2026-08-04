@@ -10,11 +10,78 @@ from crew_legacy.database.database_mongo import (
 
 TRUTHY = {"1", "true", "yes", "on"}
 REPLACEMENT_MAIL_SETTINGS_ID = "replacement_duty_mail"
+MAIL_TEMPLATE_SETTINGS_ID = "workflow_mail_templates"
 DEFAULT_REPLACEMENT_SUBJECT = "Replacement Duty Request - {shift_name} - {date}"
 DEFAULT_REPLACEMENT_BODY = (
     "{replacement_person} is requested to perform {shift_name} duty on {date} "
     "in place of {leave_person}."
 )
+
+WORKFLOW_MAIL_DEFAULTS = {
+    "replacement_assigned": {
+        "label": "Replacement duty assigned",
+        "enabled": True,
+        "subjectTemplate": DEFAULT_REPLACEMENT_SUBJECT,
+        "bodyTemplate": DEFAULT_REPLACEMENT_BODY,
+    },
+    "leave_applied": {
+        "label": "Leave application submitted to SIC",
+        "enabled": True,
+        "subjectTemplate": "Leave application for SIC review - {employee_name}",
+        "bodyTemplate": "{employee_name} ({employee_id}) applied for {leave_count} leave day(s): {leave_dates}. Group: {group_name}.",
+    },
+    "leave_sic_forwarded": {
+        "label": "Leave approved and forwarded by SIC",
+        "enabled": True,
+        "subjectTemplate": "Leave Approved and Forwarded by SIC",
+        "bodyTemplate": "Leave approved by SIC and forwarded for final approval.\n\nName: {employee_name}\nEmployee ID: {employee_id}\nDate: {leave_date}\nType: {leave_type}",
+    },
+    "leave_sic_rejected": {
+        "label": "Leave rejected by SIC",
+        "enabled": True,
+        "subjectTemplate": "Leave Rejected by SIC",
+        "bodyTemplate": "Your leave has been rejected by SIC.\n\nDate: {leave_date}\nType: {leave_type}\nComment: {comment}",
+    },
+    "leave_dic_approved": {
+        "label": "Leave finally approved by DIC",
+        "enabled": True,
+        "subjectTemplate": "Leave Finally Approved by DIC",
+        "bodyTemplate": "Leave has received final approval from the DIC.\n\nName: {employee_name}\nEmployee ID: {employee_id}\nDate: {leave_date}\nType: {leave_type}",
+    },
+    "leave_dic_rejected": {
+        "label": "Leave rejected by DIC",
+        "enabled": True,
+        "subjectTemplate": "Leave Rejected",
+        "bodyTemplate": "Your leave has been rejected.\n\nDate: {leave_date}\nType: {leave_type}\nComment: {comment}",
+    },
+}
+
+
+def workflow_mail_templates():
+    stored = mail_notification_settings_collection.find_one(
+        {"_id": MAIL_TEMPLATE_SETTINGS_ID}, {"_id": 0}
+    ) or {}
+    stored_templates = stored.get("templates") or {}
+    legacy_replacement = mail_notification_settings_collection.find_one(
+        {"_id": REPLACEMENT_MAIL_SETTINGS_ID}, {"_id": 0}
+    ) or {}
+    result = {}
+    for key, defaults in WORKFLOW_MAIL_DEFAULTS.items():
+        custom = stored_templates.get(key) or {}
+        if key == "replacement_assigned" and not custom:
+            custom = {
+                "enabled": legacy_replacement.get("enabled", defaults["enabled"]),
+                "subjectTemplate": legacy_replacement.get("subjectTemplate"),
+                "bodyTemplate": legacy_replacement.get("bodyTemplate"),
+            }
+        result[key] = {
+            "key": key,
+            "label": defaults["label"],
+            "enabled": bool(custom.get("enabled", defaults["enabled"])),
+            "subjectTemplate": custom.get("subjectTemplate") or defaults["subjectTemplate"],
+            "bodyTemplate": custom.get("bodyTemplate") or defaults["bodyTemplate"],
+        }
+    return result
 
 
 def graph_credentials_configured():
@@ -75,7 +142,7 @@ def _clean_recipients(to_list):
     return recipients
 
 
-def send_email(to_list, subject, body, *, html=False, sender=None, enabled=None):
+def send_email(to_list, subject, body, *, html=False, sender=None, enabled=None, attachments=None):
     """Send mail through Microsoft Graph without exposing credentials or tokens."""
     recipients = _clean_recipients(to_list)
     if enabled is None:
@@ -110,18 +177,33 @@ def send_email(to_list, subject, body, *, html=False, sender=None, enabled=None)
         if not access_token:
             raise RuntimeError("Microsoft Graph did not return an access token")
 
+        graph_attachments = []
+        for attachment in attachments or []:
+            content = str(attachment.get("contentBytes") or "").strip()
+            if not content:
+                continue
+            graph_attachments.append({
+                "@odata.type": "#microsoft.graph.fileAttachment",
+                "name": str(attachment.get("name") or "attachment"),
+                "contentType": str(attachment.get("contentType") or "application/octet-stream"),
+                "contentBytes": content,
+            })
+        message = {
+            "subject": str(subject or "Duty notification"),
+            "body": {"contentType": "HTML" if html else "Text", "content": str(body or "")},
+            "toRecipients": [
+                {"emailAddress": {"address": email}}
+                for email in recipients
+            ],
+        }
+        if graph_attachments:
+            message["attachments"] = graph_attachments
+
         message_response = requests.post(
             f"https://graph.microsoft.com/v1.0/users/{sender_address}/sendMail",
             headers={"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"},
             json={
-                "message": {
-                    "subject": str(subject or "Duty notification"),
-                    "body": {"contentType": "HTML" if html else "Text", "content": str(body or "")},
-                    "toRecipients": [
-                        {"emailAddress": {"address": email}}
-                        for email in recipients
-                    ],
-                },
+                "message": message,
                 "saveToSentItems": True,
             },
             timeout=30,
@@ -148,10 +230,11 @@ class _TemplateValues(dict):
 
 def send_replacement_duty_email(to_list, values):
     settings = replacement_mail_settings()
+    template = workflow_mail_templates()["replacement_assigned"]
     rendered_values = _TemplateValues({key: str(value or "") for key, value in (values or {}).items()})
     try:
-        subject = str(settings["subjectTemplate"]).format_map(rendered_values)
-        body = str(settings["bodyTemplate"]).format_map(rendered_values)
+        subject = str(template["subjectTemplate"]).format_map(rendered_values)
+        body = str(template["bodyTemplate"]).format_map(rendered_values)
     except (KeyError, ValueError):
         return {"status": "failed", "recipientCount": len(_clean_recipients(to_list)), "error": "Mail template is invalid"}
     return send_email(
@@ -159,7 +242,24 @@ def send_replacement_duty_email(to_list, values):
         subject,
         body,
         sender=settings.get("sender"),
-        enabled=bool(settings.get("enabled")),
+        enabled=bool(settings.get("enabled")) and bool(template.get("enabled")),
+    )
+
+
+def send_workflow_email(template_key, to_list, values):
+    settings = replacement_mail_settings()
+    template = workflow_mail_templates().get(template_key)
+    if not template:
+        return {"status": "skipped", "recipientCount": 0, "error": "Unknown workflow mail template"}
+    rendered = _TemplateValues({key: str(value or "") for key, value in (values or {}).items()})
+    try:
+        subject = str(template["subjectTemplate"]).format_map(rendered)
+        body = str(template["bodyTemplate"]).format_map(rendered)
+    except (KeyError, ValueError):
+        return {"status": "failed", "recipientCount": len(_clean_recipients(to_list)), "error": "Mail template is invalid"}
+    return send_email(
+        to_list, subject, body, sender=settings.get("sender"),
+        enabled=bool(settings.get("enabled")) and bool(template.get("enabled")),
     )
 
 
@@ -201,9 +301,19 @@ def notify_all(
     ref_id=None,
     action=None,
     type="GENERAL",
+    template_key=None,
+    template_values=None,
 ):
+    mail_result = {"status": "skipped", "recipientCount": 0, "error": "No email recipients supplied"}
     if email_list:
-        send_email(email_list, subject, message)
+        if template_key:
+            mail_result = send_workflow_email(template_key, email_list, template_values or {})
+        else:
+            settings = replacement_mail_settings()
+            mail_result = send_email(
+                email_list, subject, message, sender=settings.get("sender"),
+                enabled=bool(settings.get("enabled")),
+            )
     if employee_ids:
         send_app_notification(
             employee_ids,
@@ -214,3 +324,4 @@ def notify_all(
             type=type,
         )
     send_teams(f"{subject}\n\n{message}")
+    return mail_result

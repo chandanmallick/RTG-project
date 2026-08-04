@@ -21,7 +21,9 @@ api.interceptors.request.use((config) => {
   const isDutyDecision = method === "PUT" && (
     requestUrl.includes("/replacement/notifications/accept/") ||
     requestUrl.includes("/replacement/notifications/deny/") ||
-    requestUrl.includes("/replacement/duty-switch/exchange")
+    requestUrl.includes("/replacement/assign/") ||
+    requestUrl.includes("/replacement/duty-switch/exchange") ||
+    requestUrl.includes("/replacement/duty-switch/cross-date")
   );
   // Training approval is a reporting-hierarchy workflow action, not a page edit.
   // The API verifies that the logged-in employee is the nomination's current

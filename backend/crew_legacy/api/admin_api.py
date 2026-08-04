@@ -12,6 +12,7 @@ from crew_legacy.admin_logic.dropdown import (
 from bson import ObjectId
 from crew_legacy.database.database_mongo import (
     employee_collection,
+    designation_master_collection,
     organization_shift_group_collection,
     organization_unit_collection,
     roster_group_collection,
@@ -30,6 +31,7 @@ from crew_legacy.admin_logic.DutyLeaveType import (
 from crew_legacy.admin_logic.auth_utils import require_admin
 from crew_legacy.admin_logic.auth_utils import hash_password, validate_password_policy
 from datetime import datetime, timedelta
+import re
 
 
 
@@ -47,6 +49,16 @@ def normalize_list(value):
     return list(dict.fromkeys(
         str(item).strip() for item in items if str(item).strip()
     ))
+
+
+def normalize_seniority_order(value):
+    if value in [None, ""]:
+        return None
+    try:
+        order = int(value)
+    except (TypeError, ValueError):
+        return None
+    return order if order > 0 else None
 
 
 def resolve_employee_organization(function_ids=None, employee_id=None):
@@ -211,7 +223,9 @@ def serialize(emp):
         "nameHindi": emp.get("nameHindi"),
         "designation": emp.get("designation"),
         "designationHindi": emp.get("designationHindi"),
+        "designationMasterId": str(emp.get("designationMasterId") or ""),
         "userId": emp.get("userId"),
+        "seniorityOrder": normalize_seniority_order(emp.get("seniorityOrder")),
         "phone": emp.get("phone"),
         "gmail": emp.get("gmail"),
         "dutyType": emp.get("dutyType"),
@@ -242,6 +256,321 @@ def serialize(emp):
         "functionNames": [function_names.get(value, value) for value in function_ids],
         "intermediaryReportingName": intermediary.get("name") if intermediary else None,
         "hodName": hod.get("name") if hod else None
+    }
+
+
+def designation_key(value):
+    value = str(value or "").strip().casefold()
+    value = value.replace("&", " and ")
+    value = "".join(character if character.isalnum() else " " for character in value)
+    return re.sub(r"\s+", " ", value).strip()
+
+
+def serialize_designation(doc, employee_counts=None):
+    employee_counts = employee_counts or {}
+    keys = {
+        designation_key(doc.get("name")),
+        *(designation_key(value) for value in normalize_list(doc.get("aliases"))),
+    }
+    keys.discard("")
+    return {
+        "id": str(doc["_id"]),
+        "name": doc.get("name") or "",
+        "nameHindi": doc.get("nameHindi") or "",
+        "shortName": doc.get("shortName") or "",
+        "aliases": normalize_list(doc.get("aliases")),
+        "seniorityOrder": normalize_seniority_order(doc.get("seniorityOrder")),
+        "isActive": doc.get("isActive", True),
+        "reviewRequired": bool(doc.get("reviewRequired")),
+        "employeeCount": sum(employee_counts.get(key, 0) for key in keys),
+        "source": doc.get("source") or "Manual",
+        "updatedAt": doc.get("updatedAt"),
+    }
+
+
+def designation_comparison():
+    masters = sorted(
+        designation_master_collection.find(),
+        key=lambda item: (
+            normalize_seniority_order(item.get("seniorityOrder")) or 10**9,
+            str(item.get("name") or "").casefold(),
+        ),
+    )
+    key_to_master = {}
+    for master in masters:
+        for value in [master.get("name"), *normalize_list(master.get("aliases"))]:
+            key = designation_key(value)
+            if key:
+                key_to_master[key] = master
+
+    raw_groups = {}
+    blank_employees = []
+    for employee in employee_collection.find(
+        {},
+        {"userId": 1, "name": 1, "designation": 1, "designationHindi": 1, "designationMasterId": 1},
+    ):
+        raw_value = str(employee.get("designation") or "").strip()
+        key = designation_key(raw_value)
+        if not key:
+            blank_employees.append({
+                "employeeId": str(employee.get("userId") or ""),
+                "name": employee.get("name") or "",
+            })
+            continue
+        group = raw_groups.setdefault(key, {
+            "key": key,
+            "value": raw_value,
+            "employeeCount": 0,
+            "employeeIds": [],
+            "employeeNames": [],
+            "hindiValues": [],
+        })
+        group["employeeCount"] += 1
+        group["employeeIds"].append(str(employee.get("userId") or ""))
+        group["employeeNames"].append(employee.get("name") or "")
+        hindi_value = str(employee.get("designationHindi") or "").strip()
+        if hindi_value and hindi_value not in group["hindiValues"]:
+            group["hindiValues"].append(hindi_value)
+
+    employee_counts = {key: group["employeeCount"] for key, group in raw_groups.items()}
+    unmatched = []
+    matched_employee_count = 0
+    for key, group in raw_groups.items():
+        master = key_to_master.get(key)
+        if master:
+            matched_employee_count += group["employeeCount"]
+        else:
+            unmatched.append(group)
+    unmatched.sort(key=lambda item: (-item["employeeCount"], item["value"].casefold()))
+
+    return {
+        "masters": [serialize_designation(doc, employee_counts) for doc in masters],
+        "unmatched": unmatched,
+        "blankEmployees": blank_employees,
+        "stats": {
+            "masterCount": len(masters),
+            "activeMasterCount": sum(1 for item in masters if item.get("isActive", True)),
+            "reviewRequiredCount": sum(1 for item in masters if item.get("reviewRequired")),
+            "employeeDesignationCount": sum(employee_counts.values()),
+            "matchedEmployeeCount": matched_employee_count,
+            "unmatchedEmployeeCount": sum(item["employeeCount"] for item in unmatched),
+            "unmatchedValueCount": len(unmatched),
+            "blankEmployeeCount": len(blank_employees),
+        },
+    }
+
+
+def apply_designation_master_matches():
+    masters = list(designation_master_collection.find({"isActive": {"$ne": False}}))
+    key_to_master = {}
+    for master in masters:
+        for value in [master.get("name"), *normalize_list(master.get("aliases"))]:
+            key = designation_key(value)
+            if key:
+                key_to_master[key] = master
+    updated = 0
+    for employee in employee_collection.find({}, {"designation": 1, "designationHindi": 1, "designationMasterId": 1}):
+        master = key_to_master.get(designation_key(employee.get("designation")))
+        if not master:
+            continue
+        desired = {
+            "designation": master.get("name") or employee.get("designation"),
+            "designationHindi": master.get("nameHindi") or employee.get("designationHindi") or "",
+            "designationMasterId": str(master["_id"]),
+        }
+        if any(employee.get(field) != value for field, value in desired.items()):
+            employee_collection.update_one(
+                {"_id": employee["_id"]},
+                {"$set": {**desired, "updatedAt": datetime.utcnow()}},
+            )
+            updated += 1
+    return updated
+
+
+@router.get("/designations")
+def get_designation_master():
+    masters = sorted(
+        designation_master_collection.find(),
+        key=lambda item: (
+            normalize_seniority_order(item.get("seniorityOrder")) or 10**9,
+            str(item.get("name") or "").casefold(),
+        ),
+    )
+    return {
+        "masters": [serialize_designation(doc) for doc in masters],
+        "stats": {
+            "masterCount": len(masters),
+            "activeMasterCount": sum(1 for item in masters if item.get("isActive", True)),
+            "seniorityPendingCount": sum(
+                1 for item in masters
+                if not normalize_seniority_order(item.get("seniorityOrder"))
+            ),
+        },
+    }
+
+
+@router.post("/designations")
+def create_designation_master(data: dict):
+    name = str(data.get("name") or "").strip()
+    if not name:
+        raise HTTPException(400, "Designation name is required")
+    aliases = normalize_list(data.get("aliases"))
+    keys = [designation_key(name), *(designation_key(value) for value in aliases)]
+    duplicate = designation_master_collection.find_one({
+        "$or": [
+            {"normalizedName": {"$in": keys}},
+            {"normalizedAliases": {"$in": keys}},
+        ]
+    })
+    if duplicate:
+        raise HTTPException(409, "This designation or alias already exists in the master")
+    now = datetime.utcnow()
+    document = {
+        "name": name,
+        "nameHindi": str(data.get("nameHindi") or "").strip(),
+        "shortName": str(data.get("shortName") or "").strip(),
+        "seniorityOrder": normalize_seniority_order(data.get("seniorityOrder")),
+        "aliases": aliases,
+        "normalizedName": designation_key(name),
+        "normalizedAliases": [designation_key(value) for value in aliases if designation_key(value)],
+        "isActive": data.get("isActive", True) is not False,
+        "reviewRequired": bool(data.get("reviewRequired", False)),
+        "source": data.get("source") or "Manual",
+        "createdAt": now,
+        "updatedAt": now,
+    }
+    inserted = designation_master_collection.insert_one(document)
+    return {"message": "Designation created", "id": str(inserted.inserted_id)}
+
+
+@router.put("/designations/{designation_id}")
+def update_designation_master(designation_id: str, data: dict):
+    if not ObjectId.is_valid(designation_id):
+        raise HTTPException(400, "Invalid designation ID")
+    existing = designation_master_collection.find_one({"_id": ObjectId(designation_id)})
+    if not existing:
+        raise HTTPException(404, "Designation not found")
+    name = str(data.get("name", existing.get("name")) or "").strip()
+    if not name:
+        raise HTTPException(400, "Designation name is required")
+    aliases = normalize_list(data.get("aliases", existing.get("aliases")))
+    if designation_key(existing.get("name")) != designation_key(name):
+        aliases = normalize_list([*aliases, existing.get("name")])
+    normalized_name = designation_key(name)
+    normalized_aliases = [designation_key(value) for value in aliases if designation_key(value)]
+    duplicate = designation_master_collection.find_one({
+        "_id": {"$ne": existing["_id"]},
+        "$or": [
+            {"normalizedName": {"$in": [normalized_name, *normalized_aliases]}},
+            {"normalizedAliases": {"$in": [normalized_name, *normalized_aliases]}},
+        ],
+    })
+    if duplicate:
+        raise HTTPException(409, "This designation or alias is already assigned to another master entry")
+    designation_master_collection.update_one(
+        {"_id": existing["_id"]},
+        {"$set": {
+            "name": name,
+            "nameHindi": str(data.get("nameHindi", existing.get("nameHindi")) or "").strip(),
+            "shortName": str(data.get("shortName", existing.get("shortName")) or "").strip(),
+            "seniorityOrder": normalize_seniority_order(
+                data.get("seniorityOrder", existing.get("seniorityOrder"))
+            ),
+            "aliases": aliases,
+            "normalizedName": normalized_name,
+            "normalizedAliases": normalized_aliases,
+            "isActive": data.get("isActive", existing.get("isActive", True)) is not False,
+            "reviewRequired": bool(data.get("reviewRequired", False)),
+            "updatedAt": datetime.utcnow(),
+        }},
+    )
+    employees_updated = apply_designation_master_matches()
+    return {"message": "Designation updated", "employeesUpdated": employees_updated}
+
+
+@router.post("/designations/sync-employees")
+def sync_designations_from_employees():
+    comparison = designation_comparison()
+    now = datetime.utcnow()
+    inserted = 0
+    for item in comparison["unmatched"]:
+        name = str(item.get("value") or "").strip()
+        if not name:
+            continue
+        normalized_name = designation_key(name)
+        result = designation_master_collection.update_one(
+            {
+                "$or": [
+                    {"normalizedName": normalized_name},
+                    {"normalizedAliases": normalized_name},
+                ]
+            },
+            {
+                "$setOnInsert": {
+                    "name": name,
+                    "nameHindi": (item.get("hindiValues") or [""])[0],
+                    "shortName": "",
+                    "aliases": [],
+                    "normalizedName": normalized_name,
+                    "normalizedAliases": [],
+                    "isActive": True,
+                    "reviewRequired": True,
+                    "source": "Employee Sync",
+                    "createdAt": now,
+                },
+                "$set": {"updatedAt": now},
+            },
+            upsert=True,
+        )
+        if result.upserted_id:
+            inserted += 1
+    employees_updated = apply_designation_master_matches()
+    return {
+        "message": "Employee designations compared and imported for review",
+        "inserted": inserted,
+        "employeesUpdated": employees_updated,
+        "comparison": designation_comparison(),
+    }
+
+
+@router.post("/designations/{designation_id}/map")
+def map_employee_designation(designation_id: str, data: dict):
+    if not ObjectId.is_valid(designation_id):
+        raise HTTPException(400, "Invalid designation ID")
+    master = designation_master_collection.find_one({"_id": ObjectId(designation_id)})
+    if not master:
+        raise HTTPException(404, "Designation not found")
+    raw_value = str(data.get("rawValue") or "").strip()
+    if not raw_value:
+        raise HTTPException(400, "Employee designation value is required")
+    raw_key = designation_key(raw_value)
+    aliases = normalize_list([*(master.get("aliases") or []), raw_value])
+    designation_master_collection.update_one(
+        {"_id": master["_id"]},
+        {"$set": {
+            "aliases": aliases,
+            "normalizedAliases": [designation_key(value) for value in aliases if designation_key(value)],
+            "reviewRequired": False,
+            "updatedAt": datetime.utcnow(),
+        }},
+    )
+    employee_ids = [
+        employee["_id"]
+        for employee in employee_collection.find({}, {"designation": 1})
+        if designation_key(employee.get("designation")) == raw_key
+    ]
+    result = employee_collection.update_many(
+        {"_id": {"$in": employee_ids}},
+        {"$set": {
+            "designation": master.get("name"),
+            "designationHindi": master.get("nameHindi") or "",
+            "designationMasterId": str(master["_id"]),
+            "updatedAt": datetime.utcnow(),
+        }},
+    ) if employee_ids else None
+    return {
+        "message": "Employee designation mapped to master",
+        "employeesUpdated": result.modified_count if result else 0,
     }
 
 
@@ -621,7 +950,9 @@ def update_employee(employee_id: str, data: dict):
         "nameHindi": data.get("nameHindi"),
         "designation": data.get("designation"),
         "designationHindi": data.get("designationHindi"),
+        "designationMasterId": data.get("designationMasterId"),
         "userId": data.get("userId"),
+        "seniorityOrder": normalize_seniority_order(data.get("seniorityOrder")),
         "phone": data.get("phone"),
         "gmail": data.get("gmail"),
         "dutyType": data.get("dutyType"),
@@ -789,8 +1120,10 @@ def export_employees_excel():
     if not data:
         return {"message": "No data"}
 
-    # headers
-    headers = list(data[0].keys())
+    # Include optional fields even when the first document predates them.
+    headers = list(dict.fromkeys(
+        key for row in data for key in row.keys()
+    ))
     ws.append(headers)
 
     # rows
@@ -854,6 +1187,9 @@ async def import_employees_excel(file: UploadFile = File(...)):
             "name": emp_raw.get("name"),
             "designation": emp_raw.get("designation"),
             "userId": user_id,
+            "seniorityOrder": normalize_seniority_order(
+                emp_raw.get("seniorityOrder", emp_raw.get("Seniority Order"))
+            ),
             "phone": emp_raw.get("phone"),
             "gmail": emp_raw.get("gmail"),
 

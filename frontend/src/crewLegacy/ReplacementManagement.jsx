@@ -1,5 +1,6 @@
 ﻿import React, { useEffect, useState } from "react";
 import api from "./api";
+import { useRef } from "react";
 import dayjs from "dayjs";
 
 import {
@@ -31,7 +32,8 @@ import {
   Grid,
   FormControl,
   InputLabel,
-  Select
+  Select,
+  Collapse
 } from "@mui/material";
 
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
@@ -61,6 +63,7 @@ export default function ReplacementManagement() {
   const [sicCandidates, setSicCandidates] = useState([]);
 
   const [pendingSIC, setPendingSIC] = useState([]);
+  const [sicExchangeContext, setSicExchangeContext] = useState(null);
   const [halfDuty, setHalfDuty] = useState(false);
   const [candidateFilter, setCandidateFilter] = useState("auto");
   const [switchDate, setSwitchDate] = useState(dayjs().format("YYYY-MM-DD"));
@@ -74,6 +77,18 @@ export default function ReplacementManagement() {
   const [switchNotice, setSwitchNotice] = useState(null);
   const [switchSaving, setSwitchSaving] = useState(false);
   const [canSwitchDuty, setCanSwitchDuty] = useState(true);
+  const sicShortcutHandled = useRef(false);
+  const [activeWorkflow, setActiveWorkflow] = useState(() => {
+    const params = new URLSearchParams(window.location.search);
+    return params.get("action") === "assign-sic" ? "sic" : null;
+  });
+
+  const openWorkflow = (workflow) => {
+    setActiveWorkflow(workflow);
+    window.setTimeout(() => {
+      document.getElementById(`replacement-workflow-${workflow}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 180);
+  };
 
   useEffect(() => {
     fetchPendingLeaves();
@@ -262,16 +277,14 @@ export default function ReplacementManagement() {
 
       setDialogOpen(false);
 
-      // âœ… Fetch SIC candidates from backend
-      const res = await api.get(`/replacement/sic-candidates/${selectedLeave.id}`);
-      setSicCandidates(res.data || []);
-
-      setSelectedSIC("");
-      setSicDialogOpen(true);
-
       fetchPendingLeaves();
+      fetchPendingSIC();
       fetchAssignedReplacements();
       fetchDecisionAudit();
+
+      if (selectedLeave?.isSIC) {
+        await openSICDialog(selectedLeave, "Replacement workflow");
+      }
 
     } catch (err) {
       console.error(err);
@@ -283,10 +296,10 @@ export default function ReplacementManagement() {
   // MANUAL SIC BUTTON
   // ===============================
 
-  const openSICDialog = async (leave) => {
+  const openSICDialog = async (leave, source = "Direct acting-SIC assignment") => {
     try {
 
-      setSelectedLeave(leave);
+      setSelectedLeave({ ...leave, sicAssignmentSource: source });
 
       const res = await api.get(`/replacement/sic-candidates/${leave.id}`);
       setSicCandidates(res.data || []);
@@ -308,13 +321,16 @@ export default function ReplacementManagement() {
     try {
 
       await api.put(`/replacement/assign-sic/${selectedLeave.id}`, {
-        sicEmployeeId: selectedSIC
+        sicEmployeeId: selectedSIC,
+        source: selectedLeave.sicAssignmentSource || "Direct acting-SIC assignment",
       });
 
       alert("SIC Assigned");
 
       setSicDialogOpen(false);
       fetchPendingLeaves();
+      fetchPendingSIC();
+      fetchDecisionAudit();
 
     } catch (err) {
       console.error(err);
@@ -331,13 +347,77 @@ export default function ReplacementManagement() {
     }
   };
 
+  useEffect(() => {
+    if (sicShortcutHandled.current || !pendingSIC.length) return;
+
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("action") !== "assign-sic") return;
+
+    const leaveId = params.get("leaveId");
+    const leaveDate = params.get("date");
+    const target = pendingSIC.find((leave) => (
+      (leaveId && String(leave.id) === String(leaveId))
+      || (!leaveId && leaveDate && leave.date === leaveDate)
+    ));
+
+    if (!target) return;
+    sicShortcutHandled.current = true;
+    openSICDialog(target, "Completed-leave SIC coverage action");
+  }, [pendingSIC]);
+
+  const openSICExchange = (leave) => {
+    setSicExchangeContext({ leave, token: Date.now() });
+    setActiveWorkflow("duty");
+    window.setTimeout(() => {
+      document.getElementById("replacement-workflow-duty")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 220);
+  };
+
   // ===============================
   // FILTERS
   // ===============================
 
   const recommended = candidates.filter(c => c.source === "replacement");
+  const organizationCandidates = candidates.filter(c => c.source === "organization");
   const sameShift = candidates.filter(c => c.source === "shift");
   const otherShift = candidates.filter(c => c.source === "otherShift");
+
+  const assignedByLeaveId = new Map(assignedReplacements.map((item) => [String(item.id), item]));
+  const auditedLeaveIds = new Set(decisionAudit.map((item) => String(item.leaveId || "")).filter(Boolean));
+  const filteredAssignedReplacements = assignedReplacements.filter((item) => (
+    (!startDate || String(item.date || "") >= startDate)
+    && (!endDate || String(item.date || "") <= endDate)
+    && (!employeeId || String(item.replacement?.employeeId || "").includes(employeeId.trim()))
+  ));
+  const mergedReplacementRows = [
+    ...decisionAudit.map((audit) => ({
+      ...audit,
+      rowKey: `audit-${audit.id}`,
+      currentAssignment: assignedByLeaveId.get(String(audit.leaveId || "")) || null,
+    })),
+    ...filteredAssignedReplacements
+      .filter((item) => !auditedLeaveIds.has(String(item.id)))
+      .map((item) => ({
+        rowKey: `assigned-${item.id}`,
+        leaveId: item.id,
+        date: item.date,
+        groupName: item.groupName,
+        assignedDuty: item.assignedDuty,
+        assignmentMode: item.replacement?.mode,
+        employeeId: item.replacement?.employeeId,
+        employeeName: item.replacement?.name,
+        replacedEmployeeId: item.employeeId,
+        replacedEmployeeName: item.name,
+        leaveType: item.leaveType,
+        status: item.notificationStatus,
+        reason: item.notificationReason,
+        autoAccepted: item.notificationAutoAccepted,
+        mailDelivery: item.mailDelivery,
+        decisionHistory: item.decisionHistory || [],
+        controllerNames: [],
+        currentAssignment: item,
+      })),
+  ];
 
 
   const renderCard = (c) => (
@@ -369,8 +449,23 @@ export default function ReplacementManagement() {
         </Box>
       </Box>
 
-      {c.source === "replacement" ? (
+      {["replacement", "organization"].includes(c.source) ? (
         <Box sx={{ mt: 1.2, display: "grid", gap: .45 }}>
+          {c.source === "organization" && (
+            <Typography variant="caption" sx={{ color: "#0057B7", fontWeight: 800 }}>
+              {c.eligibility}
+            </Typography>
+          )}
+          <Typography variant="caption" display="block">
+            Current unit: <strong>{[
+              ...(c.organization?.departments || []),
+              ...(c.organization?.verticals || []),
+              ...(c.organization?.sections || []),
+            ].filter(Boolean).join(" · ") || "Organization Master"}</strong>
+          </Typography>
+          <Typography variant="caption" display="block">
+            Reporting hierarchy: <strong>{(c.authorityNames || []).join(" → ") || "-"}</strong>
+          </Typography>
           <Typography variant="caption" display="block">
             Last {c.requiredDuty || "matching"} duty: <strong>{c.lastMatchingDutyDate ? dayjs(c.lastMatchingDutyDate).format("DD MMM YYYY") : "Never recorded"}</strong>
           </Typography>
@@ -421,11 +516,62 @@ export default function ReplacementManagement() {
         </Typography>
       </Box>
 
-      <DutyReassignmentPanel onChanged={() => {
-        fetchPendingLeaves();
-        fetchAssignedReplacements();
-        fetchDecisionAudit();
-      }} />
+      <Grid container spacing={2} sx={{ mb: 3 }}>
+        {[
+          { key: "duty", title: "Duty Switching & Reassignment", subtitle: "Exchange, move or reassign duty", count: null, color: "#0057B7", tint: "#EAF2FF" },
+          { key: "leave", title: "Leaves Requiring Replacement", subtitle: "Open pending manpower replacement", count: pendingLeaves.length, color: "#17876D", tint: "#EAF8F3" },
+          { key: "board", title: "Replacement Duty Board", subtitle: "Assigned duties, decisions and audit", count: assignedReplacements.length, color: "#4338CA", tint: "#EEF2FF" },
+          { key: "sic", title: "SIC Assignment", subtitle: "Allocate acting SIC for approved leave", count: pendingSIC.length, color: "#D97706", tint: "#FFF7E8" },
+        ].map((tile) => (
+          <Grid item xs={12} md={3} key={tile.key}>
+            <Paper
+              component="button"
+              type="button"
+              onClick={() => openWorkflow(tile.key)}
+              elevation={0}
+              sx={{
+                width: "100%", minHeight: 118, p: 2.2, borderRadius: 3, textAlign: "left", cursor: "pointer",
+                border: `1px solid ${activeWorkflow === tile.key ? tile.color : "#D7E3F4"}`,
+                background: activeWorkflow === tile.key ? tile.tint : "#FFFFFF",
+                boxShadow: activeWorkflow === tile.key ? `0 12px 28px ${tile.color}22` : "0 5px 18px rgba(15,23,42,.06)",
+                transition: "transform .22s ease, box-shadow .22s ease, border-color .22s ease, background .22s ease",
+                "&:hover": { transform: "translateY(-3px)", borderColor: tile.color, boxShadow: `0 14px 30px ${tile.color}26` },
+              }}
+            >
+              <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 2 }}>
+                <Box>
+                  <Typography sx={{ color: "#0F172A", fontSize: 16, fontWeight: 950 }}>{tile.title}</Typography>
+                  <Typography sx={{ mt: .65, color: "#64748B", fontSize: 11.5, fontWeight: 650 }}>{tile.subtitle}</Typography>
+                </Box>
+                {tile.count !== null && <Box sx={{ minWidth: 42, height: 42, px: 1, borderRadius: 2.2, display: "grid", placeItems: "center", color: "#FFFFFF", background: tile.color, fontSize: 18, fontWeight: 950 }}>{tile.count}</Box>}
+              </Box>
+              <Typography sx={{ mt: 1.4, color: tile.color, fontSize: 11.5, fontWeight: 900 }}>{activeWorkflow === tile.key ? "Workspace open" : "Click to open"}</Typography>
+            </Paper>
+          </Grid>
+        ))}
+      </Grid>
+
+      <Collapse in={activeWorkflow === "duty"} timeout={420} unmountOnExit>
+      <Box id="replacement-workflow-duty" sx={{ scrollMarginTop: 110 }}>
+        <DutyReassignmentPanel
+          key={sicExchangeContext?.token || "default-duty-reassignment"}
+          initialDate={sicExchangeContext?.leave?.date}
+          initialMode="exchange"
+          initialLeave={sicExchangeContext?.leave || null}
+          onChanged={async () => {
+            fetchPendingLeaves();
+            fetchAssignedReplacements();
+            fetchDecisionAudit();
+            fetchPendingSIC();
+            if (sicExchangeContext?.leave) {
+              const leave = sicExchangeContext.leave;
+              setSicExchangeContext(null);
+              await openSICDialog(leave, "Duty exchange workflow");
+            }
+          }}
+        />
+      </Box>
+      </Collapse>
 
       {false && canSwitchDuty && (
         <Accordion
@@ -573,6 +719,8 @@ export default function ReplacementManagement() {
       {/* PENDING LEAVES */}
       {/* ========================= */}
 
+      <Collapse in={activeWorkflow === "leave"} timeout={420} unmountOnExit>
+      <Box id="replacement-workflow-leave" sx={{ scrollMarginTop: 110 }}>
       <Accordion
         defaultExpanded
         sx={{
@@ -598,8 +746,8 @@ export default function ReplacementManagement() {
         <AccordionDetails>
           <Paper elevation={0} sx={{ p: 2 }}>
 
-            <TableContainer>
-              <Table size="small">
+            <TableContainer sx={{ maxHeight: 380, minHeight: pendingLeaves.length ? 150 : 72, border: "1px solid #D7E3F4", borderRadius: 2 }}>
+              <Table size="small" stickyHeader>
 
                 <TableHead>
                   <TableRow sx={{ background: "#1b5e20" }}>
@@ -645,15 +793,17 @@ export default function ReplacementManagement() {
                           Assign
                         </Button>
 
-                        <Button
-                          size="small"
-                          variant="outlined"
-                          color="warning"
-                          sx={{ ml: 1 }}
-                          onClick={() => openSICDialog(l)}
-                        >
-                          SIC
-                        </Button>
+                        {l.isSIC && (
+                          <Button
+                            size="small"
+                            variant="outlined"
+                            color="warning"
+                            sx={{ ml: 1 }}
+                            onClick={() => openSICDialog(l)}
+                          >
+                            Acting SIC
+                          </Button>
+                        )}
 
                       </TableCell>
 
@@ -668,73 +818,11 @@ export default function ReplacementManagement() {
         </AccordionDetails>
       </Accordion>
 
-      <Accordion
-        defaultExpanded
-        sx={{
-          borderRadius: 3,
-          boxShadow: "0 4px 20px rgba(0,0,0,0.08)",
-          overflow: "hidden",
-          mb: 3
-        }}
-      >
-        <AccordionSummary
-          expandIcon={<ExpandMoreIcon />}
-          sx={{ background: "linear-gradient(90deg,#071F5A,#0057B7)", color: "white", px: 3 }}
-        >
-          <Typography variant="h6" fontWeight={600}>
-            Assigned Replacement Duties
-          </Typography>
-        </AccordionSummary>
-        <AccordionDetails>
-          <TableContainer>
-            <Table size="small">
-              <TableHead>
-                <TableRow sx={{ background: "#EAF2FF" }}>
-                  <TableCell><strong>Leave employee</strong></TableCell>
-                  <TableCell><strong>Date / Duty</strong></TableCell>
-                  <TableCell><strong>Replacement employee</strong></TableCell>
-                  <TableCell><strong>Decision</strong></TableCell>
-                  <TableCell align="right"><strong>Action</strong></TableCell>
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {assignedReplacements.map((item) => (
-                  <TableRow key={item.id} hover>
-                    <TableCell>
-                      <Typography variant="body2" fontWeight={700}>{item.name}</Typography>
-                      <Typography variant="caption" color="text.secondary">{item.groupName} · {item.leaveType}</Typography>
-                    </TableCell>
-                    <TableCell>
-                      <Typography variant="body2">{dayjs(item.date).format("DD MMM YYYY")}</Typography>
-                      <Typography variant="caption" fontWeight={800}>{item.assignedDuty || "-"}</Typography>
-                    </TableCell>
-                    <TableCell>
-                      <Typography variant="body2" fontWeight={700}>{item.replacement?.name || "-"}</Typography>
-                      <Typography variant="caption" color="text.secondary">{item.replacement?.employeeId || "-"}</Typography>
-                    </TableCell>
-                    <TableCell>
-                      <Chip
-                        size="small"
-                        label={item.notificationStatus === "Denied" ? "Declined" : item.notificationStatus}
-                        color={item.notificationStatus === "Denied" ? "error" : item.notificationStatus === "Accepted" ? "success" : "warning"}
-                      />
-                    </TableCell>
-                    <TableCell align="right">
-                      <Button size="small" variant="outlined" onClick={() => openCandidateDialog(item)}>
-                        Change assignment
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                ))}
-                {!assignedReplacements.length && (
-                  <TableRow><TableCell colSpan={5} align="center">No assigned replacement duties</TableCell></TableRow>
-                )}
-              </TableBody>
-            </Table>
-          </TableContainer>
-        </AccordionDetails>
-      </Accordion>
+      </Box>
+      </Collapse>
 
+      <Collapse in={activeWorkflow === "board"} timeout={420} unmountOnExit>
+      <Box id="replacement-workflow-board" sx={{ scrollMarginTop: 110 }}>
       <Accordion
         defaultExpanded
         sx={{ borderRadius: 3, boxShadow: "0 4px 20px rgba(0,0,0,0.08)", overflow: "hidden", mb: 3 }}
@@ -743,7 +831,7 @@ export default function ReplacementManagement() {
           expandIcon={<ExpandMoreIcon />}
           sx={{ background: "linear-gradient(90deg,#08103A,#0057B7)", color: "white", px: 3 }}
         >
-          <Typography variant="h6" fontWeight={600}>Replacement Duty Decision Board</Typography>
+          <Typography variant="h6" fontWeight={600}>Replacement Duties &amp; Decision Board</Typography>
         </AccordionSummary>
         <AccordionDetails>
           <Box sx={{ display: "flex", gap: 1, mb: 2, flexWrap: "wrap" }}>
@@ -752,8 +840,8 @@ export default function ReplacementManagement() {
             <TextField size="small" label="Replacement employee ID" value={employeeId} onChange={(e) => setEmployeeId(e.target.value)} />
             <Button variant="contained" onClick={fetchDecisionAudit}>Refresh Board</Button>
           </Box>
-          <TableContainer>
-            <Table size="small">
+          <TableContainer sx={{ maxHeight: 520, minHeight: mergedReplacementRows.length ? 180 : 72, border: "1px solid #D7E3F4", borderRadius: 2 }}>
+            <Table size="small" stickyHeader>
               <TableHead>
                 <TableRow sx={{ background: "#EAF2FF" }}>
                   <TableCell><strong>Date / Duty</strong></TableCell>
@@ -762,14 +850,17 @@ export default function ReplacementManagement() {
                   <TableCell><strong>Reporting Officer(s)</strong></TableCell>
                   <TableCell><strong>Decision</strong></TableCell>
                   <TableCell><strong>Decision Audit</strong></TableCell>
+                  <TableCell align="right"><strong>Action</strong></TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
-                {decisionAudit.map((item) => {
+                {mergedReplacementRows.map((item) => {
                   const shownStatus = item.status === "Denied" ? "Declined" : item.status;
                   const statusColor = item.status === "Denied" ? "error" : item.status === "Accepted" ? "success" : item.status === "Pending" ? "warning" : "default";
+                  const current = item.currentAssignment;
+                  const isCurrentReplacement = current && String(current.replacement?.employeeId || "") === String(item.employeeId || "");
                   return (
-                    <TableRow key={item.id} hover>
+                    <TableRow key={item.rowKey} hover>
                       <TableCell>
                         <Typography variant="body2" fontWeight={800}>{item.date ? dayjs(item.date).format("DD MMM YYYY") : "-"}</Typography>
                         <Typography variant="caption">{item.assignedDuty || "-"} · {item.assignmentMode || "normal"}</Typography>
@@ -797,26 +888,39 @@ export default function ReplacementManagement() {
                       </TableCell>
                       <TableCell sx={{ minWidth: 260 }}>
                         {(item.decisionHistory || []).length ? (item.decisionHistory || []).map((entry, index) => (
-                          <Typography key={`${item.id}-${index}`} variant="caption" display="block" sx={{ mb: .35 }}>
+                          <Typography key={`${item.rowKey}-${index}`} variant="caption" display="block" sx={{ mb: .35 }}>
                             <strong>{entry.action === "Denied" ? "Declined" : entry.action}</strong> by {entry.actedByName || entry.actedBy || "-"} ({entry.actorRole || "-"})
                             {entry.actedAt ? ` · ${dayjs(entry.actedAt).format("DD MMM YYYY HH:mm")}` : ""}
                             {entry.reason ? ` · ${entry.reason}` : ""}
                           </Typography>
                         )) : <Typography variant="caption" color="text.secondary">Awaiting employee decision</Typography>}
                       </TableCell>
+                      <TableCell align="right" sx={{ whiteSpace: "nowrap" }}>
+                        {isCurrentReplacement && current.canChange !== false ? (
+                          <Button size="small" variant="outlined" onClick={() => openCandidateDialog(current)}>
+                            Change assignment
+                          </Button>
+                        ) : (
+                          <Typography variant="caption" color="text.secondary">{current ? "Previous assignment" : "Audit only"}</Typography>
+                        )}
+                      </TableCell>
                     </TableRow>
                   );
                 })}
-                {!decisionAudit.length && <TableRow><TableCell colSpan={6} align="center">No replacement-duty decisions recorded.</TableCell></TableRow>}
+                {!mergedReplacementRows.length && <TableRow><TableCell colSpan={7} align="center">No assigned replacement duties or decisions recorded.</TableCell></TableRow>}
               </TableBody>
             </Table>
           </TableContainer>
         </AccordionDetails>
       </Accordion>
+      </Box>
+      </Collapse>
 
     {/* ################# SIC Section ################### */}
 
 
+      <Collapse in={activeWorkflow === "sic"} timeout={420} unmountOnExit>
+      <Box id="replacement-workflow-sic" sx={{ scrollMarginTop: 110 }}>
       <Accordion
         defaultExpanded
         sx={{
@@ -846,9 +950,9 @@ export default function ReplacementManagement() {
 
           <Paper elevation={0} sx={{ p: 2 }}>
 
-            <TableContainer>
+            <TableContainer sx={{ maxHeight: 380, minHeight: pendingSIC.length ? 150 : 72, border: "1px solid #D7E3F4", borderRadius: 2 }}>
 
-              <Table size="small">
+              <Table size="small" stickyHeader>
 
                 <TableHead>
                   <TableRow sx={{ background: "#e65100" }}>
@@ -856,7 +960,8 @@ export default function ReplacementManagement() {
                     <TableCell sx={{ color: "white" }}>Group</TableCell>
                     <TableCell sx={{ color: "white" }}>Date</TableCell>
                     <TableCell sx={{ color: "white" }}>Leave Type</TableCell>
-                    <TableCell sx={{ color: "white" }}>Action</TableCell>
+                    <TableCell sx={{ color: "white" }}>Manpower replacement</TableCell>
+                    <TableCell sx={{ color: "white" }}>SIC coverage action</TableCell>
                   </TableRow>
                 </TableHead>
 
@@ -864,7 +969,7 @@ export default function ReplacementManagement() {
 
                   {pendingSIC.length === 0 && (
                     <TableRow>
-                      <TableCell colSpan={5} align="center">
+                      <TableCell colSpan={6} align="center">
                         No SIC assignment pending
                       </TableCell>
                     </TableRow>
@@ -882,15 +987,41 @@ export default function ReplacementManagement() {
                       <TableCell>{l.leaveType}</TableCell>
 
                       <TableCell>
+                        {l.replacementAssigned ? (
+                          <Chip
+                            size="small"
+                            color="success"
+                            label={`Assigned: ${l.replacement?.name || l.replacement?.employeeId || "Replacement"}`}
+                          />
+                        ) : (
+                          <Button
+                            variant="outlined"
+                            size="small"
+                            onClick={() => openCandidateDialog(l)}
+                          >
+                            Assign replacement
+                          </Button>
+                        )}
+                      </TableCell>
 
-                        <Button
-                          variant="contained"
-                          size="small"
-                          color="warning"
-                          onClick={() => openSICDialog(l)}
-                        >
-                          Assign SIC
-                        </Button>
+                      <TableCell>
+                        <Box sx={{ display: "flex", gap: 1, flexWrap: "wrap" }}>
+                          <Button
+                            variant="contained"
+                            size="small"
+                            color="warning"
+                            onClick={() => openSICDialog(l, "Same-shift acting-SIC assignment")}
+                          >
+                            Assign from this shift
+                          </Button>
+                          <Button
+                            variant="outlined"
+                            size="small"
+                            onClick={() => openSICExchange(l)}
+                          >
+                            Use duty exchange
+                          </Button>
+                        </Box>
 
                       </TableCell>
 
@@ -909,6 +1040,8 @@ export default function ReplacementManagement() {
         </AccordionDetails>
 
       </Accordion>
+      </Box>
+      </Collapse>
 
       {/* ========================= */}
       {/* HISTORY */}
@@ -995,7 +1128,7 @@ export default function ReplacementManagement() {
         <DialogContent sx={{ pt: 2 }}>
           <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: { xs: "stretch", md: "center" }, flexDirection: { xs: "column", md: "row" }, gap: 2, mb: 2 }}>
             <Typography variant="body2" color="text.secondary">
-              Replacement candidates are matched from employee category. Filter the list if needed.
+              Candidates use current Organization Master reporting and verified shift history. Past groups establish experience only; they do not control current reporting.
             </Typography>
             <FormControl size="small" sx={{ minWidth: 240 }}>
               <InputLabel>Candidate filter</InputLabel>
@@ -1047,6 +1180,18 @@ export default function ReplacementManagement() {
 
           <Grid container spacing={2}>
             {otherShift.map((c) => (
+              <Grid item xs={12} md={4} key={c.employeeId}>
+                {renderCard(c)}
+              </Grid>
+            ))}
+          </Grid>
+
+          <Typography variant="subtitle2" sx={{ mt: 2, mb: 1 }}>
+            Current Organization · Past Shift Experience
+          </Typography>
+
+          <Grid container spacing={2}>
+            {organizationCandidates.map((c) => (
               <Grid item xs={12} md={4} key={c.employeeId}>
                 {renderCard(c)}
               </Grid>

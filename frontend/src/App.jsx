@@ -20,10 +20,13 @@ const MISReport = lazy(() => import("./pages/MISReport"));
 const NLDCPlots = lazy(() => import("./pages/NLDCPlots"));
 const DSOReportPreparation = lazy(() => import("./pages/DSOReportPreparation"));
 const DSOMorningReport = lazy(() => import("./pages/DSOMorningReport"));
+const PlantDeviationMOP = lazy(() => import("./pages/PlantDeviationMOP"));
 const OutageAnalysis = lazy(() => import("./pages/OutageAnalysis"));
+const OutageMLTraining = lazy(() => import("./pages/OutageMLTraining"));
 const OldLogbook = lazy(() => import("./pages/OldLogbook"));
 const CrewCalendar = lazy(() => import("./pages/crew/CrewCalendar"));
 const CrewDutyRoster = lazy(() => import("./pages/crew/CrewDutyRoster"));
+const MorningPresentationRoster = lazy(() => import("./pages/crew/MorningPresentationRoster"));
 const CrewSetup = lazy(() => import("./pages/crew/CrewSetup"));
 const CrewDashboard = lazy(() => import("./crewLegacy/Dashboard"));
 const CrewLeave = lazy(() => import("./crewLegacy/LeaveManagement"));
@@ -130,8 +133,23 @@ export default function App() {
         />
 
         <Route
+          path="/report-preparation/plant-deviation"
+          element={protectedPage("plant_deviation_report", <PlantDeviationMOP />)}
+        />
+
+        <Route
+          path="/report-preparation/psp-highlights"
+          element={protectedPage("psp_highlights_report", <PSPDashboard highlightsOnly />)}
+        />
+
+        <Route
           path="/outage-analysis"
           element={protectedPage("outage_analysis", <OutageAnalysis />)}
+        />
+
+        <Route
+          path="/outage-analysis/ml-training"
+          element={protectedPage("outage_analysis", <OutageMLTraining />)}
         />
 
         <Route
@@ -155,6 +173,11 @@ export default function App() {
         />
 
         <Route
+          path="/crew/morning-presentation"
+          element={protectedPage("crew_presentation", <CrewLegacyShell><MorningPresentationRoster /></CrewLegacyShell>)}
+        />
+
+        <Route
           path="/crew/setup"
           element={protectedPage("crew_setup", <CrewSetup />)}
         />
@@ -164,7 +187,14 @@ export default function App() {
         <Route path="/admin/mail-settings" element={protectedPage("mail_settings", <MailSettings />)} />
         <Route path="/crew/dashboard" element={protectedPage("crew_dashboard", <CrewLegacyShell><CrewDashboard /></CrewLegacyShell>)} />
         <Route path="/crew/leave" element={protectedPage("crew_leave", <CrewLegacyShell><CrewLeave /></CrewLegacyShell>)} />
-        <Route path="/crew/replacement" element={protectedPage("crew_replacement", <CrewLegacyShell><CrewReplacement /></CrewLegacyShell>)} />
+        <Route
+          path="/crew/replacement"
+          element={(
+            <ProtectedRoute pageKey="crew_replacement" allowWorkflowAccess>
+              <CrewLegacyShell><CrewReplacement /></CrewLegacyShell>
+            </ProtectedRoute>
+          )}
+        />
         <Route
           path="/crew/training"
           element={(

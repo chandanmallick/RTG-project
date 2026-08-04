@@ -85,7 +85,7 @@ export default function PipelineMonitor() {
   const rtgPushLog = pipelineLogs
     .filter(
       (log) =>
-        log.process === "RTG_PUSH" &&
+        (log.process_name === "RTG_PUSH" || log.process === "RTG_PUSH") &&
         log.response_data &&
         (
           log.response_data.success_plants ||
@@ -94,8 +94,8 @@ export default function PipelineMonitor() {
     )
     .sort(
       (a, b) =>
-        new Date(b.created_at) -
-        new Date(a.created_at)
+        new Date(b.timestamp || b.created_at) -
+        new Date(a.timestamp || a.created_at)
     )[0];
 
   console.log(
@@ -179,6 +179,43 @@ export default function PipelineMonitor() {
     )
       ? rtgPushLog.payload
       : [];
+
+  const outageSuccessIds = new Set(
+    (rtgPushLog?.response_data?.success_plants || [])
+      .map((item) => String(item.plant_id || ""))
+  );
+
+  const outageFailedIds = new Set(
+    (rtgPushLog?.response_data?.failed_plants || [])
+      .map((item) => String(item.plant_id || ""))
+  );
+
+  const finalOutageTable =
+    rtgPushLog?.response_data?.final_outage_table
+    ||
+    outageTableData.map((item) => {
+      const plantId = String(item.plant_id || "");
+      const total = [
+        "planned_outage",
+        "forced_outage",
+        "fuel_shortage",
+        "rsd",
+        "commercial_issues",
+      ].reduce((sum, key) => sum + Number(item[key] || 0), 0);
+      return {
+        plant_name: item.plant_name || "",
+        plant_id: plantId,
+        planned_outage: Number(item.planned_outage || 0),
+        forced_outage: Number(item.forced_outage || 0),
+        fuel_shortage: Number(item.fuel_shortage || 0),
+        rsd: Number(item.rsd || 0),
+        commercial_issues: Number(item.commercial_issues || 0),
+        total_outage_mw: total,
+        push_status: outageSuccessIds.has(plantId)
+          ? "SUCCESS"
+          : (outageFailedIds.has(plantId) ? "FAILED" : "NOT_ATTEMPTED"),
+      };
+    });
 
   const scheduleTableData =
 
@@ -450,7 +487,7 @@ export default function PipelineMonitor() {
 
                   {columns.map(col => {
 
-                    if (col === "status") {
+                    if (col === "status" || col === "push_status") {
 
                       return (
 
@@ -515,8 +552,13 @@ export default function PipelineMonitor() {
                               row[col]
                             )
 
-                          : String(
-                              row[col]
+                          : (
+                              typeof row[col] === "number"
+                                ? Number(row[col]).toLocaleString(
+                                    "en-IN",
+                                    { maximumFractionDigits: 2 }
+                                  )
+                                : String(row[col] ?? "")
                             )
 
                         }
@@ -1482,11 +1524,19 @@ export default function PipelineMonitor() {
 
                       {
 
-                        selectedPipeline?.pipeline
+                        selectedPipeline?.pipeline === "OUTAGE"
+                          ? "Final Outage Data Pushed to RTG"
+                          : `${selectedPipeline?.pipeline} Last Push Data`
 
-                      } Last Push Data
+                      }
 
                     </Typography>
+
+                    {selectedPipeline?.pipeline === "OUTAGE" && (
+                      <Typography sx={{ mb: 2, color: "#64748B", fontSize: 12 }}>
+                        {finalOutageTable.length} plant outage record(s). Values are MW from the final outbound payload.
+                      </Typography>
+                    )}
 
                     {
 
@@ -1497,7 +1547,7 @@ export default function PipelineMonitor() {
 
                           ? scheduleStatusData
 
-                          : outageStatusData
+                          : finalOutageTable
 
                       )
 

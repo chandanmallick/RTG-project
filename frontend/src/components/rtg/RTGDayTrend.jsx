@@ -64,8 +64,8 @@ function TrendTile({
 
     <Box
       sx={{
-        minHeight: 170,
-        p: 2.2,
+        minHeight: 220,
+        p: 2,
         borderRadius: "20px",
         overflow: "hidden",
         position: "relative",
@@ -259,25 +259,16 @@ export default function RTGDayTrend({ data = [], onOutageClick, onUnreqClick }) 
       elevation={0}
       sx={{
         height: "100%",
-        minHeight: 460,
-        p: 3,
+        minHeight: 220,
+        p: 0,
         borderRadius: "24px",
-        background: "linear-gradient(180deg,#FFFFFF 0%,#F8FAFC 100%)",
-        border: "1px solid #E2E8F0",
-        boxShadow: "0 18px 44px rgba(15,23,42,0.08)"
+        background: "transparent",
+        border: "none",
+        boxShadow: "none"
       }}
     >
-      <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 2, mb: 2.5 }}>
-        <Box>
-          <Typography sx={{ fontSize: 21, fontWeight: 950, color: "#0F172A" }}>Day Trend</Typography>
-          <Typography sx={{ mt: 0.6, fontSize: 13, fontWeight: 750, color: "#64748B" }}>Outage and UnRequisition Power</Typography>
-        </Box>
-        <Box sx={{ px: 1.4, py: 0.7, borderRadius: "999px", background: "#EFF6FF", color: "#2563EB", fontSize: 12, fontWeight: 900 }}>
-          15 min snapshot
-        </Box>
-      </Box>
       {data.length > 0 ? (
-        <Box sx={{ display: "grid", gridTemplateRows: "1fr 1fr", gap: 2.2, alignItems: "stretch" }}>
+        <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "repeat(2,minmax(0,1fr))" }, gap: 1.5, alignItems: "stretch" }}>
           <TrendTile
             title="Outage"
             value={latest.outage}
@@ -300,7 +291,7 @@ export default function RTGDayTrend({ data = [], onOutageClick, onUnreqClick }) 
           />
         </Box>
       ) : (
-        <Box sx={{ height: 340, display: "flex", alignItems: "center", justifyContent: "center", borderRadius: "18px", background: "linear-gradient(135deg,#F8FAFC,#EEF2FF)", color: "#64748B", fontWeight: 850, textAlign: "center", px: 2 }}>
+        <Box sx={{ height: 220, display: "flex", alignItems: "center", justifyContent: "center", borderRadius: "18px", background: "linear-gradient(135deg,#F8FAFC,#EEF2FF)", color: "#64748B", fontWeight: 850, textAlign: "center", px: 2 }}>
           Trend will appear after today's snapshots are available.
         </Box>
       )}

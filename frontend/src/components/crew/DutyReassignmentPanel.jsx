@@ -19,7 +19,7 @@ import {
   TableRow,
   Typography,
 } from "@mui/material";
-import { ArrowLeftRight, RefreshCw, UserCheck } from "lucide-react";
+import { ArrowLeftRight, CalendarRange, RefreshCw, UserCheck } from "lucide-react";
 import api from "../../crewLegacy/api";
 
 const Field = ({ label, children, helper }) => (
@@ -34,16 +34,27 @@ const employeeLabel = (item) => (
   `${item?.name || item?.employeeId || "-"} (${item?.employeeId || "-"}) · ${item?.assignedDuty || "No duty"} · ${item?.groupName || "No group"}`
 );
 
-export default function DutyReassignmentPanel({ initialDate, onChanged, defaultExpanded = true }) {
+const SHIFT_OPTIONS = ["Morning", "Evening", "Night", "M1", "M2", "E1", "E2", "N1", "N2"];
+
+export default function DutyReassignmentPanel({
+  initialDate,
+  initialMode = "exchange",
+  initialLeave = null,
+  onChanged,
+  defaultExpanded = true,
+}) {
   const [date, setDate] = useState(initialDate || dayjs().format("YYYY-MM-DD"));
   const [role, setRole] = useState({});
-  const [mode, setMode] = useState("exchange");
+  const [mode, setMode] = useState(initialMode);
   const [employees, setEmployees] = useState([]);
   const [leaves, setLeaves] = useState([]);
   const [history, setHistory] = useState([]);
   const [firstId, setFirstId] = useState("");
   const [secondId, setSecondId] = useState("");
-  const [leaveId, setLeaveId] = useState("");
+  const [destinationDate, setDestinationDate] = useState(dayjs(initialDate || undefined).add(1, "day").format("YYYY-MM-DD"));
+  const [destinationDuty, setDestinationDuty] = useState("");
+  const [destinationEmployees, setDestinationEmployees] = useState([]);
+  const [leaveId, setLeaveId] = useState(initialLeave?.id || "");
   const [reason, setReason] = useState("");
   const [notice, setNotice] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -61,13 +72,21 @@ export default function DutyReassignmentPanel({ initialDate, onChanged, defaultE
       if (manager) {
         requests.push(api.get("/replacement/pending"));
         requests.push(api.get("/replacement/duty-switch/history", {
-          params: { startDate: dayjs(date).subtract(30, "day").format("YYYY-MM-DD"), endDate: date },
+          params: {
+            startDate: dayjs(date).subtract(30, "day").format("YYYY-MM-DD"),
+            endDate: dayjs(date).add(90, "day").format("YYYY-MM-DD"),
+          },
         }));
       }
       const [optionResult, leaveResult, historyResult] = await Promise.all(requests);
       setRole(nextRole);
       setEmployees(optionResult.data || []);
-      setLeaves((leaveResult?.data || []).filter((item) => item.date === date));
+      const fetchedLeaves = leaveResult?.data || [];
+      setLeaves(
+        initialLeave && !fetchedLeaves.some((item) => item.id === initialLeave.id)
+          ? [...fetchedLeaves, initialLeave]
+          : fetchedLeaves
+      );
       setHistory(historyResult?.data || []);
       setFirstId((current) => manager ? current : String(nextRole.employeeId || ""));
       setMode((current) => manager ? current : "exchange");
@@ -80,9 +99,24 @@ export default function DutyReassignmentPanel({ initialDate, onChanged, defaultE
 
   useEffect(() => { load(); }, [date]);
 
+  useEffect(() => {
+    if (!canManage || mode !== "cross_date" || !destinationDate) {
+      setDestinationEmployees([]);
+      return;
+    }
+    api.get("/replacement/duty-switch/options", { params: { date: destinationDate } })
+      .then((result) => setDestinationEmployees(result.data || []))
+      .catch((error) => {
+        setDestinationEmployees([]);
+        setNotice({ severity: "error", text: error.response?.data?.detail || "Destination-date duties could not be loaded." });
+      });
+  }, [canManage, mode, destinationDate]);
+
   const first = employees.find((item) => item.employeeId === firstId);
   const second = employees.find((item) => item.employeeId === secondId);
+  const destinationAssignment = destinationEmployees.find((item) => item.employeeId === firstId);
   const selectedLeave = leaves.find((item) => item.id === leaveId);
+  const leavesForSourceDate = leaves.filter((item) => item.date === date);
   const exchangeEmployees = useMemo(
     () => employees.filter((item) => item.employeeId !== firstId && !item.onLeave),
     [employees, firstId],
@@ -104,7 +138,7 @@ export default function DutyReassignmentPanel({ initialDate, onChanged, defaultE
           reason: reason.trim(),
         });
         setNotice({ severity: "success", text: "Single leave replacement assigned and recorded." });
-      } else {
+      } else if (mode === "exchange") {
         if (!firstId || !secondId) throw new Error("Select both employees for the exchange.");
         await api.put("/replacement/duty-switch/exchange", {
           date,
@@ -113,6 +147,25 @@ export default function DutyReassignmentPanel({ initialDate, onChanged, defaultE
           reason: reason.trim(),
         });
         setNotice({ severity: "success", text: "Both employees’ duties and groups were exchanged." });
+      } else {
+        if (!canManage || !firstId || !destinationDate) throw new Error("Select an employee and destination date.");
+        if (!destinationAssignment) throw new Error("The employee has no roster duty on the destination date.");
+        const result = await api.put("/replacement/duty-switch/cross-date", {
+          employeeId: firstId,
+          sourceDate: date,
+          destinationDate,
+          destinationDuty: destinationDuty || first?.assignedDuty,
+          leaveId: leaveId || undefined,
+          reason: reason.trim(),
+        });
+        setNotice({
+          severity: "success",
+          text: [
+            "Duty moved across dates and recorded.",
+            result.data?.linkedLeave ? `Replacement linked for ${result.data.linkedLeave.name || result.data.linkedLeave.employeeId}.` : "",
+            result.data?.compOffAwarded ? "A C-OFF credit was added for duty on the OFF day." : "",
+          ].filter(Boolean).join(" "),
+        });
       }
       setSecondId("");
       setLeaveId("");
@@ -133,7 +186,7 @@ export default function DutyReassignmentPanel({ initialDate, onChanged, defaultE
           <Box>
             <Typography sx={{ fontSize: 19, fontWeight: 950 }}>Duty Switching & Reassignment</Typography>
             <Typography sx={{ mt: .25, fontSize: 11.5, opacity: .9 }}>
-              {canManage ? "Single leave replacement or two-person manpower exchange." : "Exchange your duty with another available employee."}
+              {canManage ? "Leave replacement, manpower exchange, or move one employee’s duty between dates." : "Exchange your duty with another available employee."}
             </Typography>
           </Box>
           <Button size="small" onClick={load} disabled={loading} startIcon={<RefreshCw size={14} />} sx={{ color: "#FFFFFF", border: "1px solid rgba(255,255,255,.55)", fontWeight: 850 }}>Refresh</Button>
@@ -142,6 +195,12 @@ export default function DutyReassignmentPanel({ initialDate, onChanged, defaultE
 
       <Box sx={{ p: { xs: 2, md: 2.5 } }}>
         {notice && <Alert severity={notice.severity} onClose={() => setNotice(null)} sx={{ mb: 2 }}>{notice.text}</Alert>}
+        {initialLeave && mode === "exchange" && (
+          <Alert severity="info" sx={{ mb: 2 }}>
+            SIC leave coverage for <strong>{initialLeave.name}</strong> on <strong>{dayjs(initialLeave.date).format("DD MMM YYYY")}</strong>.
+            Exchange manpower into <strong>{initialLeave.groupName}</strong>; acting-SIC selection will open after the exchange is saved.
+          </Alert>
+        )}
 
         {canManage && (
           <Stack direction={{ xs: "column", sm: "row" }} spacing={1} sx={{ mb: 2 }}>
@@ -161,20 +220,33 @@ export default function DutyReassignmentPanel({ initialDate, onChanged, defaultE
             >
               Exchange of manpower for shift
             </Button>
+            <Button
+              variant={mode === "cross_date" ? "contained" : "outlined"}
+              startIcon={<CalendarRange size={16} />}
+              onClick={() => { setMode("cross_date"); setLeaveId(""); setSecondId(""); }}
+              sx={{ fontWeight: 850 }}
+            >
+              Move duty to another shift/date
+            </Button>
           </Stack>
         )}
 
         <Grid container spacing={2}>
           <Grid item xs={12} md={2.2}>
-            <Field label="Duty date">
-              <input type="date" value={date} onChange={(event) => { setDate(event.target.value); setFirstId(canManage ? "" : actorId); setSecondId(""); setLeaveId(""); }} style={{ width: "100%", height: 40, padding: "0 11px", border: "1px solid #CBD5E1", borderRadius: 8, color: "#0F172A", background: "#FFFFFF", fontWeight: 750, boxSizing: "border-box" }} />
+            <Field label={mode === "cross_date" ? "Source duty date" : "Duty date"}>
+              <input type="date" value={date} onChange={(event) => { setDate(event.target.value); setDestinationDate(dayjs(event.target.value).add(1, "day").format("YYYY-MM-DD")); setFirstId(canManage ? "" : actorId); setSecondId(""); setLeaveId(""); }} style={{ width: "100%", height: 40, padding: "0 11px", border: "1px solid #CBD5E1", borderRadius: 8, color: "#0F172A", background: "#FFFFFF", fontWeight: 750, boxSizing: "border-box" }} />
             </Field>
           </Grid>
 
-          <Grid item xs={12} md={mode === "single" ? 4.1 : 3.5}>
-            <Field label={mode === "single" ? "Replacement employee" : "First employee"} helper={!canManage ? "Your logged-in employee account" : undefined}>
+          <Grid item xs={12} md={mode === "single" ? 4.1 : mode === "cross_date" ? 4.6 : 3.5}>
+            <Field label={mode === "single" ? "Replacement employee" : mode === "cross_date" ? "Employee whose duty will move" : "First employee"} helper={!canManage ? "Your logged-in employee account" : undefined}>
               <FormControl fullWidth size="small">
-                <Select value={firstId} disabled={!canManage} displayEmpty onChange={(event) => { setFirstId(event.target.value); setSecondId(""); }}>
+                <Select value={firstId} disabled={!canManage} displayEmpty onChange={(event) => {
+                  const employee = employees.find((item) => item.employeeId === event.target.value);
+                  setFirstId(event.target.value);
+                  setDestinationDuty(employee?.assignedDuty || "");
+                  setSecondId("");
+                }}>
                   <MenuItem value="" disabled>Select employee</MenuItem>
                   {employees.filter((item) => !item.onLeave).map((item) => <MenuItem key={item.employeeId} value={item.employeeId}>{employeeLabel(item)}</MenuItem>)}
                 </Select>
@@ -188,7 +260,7 @@ export default function DutyReassignmentPanel({ initialDate, onChanged, defaultE
                 <FormControl fullWidth size="small">
                   <Select value={leaveId} displayEmpty onChange={(event) => setLeaveId(event.target.value)}>
                     <MenuItem value="" disabled>Select approved leave requiring replacement</MenuItem>
-                    {leaves.map((leave) => (
+                    {leavesForSourceDate.map((leave) => (
                       <MenuItem key={leave.id} value={leave.id}>
                         {leave.name} ({leave.employeeId}) · {leave.assignedDuty || "Duty"} · {leave.groupName}
                       </MenuItem>
@@ -197,7 +269,7 @@ export default function DutyReassignmentPanel({ initialDate, onChanged, defaultE
                 </FormControl>
               </Field>
             </Grid>
-          ) : (
+          ) : mode === "exchange" ? (
             <Grid item xs={12} md={6.3}>
               <Field label="Employee to exchange with">
                 <FormControl fullWidth size="small">
@@ -208,37 +280,116 @@ export default function DutyReassignmentPanel({ initialDate, onChanged, defaultE
                 </FormControl>
               </Field>
             </Grid>
+          ) : (
+            <Grid item xs={12} md={3}>
+              <Field label="Destination duty date" helper="The two date assignments will be swapped; duty is not duplicated.">
+                <input type="date" value={destinationDate} onChange={(event) => { setDestinationDate(event.target.value); setLeaveId(""); }} style={{ width: "100%", height: 40, padding: "0 11px", border: "1px solid #CBD5E1", borderRadius: 8, color: "#0F172A", background: "#FFFFFF", fontWeight: 750, boxSizing: "border-box" }} />
+              </Field>
+            </Grid>
+          )}
+
+          {mode === "cross_date" && (
+            <Grid item xs={12} md={2.2}>
+              <Field label="Destination shift">
+                <FormControl fullWidth size="small">
+                  <Select value={destinationDuty} displayEmpty onChange={(event) => setDestinationDuty(event.target.value)}>
+                    <MenuItem value="" disabled>Select shift</MenuItem>
+                    {SHIFT_OPTIONS.map((duty) => <MenuItem key={duty} value={duty}>{duty}</MenuItem>)}
+                  </Select>
+                </FormControl>
+              </Field>
+            </Grid>
+          )}
+
+          {mode === "cross_date" && (
+            <Grid item xs={12}>
+              <Field
+                label="Link to a leave vacancy (optional)"
+                helper="If selected, this employee will also be recorded as the replacement for that person’s leave."
+              >
+                <FormControl fullWidth size="small">
+                  <Select
+                    value={leaveId}
+                    displayEmpty
+                    onChange={(event) => {
+                      const nextLeaveId = event.target.value;
+                      const leave = leaves.find((item) => item.id === nextLeaveId);
+                      setLeaveId(nextLeaveId);
+                      if (leave?.date) {
+                        setDestinationDate(leave.date);
+                        setDestinationDuty(leave.assignedDuty || destinationDuty);
+                      }
+                    }}
+                  >
+                    <MenuItem value="">Do not link this move to a leave</MenuItem>
+                    {leaves.map((leave) => (
+                      <MenuItem key={leave.id} value={leave.id}>
+                        {dayjs(leave.date).format("DD MMM YYYY")} · {leave.name} ({leave.employeeId}) · {leave.assignedDuty || "Duty"} · {leave.groupName || "No group"}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              </Field>
+            </Grid>
           )}
 
           <Grid item xs={12} md={9.5}>
-            <Field label={mode === "single" ? "Reason for leave replacement reassignment" : "Reason for manpower exchange"}>
+            <Field label={mode === "single" ? "Reason for leave replacement reassignment" : mode === "cross_date" ? "Reason for moving duty across dates" : "Reason for manpower exchange"}>
               <input value={reason} onChange={(event) => setReason(event.target.value)} placeholder="Enter the operational reason" style={{ width: "100%", height: 40, padding: "0 12px", border: "1px solid #CBD5E1", borderRadius: 8, color: "#0F172A", background: "#FFFFFF", fontWeight: 650, boxSizing: "border-box" }} />
             </Field>
           </Grid>
           <Grid item xs={12} md={2.5} sx={{ display: "flex", alignItems: "flex-end" }}>
-            <Button fullWidth variant="contained" disabled={loading || !firstId || (mode === "single" ? !leaveId : !secondId)} onClick={save} sx={{ minHeight: 40, background: "#0057B7", fontWeight: 900 }}>
-              {mode === "single" ? "Assign replacement" : "Exchange duties"}
+            <Button fullWidth variant="contained" disabled={loading || !firstId || (mode === "single" ? !leaveId : mode === "exchange" ? !secondId : !destinationAssignment || !destinationDuty)} onClick={save} sx={{ minHeight: 40, background: "#0057B7", fontWeight: 900 }}>
+              {mode === "single" ? "Assign replacement" : mode === "cross_date" ? "Move duty" : "Exchange duties"}
             </Button>
           </Grid>
         </Grid>
 
-        {(first || second || selectedLeave) && (
+        {(first || second || selectedLeave || destinationAssignment) && (
           <Box sx={{ mt: 2, p: 1.4, borderRadius: 2, border: "1px solid #BAE6FD", background: "#F0F9FF", color: "#0F172A" }}>
             {first && <Typography sx={{ fontSize: 12, fontWeight: 800 }}>First: {employeeLabel(first)}</Typography>}
             {second && <Typography sx={{ fontSize: 12, fontWeight: 800 }}>Exchange with: {employeeLabel(second)}</Typography>}
             {selectedLeave && <Typography sx={{ fontSize: 12, fontWeight: 800 }}>Leave duty: {selectedLeave.name} · {selectedLeave.assignedDuty || "-"} · {selectedLeave.groupName}</Typography>}
+            {mode === "cross_date" && destinationAssignment && (
+              <>
+                <Typography sx={{ mt: .4, fontSize: 12, fontWeight: 800 }}>
+                  Destination: {dayjs(destinationDate).format("DD MMM YYYY")} · currently {destinationAssignment.assignedDuty || "No duty"} · will become {destinationDuty || first?.assignedDuty || "-"} · {destinationAssignment.groupName || "No group"}
+                </Typography>
+                {["OFF", "O1", "O2"].includes(String(destinationAssignment.assignedDuty || "").toUpperCase()) && first && (
+                  ["OFF", "O1", "O2"].includes(String(first.assignedDuty || "").toUpperCase()) ? (
+                    <Chip sx={{ mt: 1, background: "#DCFCE7", color: "#166534", fontWeight: 900 }} size="small" label="C-OFF will be registered: source and destination are both OFF" />
+                  ) : (
+                    <Chip sx={{ mt: 1, background: "#FEF3C7", color: "#92400E", fontWeight: 900 }} size="small" label="No C-OFF: an existing working duty is being shifted to this OFF day" />
+                  )
+                )}
+              </>
+            )}
           </Box>
         )}
 
         {canManage && (
           <>
             <Typography sx={{ mt: 2.5, mb: 1, color: "#0F172A", fontWeight: 900 }}>Recent duty changes</Typography>
-            <TableContainer sx={{ maxHeight: 260, border: "1px solid #E2E8F0", borderRadius: 2 }}>
+            <TableContainer sx={{ maxHeight: 320, minHeight: history.length ? 120 : 72, border: "1px solid #E2E8F0", borderRadius: 2 }}>
               <Table size="small" stickyHeader>
-                <TableHead><TableRow><TableCell>Date</TableCell><TableCell>Employee</TableCell><TableCell>Previous</TableCell><TableCell>Changed to</TableCell><TableCell>Reason</TableCell><TableCell>Changed by</TableCell></TableRow></TableHead>
+                <TableHead><TableRow><TableCell>Date</TableCell><TableCell>Event</TableCell><TableCell>Employee</TableCell><TableCell>Previous</TableCell><TableCell>Changed to</TableCell><TableCell>Reason</TableCell><TableCell>Changed by</TableCell></TableRow></TableHead>
                 <TableBody>
-                  {history.map((item) => <TableRow key={item._id} hover><TableCell>{dayjs(item.date).format("DD MMM YYYY")}</TableCell><TableCell><strong>{item.employeeName || item.employeeId}</strong><br /><Typography variant="caption">{item.employeeId}</Typography></TableCell><TableCell>{item.previous?.assignedDuty || "-"} · {item.previous?.groupName || "-"}</TableCell><TableCell>{item.updated?.assignedDuty || "-"} · {item.updated?.groupName || "-"}</TableCell><TableCell>{item.reason || "-"}</TableCell><TableCell>{item.changedByName || item.changedBy || "-"}</TableCell></TableRow>)}
-                  {!history.length && <TableRow><TableCell colSpan={6} align="center">No duty changes recorded in this period.</TableCell></TableRow>}
+                  {history.map((item) => {
+                    const isSIC = Boolean(item.updated?.isActingSIC) || String(item.source || "").toLowerCase().includes("sic");
+                    const isReplacement = Boolean(item.updated?.replacementDuty) || String(item.source || "").toLowerCase().includes("replacement");
+                    return (
+                      <TableRow key={item._id} hover>
+                        <TableCell>{dayjs(item.date).format("DD MMM YYYY")}</TableCell>
+                        <TableCell><Chip size="small" variant="outlined" color={isSIC ? "warning" : isReplacement ? "info" : "default"} label={isSIC ? "Acting SIC" : isReplacement ? "Replacement duty" : "Duty change"} sx={{ fontWeight: 850 }} /></TableCell>
+                        <TableCell><strong>{item.employeeName || item.employeeId}</strong><br /><Typography variant="caption">{item.employeeId}</Typography></TableCell>
+                        <TableCell>{item.previous?.assignedDuty || "-"} · {item.previous?.groupName || "-"}</TableCell>
+                        <TableCell>{item.updated?.assignedDuty || "-"} · {item.updated?.groupName || "-"}{isSIC && <><br /><Typography variant="caption" fontWeight={850} color="warning.main">Acting SIC allocated</Typography></>}{isReplacement && <><br /><Typography variant="caption" fontWeight={850} color="info.main">Replacement allocated{item.replacedEmployeeName ? ` for ${item.replacedEmployeeName}` : ""}</Typography></>}{item.compOffAwarded && <><br /><Chip size="small" label="C-OFF awarded" sx={{ mt: .5, height: 20, background: "#DCFCE7", color: "#166534", fontWeight: 850 }} /></>}</TableCell>
+                        <TableCell>{item.reason || "-"}</TableCell>
+                        <TableCell>{item.changedByName || item.changedBy || "-"}</TableCell>
+                      </TableRow>
+                    );
+                  })}
+                  {!history.length && <TableRow><TableCell colSpan={7} align="center">No duty changes recorded in this period.</TableCell></TableRow>}
                 </TableBody>
               </Table>
             </TableContainer>

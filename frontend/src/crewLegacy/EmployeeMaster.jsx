@@ -29,8 +29,6 @@ import {
   Stack,
   CircularProgress
 } from "@mui/material";
-
-
 export default function EmployeeMaster() {
 
   const [formData, setFormData] = useState({
@@ -38,7 +36,9 @@ export default function EmployeeMaster() {
     nameHindi: "",
     designation: "",
     designationHindi: "",
+    designationMasterId: "",
     userId: "",
+    seniorityOrder: "",
     password: "",
     phone: "",
     gmail: "",
@@ -60,6 +60,7 @@ export default function EmployeeMaster() {
   const [editId, setEditId] = useState(null);
   const [groupLeaveRule, setGroupLeaveRule] = useState(false);
   const [organizationUnits, setOrganizationUnits] = useState([]);
+  const [designationMasters, setDesignationMasters] = useState([]);
   const [organizationResolving, setOrganizationResolving] = useState(false);
   const [formOpen, setFormOpen] = useState(false);
 
@@ -67,7 +68,7 @@ export default function EmployeeMaster() {
   const [searchText, setSearchText] = useState("");
 
   // ðŸ”„ Sorting
-  const [orderBy, setOrderBy] = useState("name");
+  const [orderBy, setOrderBy] = useState("seniorityOrder");
   const [orderDirection, setOrderDirection] = useState("asc");
 
   // ðŸ“„ Pagination
@@ -119,10 +120,12 @@ export default function EmployeeMaster() {
     const dutyRes = await api.get(`/admin/dropdown/dutyType`);
     const catRes = await api.get(`/admin/dropdown/category`);
     const orgRes = await api.get(`/admin/organization/units`);
+    const designationRes = await api.get(`/admin/designations`);
 
     setDutyTypes(dutyRes.data);
     setCategories(catRes.data);
     setOrganizationUnits(orgRes.data || []);
+    setDesignationMasters(designationRes.data?.masters || []);
   };
 
   useEffect(() => {
@@ -142,7 +145,9 @@ export default function EmployeeMaster() {
     nameHindi: "",
     designation: "",
     designationHindi: "",
+    designationMasterId: "",
     userId: "",
+    seniorityOrder: "",
     password: "",
     phone: "",
     gmail: "",
@@ -161,6 +166,16 @@ export default function EmployeeMaster() {
       ...formData,
       [e.target.name]: e.target.value
     });
+  };
+
+  const handleDesignationChange = (event) => {
+    const master = designationMasters.find((item) => item.id === event.target.value);
+    setFormData((current) => ({
+      ...current,
+      designationMasterId: master?.id || "",
+      designation: master?.name || "",
+      designationHindi: master?.nameHindi || "",
+    }));
   };
 
   const resolveOrganization = async (functionIds, userId, baseData = formData) => {
@@ -264,8 +279,16 @@ export default function EmployeeMaster() {
       emp.designation?.toLowerCase().includes(searchText.toLowerCase())
     )
     .sort((a, b) => {
-      const valueA = a[orderBy] || "";
-      const valueB = b[orderBy] || "";
+      if (orderBy === "seniorityOrder") {
+        const valueA = Number(a.seniorityOrder) || Number.MAX_SAFE_INTEGER;
+        const valueB = Number(b.seniorityOrder) || Number.MAX_SAFE_INTEGER;
+        const difference = valueA - valueB;
+        if (difference !== 0) return orderDirection === "asc" ? difference : -difference;
+        return String(a.name || "").localeCompare(String(b.name || ""));
+      }
+
+      const valueA = String(a[orderBy] || "");
+      const valueB = String(b[orderBy] || "");
 
       return orderDirection === "asc"
         ? valueA.localeCompare(valueB)
@@ -348,9 +371,28 @@ export default function EmployeeMaster() {
           >
             <TextField size="small" label="Name" name="name" fullWidth InputLabelProps={{ shrink: true }} value={formData.name} onChange={handleChange} />
             <TextField size="small" label="Name (Hindi)" name="nameHindi" fullWidth InputLabelProps={{ shrink: true }} value={formData.nameHindi} onChange={handleChange} />
-            <TextField size="small" label="Designation" name="designation" fullWidth InputLabelProps={{ shrink: true }} value={formData.designation} onChange={handleChange} />
-            <TextField size="small" label="Designation (Hindi)" name="designationHindi" fullWidth InputLabelProps={{ shrink: true }} value={formData.designationHindi} onChange={handleChange} />
+            <TextField
+              size="small"
+              select
+              label="Designation"
+              fullWidth
+              InputLabelProps={{ shrink: true }}
+              value={formData.designationMasterId || ""}
+              onChange={handleDesignationChange}
+              helperText={formData.designation && !formData.designationMasterId ? `Current unmatched value: ${formData.designation}` : "Fetched from Designation Master"}
+            >
+              {formData.designation && !formData.designationMasterId && (
+                <MenuItem value="" disabled>{formData.designation} — unmatched</MenuItem>
+              )}
+              {designationMasters.filter((item) => item.isActive !== false).map((item) => (
+                <MenuItem key={item.id} value={item.id}>
+                  {item.name}{item.shortName ? ` (${item.shortName})` : ""}
+                </MenuItem>
+              ))}
+            </TextField>
+            <TextField size="small" label="Designation (Hindi)" name="designationHindi" fullWidth InputLabelProps={{ shrink: true }} value={formData.designationHindi} InputProps={{ readOnly: true }} helperText="Auto-fetched from Designation Master" />
             <TextField size="small" label="User ID" name="userId" fullWidth InputLabelProps={{ shrink: true }} value={formData.userId} onChange={handleChange} />
+            <TextField size="small" type="number" label="Employee seniority order" name="seniorityOrder" fullWidth InputLabelProps={{ shrink: true }} inputProps={{ min: 1, step: 1 }} value={formData.seniorityOrder ?? ""} onChange={handleChange} helperText="Lower number means higher seniority" />
             <TextField size="small" label="Password" type="password" name="password" fullWidth InputLabelProps={{ shrink: true }} value={formData.password} onChange={handleChange} />
             <TextField size="small" label="Phone" name="phone" fullWidth InputLabelProps={{ shrink: true }} value={formData.phone} onChange={handleChange} />
             <TextField size="small" label="Gmail" name="gmail" fullWidth InputLabelProps={{ shrink: true }} value={formData.gmail} onChange={handleChange} />
@@ -506,6 +548,9 @@ export default function EmployeeMaster() {
 
           <TableHead>
             <TableRow sx={{ backgroundColor: "#d9f2d9" }}>
+              <TableCell onClick={() => handleSort("seniorityOrder")} sx={{ cursor: "pointer" }}>
+                <strong>Seniority</strong> {orderBy === "seniorityOrder" ? (orderDirection === "asc" ? "↑" : "↓") : ""}
+              </TableCell>
               <TableCell onClick={() => handleSort("name")} sx={{ cursor: "pointer" }}>
                 <strong>Name</strong> {orderBy === "name" ? (orderDirection === "asc" ? "â†‘" : "â†“") : ""}
               </TableCell>
@@ -528,7 +573,7 @@ export default function EmployeeMaster() {
 
             {/* ðŸ”Ž Search Row */}
             <TableRow>
-              <TableCell colSpan={12}>
+              <TableCell colSpan={13}>
                 <TextField
                   fullWidth
                   size="small"
@@ -546,6 +591,7 @@ export default function EmployeeMaster() {
           <TableBody>
             {paginatedData.map((emp) => (
               <TableRow key={emp.id}>
+                <TableCell>{emp.seniorityOrder || "-"}</TableCell>
                 <TableCell>{emp.name}</TableCell>
                 <TableCell>{emp.designation}</TableCell>
                 <TableCell>{emp.nameHindi}</TableCell>

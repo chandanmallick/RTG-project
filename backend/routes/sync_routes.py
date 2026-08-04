@@ -1,6 +1,76 @@
-from fastapi import APIRouter, Body
+from datetime import datetime
+
+from fastapi import APIRouter, Body, Depends
+
+from crew_legacy.admin_logic.auth_utils import get_authenticated_user, require_page_view, require_page_write
+from services.database_sync_review_service import (
+    commit_review_rows,
+    refresh_staging_and_review,
+    review_snapshot,
+    update_rtg_static_from_reporting,
+)
 
 router = APIRouter()
+
+
+def require_database_sync_view(user=Depends(get_authenticated_user)):
+    return require_page_view(user, "database_sync")
+
+
+def require_database_sync_write(user=Depends(get_authenticated_user)):
+    return require_page_write(user, "database_sync")
+
+
+@router.post("/db-sync/review/refresh")
+async def refresh_database_sync_review(user=Depends(require_database_sync_write)):
+    try:
+        return refresh_staging_and_review()
+    except Exception as exc:
+        print("DATABASE SYNC STAGING ERROR:", str(exc))
+        return {
+            "success": False,
+            "rows": [],
+            "rtg_master": [],
+            "summary": {},
+            "message": str(exc),
+        }
+
+
+@router.get("/db-sync/review")
+async def get_database_sync_review(user=Depends(require_database_sync_view)):
+    try:
+        return review_snapshot()
+    except Exception as exc:
+        return {
+            "success": False,
+            "rows": [],
+            "rtg_master": [],
+            "summary": {},
+            "message": str(exc),
+        }
+
+
+@router.post("/db-sync/review/commit")
+async def commit_database_sync_review(
+    payload: list = Body(...),
+    user=Depends(require_database_sync_write),
+):
+    return commit_review_rows(payload, str(user.get("employeeId") or user.get("userId") or ""))
+
+
+@router.post("/db-sync/review/update-rtg-static")
+async def update_database_sync_rtg_static(
+    payload: list = Body(...),
+    user=Depends(require_database_sync_write),
+):
+    review_ids = [
+        str(item.get("review_id") or "") if isinstance(item, dict) else str(item or "")
+        for item in payload
+    ]
+    return update_rtg_static_from_reporting(
+        [review_id for review_id in review_ids if review_id],
+        str(user.get("employeeId") or user.get("userId") or ""),
+    )
 
 
 def get_sync_dependencies():
@@ -360,55 +430,37 @@ async def update_map_table(
 
     updated = 0
 
+    editable_fields = {
+        "wbes_name", "wbes_acronym", "crms_utility_name",
+        "scada_key", "scada_header",
+        "scada_schedule_key", "scada_schedule_header",
+        "scada_dc_key", "scada_dc_header",
+        "outage_key", "schedule_source", "dc_source", "actual_source",
+        "type", "is_state", "is_frequency",
+    }
+
     for row in payload:
+
+        plant_id = str(row.get("plant_id") or "").strip()
+        stage_id = str(row.get("STAGE_ID") or "").strip()
+        if not plant_id:
+            continue
+
+        values = {
+            field: row.get(field)
+            for field in editable_fields
+            if field in row
+        }
+        values["mapping_updated_at"] = datetime.utcnow()
 
         db.map_collection.update_one(
 
             {
-                "plant_id": row["plant_id"],
-                "STAGE_ID": row["STAGE_ID"]
+                "plant_id": plant_id,
+                "STAGE_ID": stage_id,
             },
 
-            {
-                "$set": {
-
-                    "wbes_name":
-                        row.get("wbes_name", ""),
-
-                    "scada_key":
-                        row.get("scada_key", ""),
-
-                    "scada_header":
-                        row.get("scada_header", ""),
-
-                    "outage_key":
-                        row.get("outage_key", ""),
-
-                    "schedule_source":
-                        row.get("schedule_source", "RTG"),
-
-                    "dc_source":
-                        row.get("dc_source", "RTG"),
-
-                    "wbes_acronym":
-                        row.get("wbes_acronym", ""),
-
-                    "rtg_plant_id":
-                        row.get("rtg_plant_id", ""),
-
-                    "scada_schedule_key":
-                        row.get("scada_schedule_key", ""),
-
-                    "scada_dc_key":
-                        row.get("scada_dc_key", ""),
-
-                    "actual_source":
-                        row.get("actual_source", "RTG"),
-
-                    "type":
-                        row.get("type", "IPP")
-                }
-            }
+            {"$set": values},
         )
 
         updated += 1

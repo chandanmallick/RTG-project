@@ -25,6 +25,16 @@ def _normalize_list(value):
     ))
 
 
+def _normalize_seniority_order(value):
+    if value in [None, ""]:
+        return None
+    try:
+        order = int(value)
+    except (TypeError, ValueError):
+        return None
+    return order if order > 0 else None
+
+
 def create_employee_logic(data):
 
     verticals = _normalize_list(
@@ -41,7 +51,9 @@ def create_employee_logic(data):
         "nameHindi": data.get("nameHindi"),
         "designation": data.get("designation"),
         "designationHindi": data.get("designationHindi"),
+        "designationMasterId": data.get("designationMasterId"),
         "userId": data.get("userId"),
+        "seniorityOrder": _normalize_seniority_order(data.get("seniorityOrder")),
         "password": _hash_if_present(data.get("password")),
         "phone": data.get("phone"),
         "gmail": data.get("gmail"),

@@ -73,6 +73,26 @@ axios.interceptors.response.use(
 const API = {
   apiBaseUrl: BASE_URL,
 
+  getDatabaseSyncReview: async () => {
+    const res = await axios.get(`${BASE_URL}/db-sync/review`);
+    return res.data;
+  },
+
+  refreshDatabaseSyncReview: async () => {
+    const res = await axios.post(`${BASE_URL}/db-sync/review/refresh`);
+    return res.data;
+  },
+
+  commitDatabaseSyncReview: async (rows) => {
+    const res = await axios.post(`${BASE_URL}/db-sync/review/commit`, rows);
+    return res.data;
+  },
+
+  updateDatabaseSyncRtgStatic: async (rows) => {
+    const res = await axios.post(`${BASE_URL}/db-sync/review/update-rtg-static`, rows);
+    return res.data;
+  },
+
   // =========================================
   // UNIT DATA PREVIEW
   // =========================================
@@ -210,6 +230,28 @@ const API = {
     );
 
     return res.data;
+  },
+
+  getRTGHistoricalOptions: async () => {
+    const res = await axios.get(`${BASE_URL}/rtg-dashboard/historical/options`);
+    return res.data;
+  },
+
+  getRTGHistoricalMatrix: async (params) => {
+    const res = await axios.get(`${BASE_URL}/rtg-dashboard/historical/matrix`, {
+      params,
+      paramsSerializer: { indexes: null },
+    });
+    return res.data;
+  },
+
+  downloadRTGHistoricalMatrix: async (params) => {
+    const res = await axios.get(`${BASE_URL}/rtg-dashboard/historical/download`, {
+      params,
+      paramsSerializer: { indexes: null },
+      responseType: "blob",
+    });
+    return res;
   },
 
   getPipelineStatus: async () => {
@@ -735,6 +777,33 @@ const API = {
     return res.data;
   },
 
+  getOutageMlOverview: async () => (await axios.get(`${BASE_URL}/outage-ml/overview`)).data,
+  getOutageMlTaxonomy: async () => (await axios.get(`${BASE_URL}/outage-ml/taxonomy`)).data,
+  createOutageMlTaxonomy: async (payload) => (await axios.post(`${BASE_URL}/outage-ml/taxonomy`, payload)).data,
+  updateOutageMlTaxonomy: async (id, payload) => (await axios.put(`${BASE_URL}/outage-ml/taxonomy/${id}`, payload)).data,
+  archiveOutageMlTaxonomy: async (id) => (await axios.delete(`${BASE_URL}/outage-ml/taxonomy/${id}`)).data,
+  importOutageMlOldLogbook: async () => (await axios.post(`${BASE_URL}/outage-ml/import-old-logbook`)).data,
+  getOutageMlRecords: async (filters = {}) => {
+    const params = new URLSearchParams();
+    Object.entries(filters).forEach(([name, value]) => {
+      if (value !== undefined && value !== null && value !== "") params.set(name, String(value));
+    });
+    return (await axios.get(`${BASE_URL}/outage-ml/records?${params.toString()}`)).data;
+  },
+  updateOutageMlRecord: async (id, payload) => (await axios.put(`${BASE_URL}/outage-ml/records/${id}`, payload)).data,
+  updateOutageMlRecords: async (payload) => (await axios.put(`${BASE_URL}/outage-ml/records`, payload)).data,
+  trainOutageMlModels: async (payload) => (await axios.post(`${BASE_URL}/outage-ml/train`, payload)).data,
+  getOutageMlVersions: async () => (await axios.get(`${BASE_URL}/outage-ml/versions`)).data,
+  activateOutageMlVersion: async (id) => (await axios.put(`${BASE_URL}/outage-ml/versions/${id}/activate`)).data,
+  archiveOutageMlVersion: async (id) => (await axios.put(`${BASE_URL}/outage-ml/versions/${id}/archive`)).data,
+  predictOutageMl: async (payload) => (await axios.post(`${BASE_URL}/outage-ml/predict`, payload)).data,
+  downloadOutageMlDataset: async (format = "csv") => (
+    await axios.get(`${BASE_URL}/outage-ml/dataset/export?format=${format}`, { responseType: "blob" })
+  ).data,
+  downloadOutageMlVersion: async (id) => (
+    await axios.get(`${BASE_URL}/outage-ml/versions/${id}/download`, { responseType: "blob" })
+  ).data,
+
   // =========================================
   // FREQUENCY REPORT
   // =========================================
@@ -987,7 +1056,35 @@ const API = {
 
   dsoReportPdfUrl: (reportType, reportDate) => (
     `${BASE_URL}/dso-reports/${reportType}/${reportDate}/pdf`
-  )
+  ),
+
+  getPlantDeviationStatic: async (reportDate, refresh = false) => {
+    const res = await axios.get(`${BASE_URL}/plant-deviation/static`, {
+      params: { report_date: reportDate, refresh },
+    });
+    return res.data;
+  },
+
+  savePlantDeviationEdit: async (plantId, payload) => {
+    const res = await axios.put(
+      `${BASE_URL}/plant-deviation/static/edits/${encodeURIComponent(plantId)}`,
+      payload,
+    );
+    return res.data;
+  },
+
+  savePlantDeviationEdits: async (payload) => {
+    const res = await axios.put(`${BASE_URL}/plant-deviation/static/edits`, payload);
+    return res.data;
+  },
+
+  downloadPlantDeviationStatic: async (reportDate) => {
+    const res = await axios.get(`${BASE_URL}/plant-deviation/static/excel`, {
+      params: { report_date: reportDate },
+      responseType: "blob",
+    });
+    return res.data;
+  },
 };
 
 export default API;

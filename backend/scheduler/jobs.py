@@ -19,6 +19,7 @@ from services.pipeline_logger import (
 from services.psp_service import PSPService
 from services.db_handler import MongoService
 from crew_legacy.api.replacement import auto_accept_pending_duty_notifications
+from crew_legacy.api.morning_presentation import send_morning_presentation_reminders
 
 scheduler = BackgroundScheduler()
 
@@ -30,6 +31,19 @@ scheduler.add_job(
     max_instances=1,
     coalesce=True,
     misfire_grace_time=120,
+    replace_existing=True,
+)
+
+scheduler.add_job(
+    send_morning_presentation_reminders,
+    trigger="cron",
+    hour="8,13,17",
+    minute=0,
+    timezone="Asia/Kolkata",
+    id="morning_presentation_d1_reminders",
+    max_instances=1,
+    coalesce=True,
+    misfire_grace_time=1800,
     replace_existing=True,
 )
 

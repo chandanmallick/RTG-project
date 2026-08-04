@@ -41,6 +41,7 @@ import {
 } from "recharts";
 
 import API from "../services/api";
+import { useAuth } from "../auth/AuthContext";
 
 // LAYOUT
 import AppShell from "../components/layout/AppShell";
@@ -420,7 +421,9 @@ const CustomTooltip = ({ active, payload }) => {
   return null;
 };
 
-export default function PSPDashboard() {
+export default function PSPDashboard({ highlightsOnly = false }) {
+  const { user } = useAuth();
+  const canFetchPspSources = Boolean(user?.permissions?.psp_admin?.write);
   const navigate = useNavigate();
   const loadSequenceRef = useRef(0);
   const [statusData, setStatusData] = useState([]);
@@ -514,7 +517,7 @@ export default function PSPDashboard() {
   const [exchangeLoading, setExchangeLoading] = useState(true);
   const [voltageData, setVoltageData] = useState(null);
   const [voltageLoading, setVoltageLoading] = useState(true);
-  const [highlightsModalOpen, setHighlightsModalOpen] = useState(false);
+  const [highlightsModalOpen, setHighlightsModalOpen] = useState(Boolean(highlightsOnly));
   const [frequencyCheckData, setFrequencyCheckData] = useState(null);
   const [frequencyCheckLoading, setFrequencyCheckLoading] = useState(true);
   const [frequencyTrendOpen, setFrequencyTrendOpen] = useState(false);
@@ -1285,8 +1288,10 @@ export default function PSPDashboard() {
               <button
                 className="btn theme-btn-banner-refresh d-flex align-items-center gap-2"
                 onClick={handleFetchSources}
-                disabled={sourceRefreshLoading || loading || analyticsLoading}
-                title="Fetch PSP, loadshed/hourly, outage, portfolio, and curve data from source and cache it"
+                disabled={!canFetchPspSources || sourceRefreshLoading || loading || analyticsLoading}
+                title={canFetchPspSources
+                  ? "Fetch PSP, loadshed/hourly, outage, portfolio, and curve data from source and cache it"
+                  : "PSP Settings Write access is required to fetch source data"}
               >
                 <Database size={14} className={sourceRefreshLoading ? "animate-spin-custom" : ""} />
                 <span>Fetch Sources</span>
@@ -2422,14 +2427,6 @@ export default function PSPDashboard() {
                     </span>
                   </div>
                   <div className="d-flex align-items-center gap-2">
-                    <button
-                      type="button"
-                      className="btn btn-sm btn-light py-1 px-2 fw-bold"
-                      onClick={() => setHighlightsModalOpen(true)}
-                      style={{ fontSize: "0.7rem" }}
-                    >
-                      PSP Highlights
-                    </button>
                     <span className="badge bg-white bg-opacity-20 text-white border border-white border-opacity-10 small">
                       Max Demand & Energy
                     </span>
@@ -2983,14 +2980,27 @@ export default function PSPDashboard() {
           <Suspense fallback={<WidgetLoader minHeight={180} label="Loading report..." />}>
             <PSPHighlightsReport
               open={highlightsModalOpen}
-              onClose={() => setHighlightsModalOpen(false)}
-              reportDate={portfolioData?.date || latestDate || selectedDate}
+              onClose={() => {
+                setHighlightsModalOpen(false);
+                if (highlightsOnly) navigate("/psp-dashboard");
+              }}
+              reportDate={selectedDate || portfolioData?.date || latestDate}
               powerPositionData={powerPositionData}
               loadsheddingData={loadsheddingData}
               outageChangeData={outageChangeData}
               portfolioData={portfolioData}
               highestRecords={highestRecords}
               powerSystemData={powerSystemData}
+              selectedDate={selectedDate || portfolioData?.date || latestDate}
+              dateOptions={(statusData || []).filter((item) => item.status === "SUCCESS")}
+              onDateChange={handleDateChange}
+              dateLoading={
+                portfolioLoading ||
+                powerPositionLoading ||
+                powerSystemLoading ||
+                loadsheddingLoading ||
+                outageChangeLoading
+              }
             />
           </Suspense>
         )}

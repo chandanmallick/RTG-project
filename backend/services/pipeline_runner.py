@@ -1633,6 +1633,65 @@ class PipelineRunner:
                 else "FAILED"
             )
 
+            # Keep the exact outbound dictionaries as the push payload, and
+            # also store a dataframe-shaped display copy for the monitoring UI.
+            # JSON round-tripping converts pandas/numpy scalar values into
+            # values that are safe for MongoDB and the API response.
+            outage_frame = pd.DataFrame(dataToPost)
+            final_outage_table = []
+            if not outage_frame.empty:
+                outage_columns = [
+                    "rsd",
+                    "fuel_shortage",
+                    "planned_outage",
+                    "forced_outage",
+                    "commercial_issues",
+                ]
+                for column in outage_columns:
+                    if column not in outage_frame.columns:
+                        outage_frame[column] = 0
+                    outage_frame[column] = pd.to_numeric(
+                        outage_frame[column],
+                        errors="coerce",
+                    ).fillna(0)
+                outage_frame["total_outage_mw"] = outage_frame[outage_columns].sum(axis=1)
+                success_ids = {
+                    str(item.get("plant_id", ""))
+                    for item in success_plants
+                }
+                failed_ids = {
+                    str(item.get("plant_id", ""))
+                    for item in failed_plants
+                }
+                outage_frame["push_status"] = outage_frame["plant_id"].map(
+                    lambda value: (
+                        "SUCCESS"
+                        if str(value) in success_ids
+                        else ("FAILED" if str(value) in failed_ids else "NOT_ATTEMPTED")
+                    )
+                )
+                preferred_columns = [
+                    "plant_name",
+                    "plant_id",
+                    "planned_outage",
+                    "forced_outage",
+                    "fuel_shortage",
+                    "rsd",
+                    "commercial_issues",
+                    "total_outage_mw",
+                    "push_status",
+                ]
+                outage_frame = outage_frame[
+                    [
+                        column
+                        for column in preferred_columns
+                        if column in outage_frame.columns
+                    ]
+                ]
+                final_outage_table = json.loads(
+                    outage_frame.to_json(orient="records")
+                )
+
             logger.log(
 
                 revision_id,
@@ -1657,7 +1716,10 @@ class PipelineRunner:
                         round(
                             success_percent,
                             2
-                        )
+                        ),
+
+                    "final_outage_records":
+                        len(final_outage_table)
                 },
 
                 payload=dataToPost,
@@ -1680,7 +1742,15 @@ class PipelineRunner:
                         round(
                             success_percent,
                             2
-                        )
+                        ),
+
+                    "final_outage_table":
+                        final_outage_table,
+
+                    "final_outage_columns":
+                        list(outage_frame.columns)
+                        if not outage_frame.empty
+                        else []
                 }
             )
 

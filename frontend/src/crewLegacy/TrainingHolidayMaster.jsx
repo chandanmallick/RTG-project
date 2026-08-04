@@ -112,6 +112,14 @@ const [history,setHistory]=useState([])
 const [historyFY,setHistoryFY]=useState("")
 const [historyEmployee,setHistoryEmployee]=useState("")
 const [notice,setNotice]=useState(null)
+const [activeSection,setActiveSection]=useState(null)
+
+const openSection=(section)=>{
+setActiveSection(section)
+window.setTimeout(()=>{
+document.getElementById(`training-workspace-${section}`)?.scrollIntoView({behavior:"smooth",block:"start"})
+},180)
+}
 
 /* ================= FETCH HOLIDAY ================= */
 
@@ -385,18 +393,47 @@ if(canViewTrainingPage) fetchHistory()
 
 return(
 
-<Box sx={{p:4,background:"#f4f6fb",minHeight:"100vh"}}>
+<Box sx={{p:3,background:"#f4f6fb",minHeight:"100vh"}}>
 
 {/* HEADER */}
 
-<Typography variant="h4" sx={{mb:4,fontWeight:600}}>
+<Box sx={{p:3,mb:3,borderRadius:3,background:"linear-gradient(105deg,#08103A 0%,#0057B7 65%,#0F6FDB 100%)",color:"#FFFFFF"}}>
+<Typography variant="h5" sx={{fontWeight:900,color:"#FFFFFF"}}>
 {canViewTrainingPage ? "Training & Holiday Management" : "Training Approval Inbox"}
 </Typography>
+<Typography variant="body2" sx={{mt:.45,color:"rgba(255,255,255,.88)"}}>
+Manage holiday masters, training programmes, nominations and approval workflows.
+</Typography>
+</Box>
 
 {notice && <Alert severity={notice.severity} onClose={()=>setNotice(null)} sx={{mb:2}}>{notice.text}</Alert>}
 
+<Grid container spacing={2} sx={{mb:3}}>
+{[
+...(canViewTrainingPage ? [
+{key:"holiday",title:"Holiday Master",subtitle:"Maintain yearly holiday records",count:holidayList.length,color:"#0057B7",tint:"#EAF2FF"},
+{key:"training",title:"Training Master",subtitle:"Maintain training programmes",count:trainingList.length,color:"#0F766E",tint:"#ECFDF5"},
+] : []),
+...(canManageTraining ? [{key:"assign",title:"Assign Training",subtitle:"Nominate eligible employees",count:null,color:"#17876D",tint:"#EAF8F3"}] : []),
+{key:"pending",title:"Pending Approvals",subtitle:"Review and forward nominations",count:pendingList.length,color:"#D97706",tint:"#FFF7E8"},
+...(canViewTrainingPage ? [{key:"history",title:"Nomination History",subtitle:"View completed workflow records",count:history.length,color:"#4338CA",tint:"#EEF2FF"}] : []),
+].map((tile)=>(
+<Grid item xs={12} sm={6} md={4} lg={canViewTrainingPage ? 2.4 : 4} key={tile.key}>
+<Paper component="button" type="button" elevation={0} onClick={()=>openSection(tile.key)} sx={{width:"100%",minHeight:118,p:2.2,borderRadius:3,textAlign:"left",cursor:"pointer",border:`1px solid ${activeSection===tile.key ? tile.color : "#D7E3F4"}`,background:activeSection===tile.key ? tile.tint : "#FFFFFF",boxShadow:activeSection===tile.key ? `0 12px 28px ${tile.color}22` : "0 5px 18px rgba(15,23,42,.06)",transition:"transform .22s ease, box-shadow .22s ease, border-color .22s ease, background .22s ease","&:hover":{transform:"translateY(-3px)",borderColor:tile.color,boxShadow:`0 14px 30px ${tile.color}26`}}}>
+<Box sx={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:2}}>
+<Box><Typography sx={{color:"#0F172A",fontSize:16,fontWeight:950}}>{tile.title}</Typography><Typography sx={{mt:.65,color:"#64748B",fontSize:11.5,fontWeight:650}}>{tile.subtitle}</Typography></Box>
+{tile.count!==null && <Box sx={{minWidth:42,height:42,px:1,borderRadius:2.2,display:"grid",placeItems:"center",color:"#FFFFFF",background:tile.color,fontSize:18,fontWeight:950}}>{tile.count}</Box>}
+</Box>
+<Typography sx={{mt:1.4,color:tile.color,fontSize:11.5,fontWeight:900}}>{activeSection===tile.key ? "Workspace open" : "Click to open"}</Typography>
+</Paper>
+</Grid>
+))}
+</Grid>
+
 {/* ================= HOLIDAY ================= */}
 
+<Collapse in={activeSection==="holiday"} timeout={420} unmountOnExit>
+<Box id="training-workspace-holiday" sx={{scrollMarginTop:110}}>
 {canViewTrainingPage && (
 <Accordion
   defaultExpanded
@@ -578,9 +615,13 @@ return(
 
 </Accordion>
 )}
+</Box>
+</Collapse>
 
 {/* ================= TRAINING ================= */}
 
+<Collapse in={activeSection==="training"} timeout={420} unmountOnExit>
+<Box id="training-workspace-training" sx={{scrollMarginTop:110}}>
 {canViewTrainingPage && (
 <Accordion
   defaultExpanded
@@ -723,9 +764,13 @@ return(
 
 </Accordion>
 )}
+</Box>
+</Collapse>
 
 {/* ================= ASSIGN ================= */}
 
+<Collapse in={activeSection==="assign"} timeout={420} unmountOnExit>
+<Box id="training-workspace-assign" sx={{scrollMarginTop:110}}>
 {canManageTraining && (
 <Accordion
   defaultExpanded
@@ -802,6 +847,8 @@ return(
 
 </Accordion>
 )}
+</Box>
+</Collapse>
 
 
 {/* ############### Duty Matrix Popup (Full Section) */}
@@ -949,6 +996,8 @@ Nominate Selected
 
 {/* ########## Pending Approval Section */}
 
+<Collapse in={activeSection==="pending"} timeout={420} unmountOnExit>
+<Box id="training-workspace-pending" sx={{scrollMarginTop:110}}>
 <Accordion
   defaultExpanded
   sx={{
@@ -1198,9 +1247,13 @@ Approve & Forward
 </AccordionDetails>
 
 </Accordion>
+</Box>
+</Collapse>
 
 {/* ############### History Section */}
 
+<Collapse in={activeSection==="history"} timeout={420} unmountOnExit>
+<Box id="training-workspace-history" sx={{scrollMarginTop:110}}>
 {canViewTrainingPage && (
 <Accordion
   defaultExpanded
@@ -1324,6 +1377,8 @@ sx={{
 
 </Accordion>
 )}
+</Box>
+</Collapse>
 
 </Box>
 
