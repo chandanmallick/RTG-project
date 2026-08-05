@@ -591,6 +591,7 @@ export default function LeaveManagement() {
         <Box sx={{ display: "flex", alignItems: "center", gap: 1.2, flexWrap: "wrap", px: 1, py: .65, borderRadius: 1.5, border: "1px solid #BFDBFE", background: "#F8FBFF" }}>
           <Stack direction="row" alignItems="center" spacing={.25}><Checkbox size="small" disabled sx={{ p: 0, "& .MuiSvgIcon-root": { fontSize: 15 } }} /><Typography sx={{ fontSize: 10, color: "#475569" }}>Tick a leave cell, date heading, or employee checkbox to select visible leave for approval/rejection.</Typography></Stack>
           <Stack direction="row" alignItems="center" spacing={.45}><Box sx={{ width: 17, height: 17, borderRadius: .7, display: "grid", placeItems: "center", color: "#FFF", background: "#D97706", fontSize: 8, fontWeight: 950 }}>R</Box><Typography sx={{ fontSize: 10, color: "#475569" }}>Amber R = replacement required; grey R = not required. DIC may change SIC's choice.</Typography></Stack>
+          <Stack direction="row" alignItems="center" spacing={.4}><CheckCircle2 size={15} color="#15803D" strokeWidth={3} /><Typography sx={{ fontSize: 10, color: "#475569" }}>Green tick = leave finally approved.</Typography></Stack>
         </Box>
 
         {approvalCalendarError && <Alert severity="error">{approvalCalendarError}</Alert>}
@@ -635,6 +636,7 @@ export default function LeaveManagement() {
                         const actionable = Boolean(leave?.canSICAct || leave?.canFinalAct);
                         const selected = actionable && selectedWorkflowIds.includes(leave.id);
                         const sicForwarded = leave?.sicApprovalStatus === "Forwarded" || duty.leaveStatus === "Forwarded by SIC";
+                        const finallyApproved = leave?.finalStatus === "Approved" || leave?.deptApprovalStatus === "Approved" || duty.leaveStatus === "Approved";
                         const decisions = leave?.replacementDecisionHistory || [];
                         const sicDecision = decisions.find((entry) => entry.stage === "SIC");
                         const dicDecision = decisions.find((entry) => entry.stage === "DIC");
@@ -656,6 +658,7 @@ export default function LeaveManagement() {
                               <Box sx={{ minHeight: 27, px: .18, py: .18, borderRadius: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: .05, background: selected ? "#DBEAFE" : palette.bg, color: palette.color, border: `1px solid ${actionable ? selected ? "#0057B7" : "#EF4444" : palette.border}` }}>
                                 {actionable && <Checkbox size="small" checked={Boolean(selected)} onChange={(event) => toggleWorkflowSelection(leave.id, event.target.checked)} sx={{ p: 0, color: "#DC2626", "&.Mui-checked": { color: "#0057B7" }, "& .MuiSvgIcon-root": { fontSize: 14 } }} />}
                                 <Box sx={{ minWidth: 0, flex: 1 }}><Typography sx={{ fontSize: 8.6, lineHeight: 1.05, fontWeight: 950 }}>{duty.shift || "-"}</Typography>{duty.leaveStatus && <Typography noWrap sx={{ maxWidth: 52, mx: "auto", fontSize: 6.5, lineHeight: 1.05, fontWeight: 900 }}>{duty.leaveType || "Leave"} · {sicForwarded ? "Approved & Forwarded" : duty.leaveStatus}</Typography>}</Box>
+                                {finallyApproved && <Tooltip title="Leave finally approved" arrow><CheckCircle2 size={15} color="#15803D" strokeWidth={3} aria-label="Leave finally approved" /></Tooltip>}
                                 {actionable && <Tooltip title={`Replacement required: ${replacementChecked ? "Yes" : "No"}`} arrow><Box component="button" type="button" aria-label="Toggle replacement required" aria-pressed={replacementChecked} onClick={(event) => { event.stopPropagation(); setReplacementChoice(leave, replacementStage, !replacementChecked); }} sx={{ width: 17, minWidth: 17, height: 17, p: 0, borderRadius: .7, border: `1px solid ${replacementChecked ? "#D97706" : "#94A3B8"}`, color: replacementChecked ? "#FFFFFF" : "#64748B", background: replacementChecked ? "#D97706" : "#FFFFFF", fontSize: 8, fontWeight: 950, cursor: "pointer" }}>R</Box></Tooltip>}
                               </Box>
                             </Tooltip>

@@ -41,7 +41,6 @@ import {
 } from "recharts";
 
 import API from "../services/api";
-import { useAuth } from "../auth/AuthContext";
 
 // LAYOUT
 import AppShell from "../components/layout/AppShell";
@@ -422,8 +421,6 @@ const CustomTooltip = ({ active, payload }) => {
 };
 
 export default function PSPDashboard({ highlightsOnly = false }) {
-  const { user } = useAuth();
-  const canFetchPspSources = Boolean(user?.permissions?.psp_admin?.write);
   const navigate = useNavigate();
   const loadSequenceRef = useRef(0);
   const [statusData, setStatusData] = useState([]);
@@ -1288,13 +1285,11 @@ export default function PSPDashboard({ highlightsOnly = false }) {
               <button
                 className="btn theme-btn-banner-refresh d-flex align-items-center gap-2"
                 onClick={handleFetchSources}
-                disabled={!canFetchPspSources || sourceRefreshLoading || loading || analyticsLoading}
-                title={canFetchPspSources
-                  ? "Fetch PSP, loadshed/hourly, outage, portfolio, and curve data from source and cache it"
-                  : "PSP Settings Write access is required to fetch source data"}
+                disabled={sourceRefreshLoading || loading || analyticsLoading}
+                title="Fetch PSP, loadshed/hourly, outage, portfolio, and curve data from source and cache it"
               >
                 <Database size={14} className={sourceRefreshLoading ? "animate-spin-custom" : ""} />
-                <span>Fetch Sources</span>
+                <span>Fetch Dashboard</span>
               </button>
               <button
                 className="btn theme-btn-banner-refresh d-flex align-items-center gap-2"

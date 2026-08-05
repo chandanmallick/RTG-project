@@ -322,6 +322,17 @@ class BulkTrainingUpdate(TrainingUpdate):
     ids: list[str] = Field(default_factory=list)
 
 
+class BulkUseUpdate(BaseModel):
+    search: str = ""
+    type: str = ""
+    category: str = ""
+    subcategory: str = ""
+    review: str = "all"
+    use_filter: str = "all"
+    secondary_filter: str = "all"
+    use: bool = True
+
+
 class TrainInput(BaseModel):
     name: str = ""
     activate: bool = True
@@ -510,14 +521,28 @@ def list_records(
     user=Depends(get_authenticated_user),
 ):
     _, _, training, _ = collections()
+    query = build_records_query(
+        search=search, type_name=type, category=category, subcategory=subcategory,
+        review=review, use_filter=use_filter, secondary_filter=secondary_filter,
+    )
+    total = training.count_documents(query)
+    direction = 1 if sort_dir == "asc" else -1
+    rows = training.find(query).sort([(sort_by, direction), ("_id", -1)]).skip((page - 1) * limit).limit(limit)
+    return {"success": True, "total": total, "page": page, "limit": limit, "rows": [jsonable(row) for row in rows]}
+
+
+def build_records_query(
+    *, search: str = "", type_name: str = "", category: str = "", subcategory: str = "",
+    review: str = "all", use_filter: str = "all", secondary_filter: str = "all",
+) -> dict[str, Any]:
     query: dict[str, Any] = {}
     if search:
         query["$or"] = [
             {field: {"$regex": search, "$options": "i"}}
             for field in ("reason", "element_name", "element_type", "category", "subcategory")
         ]
-    if type:
-        query["type"] = type
+    if type_name:
+        query["type"] = type_name
     if category:
         query["category"] = category
     if subcategory:
@@ -538,10 +563,29 @@ def list_records(
         query.update({"type": "Outage", "secondary_shutdown": True})
     elif secondary_filter == "none":
         query["secondary_shutdown"] = {"$ne": True}
-    total = training.count_documents(query)
-    direction = 1 if sort_dir == "asc" else -1
-    rows = training.find(query).sort([(sort_by, direction), ("_id", -1)]).skip((page - 1) * limit).limit(limit)
-    return {"success": True, "total": total, "page": page, "limit": limit, "rows": [jsonable(row) for row in rows]}
+    return query
+
+
+@router.post("/records/bulk-use")
+def update_filtered_use(data: BulkUseUpdate, user=Depends(get_authenticated_user)):
+    require_write(user)
+    _, _, training, _ = collections()
+    query = build_records_query(
+        search=data.search, type_name=data.type, category=data.category,
+        subcategory=data.subcategory, review=data.review,
+        use_filter=data.use_filter, secondary_filter=data.secondary_filter,
+    )
+    result = training.update_many(query, {"$set": {
+        "use": data.use,
+        "updated_at": utcnow(),
+        "use_updated_by": actor(user),
+    }})
+    return {
+        "success": True,
+        "matched": result.matched_count,
+        "updated": result.modified_count,
+        "use": data.use,
+    }
 
 
 @router.put("/records/{record_id}")

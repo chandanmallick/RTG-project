@@ -73,6 +73,9 @@ def get_legacy_session():
 
 class RTGDashboardService:
 
+    _actual_history_cache = {}
+    _snapshot_history_cache = {}
+
     HISTORICAL_METRICS = {
         "schedule": "Schedule",
         "dc": "DC",
@@ -194,7 +197,7 @@ class RTGDashboardService:
                     return selected_state
             elif selection == "ISGS" and utility_type == "ISGS":
                 return "ISGS"
-            elif selection == "IPP" and utility_type == "IPP":
+            elif selection == "IPP" and utility_type in {"IPP", "REGIONAL_IPP", "REGIONAL IPP"}:
                 return "IPP"
         return None
 
@@ -254,6 +257,148 @@ class RTGDashboardService:
         return values
 
     @staticmethod
+    def _fetch_historical_actual_totals(date_value, plant_ids):
+        """Fetch and aggregate the RTG 5-minute SCADA Actual series for a day."""
+        plant_ids = sorted({str(value).strip() for value in plant_ids if str(value or "").strip()})
+        if not plant_ids:
+            return None
+
+        cache_key = (date_value, tuple(plant_ids))
+        cached = RTGDashboardService._actual_history_cache.get(cache_key)
+        if cached and datetime.utcnow() - cached["fetched_at"] < timedelta(minutes=30):
+            return cached["result"]
+
+        config = PipelineConfigService().get_config("RTG") or {}
+        required = ("rtg_token_url", "rtg_username", "rtg_password")
+        if not all(config.get(key) for key in required):
+            return None
+
+        token = TokenService.get_token(
+            config["rtg_token_url"], config["rtg_username"], config["rtg_password"]
+        )
+        headers = {"Authorization": f"Token {token}", "Content-Type": "application/json"}
+        base_url = str(
+            config.get("rtg_scada_url")
+            or "https://rtgapi.grid-india.in/sendData/scada-data/"
+        ).rstrip("/") + "/"
+
+        def fetch_plant(plant_id):
+            session = get_legacy_session()
+            response = session.get(
+                f"{base_url}{date_value}/{plant_id}/",
+                headers=headers,
+                verify=False,
+                timeout=20,
+            )
+            response.raise_for_status()
+            return RTGDashboardService._series_from_payload(
+                response.json(),
+                ("actual_gen", "actual", "data", "scada", "values"),
+            )
+
+        series_list = []
+        failed_count = 0
+        with ThreadPoolExecutor(max_workers=12) as executor:
+            futures = [executor.submit(fetch_plant, plant_id) for plant_id in plant_ids]
+            for future in as_completed(futures):
+                try:
+                    series = future.result()
+                    if series:
+                        series_list.append(series)
+                    else:
+                        failed_count += 1
+                except Exception:
+                    failed_count += 1
+
+        # A partial regional sum is misleading. Only use the recovery series
+        # when every selected RTG plant has returned its daily Actual data.
+        if not series_list or failed_count or len(series_list) != len(plant_ids):
+            return None
+
+        point_count = max(len(series) for series in series_list)
+        totals = []
+        for index in range(point_count):
+            values = [series[index] for series in series_list if index < len(series)]
+            totals.append(round(sum(values), 2) if len(values) == len(series_list) else None)
+
+        result = {
+            "values": totals,
+            "interval_minutes": 1440 / point_count if point_count else 5,
+            "plant_count": len(series_list),
+        }
+        RTGDashboardService._actual_history_cache[cache_key] = {
+            "fetched_at": datetime.utcnow(),
+            "result": result,
+        }
+        return result
+
+    @staticmethod
+    def _fetch_api_snapshot_trend(date_value):
+        """Build the complete Previous Day Snapshot from RTG historical APIs."""
+        cached = RTGDashboardService._snapshot_history_cache.get(date_value)
+        if cached and datetime.utcnow() - cached["fetched_at"] < timedelta(minutes=30):
+            return cached["result"]
+
+        db = MongoService()
+        latest = db.rtg_dashboard_collection.find_one(
+            {}, {"_id": 0, "data": 1}, sort=[("snapshot_time", -1)]
+        ) or {}
+        states = sorted({
+            str(row.get("state_name") or "").strip()
+            for row in latest.get("data", [])
+            if str(row.get("utility_type") or "").strip().upper() in {"STATE", "STATE_IPP"}
+            and str(row.get("state_name") or "").strip()
+        })
+        selections = [f"STATE:{state}" for state in states] + ["ISGS", "IPP"]
+        metrics = ["schedule", "dc", "cap_on_bar", "actual_gen"]
+        matrix = RTGDashboardService._fetch_api_historical_matrix(
+            datetime.strptime(date_value, "%Y-%m-%d").date(),
+            datetime.strptime(date_value, "%Y-%m-%d").date(),
+            metrics,
+            selections,
+            False,
+            15,
+        )
+        metric_columns = {
+            metric: [column["key"] for column in matrix.get("columns", []) if column.get("metric") == metric]
+            for metric in metrics
+        }
+        records = []
+        for row in matrix.get("rows", []):
+            totals = {
+                metric: round(sum(
+                    float(row.get(key) or 0)
+                    for key in metric_columns[metric]
+                ), 2)
+                for metric in metrics
+            }
+            records.append({
+                "time": row.get("time") or "",
+                "snapshot_time": row.get("timestamp") or "",
+                "cap_on_bar": totals["cap_on_bar"],
+                "dc": totals["dc"],
+                "schedule": totals["schedule"],
+                "actual_gen": totals["actual_gen"],
+                "dc_schedule_difference": round(totals["dc"] - totals["schedule"], 2),
+                "source": "RTG historical APIs",
+            })
+
+        if not records:
+            raise RuntimeError("RTG historical APIs returned no snapshot records")
+        result = {
+            "date": date_value,
+            "records": records,
+            "source": "RTG historical APIs",
+            "api_warnings": int(matrix.get("warnings") or 0),
+            "actual_recovered_points": 0,
+        }
+        RTGDashboardService._snapshot_history_cache[date_value] = {
+            "fetched_at": datetime.utcnow(),
+            "result": result,
+        }
+        return result
+
+    @staticmethod
     def _fetch_api_historical_matrix(
         start, end, metrics, selections, plant_wise, interval_minutes
     ):
@@ -298,26 +443,41 @@ class RTGDashboardService:
         def fetch_one(date_value, plant):
             result = {metric: [] for metric in metrics}
             session = get_legacy_session()
+            request_errors = []
             if needs_schedule:
-                response = session.get(f'{urls["schedule"]}{date_value}/{plant["id"]}/', headers=headers, verify=False, timeout=20)
-                response.raise_for_status()
-                payload = response.json() or {}
-                if "schedule" in metrics:
-                    result["schedule"] = RTGDashboardService._series_from_payload(payload, ("schedule",))
-                if "dc" in metrics:
-                    result["dc"] = RTGDashboardService._series_from_payload(payload, ("dc",))
+                try:
+                    response = session.get(f'{urls["schedule"]}{date_value}/{plant["id"]}/', headers=headers, verify=False, timeout=20)
+                    response.raise_for_status()
+                    payload = response.json() or {}
+                    if "schedule" in metrics:
+                        result["schedule"] = RTGDashboardService._series_from_payload(payload, ("schedule",))
+                    if "dc" in metrics:
+                        result["dc"] = RTGDashboardService._series_from_payload(payload, ("dc",))
+                except Exception as exc:
+                    request_errors.append(f'{plant["id"]} WBES: {exc}')
             if needs_actual:
-                response = session.get(f'{urls["actual"]}{date_value}/{plant["id"]}/', headers=headers, verify=False, timeout=20)
-                response.raise_for_status()
-                result["actual_gen"] = RTGDashboardService._series_from_payload(response.json(), ("actual", "data", "scada", "values"))
+                try:
+                    response = session.get(f'{urls["actual"]}{date_value}/{plant["id"]}/', headers=headers, verify=False, timeout=20)
+                    response.raise_for_status()
+                    # SCADA historical API returns the 5-minute series under
+                    # `actual_gen` (for example: {"data_date": ..., "actual_gen": [...] }).
+                    result["actual_gen"] = RTGDashboardService._series_from_payload(
+                        response.json(),
+                        ("actual_gen", "actual", "data", "scada", "values"),
+                    )
+                except Exception as exc:
+                    request_errors.append(f'{plant["id"]} SCADA: {exc}')
             if needs_cap:
-                response = session.get(f'{urls["cap"]}{date_value}/{plant["id"]}/', headers=headers, verify=False, timeout=20)
-                response.raise_for_status()
-                result["cap_on_bar"] = RTGDashboardService._series_from_payload(response.json(), ("cap_on_bar", "data", "values"))
+                try:
+                    response = session.get(f'{urls["cap"]}{date_value}/{plant["id"]}/', headers=headers, verify=False, timeout=20)
+                    response.raise_for_status()
+                    result["cap_on_bar"] = RTGDashboardService._series_from_payload(response.json(), ("cap_on_bar", "data", "values"))
+                except Exception as exc:
+                    request_errors.append(f'{plant["id"]} Capacity-on-Bar: {exc}')
             return date_value, plant, {
                 metric: RTGDashboardService._resample_day(result[metric], interval_minutes)
                 for metric in metrics
-            }
+            }, request_errors
 
         fetched = {}
         errors = []
@@ -325,8 +485,9 @@ class RTGDashboardService:
             futures = [executor.submit(fetch_one, date_value, plant) for date_value in dates for plant in plants]
             for future in as_completed(futures):
                 try:
-                    date_value, plant, series = future.result()
+                    date_value, plant, series, request_errors = future.result()
                     fetched[(date_value, plant["id"])] = (plant, series)
+                    errors.extend(request_errors)
                 except Exception as exc:
                     errors.append(str(exc))
         if not fetched:
@@ -799,6 +960,18 @@ class RTGDashboardService:
                 - timedelta(days=1)
             ).isoformat()
 
+        # Historical RTG APIs are now the authoritative source for every
+        # Previous Day Snapshot series. Stored Mongo snapshots remain only as
+        # a resilience fallback when the upstream APIs are unavailable.
+        try:
+            return RTGDashboardService._fetch_api_snapshot_trend(target_date)
+        except Exception as exc:
+            print(
+                f"RTG historical snapshot APIs failed for {target_date}; "
+                f"using stored snapshot fallback: {exc}",
+                flush=True,
+            )
+
         def get_day_bounds(day_text):
 
             target_day = datetime.strptime(
@@ -985,10 +1158,16 @@ class RTGDashboardService:
         )
 
         trend = []
+        snapshot_plant_ids = set()
 
         for snapshot in snapshots:
 
             rows = snapshot.get("data", [])
+            snapshot_plant_ids.update(
+                str(row.get("plant_id") or row.get("rtg_plant_id") or "").strip()
+                for row in rows
+                if str(row.get("plant_id") or row.get("rtg_plant_id") or "").strip()
+            )
 
             cap_on_bar = sum(
                 RTGDashboardService._to_number(
@@ -1065,7 +1244,36 @@ class RTGDashboardService:
                 )
             })
 
+        recovered_actual_points = 0
+        if trend and any(item.get("actual_gen", 0) <= 0 for item in trend):
+            try:
+                actual_history = RTGDashboardService._fetch_historical_actual_totals(
+                    target_date,
+                    snapshot_plant_ids,
+                )
+                if actual_history:
+                    values = actual_history.get("values") or []
+                    source_interval = float(actual_history.get("interval_minutes") or 5)
+                    for item in trend:
+                        if item.get("actual_gen", 0) > 0 or not item.get("time"):
+                            continue
+                        hours, minutes = (int(value) for value in item["time"].split(":", 1))
+                        point_index = min(
+                            int(round((hours * 60 + minutes) / source_interval)),
+                            len(values) - 1,
+                        )
+                        if point_index >= 0 and values[point_index] is not None:
+                            item["actual_gen"] = values[point_index]
+                            item["actual_source"] = "RTG historical SCADA API"
+                            recovered_actual_points += 1
+            except Exception as exc:
+                print(
+                    f"Historical Actual recovery failed for {target_date}: {exc}",
+                    flush=True,
+                )
+
         return {
             "date": target_date,
-            "records": trend
+            "records": trend,
+            "actual_recovered_points": recovered_actual_points,
         }

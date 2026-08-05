@@ -28,6 +28,48 @@ def clean_id(value) -> str:
     return str(value or "").replace("\xa0", " ").strip()
 
 
+def leave_date_summary(leaves: list[dict]) -> str:
+    """Return a compact, truthful summary for one multi-date leave action."""
+    dates = sorted({clean_id(leave.get("date")) for leave in leaves if clean_id(leave.get("date"))})
+    if not dates:
+        return "-"
+    if len(dates) == 1:
+        return dates[0]
+
+    try:
+        parsed = [datetime.strptime(value, "%Y-%m-%d") for value in dates]
+        is_contiguous = all(
+            current - previous == timedelta(days=1)
+            for previous, current in zip(parsed, parsed[1:])
+        )
+    except ValueError:
+        is_contiguous = False
+
+    if is_contiguous:
+        return f"{dates[0]} to {dates[-1]}"
+    return ", ".join(dates)
+
+
+def leave_type_summary(leaves: list[dict]) -> str:
+    leave_types = list(dict.fromkeys(
+        clean_id(leave.get("leaveType"))
+        for leave in leaves
+        if clean_id(leave.get("leaveType"))
+    ))
+    return ", ".join(leave_types) or "-"
+
+
+def add_grouped_leave_notification(groups: dict, leave: dict, recipient_ids) -> None:
+    """Collect daily leave rows into one notification per affected employee."""
+    employee_id = clean_id(leave.get("employeeId"))
+    key = employee_id or str(leave.get("_id"))
+    bucket = groups.setdefault(key, {"leaves": [], "recipient_ids": set()})
+    bucket["leaves"].append(leave)
+    bucket["recipient_ids"].update(
+        clean_id(value) for value in (recipient_ids or []) if clean_id(value)
+    )
+
+
 def is_admin(user: dict) -> bool:
     return str(user.get("role") or "").lower() == "admin" or clean_id(user.get("employeeId")) == "50041"
 
@@ -952,7 +994,7 @@ def apply_leave_v2(data: dict, user=Depends(get_authenticated_user)):
     notified_sics.discard(employee_id)
     if notified_sics:
         groups = ", ".join(sorted({item["groupName"] for item in prepared if item.get("groupName")})) or "Not mapped"
-        date_text = dates[0] if len(dates) == 1 else f"{dates[0]} to {dates[-1]}"
+        date_text = leave_date_summary(prepared)
         notify_all(
             email_list=recipient_emails(sorted(notified_sics)),
             employee_ids=sorted(notified_sics),
@@ -1018,6 +1060,7 @@ def sic_forward_bulk(data: dict, user=Depends(get_authenticated_user)):
 
     leaves = data.get("leaves", [])
     updated_count = 0
+    notification_groups = {}
 
     for item in leaves:
 
@@ -1084,31 +1127,41 @@ def sic_forward_bulk(data: dict, user=Depends(get_authenticated_user)):
             value for value in dict.fromkeys(forward_recipient_ids) if value
         ]
 
-        notify_all(
-            email_list=recipient_emails(forward_recipient_ids),
-            employee_ids=forward_recipient_ids,
-            subject="Leave Approved and Forwarded by SIC",
-            message=f"""
-            Leave approved by SIC and forwarded for final approval
+        add_grouped_leave_notification(notification_groups, leave, forward_recipient_ids)
 
-            Name: {leave.get('name')}
-            Employee ID: {leave.get('employeeId')}
-            Date: {leave.get('date')}
-            Type: {leave.get('leaveType')}
-            """,
-            ref_id=str(leave["_id"]),
+        updated_count += 1
+
+    for group in notification_groups.values():
+        grouped_leaves = group["leaves"]
+        first_leave = grouped_leaves[0]
+        recipient_ids = sorted(group["recipient_ids"])
+        date_text = leave_date_summary(grouped_leaves)
+        leave_type_text = leave_type_summary(grouped_leaves)
+        notify_all(
+            email_list=recipient_emails(recipient_ids),
+            employee_ids=recipient_ids,
+            subject="Leave Approved and Forwarded by SIC",
+            message=(
+                "Leave approved by SIC and forwarded for final approval\n\n"
+                f"Name: {first_leave.get('name')}\n"
+                f"Employee ID: {first_leave.get('employeeId')}\n"
+                f"Dates: {date_text}\n"
+                f"Total Days: {len(grouped_leaves)}\n"
+                f"Type: {leave_type_text}"
+            ),
+            ref_id=first_leave.get("leaveGroupId") or str(first_leave["_id"]),
             action="VIEW_LEAVE",
             type="LEAVE",
             template_key="leave_sic_forwarded",
             template_values={
-                "employee_name": leave.get("name"),
-                "employee_id": leave.get("employeeId"),
-                "leave_date": leave.get("date"),
-                "leave_type": leave.get("leaveType"),
+                "employee_name": first_leave.get("name"),
+                "employee_id": first_leave.get("employeeId"),
+                "leave_date": date_text,
+                "leave_dates": date_text,
+                "leave_count": len(grouped_leaves),
+                "leave_type": leave_type_text,
             },
         )
-
-        updated_count += 1
 
     return {"message": f"{updated_count} leave(s) forwarded"}
 
@@ -1240,6 +1293,7 @@ def approve_leave_bulk(data: dict, user=Depends(get_authenticated_user)):
         raise HTTPException(400, "No leave selected")
 
     updated_count = 0
+    notification_groups = {}
 
     for item in decision_items:
 
@@ -1317,34 +1371,44 @@ def approve_leave_bulk(data: dict, user=Depends(get_authenticated_user)):
             value for value in dict.fromkeys(final_recipient_ids) if value
         ]
 
-        notify_all(
-            email_list=recipient_emails(final_recipient_ids),
-            employee_ids=final_recipient_ids,
-            subject="Leave Finally Approved by DIC",
-            message=f"""
-            Leave has received final approval from the DIC
-
-            Name: {leave.get('name')}
-            Employee ID: {leave.get('employeeId')}
-            Date: {leave.get('date')}
-            Type: {leave.get('leaveType')}
-            """,
-            ref_id=str(leave["_id"]),
-            action="VIEW_LEAVE",
-            type="LEAVE",
-            template_key="leave_dic_approved",
-            template_values={
-                "employee_name": leave.get("name"),
-                "employee_id": leave.get("employeeId"),
-                "leave_date": leave.get("date"),
-                "leave_type": leave.get("leaveType"),
-            },
-        )
+        add_grouped_leave_notification(notification_groups, leave, final_recipient_ids)
 
         updated_count += 1
 
     if updated_count == 0:
         raise HTTPException(400, "No valid leaves approved")
+
+    for group in notification_groups.values():
+        grouped_leaves = group["leaves"]
+        first_leave = grouped_leaves[0]
+        recipient_ids = sorted(group["recipient_ids"])
+        date_text = leave_date_summary(grouped_leaves)
+        leave_type_text = leave_type_summary(grouped_leaves)
+        notify_all(
+            email_list=recipient_emails(recipient_ids),
+            employee_ids=recipient_ids,
+            subject="Leave Finally Approved by DIC",
+            message=(
+                "Leave has received final approval from the DIC\n\n"
+                f"Name: {first_leave.get('name')}\n"
+                f"Employee ID: {first_leave.get('employeeId')}\n"
+                f"Dates: {date_text}\n"
+                f"Total Days: {len(grouped_leaves)}\n"
+                f"Type: {leave_type_text}"
+            ),
+            ref_id=first_leave.get("leaveGroupId") or str(first_leave["_id"]),
+            action="VIEW_LEAVE",
+            type="LEAVE",
+            template_key="leave_dic_approved",
+            template_values={
+                "employee_name": first_leave.get("name"),
+                "employee_id": first_leave.get("employeeId"),
+                "leave_date": date_text,
+                "leave_dates": date_text,
+                "leave_count": len(grouped_leaves),
+                "leave_type": leave_type_text,
+            },
+        )
 
     return {"message": f"{updated_count} leave(s) approved"}
 

@@ -1,4 +1,5 @@
 import os
+import logging
 from datetime import datetime
 
 import requests
@@ -9,6 +10,7 @@ from crew_legacy.database.database_mongo import (
 )
 
 TRUTHY = {"1", "true", "yes", "on"}
+logger = logging.getLogger(__name__)
 REPLACEMENT_MAIL_SETTINGS_ID = "replacement_duty_mail"
 MAIL_TEMPLATE_SETTINGS_ID = "workflow_mail_templates"
 DEFAULT_REPLACEMENT_SUBJECT = "Replacement Duty Request - {shift_name} - {date}"
@@ -306,22 +308,39 @@ def notify_all(
 ):
     mail_result = {"status": "skipped", "recipientCount": 0, "error": "No email recipients supplied"}
     if email_list:
-        if template_key:
-            mail_result = send_workflow_email(template_key, email_list, template_values or {})
-        else:
-            settings = replacement_mail_settings()
-            mail_result = send_email(
-                email_list, subject, message, sender=settings.get("sender"),
-                enabled=bool(settings.get("enabled")),
-            )
+        try:
+            if template_key:
+                mail_result = send_workflow_email(template_key, email_list, template_values or {})
+            else:
+                settings = replacement_mail_settings()
+                mail_result = send_email(
+                    email_list, subject, message, sender=settings.get("sender"),
+                    enabled=bool(settings.get("enabled")),
+                )
+        except Exception as exc:
+            # Notifications run after the business record is committed. A
+            # delivery failure must not make the API report that operation as
+            # failed and tempt the user to submit the same record again.
+            logger.exception("Mail notification failed for %s", template_key or type)
+            mail_result = {
+                "status": "failed",
+                "recipientCount": len(_clean_recipients(email_list)),
+                "error": str(exc)[:180],
+            }
     if employee_ids:
-        send_app_notification(
-            employee_ids,
-            subject,
-            message,
-            ref_id=ref_id,
-            action=action,
-            type=type,
-        )
-    send_teams(f"{subject}\n\n{message}")
+        try:
+            send_app_notification(
+                employee_ids,
+                subject,
+                message,
+                ref_id=ref_id,
+                action=action,
+                type=type,
+            )
+        except Exception:
+            logger.exception("Portal notification failed for %s", type)
+    try:
+        send_teams(f"{subject}\n\n{message}")
+    except Exception:
+        logger.exception("Teams notification failed for %s", type)
     return mail_result

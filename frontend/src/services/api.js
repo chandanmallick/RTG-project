@@ -15,14 +15,14 @@ axios.interceptors.request.use((config) => {
 
   const isMutation = !["GET", "HEAD", "OPTIONS"].includes(method);
   const isAuthRequest = url.includes("/crew/auth/login") || url.includes("/crew/auth/logout") || url.includes("/crew/auth/admin/access");
-  // Reading a notification and accepting/declining one's own replacement duty
-  // are personal workflow actions. Their authorization is enforced by the
-  // backend against the logged-in employee, independent of page Write access.
-  const isPersonalWorkflowAction =
+  // These narrowly scoped actions are available without page Write access.
+  // Their authorization is enforced by the backend against the signed-in user.
+  const isWriteWithoutPagePermission =
     url.includes("/crew/notifications/read/") ||
     url.includes("/crew/replacement/notifications/accept/") ||
-    url.includes("/crew/replacement/notifications/deny/");
-  if (isMutation && !isAuthRequest && !isPersonalWorkflowAction) {
+    url.includes("/crew/replacement/notifications/deny/") ||
+    url.includes("/psp/refresh-sources");
+  if (isMutation && !isAuthRequest && !isWriteWithoutPagePermission) {
     const access = storedPermissions()[pageKeyForPath()];
     if (access && !access.write) {
       const error = new Error("This page is read-only for your account.");
@@ -792,6 +792,7 @@ const API = {
   },
   updateOutageMlRecord: async (id, payload) => (await axios.put(`${BASE_URL}/outage-ml/records/${id}`, payload)).data,
   updateOutageMlRecords: async (payload) => (await axios.put(`${BASE_URL}/outage-ml/records`, payload)).data,
+  updateOutageMlFilteredUse: async (payload) => (await axios.post(`${BASE_URL}/outage-ml/records/bulk-use`, payload)).data,
   trainOutageMlModels: async (payload) => (await axios.post(`${BASE_URL}/outage-ml/train`, payload)).data,
   getOutageMlVersions: async () => (await axios.get(`${BASE_URL}/outage-ml/versions`)).data,
   activateOutageMlVersion: async (id) => (await axios.put(`${BASE_URL}/outage-ml/versions/${id}/activate`)).data,

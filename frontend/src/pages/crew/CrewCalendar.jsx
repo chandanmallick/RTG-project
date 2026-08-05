@@ -40,6 +40,19 @@ const parseLocalDate = (dateStr) => {
 };
 const displayDate = (dateStr) => new Intl.DateTimeFormat("en-IN", { day: "2-digit", month: "short" }).format(parseLocalDate(dateStr));
 const weekday = (dateStr) => new Intl.DateTimeFormat("en-IN", { weekday: "short" }).format(parseLocalDate(dateStr));
+const replacementLabelSx = {
+  alignSelf: "center",
+  mt: .25,
+  px: .65,
+  py: .2,
+  borderRadius: 1,
+  border: "1px solid #86D3A5",
+  background: "#DCFCE7",
+  color: "#15803D",
+  fontSize: 9.5,
+  fontWeight: 950,
+  lineHeight: 1.2,
+};
 
 const shiftStyle = (duty) => {
   const leave = String(duty?.leaveStatus || "").trim().toLowerCase();
@@ -96,8 +109,8 @@ const EmployeeRow = memo(({ person, groupName, active, dates, selectedColumn, on
             <Typography sx={{ fontSize: 12.5, fontWeight: 900 }}>{duty.shift || "-"}</Typography>
             {duty.leaveStatus && <Typography sx={{ fontSize: 9.5, fontWeight: 800, lineHeight: 1.2 }}>{duty.leaveType || "Leave"} · {duty.leaveStatus}</Typography>}
             {duty.trainingName && <Typography sx={{ fontSize: 9.5, fontWeight: 800 }}>{duty.trainingName}</Typography>}
-            {duty.replacementEmployee?.name && <Typography sx={{ fontSize: 9.5, fontWeight: 900, color: "#0057B7" }}>Replacement: {duty.replacementEmployee.name}</Typography>}
-            {duty.replacementFor?.name && <Typography sx={{ fontSize: 9.5, fontWeight: 900, color: "#0057B7" }}>For: {duty.replacementFor.name}</Typography>}
+            {duty.replacementEmployee?.name && <Typography sx={replacementLabelSx}>Replacement: {duty.replacementEmployee.name}</Typography>}
+            {duty.replacementFor?.name && <Typography sx={replacementLabelSx}>Replacement for: {duty.replacementFor.name}</Typography>}
             {duty.isActingSIC && <Typography sx={{ fontSize: 9.5, fontWeight: 900, color: "#6A1B9A" }}>Acting SIC · {duty.actingSICGroup || groupName}</Typography>}
           </Paper>
         </TableCell>;
@@ -218,12 +231,12 @@ export default function CrewCalendar() {
         {loading ? (
           <Box sx={{ minHeight: 360, display: "grid", placeItems: "center" }}><CircularProgress sx={{ color: "#03624C" }} /></Box>
         ) : (
-          <Box sx={{ overflow: "auto", maxHeight: "calc(100vh - 265px)" }}>
+          <Box sx={{ position: "relative", overflow: "auto", maxHeight: "calc(100vh - 265px)", overscrollBehavior: "contain" }}>
             <Table stickyHeader size="small" sx={{ borderCollapse: "separate", borderSpacing: 0 }}>
               <TableHead>
                 <TableRow>
-                  <TableCell sx={{ position: "sticky", left: 0, zIndex: 6, minWidth: 235, background: "#F8FAFC", fontWeight: 900, color: "#334155", borderRight: "1px solid #E2E8F0" }}>Name / designation</TableCell>
-                  {dates.map((date) => <TableCell key={date} align="center" onClick={() => setSelectedColumn(date)} sx={{ minWidth: 108, cursor: "pointer", fontWeight: 900, color: date === today ? "#03624C" : "#334155", background: selectedColumn === date ? "#D1FAE5" : date === today ? "#ECFDF5" : "#F8FAFC", borderBottom: date === today ? "3px solid #00A86B" : undefined }}><Box>{displayDate(date)}</Box><Typography variant="caption" sx={{ fontWeight: 800, color: "#94A3B8" }}>{weekday(date)}</Typography></TableCell>)}
+                  <TableCell sx={{ position: "sticky !important", top: 0, left: 0, zIndex: 8, minWidth: 235, background: "#F8FAFC", fontWeight: 900, color: "#334155", borderRight: "1px solid #E2E8F0" }}>Name / designation</TableCell>
+                  {dates.map((date) => <TableCell key={date} align="center" onClick={() => setSelectedColumn(date)} sx={{ position: "sticky !important", top: 0, zIndex: 7, minWidth: 108, cursor: "pointer", fontWeight: 900, color: date === today ? "#03624C" : "#334155", background: selectedColumn === date ? "#D1FAE5" : date === today ? "#ECFDF5" : "#F8FAFC", borderBottom: date === today ? "3px solid #00A86B" : undefined }}><Box>{displayDate(date)}</Box><Typography variant="caption" sx={{ fontWeight: 800, color: "#94A3B8" }}>{weekday(date)}</Typography></TableCell>)}
                 </TableRow>
               </TableHead>
               <TableBody>
@@ -272,18 +285,18 @@ export default function CrewCalendar() {
                 </Alert>
               )}
               {selectedDuty.duty.replacementEmployee?.name && (
-                <Paper variant="outlined" sx={{ p: 1.5, borderColor: "#93C5FD", background: "#EFF6FF" }}>
+                <Paper variant="outlined" sx={{ p: 1.5, borderColor: "#86D3A5", background: "#F0FDF4" }}>
                   <Typography sx={{ fontSize: 11, fontWeight: 900, color: "#64748B", textTransform: "uppercase" }}>Replacement duty assigned to</Typography>
-                  <Typography sx={{ mt: .4, fontSize: 16, fontWeight: 900, color: "#0057B7" }}>
+                  <Typography sx={{ mt: .4, fontSize: 16, fontWeight: 900, color: "#15803D" }}>
                     {selectedDuty.duty.replacementEmployee.name}
                     {selectedDuty.duty.replacementEmployee.employeeId ? ` (${selectedDuty.duty.replacementEmployee.employeeId})` : ""}
                   </Typography>
                 </Paper>
               )}
               {selectedDuty.duty.replacementFor?.name && (
-                <Paper variant="outlined" sx={{ p: 1.5, borderColor: "#93C5FD", background: "#EFF6FF" }}>
+                <Paper variant="outlined" sx={{ p: 1.5, borderColor: "#86D3A5", background: "#F0FDF4" }}>
                   <Typography sx={{ fontSize: 11, fontWeight: 900, color: "#64748B", textTransform: "uppercase" }}>Replacement duty for</Typography>
-                  <Typography sx={{ mt: .4, fontSize: 16, fontWeight: 900, color: "#0057B7" }}>
+                  <Typography sx={{ mt: .4, fontSize: 16, fontWeight: 900, color: "#15803D" }}>
                     {selectedDuty.duty.replacementFor.name}
                     {selectedDuty.duty.replacementFor.employeeId ? ` (${selectedDuty.duty.replacementFor.employeeId})` : ""}
                   </Typography>

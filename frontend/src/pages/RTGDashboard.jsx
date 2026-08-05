@@ -1027,55 +1027,6 @@ export default function RTGDashboard() {
         </Box>
       </Box>
 
-      <Box sx={{ display: "none" }}>
-        <Paper
-          component="button"
-          type="button"
-          onClick={() => setShowHistoricalDownload((open) => !open)}
-          elevation={0}
-          sx={{
-            width: { xs: "100%", sm: 330 }, minHeight: 112, p: 2, textAlign: "left",
-            borderRadius: "15px", border: showHistoricalDownload ? "2px solid #0057B7" : "1px solid #BFE4D8",
-            background: showHistoricalDownload ? "#EDF5FF" : "linear-gradient(145deg,#FFFFFF,#F4FBF8)",
-            cursor: "pointer", transition: "all .2s ease", color: "#08103A",
-            "&:hover": { transform: "translateY(-2px)", boxShadow: "0 12px 26px rgba(0,87,183,.13)" },
-          }}
-        >
-          <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 1 }}>
-            <Typography sx={{ fontSize: 15, fontWeight: 900 }}>RTG Historical Data Download</Typography>
-            <Box sx={{ width: 38, height: 38, borderRadius: "50%", bgcolor: "#0057B7", color: "white", display: "grid", placeItems: "center" }}>
-              <Database size={19} />
-            </Box>
-          </Box>
-          <Typography sx={{ mt: 1, fontSize: 12, color: "#52647D" }}>
-            Schedule, DC, capacity and actual data matrix
-          </Typography>
-        </Paper>
-      </Box>
-
-      <Paper
-        variant="outlined"
-        sx={{ display: "none" }}
-      >
-        <Box sx={{ px: 1.3, py: .75, borderRadius: "999px", bgcolor: actualUpdateStale ? "#FEF2F2" : "#ECFDF5", color: actualUpdateStale ? "#DC2626" : "#047857", fontSize: 12, fontWeight: 900 }}>
-          Actual Last Updated&nbsp;&nbsp;{formatUpdateTime(actualLastUpdated)}
-        </Box>
-        <Box sx={{ display: "flex", gap: 1.2, alignItems: "center", flexWrap: "wrap" }}>
-          <Autocomplete
-            multiple size="small" sx={{ width: { xs: "100%", sm: 360 } }} options={FILTER_OPTIONS}
-            value={FILTER_OPTIONS.filter((option) => selectedFilters.includes(option.value))}
-            getOptionLabel={(option) => option.label}
-            onChange={(_, value) => setSelectedFilters(value.map((item) => item.value))}
-            renderInput={(params) => <TextField {...params} label="Filter Utility / State" />}
-          />
-          <GradientButton startIcon={<RefreshRoundedIcon />} onClick={refreshRTGData} sx={{ whiteSpace: "nowrap" }}>
-            Refresh RTG Data
-          </GradientButton>
-        </Box>
-      </Paper>
-
-
-
       {/* ── PIPELINE EXECUTION DIALOG ── */}
       {openLogs && (
       <Dialog
@@ -1228,18 +1179,34 @@ export default function RTGDashboard() {
 
       <Grid
         container
-        spacing={2}
-        sx={{ mb: 3 }}
+        sx={{
+          mb: 3,
+          display: "grid",
+          gridTemplateColumns: {
+            xs: "minmax(0,1fr)",
+            md: "minmax(0,1fr) minmax(0,1fr)",
+            lg: "190px 210px minmax(250px,1fr) 150px 220px",
+          },
+          gridTemplateAreas: {
+            xs: '"activity" "pipelines" "schedule" "snapshot" "generation" "actual" "historical"',
+            md: '"activity pipelines" "snapshot snapshot" "generation schedule" "actual historical"',
+            lg: '"activity pipelines snapshot snapshot generation" "schedule schedule schedule actual historical"',
+          },
+          gap: 1.25,
+          alignItems: "stretch",
+          width: "100%",
+          maxWidth: 1480,
+        }}
       >
 
-        <Grid item xs={12} md={5} lg={3} sx={{ order: 1 }}>
+        <Grid item sx={{ gridArea: "historical", width: "100%", maxWidth: "none !important" }}>
           <Paper
             component="button"
             type="button"
             onClick={() => setShowHistoricalDownload((open) => !open)}
             elevation={0}
             sx={{
-              width: "100%", height: "100%", minHeight: 220, p: 2.4, textAlign: "left",
+              width: "100%", height: "100%", minHeight: 116, p: 1.45, textAlign: "left",
               borderRadius: "22px", border: showHistoricalDownload ? "2px solid #0057B7" : "1px solid #BFE4D8",
               background: showHistoricalDownload ? "#EDF5FF" : "linear-gradient(145deg,#FFFFFF,#F1FAF7)",
               cursor: "pointer", transition: "all .2s ease", color: "#08103A",
@@ -1247,21 +1214,28 @@ export default function RTGDashboard() {
             }}
           >
             <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 1.5 }}>
-              <Typography sx={{ fontSize: 18, fontWeight: 950 }}>RTG Historical Data Download</Typography>
-              <Box sx={{ width: 44, height: 44, borderRadius: "50%", bgcolor: "#0057B7", color: "white", display: "grid", placeItems: "center", flexShrink: 0 }}>
-                <Database size={21} />
+              <Typography sx={{ fontSize: 14, fontWeight: 950 }}>RTG Historical Data Download</Typography>
+              <Box sx={{ width: 34, height: 34, borderRadius: "50%", bgcolor: "#0057B7", color: "white", display: "grid", placeItems: "center", flexShrink: 0 }}>
+                <Database size={17} />
               </Box>
             </Box>
-            <Typography sx={{ mt: 2, fontSize: 13, color: "#52647D", lineHeight: 1.55 }}>
+            <Typography sx={{ mt: 0.7, fontSize: 10.5, color: "#52647D", lineHeight: 1.35 }}>
               Schedule, DC, Capacity on Bar and Actual data in entity-wise or plant-wise matrix format.
             </Typography>
-            <Typography sx={{ mt: 2.2, fontSize: 11, fontWeight: 900, color: "#0057B7" }}>
+            <Box sx={{ mt: 0.75, display: "grid", gridTemplateColumns: "repeat(4,minmax(0,1fr))", gap: 0.4 }}>
+              {["Schedule", "DC", "Capacity", "Actual"].map((label) => (
+                <Box key={label} sx={{ px: 0.4, py: 0.4, borderRadius: "7px", bgcolor: "#E8F1FF", color: "#0057B7", textAlign: "center", fontSize: 8.5, fontWeight: 900 }}>
+                  {label}
+                </Box>
+              ))}
+            </Box>
+            <Typography sx={{ mt: 0.55, fontSize: 9, fontWeight: 900, color: "#0057B7" }}>
               {showHistoricalDownload ? "CLOSE DOWNLOAD WORKSPACE" : "OPEN DOWNLOAD WORKSPACE"}
             </Typography>
           </Paper>
         </Grid>
 
-        <Grid item xs={12} md={7} lg={5} sx={{ order: 2 }}>
+        <Grid item sx={{ gridArea: "activity", width: "100%", maxWidth: "none !important" }}>
 
           <RTGDayTrend
             data={trendData}
@@ -1275,14 +1249,14 @@ export default function RTGDashboard() {
 
         </Grid>
 
-        <Grid item xs={12} md={6} lg={4} sx={{ order: 4 }}>
+        <Grid item sx={{ gridArea: "generation", width: "100%", maxWidth: "none !important" }}>
 
           <Paper
             elevation={0}
             sx={{
               height: "100%",
-              minHeight: 460,
-              p: 3,
+              minHeight: 0,
+              p: 1.35,
               borderRadius: "24px",
               background:
                 "linear-gradient(180deg,#FFFFFF 0%,#F8FAFC 100%)",
@@ -1299,12 +1273,12 @@ export default function RTGDashboard() {
                 justifyContent:
                   "space-between",
                 alignItems: "center",
-                mb: 2.2
+                mb: 0.8
               }}
             >
               <Typography
                 sx={{
-                  fontSize: 21,
+                  fontSize: 14,
                   fontWeight: 950,
                   color: "#0F172A"
                 }}
@@ -1314,11 +1288,11 @@ export default function RTGDashboard() {
 
               <Typography
                 sx={{
-                  px: 1.4,
-                  py: 0.7,
+                  px: 0.8,
+                  py: 0.35,
                   borderRadius: "999px",
                   background: "#ECFDF5",
-                  fontSize: 12,
+                  fontSize: 9,
                   fontWeight: 900,
                   color: "#10B981"
                 }}
@@ -1348,10 +1322,10 @@ export default function RTGDashboard() {
                     sx={{
                       display: "grid",
                       gridTemplateColumns:
-                        "36px minmax(0,1fr) auto",
+                        "25px minmax(0,1fr) auto",
                       alignItems: "center",
-                      gap: 1.7,
-                      py: 1.65,
+                      gap: 0.65,
+                      py: 0.38,
                       borderBottom:
                         index ===
                         systemHealthRows.length - 1
@@ -1361,8 +1335,8 @@ export default function RTGDashboard() {
                         row.onClick
                           ? "pointer"
                           : "default",
-                      borderRadius: "14px",
-                      px: 1,
+                      borderRadius: "9px",
+                      px: 0.35,
                       transition:
                         "background .18s ease, transform .18s ease",
                       "&:hover": row.onClick
@@ -1381,13 +1355,13 @@ export default function RTGDashboard() {
                         display: "flex",
                         alignItems: "center",
                         justifyContent: "center",
-                        width: 32,
-                        height: 32,
-                        borderRadius: "12px",
+                        width: 23,
+                        height: 23,
+                        borderRadius: "8px",
                         background:
                           `${row.color}14`,
                         "& svg": {
-                          fontSize: 20
+                          fontSize: 15
                         }
                       }}
                     >
@@ -1396,7 +1370,7 @@ export default function RTGDashboard() {
 
                     <Typography
                       sx={{
-                        fontSize: 14,
+                        fontSize: 10.5,
                         fontWeight: 850,
                         color: "#475569",
                         overflow: "hidden",
@@ -1410,7 +1384,7 @@ export default function RTGDashboard() {
 
                     <Typography
                       sx={{
-                        fontSize: 14,
+                        fontSize: 10.5,
                         fontWeight: 950,
                         color:
                           row.color,
@@ -1431,14 +1405,15 @@ export default function RTGDashboard() {
 
         </Grid>
 
-        <Grid item xs={12} md={6} lg={4} sx={{ order: 5 }}>
+        <Grid item sx={{ gridArea: "schedule", width: "100%", maxWidth: "none !important" }}>
 
           <Paper
             elevation={0}
             sx={{
               height: "100%",
-              minHeight: 460,
-              p: 2.4,
+              minHeight: 116,
+              maxHeight: "none",
+              p: 1.1,
               borderRadius: "24px",
               background:
                 "linear-gradient(180deg,#FFFFFF 0%,#F8FAFC 100%)",
@@ -1465,12 +1440,12 @@ export default function RTGDashboard() {
 
             <Box
               sx={{
-                mb: 1.6
+                mb: 0.7
               }}
             >
               <Typography
                 sx={{
-                  fontSize: 21,
+                  fontSize: 14,
                   fontWeight: 950,
                   color: "#0F172A"
                 }}
@@ -1480,8 +1455,8 @@ export default function RTGDashboard() {
 
               <Typography
                 sx={{
-                  mt: 0.35,
-                  fontSize: 12,
+                  mt: 0.15,
+                  fontSize: 9.5,
                   fontWeight: 750,
                   color: "#64748B"
                 }}
@@ -1492,9 +1467,9 @@ export default function RTGDashboard() {
 
             <Box
               sx={{
-                display: "flex",
-                flexDirection: "column",
-                gap: 0.8
+                display: "grid",
+                gridTemplateColumns: { xs: "repeat(2,minmax(0,1fr))", sm: "repeat(3,minmax(0,1fr))", lg: "repeat(7,minmax(0,1fr))" },
+                gap: 0.55,
               }}
             >
               {scheduleUpdateRows.map(row => (
@@ -1502,11 +1477,13 @@ export default function RTGDashboard() {
                 <Box
                   key={row.label}
                   sx={{
-                    p: 1,
-                    borderRadius: "16px",
-                    display: "flex",
+                    p: 0.7,
+                    minHeight: 62,
+                    borderRadius: "10px",
+                    display: "grid",
+                    gridTemplateColumns: "22px minmax(0,1fr)",
                     alignItems: "center",
-                    gap: 1,
+                    gap: 0.5,
                     background:
                       row.stale
                         ? "#FEF2F2"
@@ -1524,9 +1501,9 @@ export default function RTGDashboard() {
 
                   <Box
                     sx={{
-                      width: 30,
-                      height: 30,
-                      borderRadius: "12px",
+                      width: 22,
+                      height: 22,
+                      borderRadius: "7px",
                       display: "flex",
                       alignItems: "center",
                       justifyContent: "center",
@@ -1542,7 +1519,7 @@ export default function RTGDashboard() {
                     }}
                   >
                     <CalendarMonthRoundedIcon
-                      sx={{ fontSize: 16 }}
+                      sx={{ fontSize: 13 }}
                     />
                   </Box>
 
@@ -1554,7 +1531,7 @@ export default function RTGDashboard() {
                   >
                     <Typography
                       sx={{
-                        fontSize: 12,
+                        fontSize: 10,
                         fontWeight: 900,
                         color: "#0F172A",
                         overflow: "hidden",
@@ -1569,7 +1546,7 @@ export default function RTGDashboard() {
                     <Typography
                       sx={{
                         mt: 0.1,
-                        fontSize: 10,
+                        fontSize: 8.5,
                         fontWeight: 750,
                         color: "#64748B"
                       }}
@@ -1580,8 +1557,8 @@ export default function RTGDashboard() {
 
                   <Box
                     sx={{
-                      px: 0.9,
-                      py: 0.5,
+                      px: 0.45,
+                      py: 0.25,
                       borderRadius: "999px",
                       background:
                         row.stale
@@ -1591,9 +1568,12 @@ export default function RTGDashboard() {
                         row.stale
                           ? "#fff"
                           : "#16A34A",
-                      fontSize: 10,
+                      fontSize: 8,
                       fontWeight: 950,
-                      whiteSpace: "nowrap"
+                      whiteSpace: "nowrap",
+                      gridColumn: "1 / -1",
+                      justifySelf: "stretch",
+                      textAlign: "center",
                     }}
                   >
                     {formatUpdateTime(
@@ -1611,39 +1591,39 @@ export default function RTGDashboard() {
         </Grid>
 
         {/* ── PIPELINE MONITOR CARDS ── */}
-        <Grid item xs={12} lg={4} sx={{ order: 3 }}>
-          <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "repeat(2,minmax(0,1fr))" }, gap: 1.2, height: "100%", minHeight: 220 }}>
+        <Grid item sx={{ gridArea: "pipelines", width: "100%", maxWidth: "none !important" }}>
+          <Box sx={{ display: "grid", gridTemplateColumns: "1fr", gap: 0.8, height: "100%", minHeight: 0 }}>
             {pipelineStatus.map((item) => {
               const success = item.last_status === "SUCCESS";
               return (
                 <GlassCard
                   key={item.pipeline}
-                  sx={{ p: 2, position: "relative", overflow: "hidden", flex: 1 }}
+                  sx={{ p: 1.05, position: "relative", overflow: "hidden", flex: 1, borderRadius: "15px" }}
                 >
                   <Box sx={{ position: "absolute", top: -40, right: -40, width: 110, height: 110, borderRadius: "50%", background: success ? "radial-gradient(circle,rgba(16,185,129,0.14),transparent 70%)" : "radial-gradient(circle,rgba(239,68,68,0.14),transparent 70%)" }} />
 
                   {/* header */}
                   <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", position: "relative", zIndex: 2 }}>
-                    <Box sx={{ display: "flex", alignItems: "center", gap: 1.2 }}>
-                      <Box sx={{ width: 36, height: 36, borderRadius: "12px", background: success ? "linear-gradient(135deg,#10b981,#34d399)" : "linear-gradient(135deg,#ef4444,#f87171)", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", flexShrink: 0, boxShadow: success ? "0 6px 14px rgba(16,185,129,0.28)" : "0 6px 14px rgba(239,68,68,0.22)" }}>
-                        {success ? <CheckCircle2 size={16} /> : <AlertTriangle size={16} />}
+                    <Box sx={{ display: "flex", alignItems: "center", gap: 0.55, minWidth: 0 }}>
+                      <Box sx={{ width: 27, height: 27, borderRadius: "9px", background: success ? "linear-gradient(135deg,#10b981,#34d399)" : "linear-gradient(135deg,#ef4444,#f87171)", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", flexShrink: 0, boxShadow: success ? "0 6px 14px rgba(16,185,129,0.28)" : "0 6px 14px rgba(239,68,68,0.22)" }}>
+                        {success ? <CheckCircle2 size={13} /> : <AlertTriangle size={13} />}
                       </Box>
                       <Box>
                         <Box sx={{ display: "flex", alignItems: "center", gap: 0.8 }}>
-                          <Typography sx={{ fontSize: 14, fontWeight: 800, color: "#1e1b39", lineHeight: 1 }}>{item.pipeline}</Typography>
+                          <Typography sx={{ fontSize: 10.5, fontWeight: 900, color: "#1e1b39", lineHeight: 1 }}>{item.pipeline}</Typography>
                           <Box sx={{ display: "flex", alignItems: "center", gap: 0.3 }}>
                             <Radio size={9} color={success ? "#10b981" : "#ef4444"} />
                             <Typography sx={{ fontSize: 8, fontWeight: 700, color: success ? "#10b981" : "#ef4444", letterSpacing: "0.04em" }}>LIVE</Typography>
                           </Box>
                         </Box>
-                        <Typography sx={{ fontSize: 10, color: "#7b8199", mt: 0.1 }}>Realtime Monitoring</Typography>
+                        <Typography sx={{ fontSize: 7.5, color: "#7b8199", mt: 0.1 }}>Realtime Monitoring</Typography>
                       </Box>
                     </Box>
-                    <Chip label={item.last_status || "UNKNOWN"} size="small" sx={{ background: success ? "rgba(16,185,129,0.12)" : "rgba(239,68,68,0.12)", color: success ? "#10b981" : "#ef4444", fontWeight: 700, fontSize: 10, height: 20 }} />
+                    <Chip label={item.last_status || "UNKNOWN"} size="small" sx={{ background: success ? "rgba(16,185,129,0.12)" : "rgba(239,68,68,0.12)", color: success ? "#10b981" : "#ef4444", fontWeight: 800, fontSize: 7, height: 17, "& .MuiChip-label": { px: 0.45 } }} />
                   </Box>
 
                   {/* detail rows — only Last Process + Last Trigger */}
-                  <Box sx={{ mt: 1.2, display: "flex", flexDirection: "column", gap: 0.6, position: "relative", zIndex: 2 }}>
+                  <Box sx={{ display: "none" }}>
                     <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                       <Box sx={{ display: "flex", alignItems: "center", gap: 0.5, color: "#94a3b8" }}><Activity size={10} /><Typography sx={{ fontSize: 10 }}>Last Process</Typography></Box>
                       <Typography sx={{ fontSize: 10, fontWeight: 700, color: "#1e1b39" }}>{item.last_process || "-"}</Typography>
@@ -1655,21 +1635,21 @@ export default function RTGDashboard() {
                   </Box>
 
                   {/* stats — Success + Failed only */}
-                  <Box sx={{ mt: 1.2, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 0.8 }}>
-                    <Box sx={{ p: 0.8, textAlign: "center", borderRadius: "8px", background: "rgba(16,185,129,0.06)", border: "1px solid rgba(16,185,129,0.12)" }}>
-                      <Typography sx={{ fontSize: 9, color: "#7b8199" }}>Success</Typography>
-                      <Typography sx={{ fontSize: 16, fontWeight: 800, color: "#10b981", lineHeight: 1.1 }}>{item.success_count || 0}</Typography>
+                  <Box sx={{ mt: 0.65, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 0.45 }}>
+                    <Box sx={{ p: 0.35, textAlign: "center", borderRadius: "6px", background: "rgba(16,185,129,0.06)", border: "1px solid rgba(16,185,129,0.12)" }}>
+                      <Typography sx={{ fontSize: 7, color: "#7b8199" }}>Success</Typography>
+                      <Typography sx={{ fontSize: 12, fontWeight: 900, color: "#10b981", lineHeight: 1.1 }}>{item.success_count || 0}</Typography>
                     </Box>
-                    <Box sx={{ p: 0.8, textAlign: "center", borderRadius: "8px", background: "rgba(239,68,68,0.06)", border: "1px solid rgba(239,68,68,0.12)" }}>
-                      <Typography sx={{ fontSize: 9, color: "#7b8199" }}>Failed</Typography>
-                      <Typography sx={{ fontSize: 16, fontWeight: 800, color: "#ef4444", lineHeight: 1.1 }}>{item.failed_count || 0}</Typography>
+                    <Box sx={{ p: 0.35, textAlign: "center", borderRadius: "6px", background: "rgba(239,68,68,0.06)", border: "1px solid rgba(239,68,68,0.12)" }}>
+                      <Typography sx={{ fontSize: 7, color: "#7b8199" }}>Failed</Typography>
+                      <Typography sx={{ fontSize: 12, fontWeight: 900, color: "#ef4444", lineHeight: 1.1 }}>{item.failed_count || 0}</Typography>
                     </Box>
                   </Box>
 
                   {/* buttons */}
-                  <Box sx={{ mt: 1.2, display: "flex", gap: 0.8 }}>
-                    <GradientButton onClick={() => triggerPipeline(item.pipeline.toLowerCase())} sx={{ flex: 1, py: 0.6, fontSize: 11 }}>Trigger</GradientButton>
-                    <GradientButton onClick={() => fetchLogs(item.revision_id, item)} sx={{ flex: 1, py: 0.6, fontSize: 11, background: "rgba(255,255,255,0.82)", color: "#1e1b39" }}>Details</GradientButton>
+                  <Box sx={{ mt: 0.55, display: "flex", gap: 0.4 }}>
+                    <GradientButton onClick={() => triggerPipeline(item.pipeline.toLowerCase())} sx={{ flex: 1, minWidth: 0, minHeight: 24, py: 0.2, px: 0.35, fontSize: 8 }}>Trigger</GradientButton>
+                    <GradientButton onClick={() => fetchLogs(item.revision_id, item)} sx={{ flex: 1, minWidth: 0, minHeight: 24, py: 0.2, px: 0.35, fontSize: 8, background: "rgba(255,255,255,0.82)", color: "#1e1b39" }}>Details</GradientButton>
                   </Box>
 
                 </GlassCard>
@@ -1678,23 +1658,25 @@ export default function RTGDashboard() {
           </Box>
         </Grid>
 
-        <Grid item xs={12} lg={4} sx={{ order: 6 }}>
-          <Paper elevation={0} sx={{ height: "100%", minHeight: 460, p: 2.5, borderRadius: "24px", border: "1px solid #E2E8F0", background: "linear-gradient(180deg,#FFFFFF,#F8FAFC)", boxShadow: "0 18px 44px rgba(15,23,42,.08)" }}>
-            <Typography sx={{ fontSize: 21, fontWeight: 950, color: "#0F172A" }}>Data Freshness</Typography>
-            <Typography sx={{ mt: .4, mb: 2, fontSize: 12, color: "#64748B", fontWeight: 750 }}>Latest timestamps for the filtered operational snapshot</Typography>
-            <Box sx={{ p: 1.8, borderRadius: 2.5, bgcolor: actualUpdateStale ? "#FEF2F2" : "#ECFDF5", border: `1px solid ${actualUpdateStale ? "#FECACA" : "#BBF7D0"}` }}>
-              <Typography sx={{ fontSize: 11, color: actualUpdateStale ? "#B91C1C" : "#047857", fontWeight: 850 }}>ACTUAL LAST UPDATED</Typography>
-              <Typography sx={{ mt: .7, fontSize: 22, color: actualUpdateStale ? "#DC2626" : "#047857", fontWeight: 950 }}>{formatUpdateTime(actualLastUpdated)}</Typography>
+        <Grid item sx={{ gridArea: "actual", width: "100%", maxWidth: "none !important" }}>
+          <Paper elevation={0} sx={{ height: "100%", minHeight: 116, p: 1.2, borderRadius: "18px", border: `1px solid ${actualUpdateStale ? "#FECACA" : "#BDE6D4"}`, background: actualUpdateStale ? "linear-gradient(145deg,#FFFFFF,#FEF2F2)" : "linear-gradient(145deg,#FFFFFF,#F1FAF7)", boxShadow: "0 12px 26px rgba(15,23,42,.06)", display: "grid", gridTemplateColumns: "34px minmax(0,1fr)", columnGap: 0.9, alignContent: "center" }}>
+            <Box sx={{ width: 34, height: 34, borderRadius: "11px", display: "grid", placeItems: "center", bgcolor: actualUpdateStale ? "#FEE2E2" : "#DCFCE7", color: actualUpdateStale ? "#DC2626" : "#047857", gridRow: "1 / span 3" }}>
+              <Clock3 size={17} />
             </Box>
-            <Box sx={{ mt: 2, display: "grid", gap: 1 }}>
-              {scheduleUpdateRows.map((row) => (
-                <Box key={`fresh-${row.label}`} sx={{ display: "flex", justifyContent: "space-between", gap: 2, py: 1.1, px: 1.2, borderBottom: "1px solid #EEF2F7" }}>
-                  <Typography sx={{ fontSize: 12, color: "#475569", fontWeight: 850 }}>{row.label}</Typography>
-                  <Typography sx={{ fontSize: 12, color: row.stale ? "#DC2626" : "#16A34A", fontWeight: 950 }}>{formatUpdateTime(row.updatedAt)}</Typography>
-                </Box>
-              ))}
-            </Box>
+            <Typography sx={{ fontSize: 9.5, color: "#64748B", fontWeight: 850 }}>Actual Last Updated</Typography>
+            <Typography sx={{ mt: .25, fontSize: 16, lineHeight: 1.15, color: actualUpdateStale ? "#DC2626" : "#047857", fontWeight: 950 }}>{formatUpdateTime(actualLastUpdated)}</Typography>
+            <Typography sx={{ mt: .3, fontSize: 8.5, color: actualUpdateStale ? "#B91C1C" : "#16A34A", fontWeight: 800 }}>{actualUpdateStale ? "Update may be delayed" : "Latest operational snapshot"}</Typography>
           </Paper>
+        </Grid>
+
+        <Grid item sx={{ gridArea: "snapshot", width: "100%", minWidth: 0, maxWidth: "none !important", "& > .MuiPaper-root": { height: "100%", mb: 0 } }}>
+          <RTGSnapshotTrend
+            date={snapshotTrendDate}
+            data={snapshotTrendData}
+            loading={snapshotTrendLoading}
+            onDateChange={handleSnapshotTrendDateChange}
+            compact
+          />
         </Grid>
 
       </Grid>
@@ -1704,15 +1686,6 @@ export default function RTGDashboard() {
           <RTGHistoricalDownload />
         </Box>
       )}
-
-      <RTGSnapshotTrend
-        date={snapshotTrendDate}
-        data={snapshotTrendData}
-        loading={snapshotTrendLoading}
-        onDateChange={
-          handleSnapshotTrendDateChange
-        }
-      />
 
       {showOutageDialog && (
       <Dialog

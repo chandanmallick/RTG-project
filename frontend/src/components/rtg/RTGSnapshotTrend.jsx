@@ -84,7 +84,8 @@ export default function RTGSnapshotTrend({
   date,
   data = [],
   loading = false,
-  onDateChange
+  onDateChange,
+  compact = false,
 }) {
 
   const metrics = [
@@ -119,9 +120,9 @@ export default function RTGSnapshotTrend({
     <Paper
       elevation={0}
       sx={{
-        mb: 3,
-        p: 2.2,
-        borderRadius: "24px",
+        mb: compact ? 0 : 3,
+        p: compact ? 1.25 : 2.2,
+        borderRadius: compact ? "18px" : "24px",
         background:
           "linear-gradient(180deg,#FFFFFF 0%,#F8FAFC 100%)",
         border: "1px solid #E2E8F0",
@@ -142,13 +143,13 @@ export default function RTGSnapshotTrend({
             md: "row"
           },
           gap: 1.5,
-          mb: 1.6
+          mb: compact ? 0.8 : 1.6
         }}
       >
         <Box>
           <Typography
             sx={{
-              fontSize: 20,
+              fontSize: compact ? 15 : 20,
               fontWeight: 950,
               color: "#0F172A"
             }}
@@ -156,7 +157,7 @@ export default function RTGSnapshotTrend({
             Previous Day Snapshot
           </Typography>
 
-          <Typography
+          {!compact && <Typography
             sx={{
               mt: 0.35,
               fontSize: 12,
@@ -165,16 +166,16 @@ export default function RTGSnapshotTrend({
             }}
           >
             Sum from rtg_dashboard_snapshot | dotted lines in MW, orange area is DC - Schedule
-          </Typography>
+          </Typography>}
         </Box>
 
-        <Box sx={{ minWidth: { xs: "100%", sm: 190 } }}>
+        <Box sx={{ minWidth: { xs: "100%", sm: compact ? 130 : 190 } }}>
           <CalendarInput
             value={date || ""}
             onChange={(value) => onDateChange?.(value)}
             style={{
-              minHeight: 40,
-              borderRadius: 14,
+              minHeight: compact ? 32 : 40,
+              borderRadius: compact ? 10 : 14,
               padding: "0 12px",
               background: "#FFFFFF",
               fontWeight: 800,
@@ -190,8 +191,8 @@ export default function RTGSnapshotTrend({
             xs: "1fr 1fr",
             md: "repeat(5, minmax(0,1fr))"
           },
-          gap: 1,
-          mb: 1.8
+          gap: compact ? 0.55 : 1,
+          mb: compact ? 0.8 : 1.8,
         }}
       >
         {metrics.map((metric) => (
@@ -210,8 +211,8 @@ export default function RTGSnapshotTrend({
       <Box
         sx={{
           height: {
-            xs: 330,
-            md: 390
+            xs: compact ? 190 : 330,
+            md: compact ? 190 : 390
           },
           borderRadius: "18px",
           background: "#FFFFFF",

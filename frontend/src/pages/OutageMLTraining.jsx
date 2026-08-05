@@ -145,6 +145,7 @@ function Dataset({ taxonomy, notify, refreshOverview }) {
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
+  const [appliedSearch, setAppliedSearch] = useState("");
   const [review, setReview] = useState("all");
   const [useFilter, setUseFilter] = useState("all");
   const [typeFilter, setTypeFilter] = useState("");
@@ -152,6 +153,8 @@ function Dataset({ taxonomy, notify, refreshOverview }) {
   const [sortBy, setSortBy] = useState("outage_at");
   const [sortDir, setSortDir] = useState("desc");
   const [loading, setLoading] = useState(false);
+  const [savingFilteredUse, setSavingFilteredUse] = useState(false);
+  const [filteredUseOverride, setFilteredUseOverride] = useState(null);
   const [selected, setSelected] = useState([]);
   const [bulk, setBulk] = useState({
     type: "Shutdown", category: "", subcategory: "", secondary_shutdown: false,
@@ -169,16 +172,18 @@ function Dataset({ taxonomy, notify, refreshOverview }) {
     return active.filter((item) => item.level === "subcategory" && item.parent_id === category?._id);
   };
 
-  const load = async (targetPage = page) => {
+  const load = async (targetPage = page, requestedSearch = search) => {
     setLoading(true);
+    const searchQuery = requestedSearch;
     try {
       const data = await API.getOutageMlRecords({
-        page: targetPage, limit: 50, search, review, type: typeFilter,
+        page: targetPage, limit: 50, search: searchQuery, review, type: typeFilter,
         use_filter: useFilter, secondary_filter: secondaryFilter,
         sort_by: sortBy, sort_dir: sortDir,
       });
       setRows(data.rows || []);
       setTotal(data.total || 0);
+      setAppliedSearch(searchQuery);
       setSelected([]);
     } catch (error) {
       notify(messageOf(error), "error");
@@ -188,6 +193,7 @@ function Dataset({ taxonomy, notify, refreshOverview }) {
   };
 
   useEffect(() => { load(page); }, [page, review, useFilter, typeFilter, secondaryFilter, sortBy, sortDir]);
+  useEffect(() => { setFilteredUseOverride(null); }, [appliedSearch, review, useFilter, typeFilter, secondaryFilter]);
 
   const changeRow = (id, field, value) => setRows((current) => current.map((row) => {
     if (row._id !== id) return row;
@@ -233,6 +239,31 @@ function Dataset({ taxonomy, notify, refreshOverview }) {
     }
   };
 
+  const setAllFilteredUse = async (use) => {
+    if (!total || savingFilteredUse) return;
+    const action = use ? "mark" : "clear";
+    if (!window.confirm(`${action === "mark" ? "Mark" : "Clear"} Use for training for all ${total.toLocaleString("en-IN")} records matching the current filters?`)) return;
+    setSavingFilteredUse(true);
+    try {
+      const result = await API.updateOutageMlFilteredUse({
+        search: appliedSearch, review, type: typeFilter, use_filter: useFilter,
+        secondary_filter: secondaryFilter, use,
+      });
+      setFilteredUseOverride(use);
+      setRows((current) => current.map((row) => ({ ...row, use })));
+      notify(`${result.matched.toLocaleString("en-IN")} filtered records ${use ? "selected" : "cleared"} for training.`, "ok");
+      refreshOverview();
+      if (useFilter !== "all") {
+        setPage(1);
+        load(1, appliedSearch);
+      }
+    } catch (error) {
+      notify(messageOf(error), "error");
+    } finally {
+      setSavingFilteredUse(false);
+    }
+  };
+
   const bulkCategories = categoriesFor(bulk.type);
   const bulkSubcategories = subcategoriesFor(bulk.category, bulk.type);
   const shutdownCategories = categoriesFor("Shutdown");
@@ -245,7 +276,7 @@ function Dataset({ taxonomy, notify, refreshOverview }) {
         <Database size={22} color={BLUE} />
       </div>
       <div style={s.toolbar}>
-        <div style={s.searchBox}><Search size={16} /><input style={s.searchInput} value={search} onChange={(event) => setSearch(event.target.value)} onKeyDown={(event) => event.key === "Enter" && load(1)} placeholder="Search reason, element or label" /></div>
+        <div style={s.searchBox}><Search size={16} /><input style={s.searchInput} value={search} onChange={(event) => setSearch(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { setPage(1); load(1); } }} placeholder="Search reason, element or label" /></div>
         <Select value={review} onChange={(value) => { setPage(1); setReview(value); }} style={{ width: 150 }}>
           <option value="all">All records</option><option value="unreviewed">Unreviewed</option><option value="reviewed">Reviewed</option><option value="excluded">Excluded</option>
         </Select>
@@ -265,7 +296,7 @@ function Dataset({ taxonomy, notify, refreshOverview }) {
           <option value="subcategory">Sort: Subcategory</option><option value="reviewed">Sort: Reviewed</option><option value="use">Sort: Use</option>
         </Select>
         <button style={s.secondary} title="Reverse sort order" onClick={() => setSortDir((value) => value === "asc" ? "desc" : "asc")}>{sortDir === "asc" ? "↑ Asc" : "↓ Desc"}</button>
-        <button style={s.secondary} onClick={() => load(1)}><RefreshCw size={15} /> Refresh</button>
+        <button style={s.secondary} onClick={() => { setPage(1); load(1); }}><RefreshCw size={15} /> Refresh</button>
         <span style={s.count}>{total.toLocaleString("en-IN")} records</span>
       </div>
       {selected.length > 0 && (
@@ -303,7 +334,19 @@ function Dataset({ taxonomy, notify, refreshOverview }) {
         <table className="outage-ml-table" style={s.table}>
           <thead><tr>
             <th><input type="checkbox" checked={rows.length > 0 && selected.length === rows.length} onChange={(event) => setSelected(event.target.checked ? rows.map((row) => row._id) : [])} /></th>
-            <th>Source record</th><th>Reason / element</th><th>Duration</th><th>Classification</th><th>Review decision</th><th />
+            <th>Source record</th><th>Reason / element</th><th>Duration</th><th>Classification</th>
+            <th>
+              <span>Review decision</span>
+              <label style={s.selectAllUse} title="Apply to every record matching the current filters">
+                <input
+                  type="checkbox"
+                  checked={filteredUseOverride === null ? useFilter === "use" : filteredUseOverride}
+                  disabled={!total || savingFilteredUse}
+                  onChange={(event) => setAllFilteredUse(event.target.checked)}
+                />
+                {savingFilteredUse ? "Saving…" : `Use all filtered (${total.toLocaleString("en-IN")})`}
+              </label>
+            </th><th />
           </tr></thead>
           <tbody>
             {rows.map((row) => {
@@ -550,6 +593,7 @@ const s = {
   classificationRow: { display: "grid", gridTemplateColumns: "repeat(3,minmax(120px,1fr))", gap: 6 },
   secondaryClassification: { marginTop: 7, padding: 7, border: "1px solid #F5C96A", background: "#FFF9E8", borderRadius: 7, display: "grid", gap: 6 },
   useFlag: { display: "inline-flex", alignItems: "center", gap: 6, padding: "6px 8px", borderRadius: 7, background: "#E8F8F0", color: "#007A43", fontSize: 11, fontWeight: 900, whiteSpace: "nowrap" },
+  selectAllUse: { display: "flex", alignItems: "center", gap: 5, marginTop: 5, color: "#007A43", fontSize: 10, fontWeight: 900, textTransform: "none", letterSpacing: 0, whiteSpace: "nowrap", cursor: "pointer" },
   saveReviewButton: { minHeight: 34, padding: "0 10px", borderRadius: 7, border: 0, background: BLUE, color: "#fff", fontWeight: 800, display: "inline-flex", alignItems: "center", gap: 6, cursor: "pointer", whiteSpace: "nowrap" },
   empty: { textAlign: "center", color: "#64748B", padding: 25 }, pagination: { display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 10, marginTop: 12, fontSize: 12, fontWeight: 700, color: "#475569" },
   trainBox: { display: "flex", alignItems: "flex-end", gap: 12, padding: 13, borderRadius: 10, background: "#F5F9FF", border: "1px solid #D9E7F8" }, versionList: { display: "grid", gap: 9, marginTop: 14 },

@@ -1439,7 +1439,7 @@ async def sync_all_state_demand_date(date_str: str):
             "message": str(e)
         }
 
-@router.post("/refresh-sources", dependencies=[Depends(require_psp_settings_write)])
+@router.post("/refresh-sources", dependencies=[Depends(get_authenticated_user)])
 async def refresh_psp_sources(date_str: str = None):
     try:
         target_date = date.fromisoformat(date_str) if date_str else date.today() - timedelta(days=1)

@@ -377,11 +377,13 @@ scheduler.add_job(
 
     trigger="cron",
 
-    hour=9,
+    hour=7,
 
-    minute=0,
+    minute=20,
 
-    id="psp_daily_9am",
+    timezone="Asia/Kolkata",
+
+    id="psp_daily_0720am",
 
     replace_existing=True
 )
