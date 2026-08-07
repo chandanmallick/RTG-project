@@ -216,6 +216,25 @@ export default function ReplacementManagement() {
     }
   };
 
+  const deleteReplacementAssignment = async (assignment) => {
+    const reason = window.prompt(
+      `Reason for deleting the replacement assignment of ${assignment.replacement?.name || assignment.replacement?.employeeId || "this employee"}:`,
+      "Operational requirement changed",
+    );
+    if (reason === null) return;
+    if (!reason.trim()) {
+      alert("Enter a reason before deleting the assignment.");
+      return;
+    }
+    if (!window.confirm("Delete this replacement assignment and restore the employee's original duty?")) return;
+    try {
+      await api.delete(`/replacement/assign/${assignment.id}`, { data: { reason: reason.trim() } });
+      await Promise.all([fetchPendingLeaves(), fetchAssignedReplacements(), fetchDecisionAudit(), fetchDutySwitchOptions()]);
+    } catch (err) {
+      alert(err.response?.data?.detail || "Replacement assignment could not be deleted.");
+    }
+  };
+
   const fetchDecisionAudit = async () => {
     try {
       const params = {};
@@ -377,10 +396,12 @@ export default function ReplacementManagement() {
   // FILTERS
   // ===============================
 
-  const recommended = candidates.filter(c => c.source === "replacement");
-  const organizationCandidates = candidates.filter(c => c.source === "organization");
-  const sameShift = candidates.filter(c => c.source === "shift");
-  const otherShift = candidates.filter(c => c.source === "otherShift");
+  const orderedCandidates = [...candidates].sort((left, right) => {
+    const leftOrder = Number(left.serialNo ?? Number.MAX_SAFE_INTEGER);
+    const rightOrder = Number(right.serialNo ?? Number.MAX_SAFE_INTEGER);
+    if (leftOrder !== rightOrder) return leftOrder - rightOrder;
+    return String(left.name || "").localeCompare(String(right.name || ""));
+  });
 
   const assignedByLeaveId = new Map(assignedReplacements.map((item) => [String(item.id), item]));
   const auditedLeaveIds = new Set(decisionAudit.map((item) => String(item.leaveId || "")).filter(Boolean));
@@ -420,76 +441,12 @@ export default function ReplacementManagement() {
   ];
 
 
-  const renderCard = (c) => (
-    <Paper
-      onClick={() => assignReplacement(c.employeeId)}
-      sx={{
-        p: 1.5,
-        borderRadius: 2,
-        cursor: "pointer",
-        border: "1px solid #d6dbe1",
-        background: "#f7f9fb",
-
-        "&:hover": {
-          background: "#eef3f7"
-        }
-      }}
-    >
-      <Box sx={{ display: "flex", alignItems: "flex-start", gap: 1 }}>
-        <Chip
-          label={c.serialNo || "-"}
-          size="small"
-          sx={{ minWidth: 30, fontWeight: 900, background: "#E8F1FF", color: "#0057B7" }}
-        />
-        <Box sx={{ minWidth: 0 }}>
-          <Typography fontWeight={700}>{c.name}</Typography>
-          <Typography variant="caption" color="text.secondary">
-            {c.designation} · {c.employeeId}
-          </Typography>
-        </Box>
-      </Box>
-
-      {["replacement", "organization"].includes(c.source) ? (
-        <Box sx={{ mt: 1.2, display: "grid", gap: .45 }}>
-          {c.source === "organization" && (
-            <Typography variant="caption" sx={{ color: "#0057B7", fontWeight: 800 }}>
-              {c.eligibility}
-            </Typography>
-          )}
-          <Typography variant="caption" display="block">
-            Current unit: <strong>{[
-              ...(c.organization?.departments || []),
-              ...(c.organization?.verticals || []),
-              ...(c.organization?.sections || []),
-            ].filter(Boolean).join(" · ") || "Organization Master"}</strong>
-          </Typography>
-          <Typography variant="caption" display="block">
-            Reporting hierarchy: <strong>{(c.authorityNames || []).join(" → ") || "-"}</strong>
-          </Typography>
-          <Typography variant="caption" display="block">
-            Last {c.requiredDuty || "matching"} duty: <strong>{c.lastMatchingDutyDate ? dayjs(c.lastMatchingDutyDate).format("DD MMM YYYY") : "Never recorded"}</strong>
-          </Typography>
-          <Typography variant="caption" display="block">
-            Days since last duty: <strong>{c.daysSinceMatchingDuty ?? "-"}</strong>
-          </Typography>
-          <Typography variant="caption" display="block">
-            No. of denied duties: <strong>{c.denialCount ?? c.denialCount90Days ?? 0}</strong>
-          </Typography>
-        </Box>
-      ) : (
-        <Box sx={{ mt: 1.2, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 1 }}>
-          <Box sx={{ p: .8, borderRadius: 1.5, background: "#F1F5F9" }}>
-            <Typography variant="caption" color="text.secondary" display="block">Duty on leave date</Typography>
-            <Typography variant="caption" fontWeight={800}>{c.assignedDuty || "-"}</Typography>
-          </Box>
-          <Box sx={{ p: .8, borderRadius: 1.5, background: "#F1F5F9" }}>
-            <Typography variant="caption" color="text.secondary" display="block">Next-day duty</Typography>
-            <Typography variant="caption" fontWeight={800}>{c.nextDayDuty || "-"}</Typography>
-          </Box>
-        </Box>
-      )}
-    </Paper>
-  );
+  const sourceLabel = (source) => ({
+    replacement: "Replacement tagged",
+    shift: "Same shift",
+    otherShift: "Other shift",
+    organization: "Organization",
+  }[source] || "Eligible");
 
   // ===============================
   // UI
@@ -896,10 +853,17 @@ export default function ReplacementManagement() {
                         )) : <Typography variant="caption" color="text.secondary">Awaiting employee decision</Typography>}
                       </TableCell>
                       <TableCell align="right" sx={{ whiteSpace: "nowrap" }}>
-                        {isCurrentReplacement && current.canChange !== false ? (
-                          <Button size="small" variant="outlined" onClick={() => openCandidateDialog(current)}>
-                            Change assignment
-                          </Button>
+                        {isCurrentReplacement ? (
+                          <Box sx={{ display: "flex", justifyContent: "flex-end", gap: .75 }}>
+                            {current.canChange !== false && (
+                              <Button size="small" variant="outlined" onClick={() => openCandidateDialog(current)}>
+                                Change assignment
+                              </Button>
+                            )}
+                            <Button size="small" color="error" variant="outlined" onClick={() => deleteReplacementAssignment(current)}>
+                              Delete
+                            </Button>
+                          </Box>
                         ) : (
                           <Typography variant="caption" color="text.secondary">{current ? "Previous assignment" : "Audit only"}</Typography>
                         )}
@@ -1144,59 +1108,50 @@ export default function ReplacementManagement() {
             </FormControl>
           </Box>
 
-          {/* SECTION 1 â€” Recommended */}
-
           <Typography variant="subtitle2" sx={{ mb: 1 }}>
-            Replacement-tagged personnel · required duty: {candidates[0]?.requiredDuty || "-"}
+            Candidate selection order · required duty: {candidates[0]?.requiredDuty || "-"}
           </Typography>
-
-          <Grid container spacing={2}>
-            {recommended.map((c) => (
-              <Grid item xs={12} md={4} key={c.employeeId}>
-                {renderCard(c)}
-              </Grid>
-            ))}
-          </Grid>
-
-          {/* SECTION 2 â€” Same Shift Staff */}
-
-          <Typography variant="subtitle2" sx={{ mt: 2, mb: 1 }}>
-            Same Shift Staff
-          </Typography>
-
-          <Grid container spacing={2}>
-            {sameShift.map((c) => (
-              <Grid item xs={12} md={4} key={c.employeeId}>
-                {renderCard(c)}
-              </Grid>
-            ))}
-          </Grid>
-
-          {/* SECTION 1 â€” Other Shift */}
-
-          <Typography variant="subtitle2" sx={{ mt: 2, mb: 1 }}>
-            Other Shift (Will Create Vacancy)
-          </Typography>
-
-          <Grid container spacing={2}>
-            {otherShift.map((c) => (
-              <Grid item xs={12} md={4} key={c.employeeId}>
-                {renderCard(c)}
-              </Grid>
-            ))}
-          </Grid>
-
-          <Typography variant="subtitle2" sx={{ mt: 2, mb: 1 }}>
-            Current Organization · Past Shift Experience
-          </Typography>
-
-          <Grid container spacing={2}>
-            {organizationCandidates.map((c) => (
-              <Grid item xs={12} md={4} key={c.employeeId}>
-                {renderCard(c)}
-              </Grid>
-            ))}
-          </Grid>
+          <TableContainer sx={{ border: "1px solid #CBD5E1", borderRadius: 2, maxHeight: "62vh" }}>
+            <Table size="small" stickyHeader sx={{ minWidth: 1180 }}>
+              <TableHead>
+                <TableRow>
+                  <TableCell sx={{ fontWeight: 900 }}>Order</TableCell>
+                  <TableCell sx={{ fontWeight: 900, minWidth: 180 }}>Employee</TableCell>
+                  <TableCell sx={{ fontWeight: 900 }}>Candidate pool</TableCell>
+                  <TableCell sx={{ fontWeight: 900, minWidth: 220 }}>Current unit / reporting line</TableCell>
+                  <TableCell sx={{ fontWeight: 900 }}>Duty on date</TableCell>
+                  <TableCell sx={{ fontWeight: 900 }}>Next day</TableCell>
+                  <TableCell sx={{ fontWeight: 900 }}>Last matching duty</TableCell>
+                  <TableCell sx={{ fontWeight: 900 }}>Days since</TableCell>
+                  <TableCell sx={{ fontWeight: 900 }}>Denied</TableCell>
+                  <TableCell sx={{ fontWeight: 900, textAlign: "right" }}>Action</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {orderedCandidates.map((candidate) => {
+                  const unit = [
+                    ...(candidate.organization?.departments || []),
+                    ...(candidate.organization?.verticals || []),
+                    ...(candidate.organization?.sections || []),
+                  ].filter(Boolean).join(" · ") || "Organization Master";
+                  const lastDuty = candidate.lastMatchingDutyDate ? dayjs(candidate.lastMatchingDutyDate).format("DD MMM YYYY") : "Never recorded";
+                  return <TableRow key={candidate.employeeId} hover sx={{ "&:hover": { background: "#F5FAFF" } }}>
+                    <TableCell><Chip size="small" label={candidate.serialNo || "-"} sx={{ fontWeight: 900, background: "#E8F1FF", color: "#0057B7" }} /></TableCell>
+                    <TableCell><Typography sx={{ fontSize: 12.5, fontWeight: 900 }}>{candidate.name}</Typography><Typography sx={{ fontSize: 11, color: "#64748B" }}>{candidate.designation || "-"} · {candidate.employeeId}</Typography></TableCell>
+                    <TableCell><Chip size="small" label={sourceLabel(candidate.source)} color={candidate.source === "replacement" ? "success" : candidate.source === "otherShift" ? "warning" : "default"} variant="outlined" />{candidate.eligibility && <Typography sx={{ mt: .4, fontSize: 10.5, color: "#0057B7", fontWeight: 800 }}>{candidate.eligibility}</Typography>}</TableCell>
+                    <TableCell><Typography sx={{ fontSize: 11.5, fontWeight: 750 }}>{unit}</Typography><Typography sx={{ mt: .35, fontSize: 10.5, color: "#64748B" }}>{(candidate.authorityNames || []).join(" → ") || "No reporting line recorded"}</Typography></TableCell>
+                    <TableCell sx={{ fontWeight: 800 }}>{candidate.assignedDuty || "-"}</TableCell>
+                    <TableCell sx={{ fontWeight: 800 }}>{candidate.nextDayDuty || "-"}</TableCell>
+                    <TableCell sx={{ whiteSpace: "nowrap" }}>{lastDuty}</TableCell>
+                    <TableCell>{candidate.daysSinceMatchingDuty ?? "-"}</TableCell>
+                    <TableCell>{candidate.denialCount ?? candidate.denialCount90Days ?? 0}</TableCell>
+                    <TableCell align="right"><Button size="small" variant="contained" onClick={() => assignReplacement(candidate.employeeId)} sx={{ whiteSpace: "nowrap" }}>Assign</Button></TableCell>
+                  </TableRow>;
+                })}
+                {!orderedCandidates.length && <TableRow><TableCell colSpan={10} align="center" sx={{ py: 4, color: "#64748B" }}>No eligible candidates match the selected filter.</TableCell></TableRow>}
+              </TableBody>
+            </Table>
+          </TableContainer>
         </DialogContent>
 
 

@@ -73,6 +73,7 @@ const [selectedFY,setSelectedFY]=useState(financialYears[2])
 
 const [holidayList,setHolidayList]=useState([])
 const [trainingList,setTrainingList]=useState([])
+const [editingTrainingId,setEditingTrainingId]=useState("")
 
 const [holiday,setHoliday]=useState({
 date:"",
@@ -83,6 +84,7 @@ holidayNameHindi:""
 const [training,setTraining]=useState({
 trainingName:"",
 trainingNameHindi:"",
+location:"",
 startDate:"",
 endDate:""
 })
@@ -97,6 +99,7 @@ const [calendarData,setCalendarData]=useState({})
 const [calendarDates,setCalendarDates]=useState([])
 
 const [selectedEmployees,setSelectedEmployees]=useState([])
+const [employeeTypeFilter,setEmployeeTypeFilter]=useState("All")
 
 /* ================= APPROVAL ================= */
 
@@ -111,6 +114,8 @@ const [candidateLoading,setCandidateLoading]=useState({})
 const [history,setHistory]=useState([])
 const [historyFY,setHistoryFY]=useState("")
 const [historyEmployee,setHistoryEmployee]=useState("")
+const [myApprovedTraining,setMyApprovedTraining]=useState([])
+const [myOffChoices,setMyOffChoices]=useState({})
 const [notice,setNotice]=useState(null)
 const [activeSection,setActiveSection]=useState(null)
 
@@ -183,17 +188,22 @@ const saveTraining = async()=>{
 
 try{
 
-await api.post(`/Training_holiday/training`,{
-...training,
-financialYear:selectedFY
-})
+const payload={...training,financialYear:selectedFY}
+if(editingTrainingId){
+await api.put(`/Training_holiday/training/${editingTrainingId}`,payload)
+}else{
+await api.post(`/Training_holiday/training`,payload)
+}
 
 setTraining({
 trainingName:"",
 trainingNameHindi:"",
+location:"",
 startDate:"",
 endDate:""
 })
+setEditingTrainingId("")
+setNotice({severity:"success",text:editingTrainingId ? "Training dates and location updated." : "Training programme added."})
 
 fetchTraining()
 
@@ -201,6 +211,22 @@ fetchTraining()
 console.error(err)
 }
 
+}
+
+const editTraining=(item)=>{
+setTraining({
+trainingName:item.trainingName || "",
+trainingNameHindi:item.trainingNameHindi || "",
+location:item.location || "",
+startDate:item.startDate || "",
+endDate:item.endDate || ""
+})
+setEditingTrainingId(item.id)
+}
+
+const cancelTrainingEdit=()=>{
+setEditingTrainingId("")
+setTraining({trainingName:"",trainingNameHindi:"",location:"",startDate:"",endDate:""})
 }
 
 /* ================= DUTY MATRIX ================= */
@@ -243,6 +269,7 @@ const res = await api.get(
 setCalendarData(res.data)
 setCalendarDates(generateDates(trainingObj.startDate,trainingObj.endDate))
 setSelectedEmployees([])
+setEmployeeTypeFilter("All")
 
 setCalendarOpen(true)
 
@@ -263,6 +290,7 @@ date:trainingObj.startDate,
 startDate:trainingObj.startDate,
 endDate:trainingObj.endDate,
 trainingName:selectedTraining,
+trainingLocation:trainingObj.location || "",
 employees:selectedEmployees
 })
 
@@ -389,6 +417,31 @@ useEffect(()=>{
 if(canViewTrainingPage) fetchHistory()
 },[historyFY,historyEmployee,canViewTrainingPage])
 
+const fetchMyApprovedTraining=async()=>{
+try{
+const res=await api.get("/training-assign/my-approved")
+setMyApprovedTraining(res.data || [])
+}catch(err){
+console.error(err)
+}
+}
+
+useEffect(()=>{
+fetchMyApprovedTraining()
+},[])
+
+const requestAdjacentOff=async(row)=>{
+const choice=myOffChoices[row.id] || {before:false,after:false}
+try{
+await api.post(`/training-assign/request-adjacent-off/${row.id}`,choice)
+setNotice({severity:"success",text:"Adjacent OFF request sent through your reporting hierarchy."})
+setMyOffChoices((current)=>({...current,[row.id]:{before:false,after:false}}))
+await Promise.all([fetchMyApprovedTraining(),fetchPending()])
+}catch(err){
+setNotice({severity:"error",text:err?.response?.data?.detail || err?.message || "Adjacent OFF request could not be submitted."})
+}
+}
+
 /* ================= UI ================= */
 
 return(
@@ -415,6 +468,7 @@ Manage holiday masters, training programmes, nominations and approval workflows.
 {key:"training",title:"Training Master",subtitle:"Maintain training programmes",count:trainingList.length,color:"#0F766E",tint:"#ECFDF5"},
 ] : []),
 ...(canManageTraining ? [{key:"assign",title:"Assign Training",subtitle:"Nominate eligible employees",count:null,color:"#17876D",tint:"#EAF8F3"}] : []),
+{key:"mytraining",title:"My Approved Training",subtitle:"Request adjacent OFF after approval",count:myApprovedTraining.length,color:"#047857",tint:"#ECFDF5"},
 {key:"pending",title:"Pending Approvals",subtitle:"Review and forward nominations",count:pendingList.length,color:"#D97706",tint:"#FFF7E8"},
 ...(canViewTrainingPage ? [{key:"history",title:"Nomination History",subtitle:"View completed workflow records",count:history.length,color:"#4338CA",tint:"#EEF2FF"}] : []),
 ].map((tile)=>(
@@ -652,7 +706,7 @@ Manage holiday masters, training programmes, nominations and approval workflows.
 
       <Grid container spacing={2} alignItems="center">
 
-        <Grid item xs={3}>
+        <Grid item xs={12} md={2.5}>
           <TextField
             select
             label="Financial Year"
@@ -680,9 +734,21 @@ Manage holiday masters, training programmes, nominations and approval workflows.
           />
         </Grid>
 
-        <Grid item xs={2}>
+        <Grid item xs={12} md={2.5}>
+          <TextField
+            label="Location"
+            disabled={!canManageTraining}
+            fullWidth
+            value={training.location}
+            onChange={(e) => setTraining({ ...training, location: e.target.value })}
+          />
+        </Grid>
+
+        <Grid item xs={6} md={1.5}>
           <TextField
             type="date"
+            label="Start date"
+            InputLabelProps={{shrink:true}}
             disabled={!canManageTraining}
             fullWidth
             value={training.startDate}
@@ -692,9 +758,11 @@ Manage holiday masters, training programmes, nominations and approval workflows.
           />
         </Grid>
 
-        <Grid item xs={2}>
+        <Grid item xs={6} md={1.5}>
           <TextField
             type="date"
+            label="End date"
+            InputLabelProps={{shrink:true}}
             disabled={!canManageTraining}
             fullWidth
             value={training.endDate}
@@ -704,7 +772,7 @@ Manage holiday masters, training programmes, nominations and approval workflows.
           />
         </Grid>
 
-        <Grid item xs={2}>
+        <Grid item xs={12} md={1}>
           <Button
             variant="contained"
             disabled={!canManageTraining}
@@ -716,8 +784,9 @@ Manage holiday masters, training programmes, nominations and approval workflows.
             }}
             onClick={saveTraining}
           >
-            ADD
+            {editingTrainingId ? "UPDATE" : "ADD"}
           </Button>
+          {editingTrainingId && <Button size="small" fullWidth sx={{mt:.5}} onClick={cancelTrainingEdit}>Cancel</Button>}
         </Grid>
 
       </Grid>
@@ -727,8 +796,10 @@ Manage holiday masters, training programmes, nominations and approval workflows.
         <TableHead>
           <TableRow sx={{ backgroundColor: "#e0f2fe" }}>
             <TableCell sx={{ fontWeight: 600 }}>Training</TableCell>
+            <TableCell sx={{ fontWeight: 600 }}>Location</TableCell>
             <TableCell sx={{ fontWeight: 600 }}>Start</TableCell>
             <TableCell sx={{ fontWeight: 600 }}>End</TableCell>
+            <TableCell sx={{ fontWeight: 600 }}>Action</TableCell>
           </TableRow>
         </TableHead>
 
@@ -747,8 +818,10 @@ Manage holiday masters, training programmes, nominations and approval workflows.
             >
 
               <TableCell>{t.trainingName}</TableCell>
+              <TableCell>{t.location || "-"}</TableCell>
               <TableCell>{t.startDate}</TableCell>
               <TableCell>{t.endDate}</TableCell>
+              <TableCell><Button size="small" variant="outlined" disabled={!canManageTraining} onClick={()=>editTraining(t)}>Edit dates/location</Button></TableCell>
 
             </TableRow>
 
@@ -839,6 +912,16 @@ Manage holiday masters, training programmes, nominations and approval workflows.
 
         </Grid>
 
+        {selectedTraining && (()=>{
+          const item=trainingList.find((entry)=>entry.trainingName===selectedTraining)
+          return item ? <Grid item xs={12} md={6}>
+            <Paper elevation={0} sx={{p:1.5,border:"1px solid #A7F3D0",background:"#ECFDF5",borderRadius:2,display:"flex",gap:3,flexWrap:"wrap"}}>
+              <Box><Typography variant="caption" color="text.secondary">Training dates</Typography><Typography sx={{fontWeight:900}}>{item.startDate} to {item.endDate}</Typography></Box>
+              <Box><Typography variant="caption" color="text.secondary">Location</Typography><Typography sx={{fontWeight:900}}>{item.location || "Not specified"}</Typography></Box>
+            </Paper>
+          </Grid> : null
+        })()}
+
       </Grid>
 
     </Paper>
@@ -854,13 +937,21 @@ Manage holiday masters, training programmes, nominations and approval workflows.
 {/* ############### Duty Matrix Popup (Full Section) */}
 
 
-<Dialog open={calendarOpen} maxWidth="lg" fullWidth>
+<Dialog open={calendarOpen} maxWidth="xl" fullWidth>
 
-<DialogTitle>Select shift or non-shift employees</DialogTitle>
+<DialogTitle sx={{pb:1}}>
+<Typography sx={{fontSize:20,fontWeight:900}}>Select shift or non-shift employees</Typography>
+{(()=>{const item=trainingList.find((entry)=>entry.trainingName===selectedTraining); return item ? <Typography variant="body2" color="text.secondary">{item.trainingName} · {item.startDate} to {item.endDate} · {item.location || "Location not specified"}</Typography> : null})()}
+</DialogTitle>
 
 <DialogContent>
 
-{Object.keys(calendarData).map(group => (
+<Box sx={{display:"flex",gap:1,mb:2,position:"sticky",top:0,zIndex:5,py:1,background:"#FFFFFF"}}>
+{["All","Shift","Non-shift"].map((value)=><Button key={value} size="small" variant={employeeTypeFilter===value ? "contained" : "outlined"} onClick={()=>setEmployeeTypeFilter(value)}>{value} employees</Button>)}
+<Chip sx={{ml:"auto"}} color="primary" label={`${selectedEmployees.length} selected`} />
+</Box>
+
+{Object.keys(calendarData).filter((group)=>calendarData[group].some((emp)=>employeeTypeFilter==="All" || emp.employeeType===employeeTypeFilter)).map(group => (
 
 <Box key={group} sx={{mb:4}}>
 
@@ -875,11 +966,13 @@ Manage holiday masters, training programmes, nominations and approval workflows.
 <TableRow>
 <TableCell>Name / designation</TableCell>
 
-{calendarDates.map(date => (
-<TableCell key={date} align="center">
+{calendarDates.map(date => {
+const item=trainingList.find((entry)=>entry.trainingName===selectedTraining)
+const highlighted=Boolean(item && date>=item.startDate && date<=item.endDate)
+return <TableCell key={date} align="center" sx={{background:highlighted ? "#D1FAE5" : undefined,color:highlighted ? "#065F46" : undefined,fontWeight:highlighted ? 900 : 600}}>
 {date}
 </TableCell>
-))}
+})}
 
 <TableCell>Select</TableCell>
 </TableRow>
@@ -887,7 +980,7 @@ Manage holiday masters, training programmes, nominations and approval workflows.
 
 <TableBody>
 
-{calendarData[group].map(emp => (
+{calendarData[group].filter((emp)=>employeeTypeFilter==="All" || emp.employeeType===employeeTypeFilter).map(emp => (
 
 <TableRow key={emp.employeeId} hover>
 
@@ -896,12 +989,16 @@ Manage holiday masters, training programmes, nominations and approval workflows.
 <Typography variant="caption" color="text.secondary">
 {emp.designation || "Designation not set"} · {emp.employeeId}
 </Typography>
+{(()=>{const days=Number(emp.financialYearTrainingDays || 0); return <Chip size="small" sx={{mt:.7,fontWeight:900,background:days < 5 ? "#FFEDD5" : "#FEF9C3",color:days < 5 ? "#C2410C" : "#854D0E"}} label={`${days} / 7 training days this FY`} />})()}
 </TableCell>
 
 {calendarDates.map(date => {
 
 const duty = emp.duties?.[date]
 const shift = duty?.shift || "-"
+const trainingObj=trainingList.find((entry)=>entry.trainingName===selectedTraining)
+const isTrainingDate=Boolean(trainingObj && date>=trainingObj.startDate && date<=trainingObj.endDate)
+const hasLeave=Boolean(duty?.leaveStatus && !["Rejected","Cancelled","Withdrawn"].includes(duty.leaveStatus))
 
 return(
 
@@ -910,17 +1007,22 @@ key={date}
 align="center"
 sx={{
 backgroundColor:
+hasLeave ? "#FFF1F2" :
 shift==="Morning" ? "#E3F2FD" :
 shift==="Evening" ? "#FFF3E0" :
 shift==="Night" ? "#E8F5E9" :
 shift==="OFF" ? "#FFEBEE" :
-"#fff"
+"#fff",
+borderTop:isTrainingDate ? "3px solid #0F766E" : undefined,
+minWidth:118
 }}
 >
 
 <Typography sx={{fontWeight:shift==="Training" ? 900 : 500}}>
 {shift}
 </Typography>
+{isTrainingDate && <Typography variant="caption" sx={{display:"block",color:"#047857",fontWeight:900}}>Training date</Typography>}
+{hasLeave && <Typography variant="caption" sx={{display:"block",color:"#DC2626",fontWeight:900}}>Leave: {duty.leaveType || duty.leaveStatus}</Typography>}
 {duty?.trainingName && (
 <Typography variant="caption" sx={{display:"block",maxWidth:130,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",color:"#6A1B9A"}}>
 {duty.trainingName}
@@ -984,7 +1086,7 @@ Cancel
 <Button
 variant="contained"
 onClick={nominateTraining}
-disabled={!canManageTraining}
+disabled={!canManageTraining || selectedEmployees.length===0}
 >
 Nominate Selected
 </Button>
@@ -992,6 +1094,42 @@ Nominate Selected
 </DialogActions>
 
 </Dialog>
+
+{/* ########## Approved employee training / adjacent OFF */}
+
+<Collapse in={activeSection==="mytraining"} timeout={420} unmountOnExit>
+<Box id="training-workspace-mytraining" sx={{scrollMarginTop:110}}>
+<Accordion defaultExpanded sx={{borderRadius:3,boxShadow:"0 4px 20px rgba(0,0,0,0.08)",overflow:"hidden",mt:4}}>
+<AccordionSummary expandIcon={<ExpandMoreIcon />} sx={{background:"linear-gradient(90deg,#047857,#10B981)",color:"white",px:3}}>
+<Typography variant="h6" fontWeight={700}>My Approved Training</Typography>
+</AccordionSummary>
+<AccordionDetails sx={{background:"#F0FDF4",p:3}}>
+<Alert severity="info" sx={{mb:2}}>The day before and/or after can be requested only after training approval. The request follows your reporting hierarchy separately.</Alert>
+<Table size="small" sx={{background:"#FFFFFF",borderRadius:2,overflow:"hidden"}}>
+<TableHead><TableRow sx={{background:"#DCFCE7"}}>
+<TableCell sx={{fontWeight:800}}>Training</TableCell><TableCell sx={{fontWeight:800}}>Period / location</TableCell><TableCell sx={{fontWeight:800}}>Adjacent OFF approval</TableCell><TableCell sx={{fontWeight:800}}>Action</TableCell>
+</TableRow></TableHead>
+<TableBody>
+{myApprovedTraining.length===0 ? <TableRow><TableCell colSpan={4} align="center">No approved training is available.</TableCell></TableRow> : myApprovedTraining.map((row)=>{
+const request=row.adjacentOffRequest
+const choice=myOffChoices[row.id] || {before:false,after:false}
+return <TableRow key={row.id} hover>
+<TableCell><Typography sx={{fontWeight:900}}>{row.trainingName}</Typography></TableCell>
+<TableCell><Typography sx={{fontWeight:700}}>{row.startDate} to {row.endDate}</Typography><Typography variant="caption" color="text.secondary">{row.trainingLocation || "Location not specified"}</Typography></TableCell>
+<TableCell>{request ? <Box><Chip size="small" color={request.status==="Approved" ? "success" : request.status==="Rejected" ? "error" : "warning"} label={request.status}/><Typography variant="caption" sx={{display:"block",mt:.5,fontWeight:800}}>OFF: {[request.adjacentOff?.before&&"before",request.adjacentOff?.after&&"after"].filter(Boolean).join(" & ")}</Typography></Box> : <Typography color="text.secondary">Not requested</Typography>}</TableCell>
+<TableCell sx={{minWidth:260}}>{(!request || request.status==="Rejected") && <Box sx={{display:"flex",alignItems:"center",gap:1,flexWrap:"wrap"}}>
+<Button size="small" variant={choice.before ? "contained" : "outlined"} onClick={()=>setMyOffChoices((current)=>({...current,[row.id]:{before:!choice.before,after:choice.after}}))}>Day before</Button>
+<Button size="small" variant={choice.after ? "contained" : "outlined"} onClick={()=>setMyOffChoices((current)=>({...current,[row.id]:{before:choice.before,after:!choice.after}}))}>Day after</Button>
+<Button size="small" color="success" variant="contained" disabled={!choice.before&&!choice.after} onClick={()=>requestAdjacentOff(row)}>Submit</Button>
+</Box>}</TableCell>
+</TableRow>
+})}
+</TableBody>
+</Table>
+</AccordionDetails>
+</Accordion>
+</Box>
+</Collapse>
 
 
 {/* ########## Pending Approval Section */}
@@ -1092,7 +1230,12 @@ selectedRows.filter(id=>id!==row.id)
 
 </TableCell>
 
-<TableCell>{row.trainingName}</TableCell>
+<TableCell>
+<Typography sx={{fontWeight:800}}>{row.trainingName}</Typography>
+<Typography variant="caption" color="text.secondary">{row.trainingLocation || "Location not specified"}</Typography>
+{row.workflowKind==="Adjacent OFF" && <Chip size="small" color="success" variant="outlined" sx={{display:"flex",width:"fit-content",mt:.5,fontWeight:900}} label="Adjacent OFF request" />}
+{(row.adjacentOff?.before || row.adjacentOff?.after) && <Typography variant="caption" sx={{display:"block",color:"#047857",fontWeight:800}}>OFF: {[row.adjacentOff?.before&&"before",row.adjacentOff?.after&&"after"].filter(Boolean).join(" & ")}</Typography>}
+</TableCell>
 
 <TableCell>{row.startDate}{row.endDate && row.endDate!==row.startDate ? ` to ${row.endDate}` : ""}</TableCell>
 
@@ -1113,7 +1256,9 @@ selectedRows.filter(id=>id!==row.id)
 </TableCell>
 
 <TableCell sx={{verticalAlign:"top",minWidth:300}}>
-{row.isShiftEmployee ? (
+{row.workflowKind==="Adjacent OFF" ? (
+<Alert severity="info" sx={{py:0}}>No replacement or Acting SIC change is required for this OFF approval.</Alert>
+) : row.isShiftEmployee ? (
 <Box sx={{display:"grid",gap:1}}>
 <Typography variant="caption" sx={{fontWeight:800,color:"#03624C"}}>
 {row.groupName || "Shift group"}{row.isGroupSIC ? " · SIC going to training" : ""}

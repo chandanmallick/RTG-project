@@ -125,7 +125,7 @@ export default function HomePage() {
           </Typography>
         </Box>
 
-        <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", xl: "0.9fr 1.2fr 1.1fr" }, gap: 2.5 }}>
+        <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", lg: "0.9fr 1.2fr 1.1fr" }, gap: 2.5, alignItems: "start" }}>
           <SectionCard title="Generation Snapshot" subtitle="Live operating snapshot" icon={Zap}>
             <Box sx={{ display: "grid", gap: 1 }}>
               {generationRows.map((row) => (

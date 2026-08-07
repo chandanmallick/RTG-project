@@ -8,7 +8,6 @@ import {
   IconButton,
   Avatar,
   Badge,
-  Grid,
   Dialog,
   DialogTitle,
   DialogContent,
@@ -43,7 +42,8 @@ import {
   UserCheck,
   Settings2,
   CalendarRange,
-  LogOut
+  LogOut,
+  MessageSquare
 } from "lucide-react";
 import { useAuth } from "../../auth/AuthContext";
 import { pageKeyForPath } from "../../auth/pageAccess";
@@ -601,7 +601,7 @@ export default function TopNavbar() {
                   top: "calc(100% + 12px)",
                   left: "50%",
                   transform: "translateX(-50%)",
-                  width: 580,
+                  width: "min(720px, calc(100vw - 32px))",
                   zIndex: 1000,
                 }}
               >
@@ -611,14 +611,16 @@ export default function TopNavbar() {
                     borderRadius: "18px",
                     boxShadow: "0 15px 45px rgba(15, 98, 76, 0.09)",
                     border: "1px solid #E2E8F0",
-                    p: 3,
+                    p: 2.5,
                     position: "relative",
+                    maxHeight: "calc(100vh - 110px)",
+                    overflowY: "auto",
                   }}
                 >
                   {caretElement}
-                  <Grid container spacing={2.5}>
+                  <Box sx={{ display: "grid", gridTemplateColumns: "minmax(220px, .9fr) 1px minmax(320px, 1.35fr)", columnGap: 2.5, alignItems: "start" }}>
                     {/* Left side: Crew user workflows */}
-                    <Grid item xs={5.2} sx={{ display: "flex", flexDirection: "column" }}>
+                    <Box sx={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
                       <Typography
                         sx={{
                           fontSize: 11,
@@ -669,16 +671,24 @@ export default function TopNavbar() {
                           onClick={handleNavigate}
                           allowWorkflowAccess
                         />
+                        <DropdownItem
+                          title="Crew Threads"
+                          description="Team discussion and file sharing"
+                          icon={MessageSquare}
+                          iconColor="#0057B7"
+                          iconBg="#EAF2FF"
+                          path="/crew/threads"
+                          active={location.pathname === "/crew/threads"}
+                          onClick={handleNavigate}
+                        />
                       </Box>
-                    </Grid>
+                    </Box>
 
                     {/* Divider */}
-                    <Grid item xs={0.6} sx={{ display: "flex", justifyContent: "center" }}>
-                      <Divider orientation="vertical" flexItem sx={{ borderStyle: "dashed" }} />
-                    </Grid>
+                    <Divider orientation="vertical" flexItem sx={{ height: "100%", borderStyle: "dashed" }} />
 
                     {/* Right side: Admin Module */}
-                    <Grid item xs={6.2} sx={{ display: "flex", flexDirection: "column" }}>
+                    <Box sx={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
                       <Typography
                         sx={{
                           fontSize: 11,
@@ -779,8 +789,8 @@ export default function TopNavbar() {
                           onClick={handleNavigate}
                         />
                       </Box>
-                    </Grid>
-                  </Grid>
+                    </Box>
+                  </Box>
                 </Box>
               </motion.div>
             )}

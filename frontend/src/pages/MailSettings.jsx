@@ -43,10 +43,30 @@ export default function MailSettings() {
   useEffect(() => { load(); }, []);
 
   const update = (field, value) => setSettings((current) => ({ ...current, [field]: value }));
-  const updateTwoFactorMode = (mode) => setSettings((current) => ({
-    ...current,
-    twoFactor: { ...(current.twoFactor || {}), mode, configuredMode: mode },
-  }));
+  const updateTwoFactorMode = async (mode) => {
+    const previous = settings?.twoFactor;
+    setSettings((current) => ({
+      ...current,
+      twoFactor: { ...(current.twoFactor || {}), mode, configuredMode: mode },
+    }));
+    setSaving(true);
+    setMessage("");
+    setError("");
+    try {
+      const { data } = await axios.put(
+        `${BASE_URL}/crew/admin/mail-settings/two-factor`,
+        { mode },
+        { headers: headers() },
+      );
+      setSettings((current) => ({ ...current, twoFactor: data.twoFactor }));
+      setMessage(data.message || "Two-factor authentication mode saved.");
+    } catch (requestError) {
+      setSettings((current) => ({ ...current, twoFactor: previous }));
+      setError(requestError.response?.data?.detail || "Two-factor authentication mode could not be saved.");
+    } finally {
+      setSaving(false);
+    }
+  };
   const updateCredential = (field, value) => setCredentials((current) => ({ ...current, [field]: value }));
   const updateTemplate = (key, field, value) => setSettings((current) => ({
     ...current,
@@ -119,6 +139,8 @@ export default function MailSettings() {
                   label="Two-factor mode"
                   value={settings.twoFactor?.configuredMode || settings.twoFactor?.mode || "off"}
                   onChange={(event) => updateTwoFactorMode(event.target.value)}
+                  disabled={saving}
+                  helperText="This setting is saved immediately."
                   sx={{ minWidth: { xs: "100%", md: 245 } }}
                 >
                   <MenuItem value="off">Off</MenuItem>

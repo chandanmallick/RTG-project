@@ -47,6 +47,7 @@ PAGE_CATALOG = [
     ("leave_master_delete", "Administration — Permanently Delete Leave Master Record", "Special permission"),
     ("crew_replacement", "Replacement", "/crew/replacement"),
     ("crew_training", "Holiday & Training", "/crew/training"),
+    ("crew_threads", "Crew Threads", "/crew/threads"),
     ("crew_setup", "Crew Setup", "/crew/setup"),
     ("crew_employees", "Employee Master", "/crew/employees"),
     ("crew_admin", "Crew Administration", "/crew/dropdowns"),
@@ -60,7 +61,13 @@ PAGE_CATALOG = [
 
 def _default_access(user_id: str) -> dict:
     full_access = user_id == "50041"
-    return {key: {"view": full_access or key == "profile", "write": full_access} for key, _, _ in PAGE_CATALOG}
+    return {
+        key: {
+            "view": full_access or key in {"profile", "crew_threads"},
+            "write": full_access or key == "crew_threads",
+        }
+        for key, _, _ in PAGE_CATALOG
+    }
 
 
 def _ensure_access(user_id: str) -> dict:
@@ -180,6 +187,9 @@ def login(data: LoginRequest, request: Request):
         _record_login_failure(data.userId)
         _record_failed_login(data, request)
         raise HTTPException(status_code=401, detail="Invalid credentials")
+    if user.get("isActive", True) is False:
+        _record_login_failure(data.userId, user.get("name"))
+        raise HTTPException(status_code=403, detail="Employee account is inactive. Contact the administrator.")
 
     stored_password = user.get("password")
 
@@ -213,8 +223,8 @@ def verify_login_otp(data: OtpVerifyRequest, request: Request):
         raise HTTPException(400, "Enter the 6-digit verification code")
     user_id = consume_otp_challenge(data.challenge_id, otp)
     user = employee_collection.find_one({"userId": user_id})
-    if not user or user.get("isActive") is False:
-        raise HTTPException(401, "Account is unavailable")
+    if not user or user.get("isActive", True) is False:
+        raise HTTPException(status_code=403, detail="Employee account is inactive. Contact the administrator.")
     return _complete_login(user, request)
 
 

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import axios from "axios";
-import { Alert, Autocomplete, Box, Button, Checkbox, Chip, CircularProgress, InputAdornment, Paper, Stack, TextField, Typography } from "@mui/material";
+import { Alert, Autocomplete, Box, Button, Checkbox, Chip, CircularProgress, FormControlLabel, InputAdornment, Paper, Stack, TextField, Typography } from "@mui/material";
 import { Copy, Save, Search, ShieldCheck, Users } from "lucide-react";
 import AppShell from "../components/layout/AppShell";
 
@@ -17,12 +17,24 @@ export default function UserAccessControl() {
   const [message, setMessage] = useState("");
   const [copySourceId, setCopySourceId] = useState("");
   const [copiedFrom, setCopiedFrom] = useState(null);
+  const [profileFields, setProfileFields] = useState({ availableFields: [], enabledFields: [] });
+  const [savingProfileFields, setSavingProfileFields] = useState(false);
+
+  const profileFieldLabels = {
+    name: "Name", nameHindi: "Name (Hindi)", designation: "Designation",
+    designationHindi: "Designation (Hindi)", phone: "Mobile number",
+    gmail: "Mail ID", profilePhoto: "Profile photo", password: "Change password",
+  };
 
   const load = async () => {
     setLoading(true);
     try {
-      const { data: payload } = await axios.get(`${BASE_URL}/crew/auth/admin/access`, { headers: authHeaders() });
+      const [{ data: payload }, { data: fieldSettings }] = await Promise.all([
+        axios.get(`${BASE_URL}/crew/auth/admin/access`, { headers: authHeaders() }),
+        axios.get(`${BASE_URL}/crew/profile/edit-settings`, { headers: authHeaders() }),
+      ]);
       setData(payload);
+      setProfileFields(fieldSettings || { availableFields: [], enabledFields: [] });
       const first = payload.users.find((item) => item.userId === selectedId) || payload.users[0];
       if (first) {
         setSelectedId(first.userId);
@@ -97,6 +109,18 @@ export default function UserAccessControl() {
     }
   };
 
+  const saveProfileFields = async () => {
+    setSavingProfileFields(true);
+    setMessage("");
+    try {
+      const { data: saved } = await axios.put(`${BASE_URL}/crew/profile/edit-settings`, { enabledFields: profileFields.enabledFields }, { headers: authHeaders() });
+      setProfileFields((current) => ({ ...current, ...saved }));
+      setMessage("Profile editable fields updated for portal users.");
+    } finally {
+      setSavingProfileFields(false);
+    }
+  };
+
   return (
     <AppShell>
       <Box className="ui-kit-page" sx={{ display: "grid", gap: 2.5 }}>
@@ -112,6 +136,27 @@ export default function UserAccessControl() {
         </Paper>
 
         {message && <Alert severity="success">{message}</Alert>}
+
+        <Paper sx={{ p: 2.3 }}>
+          <Stack direction={{ xs: "column", md: "row" }} alignItems={{ xs: "stretch", md: "center" }} gap={1.5}>
+            <Box sx={{ minWidth: 220 }}>
+              <Typography sx={{ fontWeight: 900 }}>Profile editing control</Typography>
+              <Typography sx={{ color: "#64748B", fontSize: 11.5 }}>Choose which database fields employees may edit in their own Profile. Organization and reporting fields remain master-controlled.</Typography>
+            </Box>
+            <Stack direction="row" useFlexGap flexWrap="wrap" sx={{ flex: 1 }}>
+              {(profileFields.availableFields || []).map((field) => (
+                <FormControlLabel
+                  key={field}
+                  control={<Checkbox size="small" checked={(profileFields.enabledFields || []).includes(field)} onChange={(event) => setProfileFields((current) => ({ ...current, enabledFields: event.target.checked ? [...(current.enabledFields || []), field] : (current.enabledFields || []).filter((value) => value !== field) }))} />}
+                  label={<Typography sx={{ fontSize: 12, fontWeight: 750 }}>{profileFieldLabels[field] || field}</Typography>}
+                />
+              ))}
+            </Stack>
+            <Button variant="contained" onClick={saveProfileFields} disabled={savingProfileFields || !(profileFields.availableFields || []).length} sx={{ whiteSpace: "nowrap" }}>
+              {savingProfileFields ? "Saving…" : "Save profile fields"}
+            </Button>
+          </Stack>
+        </Paper>
 
         {loading ? (
           <Box sx={{ display: "grid", placeItems: "center", p: 8 }}>

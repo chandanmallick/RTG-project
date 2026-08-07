@@ -75,6 +75,10 @@ class ReplacementMailSettingsUpdate(BaseModel):
     templates: list[dict] = Field(default_factory=list)
 
 
+class TwoFactorModeUpdate(BaseModel):
+    mode: str = Field(default="off", max_length=20)
+
+
 ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
 ENV_WRITE_LOCK = Lock()
 GRAPH_ENV_KEYS = {
@@ -159,6 +163,35 @@ def get_replacement_mail_settings():
                 "all": two_factor_readiness("all"),
             },
         },
+    }
+
+
+@router.put("/two-factor")
+def update_two_factor_only(
+    payload: TwoFactorModeUpdate,
+    user=Depends(require_mail_admin),
+):
+    """Persist the sign-in mode independently from editable mail templates."""
+    mode = str(payload.mode or "off").strip().lower()
+    validate_two_factor_activation(mode)
+    save_two_factor_mode(
+        mode,
+        str(user.get("employeeId") or user.get("userId") or "ADMIN"),
+    )
+    return {
+        "twoFactor": {
+            **two_factor_settings(),
+            "readiness": two_factor_readiness(),
+            "readinessByMode": {
+                "admin": two_factor_readiness("admin"),
+                "all": two_factor_readiness("all"),
+            },
+        },
+        "message": (
+            "Two-factor authentication disabled. Existing OTP challenges were cleared."
+            if mode == "off"
+            else "Two-factor authentication mode saved."
+        ),
     }
 
 

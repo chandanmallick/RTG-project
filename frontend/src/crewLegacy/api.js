@@ -18,17 +18,22 @@ api.interceptors.request.use((config) => {
   // the assigned employee or mapped reporting officer, so they must remain available even when
   // the dashboard page itself is configured as View-only.
   const requestUrl = String(config.url || "");
-  const isDutyDecision = method === "PUT" && (
-    requestUrl.includes("/replacement/notifications/accept/") ||
-    requestUrl.includes("/replacement/notifications/deny/") ||
-    requestUrl.includes("/replacement/assign/") ||
-    requestUrl.includes("/replacement/duty-switch/exchange") ||
-    requestUrl.includes("/replacement/duty-switch/cross-date")
-  );
+  const isDutyDecision = (
+    method === "PUT" && (
+      requestUrl.includes("/replacement/notifications/accept/") ||
+      requestUrl.includes("/replacement/notifications/deny/") ||
+      requestUrl.includes("/replacement/assign/") ||
+      requestUrl.includes("/replacement/duty-switch/exchange") ||
+      requestUrl.includes("/replacement/duty-switch/cross-date")
+    )
+  ) || (method === "DELETE" && requestUrl.includes("/replacement/assign/"));
   // Training approval is a reporting-hierarchy workflow action, not a page edit.
   // The API verifies that the logged-in employee is the nomination's current
   // approver, so Crew Training Write access must not be required.
-  const isTrainingApproval = method === "POST" && requestUrl.includes("/training-assign/approve");
+  const isTrainingApproval = method === "POST" && (
+    requestUrl.includes("/training-assign/approve") ||
+    requestUrl.includes("/training-assign/request-adjacent-off/")
+  );
   if (!["GET", "HEAD", "OPTIONS"].includes(method) && permissions[pageKeyForPath()]?.write === false && !isMasterDelete && !isDutyDecision && !isTrainingApproval) {
     return Promise.reject(new Error("This page is read-only for your account."));
   }

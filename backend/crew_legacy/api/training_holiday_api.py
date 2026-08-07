@@ -99,6 +99,7 @@ def create_training(data: dict, user=Depends(get_authenticated_user)):
         "employeeName": data.get("employeeName"),
         "trainingName": data.get("trainingName"),
         "trainingNameHindi": data.get("trainingNameHindi"),
+        "location": str(data.get("location") or "").strip(),
         "startDate": data.get("startDate"),
         "endDate": data.get("endDate"),
         "trainingType": data.get("trainingType"),
@@ -122,6 +123,7 @@ def get_training(financialYear: str):
             "employeeName": t.get("employeeName"),
             "trainingName": t.get("trainingName"),
             "trainingNameHindi": t.get("trainingNameHindi"),
+            "location": t.get("location"),
             "startDate": t.get("startDate"),
             "endDate": t.get("endDate"),
             "trainingType": t.get("trainingType"),
@@ -135,19 +137,30 @@ def get_training(financialYear: str):
 def update_training(training_id: str, data: dict, user=Depends(get_authenticated_user)):
     require_page_write(user, "crew_training")
 
-    training_master_collection.update_one(
+    if not ObjectId.is_valid(training_id):
+        raise HTTPException(400, "Invalid training programme")
+    start_date = data.get("startDate")
+    end_date = data.get("endDate")
+    if not start_date or not end_date or end_date < start_date:
+        raise HTTPException(400, "Valid training start and end dates are required")
+    updates = {
+        "trainingName": data.get("trainingName"),
+        "trainingNameHindi": data.get("trainingNameHindi"),
+        "location": str(data.get("location") or "").strip(),
+        "startDate": start_date,
+        "endDate": end_date,
+    }
+    if data.get("trainingType") is not None:
+        updates["trainingType"] = data.get("trainingType")
+    if data.get("status") is not None:
+        updates["status"] = data.get("status")
+
+    result = training_master_collection.update_one(
         {"_id": ObjectId(training_id)},
-        {
-            "$set": {
-                "trainingName": data.get("trainingName"),
-                "trainingNameHindi": data.get("trainingNameHindi"),
-                "startDate": data.get("startDate"),
-                "endDate": data.get("endDate"),
-                "trainingType": data.get("trainingType"),
-                "status": data.get("status")
-            }
-        }
+        {"$set": updates},
     )
+    if not result.matched_count:
+        raise HTTPException(404, "Training programme not found")
 
     return {"message": "Training updated successfully"}
 

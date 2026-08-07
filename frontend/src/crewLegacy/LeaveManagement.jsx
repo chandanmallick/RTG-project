@@ -31,9 +31,10 @@ import {
   Tooltip,
   Typography,
 } from "@mui/material";
-import { CalendarDays, CheckCircle2, GripVertical, RefreshCw, Send, ShieldCheck, User } from "lucide-react";
+import { CalendarDays, CheckCircle2, GraduationCap, GripVertical, RefreshCw, Send, ShieldCheck, User } from "lucide-react";
 import api from "./api";
 import crewApi from "../services/crewApi";
+import DutyReassignmentPanel from "../components/crew/DutyReassignmentPanel";
 
 const employeeIdOf = (employee) => String(employee?.employeeId || employee?.userId || "").trim();
 const statusColor = (status) => ({
@@ -60,6 +61,22 @@ const compactDutyStyle = (duty = {}) => {
 
 function StatusChip({ value }) {
   return <Chip size="small" label={value === "Forwarded" ? "Approved & Forwarded" : value || "Pending"} color={statusColor(value)} variant="outlined" sx={{ fontWeight: 800 }} />;
+}
+
+function ReplacementFlag({ required, assigned, title }) {
+  if (!required && !assigned) return null;
+  const green = Boolean(assigned);
+  return (
+    <Tooltip title={title || (green ? "Replacement assigned" : "Replacement required and awaiting assignment")} arrow>
+      <Box sx={{
+        width: 22, height: 22, borderRadius: .9, display: "grid", placeItems: "center",
+        color: "#FFFFFF", background: green ? "#15803D" : "#D97706", fontSize: 10, fontWeight: 950,
+        boxShadow: green ? "0 0 0 3px #DCFCE7" : "0 0 0 3px #FEF3C7",
+        animation: green ? "none" : "replacementPulse 1.05s ease-in-out infinite",
+        "@keyframes replacementPulse": { "0%,100%": { opacity: 1, transform: "scale(1)" }, "50%": { opacity: .42, transform: "scale(.86)" } },
+      }}>R</Box>
+    </Tooltip>
+  );
 }
 
 function SectionTitle({ icon: Icon, title, subtitle, count }) {
@@ -103,6 +120,8 @@ export default function LeaveManagement() {
   const [rejectDialog, setRejectDialog] = useState({ open: false, stage: "sic", leaves: [] });
   const [rejectComment, setRejectComment] = useState("");
   const [activeSection, setActiveSection] = useState(null);
+  const [approvedTraining, setApprovedTraining] = useState([]);
+  const [trainingOffChoices, setTrainingOffChoices] = useState({});
 
   const openSection = (section) => {
     setActiveSection(section);
@@ -142,6 +161,15 @@ export default function LeaveManagement() {
   };
 
   useEffect(() => { loadPage(); }, []);
+  const loadApprovedTraining = async () => {
+    try {
+      const { data } = await api.get("/training-assign/my-approved");
+      setApprovedTraining(data || []);
+    } catch (error) {
+      setApprovedTraining([]);
+    }
+  };
+  useEffect(() => { loadApprovedTraining(); }, []);
   useEffect(() => {
     const stopDrag = () => { dragFill.current = null; };
     window.addEventListener("pointerup", stopDrag);
@@ -167,7 +195,7 @@ export default function LeaveManagement() {
     try {
       const { data } = await api.get("/leave/duty-detailed", { params: { employeeId: employeeIdOf(selectedEmployee), startDate, endDate } });
       setRows((data || []).map((row) => ({ ...row, selected: true, leaveType: "", compOffId: "" })));
-      if (!data?.length) setNotice({ severity: "warning", text: "No published duty rows exist in this range." });
+      if (!data?.length) setNotice({ severity: "warning", text: "No roster or General duty rows exist in this range." });
     } catch (error) {
       setNotice({ severity: "error", text: error.response?.data?.detail || "Duty could not be loaded." });
     } finally {
@@ -234,6 +262,24 @@ export default function LeaveManagement() {
   const cancelLeave = (leave) => {
     if (!window.confirm(`Cancel leave for ${leave.name} on ${dayjs(leave.date).format("DD MMM YYYY")}?`)) return;
     return act(`/leave/cancel/${leave.id}`, {}, "Leave cancelled.");
+  };
+  const requestTrainingOff = async (training) => {
+    const choice = trainingOffChoices[training.id] || { before: false, after: false };
+    if (!choice.before && !choice.after) {
+      setNotice({ severity: "warning", text: "Select the day before, the day after, or both." });
+      return;
+    }
+    setWorking(true);
+    try {
+      const { data } = await api.post(`/training-assign/request-adjacent-off/${training.id}`, choice);
+      setNotice({ severity: "success", text: data.message || "Training OFF request sent for approval." });
+      setTrainingOffChoices((current) => ({ ...current, [training.id]: { before: false, after: false } }));
+      await loadApprovedTraining();
+    } catch (error) {
+      setNotice({ severity: "error", text: error.response?.data?.detail || error.message || "Training OFF request could not be submitted." });
+    } finally {
+      setWorking(false);
+    }
   };
   const deleteMaster = async (leave) => {
     if (!window.confirm(`Permanently delete this leave master record for ${leave.name} on ${dayjs(leave.date).format("DD MMM YYYY")}? This cannot be undone.`)) return;
@@ -302,14 +348,16 @@ export default function LeaveManagement() {
   );
   const calendarLeaves = useMemo(() => {
     const actionable = pending.filter((leave) => leave.canSICAct || leave.canFinalAct);
-    if (role.isAdmin || role.isDeptIC || role.isLeaveAuthority) return actionable;
+    if (role.isAdmin || role.isDeptIC || role.isLeaveAuthority || role.isReportingOfficer) {
+      return pending.filter((leave) => leave.canSICAct || leave.canFinalAct || leave.isOrganizationObserver);
+    }
     if (role.isSIC) {
       return actionable.filter((leave) => leave.canSICAct && leave.groupName === role.groupName);
     }
     return [];
   }, [pending, role]);
   const calendarOverlayLeaves = useMemo(() => {
-    if (role.isAdmin || role.isDeptIC || role.isLeaveAuthority) return leaves;
+    if (role.isAdmin || role.isDeptIC || role.isLeaveAuthority || role.isReportingOfficer) return leaves;
     if (role.isSIC) return leaves.filter((leave) => leave.groupName === role.groupName);
     return [];
   }, [leaves, role]);
@@ -351,7 +399,10 @@ export default function LeaveManagement() {
           chunks.push([cursor.format("YYYY-MM-DD"), chunkEnd.format("YYYY-MM-DD")]);
           cursor = chunkEnd.add(1, "day");
         }
-        const responses = await Promise.all(chunks.map(([from, to]) => crewApi.calendar(from, to)));
+        const responses = await Promise.all(chunks.flatMap(([from, to]) => [
+          crewApi.calendar(from, to),
+          api.get("/leave/approval-calendar", { params: { startDate: from, endDate: to } }).then(({ data }) => data || []),
+        ]));
         if (cancelled) return;
 
         const groupMap = new Map();
@@ -370,7 +421,7 @@ export default function LeaveManagement() {
           groupName,
           employees: Array.from(employeeMap.values()).sort((a, b) => Number(Boolean(b.IsSIC)) - Number(Boolean(a.IsSIC))),
         })).sort((a, b) => a.groupName.localeCompare(b.groupName, undefined, { numeric: true }));
-        if (role.isSIC && !role.isAdmin && !role.isDeptIC && !role.isLeaveAuthority) {
+        if (role.isSIC && !role.isAdmin && !role.isDeptIC && !role.isLeaveAuthority && !role.isReportingOfficer) {
           groups = groups.filter((group) => group.groupName === role.groupName);
         }
 
@@ -659,7 +710,7 @@ export default function LeaveManagement() {
                                 {actionable && <Checkbox size="small" checked={Boolean(selected)} onChange={(event) => toggleWorkflowSelection(leave.id, event.target.checked)} sx={{ p: 0, color: "#DC2626", "&.Mui-checked": { color: "#0057B7" }, "& .MuiSvgIcon-root": { fontSize: 14 } }} />}
                                 <Box sx={{ minWidth: 0, flex: 1 }}><Typography sx={{ fontSize: 8.6, lineHeight: 1.05, fontWeight: 950 }}>{duty.shift || "-"}</Typography>{duty.leaveStatus && <Typography noWrap sx={{ maxWidth: 52, mx: "auto", fontSize: 6.5, lineHeight: 1.05, fontWeight: 900 }}>{duty.leaveType || "Leave"} · {sicForwarded ? "Approved & Forwarded" : duty.leaveStatus}</Typography>}</Box>
                                 {finallyApproved && <Tooltip title="Leave finally approved" arrow><CheckCircle2 size={15} color="#15803D" strokeWidth={3} aria-label="Leave finally approved" /></Tooltip>}
-                                {actionable && <Tooltip title={`Replacement required: ${replacementChecked ? "Yes" : "No"}`} arrow><Box component="button" type="button" aria-label="Toggle replacement required" aria-pressed={replacementChecked} onClick={(event) => { event.stopPropagation(); setReplacementChoice(leave, replacementStage, !replacementChecked); }} sx={{ width: 17, minWidth: 17, height: 17, p: 0, borderRadius: .7, border: `1px solid ${replacementChecked ? "#D97706" : "#94A3B8"}`, color: replacementChecked ? "#FFFFFF" : "#64748B", background: replacementChecked ? "#D97706" : "#FFFFFF", fontSize: 8, fontWeight: 950, cursor: "pointer" }}>R</Box></Tooltip>}
+                                {leave?.replacementAssigned ? <ReplacementFlag required assigned title={`Replacement assigned: ${leave.replacementEmployee?.name || leave.replacementEmployee?.employeeId || "Employee"}`} /> : actionable ? <Tooltip title={`Replacement required: ${replacementChecked ? "Yes" : "No"}`} arrow><Box component="button" type="button" aria-label="Toggle replacement required" aria-pressed={replacementChecked} onClick={(event) => { event.stopPropagation(); setReplacementChoice(leave, replacementStage, !replacementChecked); }} sx={{ width: 17, minWidth: 17, height: 17, p: 0, borderRadius: .7, border: `1px solid ${replacementChecked ? "#D97706" : "#94A3B8"}`, color: replacementChecked ? "#FFFFFF" : "#64748B", background: replacementChecked ? "#D97706" : "#FFFFFF", fontSize: 8, fontWeight: 950, cursor: "pointer", animation:replacementChecked ? "replacementPulse 1.05s ease-in-out infinite" : "none", "@keyframes replacementPulse": { "0%,100%":{opacity:1}, "50%":{opacity:.4} } }}>R</Box></Tooltip> : <ReplacementFlag required={leave?.replacementRequired} assigned={leave?.replacementAssigned} />}
                               </Box>
                             </Tooltip>
                           </TableCell>
@@ -769,6 +820,10 @@ export default function LeaveManagement() {
                   <TableCell sx={{ fontWeight: 800 }}>{leave.leaveType}</TableCell>
                   <TableCell><StatusChip value={leave.sicApprovalStatus} /></TableCell><TableCell><StatusChip value={leave.deptApprovalStatus} /></TableCell>
                   <TableCell sx={{ minWidth: 190 }}>
+                    <Stack direction="row" spacing={.8} alignItems="center" sx={{ mb: .35 }}>
+                      <ReplacementFlag required={leave.replacementRequired || leave.sicReplacementRequired || (leave.canSICAct && replacementChoice(leave, "sic")) || (leave.canFinalAct && replacementChoice(leave, "dic"))} assigned={leave.replacementAssigned} title={leave.replacementAssigned ? `Replacement assigned: ${leave.replacementEmployee?.name || leave.replacementEmployee?.employeeId || "Employee"}` : "Replacement required; assignment is pending"} />
+                      {leave.replacementAssigned && <Typography sx={{fontSize:10.5,color:"#15803D",fontWeight:850}}>{leave.replacementEmployee?.name || leave.replacementEmployee?.employeeId}</Typography>}
+                    </Stack>
                     {leave.canSICAct && <Stack direction="row" alignItems="center"><Checkbox size="small" checked={replacementChoice(leave, "sic")} onChange={(event) => setReplacementChoice(leave, "sic", event.target.checked)} /><Typography sx={{ fontSize: 11.5, fontWeight: 750 }}>Replacement required</Typography></Stack>}
                     {leave.canFinalAct && <Stack><Typography sx={{ fontSize: 10.5, color: "#64748B" }}>SIC decision: {leave.sicReplacementRequired ? "Required" : "Not required"}</Typography><Stack direction="row" alignItems="center"><Checkbox size="small" checked={replacementChoice(leave, "dic")} onChange={(event) => setReplacementChoice(leave, "dic", event.target.checked)} /><Typography sx={{ fontSize: 11.5, fontWeight: 750 }}>DIC final decision</Typography></Stack></Stack>}
                     {!leave.canSICAct && !leave.canFinalAct && (
@@ -832,9 +887,11 @@ export default function LeaveManagement() {
 
       {notice && <Alert severity={notice.severity} onClose={() => setNotice(null)}>{notice.text}</Alert>}
 
-      <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "repeat(3, minmax(0, 1fr))" }, gap: 2 }}>
+      <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "repeat(2, minmax(0, 1fr))", lg: "repeat(5, minmax(0, 1fr))" }, gap: 2 }}>
         {[
           { key: "apply", title: "Apply Leave", subtitle: "Select employee, dates and leave type", count: null, color: "#0057B7", tint: "#EAF2FF" },
+          { key: "exchange", title: "Apply for Duty Exchange", subtitle: "Exchange duty through the approval workflow", count: null, color: "#0369A1", tint: "#F0F9FF" },
+          { key: "training", title: "View Training", subtitle: "Approved training and before/after OFF", count: approvedTraining.length, color: "#7C3AED", tint: "#F5F3FF" },
           { key: "pending", title: "Pending Leave Workflow", subtitle: "Review, approve, forward or reject", count: pending.length, color: "#17876D", tint: "#EAF8F3" },
           { key: "completed", title: "Completed Leave", subtitle: "Approved, rejected and cancelled records", count: completed.length, color: "#4338CA", tint: "#EEF2FF" },
         ].map((tile) => (
@@ -854,7 +911,7 @@ export default function LeaveManagement() {
         <SectionTitle icon={User} title="Apply Leave" subtitle={role.isSIC && !role.isAdmin ? `As SIC, you may apply for members of ${role.groupName}.` : "Select one continuous duty-date range."} />
         <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "1fr 1fr auto" }, gap: 1.5, alignItems: "center" }}>
           <Autocomplete options={employees} value={selectedEmployee} disabled={employees.length === 1} onChange={(_, value) => { setSelectedEmployee(value); setRows([]); }} getOptionLabel={(item) => `${item.name || employeeIdOf(item)} — ${item.designation || "Employee"}`} isOptionEqualToValue={(a, b) => employeeIdOf(a) === employeeIdOf(b)} renderInput={(params) => <TextField {...params} label="Employee" helperText={employees.length === 1 ? "Only your own name is available" : "Current group members"} />} />
-          <DatePicker range rangeHover value={dateRange} onChange={(value) => { setDateRange(value || []); setRows([]); }} format="DD MMM YYYY" numberOfMonths={2} showOtherDays render={(value, openCalendar) => <TextField fullWidth label="Continuous date range" value={value || ""} onClick={openCalendar} InputProps={{ readOnly: true }} />} />
+          <DatePicker range rangeHover minDate={role.isAdmin ? undefined : new Date()} value={dateRange} onChange={(value) => { setDateRange(value || []); setRows([]); }} format="DD MMM YYYY" numberOfMonths={2} showOtherDays render={(value, openCalendar) => <TextField fullWidth label="Continuous date range" value={value || ""} onClick={openCalendar} helperText={role.isAdmin ? "Administrators may enter earlier dates" : "Past dates are not allowed"} InputProps={{ readOnly: true }} />} />
           <Button variant="contained" onClick={fetchDuty} disabled={working} startIcon={<RefreshCw size={16} />} sx={{ minHeight: 48, px: 3 }}>Load duty</Button>
         </Box>
       </Paper>
@@ -878,17 +935,65 @@ export default function LeaveManagement() {
       </Box>
       </Collapse>
 
+      <Collapse in={activeSection === "exchange"} timeout={420} unmountOnExit>
+      <Box id="leave-workspace-exchange" sx={{ scrollMarginTop: 110 }}>
+        <DutyReassignmentPanel initialMode="exchange" onChanged={loadLeaves} />
+      </Box>
+      </Collapse>
+
+      <Collapse in={activeSection === "training"} timeout={420} unmountOnExit>
+      <Box id="leave-workspace-training" sx={{ scrollMarginTop: 110 }}>
+      <Paper sx={{ p: 2.5 }}>
+        <SectionTitle icon={GraduationCap} title="Approved Training & Adjacent OFF" subtitle="The before/after day is roster OFF, not a leave application. It follows the reporting approval workflow." count={approvedTraining.length} />
+        <Alert severity="info" sx={{ mb: 1.5 }}>
+          OFF can be requested only after training is finally approved. The approved OFF is written to the duty roster and does not consume a leave balance.
+        </Alert>
+        <TableContainer sx={{ border: "1px solid #CBD5E1", borderRadius: 2 }}>
+          <Table size="small">
+            <TableHead><TableRow sx={{ background: "#F5F3FF" }}>
+              <TableCell sx={{ fontWeight: 900 }}>Training</TableCell>
+              <TableCell sx={{ fontWeight: 900 }}>Dates</TableCell>
+              <TableCell sx={{ fontWeight: 900 }}>Location</TableCell>
+              <TableCell sx={{ fontWeight: 900 }}>OFF approval status</TableCell>
+              <TableCell sx={{ fontWeight: 900, minWidth: 310 }}>Apply for OFF</TableCell>
+            </TableRow></TableHead>
+            <TableBody>
+              {approvedTraining.map((training) => {
+                const request = training.adjacentOffRequest;
+                const choice = trainingOffChoices[training.id] || { before: false, after: false };
+                const canApply = !request || request.status === "Rejected" || request.status === "Cancelled";
+                return <TableRow key={training.id} hover>
+                  <TableCell sx={{ fontWeight: 850 }}>{training.trainingName}</TableCell>
+                  <TableCell sx={{ whiteSpace: "nowrap" }}>{dayjs(training.startDate).format("DD MMM YYYY")} to {dayjs(training.endDate).format("DD MMM YYYY")}</TableCell>
+                  <TableCell>{training.trainingLocation || "Not specified"}</TableCell>
+                  <TableCell>{request ? <Stack spacing={.5} alignItems="flex-start"><Chip size="small" color={request.status === "Approved" ? "success" : request.status === "Rejected" ? "error" : "warning"} label={request.status} /><Typography sx={{ fontSize: 10.5, fontWeight: 800 }}>OFF: {[request.adjacentOff?.before && "before", request.adjacentOff?.after && "after"].filter(Boolean).join(" & ")}</Typography></Stack> : <Typography sx={{ color: "#64748B", fontSize: 12 }}>Not applied</Typography>}</TableCell>
+                  <TableCell>{canApply && <Stack direction="row" spacing={.7} useFlexGap flexWrap="wrap">
+                    <Button size="small" variant={choice.before ? "contained" : "outlined"} onClick={() => setTrainingOffChoices((current) => ({ ...current, [training.id]: { before: !choice.before, after: choice.after } }))}>Before</Button>
+                    <Button size="small" variant={choice.after ? "contained" : "outlined"} onClick={() => setTrainingOffChoices((current) => ({ ...current, [training.id]: { before: choice.before, after: !choice.after } }))}>After</Button>
+                    <Button size="small" color="success" variant="contained" disabled={!choice.before && !choice.after} onClick={() => requestTrainingOff(training)}>Submit for approval</Button>
+                  </Stack>}</TableCell>
+                </TableRow>;
+              })}
+              {!approvedTraining.length && <TableRow><TableCell colSpan={5} align="center" sx={{ py: 4, color: "#94A3B8" }}>No approved training is available for your employee account.</TableCell></TableRow>}
+            </TableBody>
+          </Table>
+        </TableContainer>
+        <Box sx={{ mt: 1.5, display: "flex", justifyContent: "flex-end" }}><Button variant="outlined" onClick={() => window.location.assign("/crew/training")}>Open full Training module</Button></Box>
+      </Paper>
+      </Box>
+      </Collapse>
+
       <Collapse in={activeSection === "pending"} timeout={420} unmountOnExit>
       <Box id="leave-workspace-pending" sx={{ scrollMarginTop: 110 }}>
       <Paper sx={{ p: 2.5 }}>
-        <SectionTitle icon={ShieldCheck} title="Pending Leave Workflow" subtitle="SIC sees only their shift group; DIC and administrators can review all mapped shifts." count={pending.length} />
-        {(role.isSIC || role.isDeptIC || role.isLeaveAuthority || role.isAdmin) && (
+        <SectionTitle icon={ShieldCheck} title="Pending Leave Workflow" subtitle="SIC sees their shift; reporting officers see mapped subordinates; DIC and administrators retain approval controls." count={pending.length} />
+        {(role.isSIC || role.isDeptIC || role.isLeaveAuthority || role.isReportingOfficer || role.isAdmin) && (
           <Stack direction="row" spacing={1} sx={{ mb: 1.5 }}>
             <Button size="small" variant={workflowView === "table" ? "contained" : "outlined"} onClick={() => setWorkflowView("table")}>Table view</Button>
             <Button size="small" variant={workflowView === "calendar" ? "contained" : "outlined"} startIcon={<CalendarDays size={14} />} onClick={() => setWorkflowView("calendar")}>Leave calendar</Button>
           </Stack>
         )}
-        {workflowView === "calendar" && (role.isSIC || role.isDeptIC || role.isLeaveAuthority || role.isAdmin) ? rosterWorkflowCalendar() : workflowTable(pending)}
+        {workflowView === "calendar" && (role.isSIC || role.isDeptIC || role.isLeaveAuthority || role.isReportingOfficer || role.isAdmin) ? rosterWorkflowCalendar() : workflowTable(pending)}
       </Paper>
       </Box>
       </Collapse>

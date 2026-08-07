@@ -163,6 +163,10 @@ def save_two_factor_mode(mode, user_id):
         },
         upsert=True,
     )
+    # A challenge created while 2FA was enabled must not keep the login screen
+    # in OTP mode after an administrator disables the feature.
+    if mode == "off":
+        login_otp_challenge_collection.delete_many({"consumedAt": None})
 
 
 def mask_email(email):

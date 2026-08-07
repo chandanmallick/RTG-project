@@ -294,7 +294,7 @@ export function DutyNotificationBoard({ limit = 2 }) {
   };
 
   return (
-    <Box sx={{ mt: 1.2, pt: 1, borderTop: "1px solid #E2E8F0" }}>
+    <Box sx={{ mt: 1, pt: .75, width: "100%", minWidth: 0, maxWidth: "100%", overflow: "hidden", borderTop: "1px solid #E2E8F0" }}>
       <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: .55 }}>
         <Box>
           <Typography sx={{ color: "#08103A", fontSize: 12.5, fontWeight: 950 }}>Crew Notifications</Typography>
@@ -305,7 +305,7 @@ export function DutyNotificationBoard({ limit = 2 }) {
       {state.loading && <Box sx={{ py: 1, display: "grid", placeItems: "center" }}><CircularProgress size={18} /></Box>}
       {!state.loading && state.error && <Alert severity="error" sx={{ py: 0, fontSize: 11 }}>{state.error}</Alert>}
       {!state.loading && !state.error && (
-        <Stack spacing={.45}>
+        <Stack spacing={.4} sx={{ minWidth: 0, maxWidth: "100%" }}>
           {visible.map((notification) => {
             const isLeave = notification.notificationKind !== "replacement";
             const summary = isLeave
@@ -319,8 +319,10 @@ export function DutyNotificationBoard({ limit = 2 }) {
                 onClick={() => window.location.assign(destination(notification))}
                 onKeyDown={(event) => { if (event.key === "Enter") window.location.assign(destination(notification)); }}
                 sx={{
-                  minHeight: 31,
-                  px: 1,
+                  width: "100%",
+                  minWidth: 0,
+                  height: 28,
+                  px: .8,
                   display: "flex",
                   alignItems: "center",
                   gap: .7,
@@ -332,7 +334,7 @@ export function DutyNotificationBoard({ limit = 2 }) {
                   "&:hover": { background: "#F8FAFC", borderColor: "#93C5FD" },
                 }}
               >
-                <Typography title={summary} sx={{ minWidth: 0, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "#334155", fontSize: 10.8, fontWeight: notification.unread ? 800 : 650 }}>
+                <Typography title={summary} sx={{ minWidth: 0, width: 0, flex: "1 1 0", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "#334155", fontSize: 10.2, fontWeight: notification.unread ? 800 : 650 }}>
                   {summary}
                 </Typography>
                 <Chip label={isLeave ? "LEAVE" : displayStatus(notification.status)} size="small" sx={{ flexShrink: 0, height: 19, color: isLeave ? "#B91C1C" : "#0057B7", background: isLeave ? "#FEE2E2" : "#E8F1FB", fontSize: 8.5, fontWeight: 900 }} />
@@ -344,7 +346,7 @@ export function DutyNotificationBoard({ limit = 2 }) {
             <Button
               size="small"
               onClick={() => window.location.assign("/crew/leave")}
-              sx={{ alignSelf: "flex-start", minHeight: 24, p: 0, textTransform: "none", color: "#0057B7", fontSize: 10.5, fontWeight: 900 }}
+              sx={{ alignSelf: "flex-start", minHeight: 20, p: 0, textTransform: "none", color: "#0057B7", fontSize: 10, fontWeight: 900 }}
             >
               +{remaining} more — open Leave module
             </Button>

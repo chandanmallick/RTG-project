@@ -11,6 +11,8 @@ from crew_legacy.database.database_mongo import (
     compensatory_off_collection,
     deleted_leave_collection,
     page_access_collection,
+    roster_group_collection,
+    holiday_master_collection,
 )
 
 from crew_legacy.admin_logic.auth_utils import get_authenticated_user
@@ -81,6 +83,11 @@ def employee_id_filter(employee_id: str) -> dict:
 def organization_leave_observer_ids(employee: dict) -> list[str]:
     """Reporting officers and HOD resolved from the Organization Master."""
     employee_id = clean_id(employee.get("userId") or employee.get("employeeId"))
+    stored = employee.get("reportingOfficerIds") or employee.get("reportingOfficerId") or []
+    values = list(stored if isinstance(stored, list) else [stored])
+    values.extend([employee.get("intermediaryReportingId"), employee.get("hodId")])
+    if any(clean_id(value) for value in values):
+        return [value for value in dict.fromkeys(clean_id(item) for item in values) if value and value != employee_id]
     values = []
     try:
         from crew_legacy.api.admin_api import resolve_employee_organization
@@ -94,9 +101,7 @@ def organization_leave_observer_ids(employee: dict) -> list[str]:
             resolved.get("hodId"),
         ])
     except Exception:
-        stored = employee.get("reportingOfficerIds") or employee.get("reportingOfficerId") or []
-        values.extend(stored if isinstance(stored, list) else [stored])
-        values.extend([employee.get("intermediaryReportingId"), employee.get("hodId")])
+        pass
     return [
         value for value in dict.fromkeys(clean_id(item) for item in values)
         if value and value != employee_id
@@ -189,6 +194,56 @@ def daily_record(employee_id: str, date_str: str):
         "employeeId": employee_id_filter(employee_id),
         "date": date_str,
     })
+
+
+def shift_group_for_date(employee_id: str, date_str: str) -> dict:
+    """Find an employee's roster group for the requested day, including historical groups."""
+    employee_id = clean_id(employee_id)
+    return roster_group_collection.find_one({
+        "startDate": {"$lte": date_str},
+        "endDate": {"$gte": date_str},
+        "$or": [
+            {"shiftInCharge.employeeId": employee_id},
+            {"members.employeeId": employee_id},
+        ],
+    }, sort=[("startDate", -1)]) or {}
+
+
+def general_duty_record(employee_id: str, date_str: str, *, persist: bool = False) -> Optional[dict]:
+    """Build the default duty row only for employees outside a shift group on that date."""
+    employee = employee_by_id(employee_id)
+    if not employee or employee.get("isActive", True) is False:
+        return None
+    if shift_group_for_date(employee_id, date_str):
+        return None
+
+    holiday = holiday_master_collection.find_one({
+        "date": date_str,
+        "status": {"$not": {"$regex": "^(inactive|deleted)$", "$options": "i"}},
+    })
+    assigned_duty = "Holiday" if holiday else "General"
+    record = {
+        "employeeId": clean_id(employee.get("userId") or employee.get("employeeId") or employee_id),
+        "name": employee.get("name"),
+        "designation": employee.get("designation"),
+        "date": date_str,
+        "assignedDuty": assigned_duty,
+        "groupName": "General",
+        "isHoliday": "Y" if holiday else "N",
+        "holidayName": holiday.get("holidayName") if holiday else None,
+        "isSIC": False,
+        "flag": "Duty",
+        "dataSource": "General",
+        "isEditable": False,
+    }
+    if persist:
+        employee_daily_collection.update_one(
+            {"employeeId": employee_id_filter(employee_id), "date": date_str},
+            {"$setOnInsert": record},
+            upsert=True,
+        )
+        return daily_record(employee_id, date_str) or record
+    return record
 
 
 def map_duty_type(assigned_duty: str) -> str:
@@ -431,6 +486,14 @@ def get_my_role(user=Depends(get_authenticated_user)):
     })
 
     is_dept_ic = dept_ic_record is not None
+    is_reporting_officer = any(
+        emp_id in organization_leave_observer_ids(employee)
+        for employee in employee_collection.find(
+            {"isActive": {"$ne": False}, "userId": {"$ne": emp_id}},
+            {"userId": 1, "employeeId": 1, "functionIds": 1, "manualFunctionIds": 1,
+             "reportingOfficerIds": 1, "reportingOfficerId": 1, "intermediaryReportingId": 1, "hodId": 1},
+        )
+    )
 
     return {
         "employeeId": emp_id,
@@ -438,6 +501,7 @@ def get_my_role(user=Depends(get_authenticated_user)):
         "isDeptIC": is_dept_ic,
         "isLeaveAuthority": is_dept_ic,
         "isAdmin": is_admin(user),
+        "isReportingOfficer": is_reporting_officer,
         "groupName": sic_record.get("groupName") if sic_record else None,
     }
 
@@ -454,12 +518,12 @@ def get_leave_employees(user=Depends(get_authenticated_user)):
 
     if is_admin(user):
 
-        employees = list(employee_collection.find({}, {"_id": 0}))
+        employees = list(employee_collection.find({"isActive": {"$ne": False}}, {"_id": 0}))
 
     else:
 
         emp = employee_collection.find_one(
-            {"userId": emp_id},
+            {"userId": emp_id, "isActive": {"$ne": False}},
             {"_id": 0}
         )
 
@@ -474,7 +538,7 @@ def get_leave_employees(user=Depends(get_authenticated_user)):
                 "groupName": actor_duty.get("groupName"),
             }, {"employeeId": 1}))
             member_ids = [clean_id(item.get("employeeId")) for item in daily_members]
-            employees = list(employee_collection.find({"userId": {"$in": member_ids}}, {"_id": 0}))
+            employees = list(employee_collection.find({"userId": {"$in": member_ids}, "isActive": {"$ne": False}}, {"_id": 0}))
         else:
             employees = [emp]
 
@@ -482,6 +546,79 @@ def get_leave_employees(user=Depends(get_authenticated_user)):
         e["employeeId"] = e.get("userId")
 
     return employees
+
+
+@router.get("/approval-calendar")
+def get_organization_approval_calendar(
+    startDate: str = Query(...),
+    endDate: str = Query(...),
+    user=Depends(get_authenticated_user),
+):
+    try:
+        start = datetime.strptime(startDate, "%Y-%m-%d")
+        end = datetime.strptime(endDate, "%Y-%m-%d")
+    except ValueError as exc:
+        raise HTTPException(400, "Calendar dates must use YYYY-MM-DD format") from exc
+    if end < start or (end - start).days > 92:
+        raise HTTPException(400, "Select a calendar range of 93 days or less")
+
+    actor = clean_id(user.get("employeeId"))
+    shift_ids = set()
+    for group in roster_group_collection.find({"isActive": {"$ne": False}}, {"members": 1, "shiftInCharge": 1}):
+        for person in [*(group.get("members") or []), group.get("shiftInCharge") or {}]:
+            value = clean_id(person.get("employeeId") or person.get("userId"))
+            if value:
+                shift_ids.add(value)
+
+    employees = []
+    for employee in employee_collection.find({"isActive": {"$ne": False}}):
+        target_id = clean_id(employee.get("userId") or employee.get("employeeId"))
+        if not target_id or target_id in shift_ids or target_id == actor:
+            continue
+        if not is_admin(user) and actor not in organization_leave_observer_ids(employee):
+            continue
+        employees.append(employee)
+
+    employee_ids = [clean_id(item.get("userId") or item.get("employeeId")) for item in employees]
+    daily = list(employee_daily_collection.find({
+        "employeeId": {"$in": employee_ids},
+        "date": {"$gte": startDate, "$lte": endDate},
+    })) if employee_ids else []
+    duty_map = {(clean_id(item.get("employeeId")), item.get("date")): item for item in daily}
+    dates = []
+    cursor = start
+    while cursor <= end:
+        dates.append(cursor.strftime("%Y-%m-%d"))
+        cursor += timedelta(days=1)
+
+    groups = {}
+    for employee in employees:
+        target_id = clean_id(employee.get("userId") or employee.get("employeeId"))
+        department = clean_id(employee.get("department")) or "Unmapped department"
+        section = ", ".join(str(value) for value in (employee.get("sections") or []) if value)
+        group_name = f"General · {department}" + (f" · {section}" if section else "")
+        duties = {}
+        for date in dates:
+            record = duty_map.get((target_id, date), {})
+            duties[date] = {
+                "shift": record.get("assignedDuty") or "General",
+                "leaveType": record.get("leaveType"),
+                "leaveStatus": record.get("leaveStatus"),
+                "trainingName": record.get("trainingName"),
+                "replacementEmployee": record.get("replacementEmployee"),
+            }
+        groups.setdefault(group_name, []).append({
+            "employeeId": target_id,
+            "name": employee.get("name") or target_id,
+            "designation": employee.get("designation"),
+            "IsSIC": False,
+            "employeeType": "Non-shift",
+            "duties": duties,
+        })
+    return [
+        {"groupName": name, "employees": sorted(people, key=lambda item: clean_id(item.get("name")).lower())}
+        for name, people in sorted(groups.items())
+    ]
 
 
 # =========================================================
@@ -858,9 +995,11 @@ def apply_leave_v2(data: dict, user=Depends(get_authenticated_user)):
         leave_type = str(item.get("leaveType") or "").strip()
         comp_off_id = str(item.get("compOffId") or "").strip() or None
         try:
-            datetime.strptime(date_str, "%Y-%m-%d")
+            parsed_date = datetime.strptime(date_str, "%Y-%m-%d")
         except Exception as exc:
             raise HTTPException(400, f"Invalid leave date: {date_str}") from exc
+        if not is_admin(user) and parsed_date.date() < datetime.now().date():
+            raise HTTPException(400, "Back-dated leave can be applied only by an administrator")
         if date_str in seen_dates:
             raise HTTPException(400, f"Duplicate leave date: {date_str}")
         seen_dates.add(date_str)
@@ -869,7 +1008,7 @@ def apply_leave_v2(data: dict, user=Depends(get_authenticated_user)):
         if not can_apply_for(user, employee_id, date_str):
             raise HTTPException(403, f"You cannot apply leave for this employee on {date_str}")
 
-        duty = daily_record(employee_id, date_str)
+        duty = daily_record(employee_id, date_str) or general_duty_record(employee_id, date_str, persist=True)
         if not duty:
             raise HTTPException(404, f"Duty not found for {date_str}")
         group_name = duty.get("groupName")
@@ -882,7 +1021,7 @@ def apply_leave_v2(data: dict, user=Depends(get_authenticated_user)):
         if duplicate:
             raise HTTPException(400, f"Leave already applied for {date_str}")
 
-        if group_rule:
+        if group_rule and group_name != "General":
             existing_leave = leave_request_collection.find_one({
                 "groupName": group_name,
                 "date": date_str,
@@ -1561,7 +1700,9 @@ def get_leave_list(
         owner = clean_id(r.get("employeeId")) == actor
         sic_allowed = can_sic_act(user, r)
         authority_allowed = can_authority_act(user, r)
-        if not (is_admin(user) or delete_allowed or owner or sic_allowed or authority_allowed):
+        employee = employee_by_id(r.get("employeeId"))
+        organization_observer = actor in organization_leave_observer_ids(employee)
+        if not (is_admin(user) or delete_allowed or owner or sic_allowed or authority_allowed or organization_observer):
             continue
 
         others = list(employee_daily_collection.find({
@@ -1574,6 +1715,11 @@ def get_leave_list(
         }))
         duty = daily_record(r.get("employeeId"), r.get("date")) or {}
         assigned_duty = clean_id(duty.get("assignedDuty"))
+        replacement = r.get("replacement") or employee_daily_collection.find_one({
+            "date": r.get("date"),
+            "replacementDuty": True,
+            "replacementFor.employeeId": employee_id_filter(r.get("employeeId")),
+        }) or {}
 
         result.append({
             "id": str(r["_id"]),
@@ -1589,6 +1735,8 @@ def get_leave_list(
             "deptApprovalStatus": r.get("deptApprovalStatus"),
             "finalStatus": r.get("finalStatus"),
             "replacementRequired": r.get("replacementRequired", False),
+            "replacementAssigned": bool(replacement),
+            "replacementEmployee": ({"employeeId": clean_id(replacement.get("employeeId")), "name": replacement.get("name")} if replacement else None),
             "sicReplacementRequired": r.get("sicReplacementRequired", r.get("replacementRequired", False)),
             "dicReplacementRequired": r.get("dicReplacementRequired"),
             "replacementDecisionHistory": r.get("replacementDecisionHistory", []),
@@ -1604,6 +1752,7 @@ def get_leave_list(
             "cancelledByRole": r.get("cancelledByRole"),
             "cancelledOn": r.get("cancelledOn"),
             "isOwner": owner,
+            "isOrganizationObserver": organization_observer,
             "canCancel": bool(cancellation_role(user, r)) and r.get("finalStatus") in ["Applied", "Approved"],
             "canDeleteMaster": delete_allowed,
             "canSICAct": sic_allowed and r.get("sicApprovalStatus") == "Pending" and r.get("finalStatus") == "Applied",
@@ -1640,6 +1789,8 @@ def get_duty_detailed(
         raise HTTPException(400, "End date cannot be before start date")
     if (end - start).days > 92:
         raise HTTPException(400, "Select a range of 93 days or less")
+    if not is_admin(user) and start.date() < datetime.now().date():
+        raise HTTPException(400, "Back-dated leave can be applied only by an administrator")
 
     result = []
 
@@ -1652,16 +1803,13 @@ def get_duty_detailed(
         if not can_apply_for(user, employeeId, date_str):
             raise HTTPException(403, f"You cannot view this employee's duty on {date_str}")
 
-        rec = employee_daily_collection.find_one({
-            "employeeId": employeeId,
-            "date": date_str
-        })
+        rec = daily_record(employeeId, date_str) or general_duty_record(employeeId, date_str)
 
         if rec:
 
             others = list(employee_daily_collection.find({
                 "date": date_str,
-                "groupName": rec["groupName"],
+                "groupName": rec.get("groupName"),
                 "leaveStatus": {
                     "$in": ["Applied", "Forwarded by SIC", "Approved"]
                 },
@@ -1673,6 +1821,8 @@ def get_duty_detailed(
                 "assignedDuty": rec.get("assignedDuty"),
                 "groupName": rec.get("groupName"),
                 "isHoliday": rec.get("isHoliday"),
+                "holidayName": rec.get("holidayName"),
+                "dataSource": rec.get("dataSource"),
                 "othersOnLeave": [
                     {
                         "employeeId": o["employeeId"],

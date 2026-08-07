@@ -199,7 +199,7 @@ export default function OrganizationMaster() {
           </Box>
         )}
       >
-        {employees.map((employee) => (
+        {employees.filter((employee) => employee.isActive !== false).map((employee) => (
           <MenuItem key={employee.id} value={employee.userId}>
             {employee.name} ({employee.userId})
           </MenuItem>

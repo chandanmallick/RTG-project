@@ -111,6 +111,7 @@ export default function Profile() {
   const [editingPassword, setEditingPassword] = useState(false);
   const [profileBeforeEdit, setProfileBeforeEdit] = useState(null);
   const [notice, setNotice] = useState(null);
+  const [editSettings, setEditSettings] = useState({ enabledFields: ["name", "nameHindi", "designation", "designationHindi", "phone", "gmail", "profilePhoto", "password"] });
   const [passwordForm, setPasswordForm] = useState({
     currentPassword: "",
     newPassword: "",
@@ -128,6 +129,11 @@ export default function Profile() {
     if (!employeeId) return;
     const res = await api.get(`/profile/${employeeId}`);
     setProfile(res.data || {});
+  };
+
+  const fetchEditSettings = async () => {
+    const res = await api.get("/profile/edit-settings");
+    setEditSettings(res.data || { enabledFields: [] });
   };
 
   const fetchDutyStats = async () => {
@@ -169,7 +175,7 @@ export default function Profile() {
     const load = async () => {
       setLoadingProfile(true);
       try {
-        await fetchProfile();
+        await Promise.all([fetchProfile(), fetchEditSettings()]);
       } catch (error) {
         console.error(error);
       } finally {
@@ -217,6 +223,7 @@ export default function Profile() {
       });
       setProfile(res.data || {});
       setPhoto(null);
+      await fetchProfile();
       await refreshSession();
       setNotice({ severity: "success", text: "Profile updated successfully." });
       setEditingProfile(false);
@@ -255,6 +262,9 @@ export default function Profile() {
     setProfileBeforeEdit({ ...profile });
     setEditingProfile(true);
   };
+
+  const canEdit = (field) => Boolean(editSettings.isAdmin || editSettings.enabledFields?.includes(field));
+  const hasEditableProfileFields = ["name", "nameHindi", "designation", "designationHindi", "phone", "gmail", "profilePhoto"].some(canEdit);
 
   const cancelProfileEdit = () => {
     if (profileBeforeEdit) setProfile(profileBeforeEdit);
@@ -295,7 +305,7 @@ export default function Profile() {
                 <Avatar src={profileImage} sx={{ width: 112, height: 112, background: "#EDE9FE", color: "#5B55B2", fontSize: 36, fontWeight: 950 }}>
                   {(profile.name || employeeId || "?").slice(0, 1)}
                 </Avatar>
-                {editingProfile && (
+                {editingProfile && canEdit("profilePhoto") && (
                   <Button component="label" sx={{ position: "absolute", right: -8, bottom: -6, minWidth: 0, width: 38, height: 38, borderRadius: "50%", background: "#5B55B2", color: "#fff", "&:hover": { background: "#47409A" } }}>
                     <Camera size={17} />
                     <input hidden type="file" accept="image/*" onChange={(event) => setPhoto(event.target.files?.[0] || null)} />
@@ -311,7 +321,7 @@ export default function Profile() {
                   </Box>
                   <Stack direction="row" spacing={1} alignItems="center">
                     <Chip icon={<ShieldCheck size={15} />} label={employeeId || "No ID"} sx={{ background: "#EEF2FF", color: "#4F46E5", fontWeight: 900 }} />
-                    {!editingProfile && <Button size="small" variant="outlined" onClick={beginProfileEdit} sx={{ textTransform: "none", fontWeight: 900 }}>Edit profile</Button>}
+                    {!editingProfile && hasEditableProfileFields && <Button size="small" variant="outlined" onClick={beginProfileEdit} sx={{ textTransform: "none", fontWeight: 900 }}>Edit profile</Button>}
                   </Stack>
                 </Stack>
 
@@ -322,6 +332,16 @@ export default function Profile() {
                   <InfoLine icon={<Briefcase size={15} />} label="Desig. (Hindi)" value={profile.designationHindi || "-"} />
                   <InfoLine icon={<Mail size={15} />} label="Email" value={profile.gmail || profile.email || "-"} />
                   <InfoLine icon={<Phone size={15} />} label="Phone" value={profile.phone || "-"} />
+                  <InfoLine icon={<Briefcase size={15} />} label="Department" value={(profile.departments || []).join(", ") || profile.department || "-"} />
+                  <InfoLine icon={<Briefcase size={15} />} label="Section" value={(profile.sections || []).join(", ") || "-"} />
+                  <InfoLine icon={<Briefcase size={15} />} label="Function" value={(profile.functions || []).join(", ") || "-"} />
+                  <InfoLine icon={<Briefcase size={15} />} label="Shift group" value={profile.groupName || "General / non-shift"} />
+                  <InfoLine icon={<User size={15} />} label="Reporting officer" value={(profile.reportingOfficers || []).join(", ") || "-"} />
+                  <InfoLine icon={<User size={15} />} label="Intermediary reporting" value={profile.intermediaryReporting || "-"} />
+                  <InfoLine icon={<User size={15} />} label="HOD" value={profile.hod || "-"} />
+                  <Box sx={{ gridColumn: { xs: "auto", md: "1 / -1" } }}>
+                    <InfoLine icon={<User size={15} />} label="Reporting line" value={(profile.reportingLine || []).map((person) => `${person.name} (${person.employeeId})`).join("  →  ") || "-"} />
+                  </Box>
                 </Box>
               </Box>
             </Stack>
@@ -329,12 +349,12 @@ export default function Profile() {
             {editingProfile && <>
               <Divider sx={{ my: 2.3 }} />
               <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "repeat(2, minmax(0, 1fr))" }, gap: 1.5 }}>
-                <TextField size="small" label="Name" value={profile.name || ""} onChange={(event) => setProfile((current) => ({ ...current, name: event.target.value }))} fullWidth />
-                <TextField size="small" label="Name (Hindi)" value={profile.nameHindi || ""} onChange={(event) => setProfile((current) => ({ ...current, nameHindi: event.target.value }))} fullWidth />
-                <TextField size="small" label="Designation" value={profile.designation || ""} onChange={(event) => setProfile((current) => ({ ...current, designation: event.target.value }))} fullWidth />
-                <TextField size="small" label="Designation (Hindi)" value={profile.designationHindi || ""} onChange={(event) => setProfile((current) => ({ ...current, designationHindi: event.target.value }))} fullWidth />
-                <TextField size="small" label="Mobile no" value={profile.phone || ""} onChange={(event) => setProfile((current) => ({ ...current, phone: event.target.value }))} fullWidth />
-                <TextField size="small" label="Mail ID" value={profile.gmail || profile.email || ""} onChange={(event) => setProfile((current) => ({ ...current, gmail: event.target.value, email: event.target.value }))} fullWidth />
+                {canEdit("name") && <TextField size="small" label="Name" value={profile.name || ""} onChange={(event) => setProfile((current) => ({ ...current, name: event.target.value }))} fullWidth />}
+                {canEdit("nameHindi") && <TextField size="small" label="Name (Hindi)" value={profile.nameHindi || ""} onChange={(event) => setProfile((current) => ({ ...current, nameHindi: event.target.value }))} fullWidth />}
+                {canEdit("designation") && <TextField size="small" label="Designation" value={profile.designation || ""} onChange={(event) => setProfile((current) => ({ ...current, designation: event.target.value }))} fullWidth />}
+                {canEdit("designationHindi") && <TextField size="small" label="Designation (Hindi)" value={profile.designationHindi || ""} onChange={(event) => setProfile((current) => ({ ...current, designationHindi: event.target.value }))} fullWidth />}
+                {canEdit("phone") && <TextField size="small" label="Mobile no" value={profile.phone || ""} onChange={(event) => setProfile((current) => ({ ...current, phone: event.target.value }))} fullWidth />}
+                {canEdit("gmail") && <TextField size="small" label="Mail ID" value={profile.gmail || profile.email || ""} onChange={(event) => setProfile((current) => ({ ...current, gmail: event.target.value, email: event.target.value }))} fullWidth />}
               </Box>
               <Stack direction="row" spacing={1.5} justifyContent="flex-end" mt={2}>
                 <Button onClick={cancelProfileEdit} disabled={savingProfile} sx={{ textTransform: "none", fontWeight: 900 }}>Cancel</Button>
@@ -345,13 +365,28 @@ export default function Profile() {
             </>}
           </Paper>
 
+          <Paper elevation={0} sx={{ p: 2.4, borderRadius: 5, background: "#FFFFFF", boxShadow: "0 18px 45px rgba(72, 83, 140, 0.08)" }}>
+            <Stack direction="row" alignItems="center" justifyContent="space-between" mb={1.3}>
+              <Typography sx={{ fontSize: 16, color: "#24213F", fontWeight: 950 }}>Organization record</Typography>
+              <Chip size="small" label={profile.isActive === false ? "Inactive / Transferred" : "Active"} color={profile.isActive === false ? "default" : "success"} sx={{fontWeight:900}} />
+            </Stack>
+            {(profile.organizationHistory || []).length ? <Stack spacing={1}>
+              {[...(profile.organizationHistory || [])].reverse().map((entry,index)=><Box key={index} sx={{p:1.3,borderRadius:2.5,background:"#F8FAFC",border:"1px solid #E2E8F0"}}>
+                <Typography sx={{fontSize:12,fontWeight:900,color:"#24213F"}}>{(entry.departments || []).join(", ") || "Department not recorded"}{entry.sections?.length ? ` · ${entry.sections.join(", ")}` : ""}</Typography>
+                <Typography sx={{fontSize:11,color:"#64748B"}}>Function: {(entry.functions || []).join(", ") || "-"}</Typography>
+                <Typography sx={{fontSize:11,color:"#64748B"}}>Reporting: {(entry.reportingOfficers || []).join(", ") || "-"}{entry.intermediaryReporting ? ` · ${entry.intermediaryReporting}` : ""}{entry.hod ? ` · HOD: ${entry.hod}` : ""}</Typography>
+                <Typography sx={{mt:.35,fontSize:10,color:"#7B7F9E",fontWeight:800}}>{shortDate(entry.startDate)} to {shortDate(entry.endDate)}{entry.reason ? ` · ${entry.reason}` : ""}</Typography>
+              </Box>)}
+            </Stack> : <Typography sx={{fontSize:12,color:"#7B7F9E"}}>No previous organization assignment recorded. Current mapping is shown in the profile header.</Typography>}
+          </Paper>
+
           <Paper elevation={0} sx={{ p: 2.6, borderRadius: 5, background: "#FFFFFF", boxShadow: "0 18px 45px rgba(72, 83, 140, 0.08)" }}>
             <Stack direction="row" alignItems="center" justifyContent="space-between" spacing={1} mb={editingPassword ? 1.5 : 0}>
               <Stack direction="row" alignItems="center" spacing={1}>
                 <User size={18} color="#5B55B2" />
                 <Typography sx={{ fontSize: 16, color: "#24213F", fontWeight: 950 }}>Password</Typography>
               </Stack>
-              {!editingPassword && <Button size="small" variant="outlined" onClick={() => setEditingPassword(true)} sx={{ textTransform: "none", fontWeight: 900 }}>Change password</Button>}
+              {!editingPassword && canEdit("password") && <Button size="small" variant="outlined" onClick={() => setEditingPassword(true)} sx={{ textTransform: "none", fontWeight: 900 }}>Change password</Button>}
             </Stack>
             {editingPassword && <><Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "repeat(3, minmax(0, 1fr))" }, gap: 1.5 }}>
               <TextField

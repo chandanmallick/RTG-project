@@ -32,6 +32,7 @@ const CrewDashboard = lazy(() => import("./crewLegacy/Dashboard"));
 const CrewLeave = lazy(() => import("./crewLegacy/LeaveManagement"));
 const CrewReplacement = lazy(() => import("./crewLegacy/ReplacementManagement"));
 const CrewTraining = lazy(() => import("./crewLegacy/TrainingHolidayMaster"));
+const CrewThreads = lazy(() => import("./pages/crew/CrewThreads"));
 const CrewEmployees = lazy(() => import("./crewLegacy/EmployeeMaster"));
 const CrewDropdowns = lazy(() => import("./crewLegacy/dropdownmaster"));
 const CrewDutyLeaveTypes = lazy(() => import("./crewLegacy/DutyLeaveMaster"));
@@ -203,6 +204,7 @@ export default function App() {
             </ProtectedRoute>
           )}
         />
+        <Route path="/crew/threads" element={protectedPage("crew_threads", <CrewLegacyShell><CrewThreads /></CrewLegacyShell>)} />
         <Route path="/crew/employees" element={protectedPage("crew_employees", <CrewLegacyShell><CrewEmployees /></CrewLegacyShell>)} />
         <Route path="/crew/dropdowns" element={protectedPage("crew_admin", <CrewLegacyShell><CrewDropdowns /></CrewLegacyShell>)} />
         <Route path="/crew/duty-leave-types" element={protectedPage("crew_admin", <CrewLegacyShell><CrewDutyLeaveTypes /></CrewLegacyShell>)} />

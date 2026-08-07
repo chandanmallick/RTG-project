@@ -20,6 +20,7 @@ from crew_legacy.database.database_mongo import (
     duty_denial_collection,
     duty_notification_collection,
     duty_switch_collection,
+    duty_exchange_request_collection,
     organization_shift_group_collection,
     organization_unit_collection,
     roster_group_collection,
@@ -322,6 +323,50 @@ def group_shift_in_charge_ids(duty_date: str, group_name: str):
         for item in records
         if str(item.get("employeeId") or "").strip()
     ))
+
+
+def daily_department_ic_ids(*daily_records):
+    return list(dict.fromkeys(
+        str((record.get("departmentIC") or {}).get("employeeId") or "").strip()
+        for record in daily_records
+        if str((record.get("departmentIC") or {}).get("employeeId") or "").strip()
+    ))
+
+
+def exchange_request_summary(item: dict, actor_id: str = ""):
+    stage = item.get("stage") or "other_employee"
+    actor_id = str(actor_id or "").strip()
+    can_act = False
+    actor_role = ""
+    if item.get("status") == "Pending":
+        if stage == "other_employee" and actor_id == str((item.get("secondEmployee") or {}).get("employeeId") or ""):
+            can_act, actor_role = True, "Exchange employee"
+        elif stage == "sic":
+            pending = [entry for entry in item.get("sicApprovals") or [] if entry.get("status") == "Pending"]
+            if any(actor_id in normalized_categories(entry.get("employeeIds")) for entry in pending):
+                can_act, actor_role = True, "Shift-in-Charge"
+        elif stage == "dic":
+            pending = [entry for entry in item.get("dicApprovals") or [] if entry.get("status") == "Pending"]
+            if any(actor_id in normalized_categories(entry.get("employeeIds")) for entry in pending):
+                can_act, actor_role = True, "Leave Approving Authority"
+    return {
+        "id": str(item.get("_id")),
+        "requestId": item.get("requestId"),
+        "date": item.get("date"),
+        "firstEmployee": item.get("firstEmployee") or {},
+        "secondEmployee": item.get("secondEmployee") or {},
+        "reason": item.get("reason"),
+        "status": item.get("status"),
+        "stage": stage,
+        "requestedBy": item.get("requestedBy"),
+        "requestedAt": api_datetime(item.get("requestedAt")),
+        "updatedAt": api_datetime(item.get("updatedAt")),
+        "sicApprovals": item.get("sicApprovals") or [],
+        "dicApprovals": item.get("dicApprovals") or [],
+        "decisionHistory": api_decision_history(item.get("decisionHistory")),
+        "canAct": can_act,
+        "actorRole": actor_role,
+    }
 
 
 def mail_address(employee):
@@ -742,7 +787,8 @@ def exchange_employee_duties(
         raise HTTPException(400, "Date must use YYYY-MM-DD format") from exc
     if not first_id or not second_id or first_id == second_id or not reason:
         raise HTTPException(400, "Two different employees and the exchange reason are required")
-    if not has_duty_switch_authority(user, duty_date) and actor != first_id:
+    manager_authorized = has_duty_switch_authority(user, duty_date)
+    if not manager_authorized and actor != first_id:
         raise HTTPException(403, "Employees may exchange only their own duty")
 
     first = employee_daily_collection.find_one({
@@ -757,6 +803,99 @@ def exchange_employee_duties(
         raise HTTPException(404, "Both employees must have a duty record on the selected date")
     if first.get("leaveStatus") in ACTIVE_LEAVE_STATUSES or second.get("leaveStatus") in ACTIVE_LEAVE_STATUSES:
         raise HTTPException(409, "Duty cannot be exchanged with an employee who is on leave")
+
+    # An employee request is never applied immediately. The other employee,
+    # the SIC of every affected group, and the mapped DIC(s) must approve it.
+    # DIC/admin initiated operational changes retain the existing immediate path.
+    if not manager_authorized:
+        existing = duty_exchange_request_collection.find_one({
+            "date": duty_date,
+            "status": "Pending",
+            "$or": [
+                {"firstEmployee.employeeId": {"$in": [first_id, second_id]}},
+                {"secondEmployee.employeeId": {"$in": [first_id, second_id]}},
+            ],
+        })
+        if existing:
+            raise HTTPException(409, "A pending duty-exchange request already exists for one of these employees on this date")
+
+        affected_groups = list(dict.fromkeys(
+            str(value or "").strip()
+            for value in (first.get("groupName"), second.get("groupName"))
+            if str(value or "").strip()
+        ))
+        sic_approvals = []
+        for group_name in affected_groups:
+            sic_ids = group_shift_in_charge_ids(duty_date, group_name)
+            if not sic_ids:
+                raise HTTPException(409, f"Shift-in-Charge is not mapped for {group_name} on {duty_date}")
+            sic_approvals.append({
+                "groupName": group_name,
+                "employeeIds": sic_ids,
+                "status": "Pending",
+            })
+        dic_ids = daily_department_ic_ids(first, second)
+        if not dic_ids:
+            raise HTTPException(409, "Leave Approving Authority is not mapped for the selected employees")
+        dic_approvals = [{
+            "scope": "Final approval",
+            "employeeIds": dic_ids,
+            "status": "Pending",
+        }]
+        request_id = str(uuid.uuid4())
+        now = datetime.utcnow()
+        request = {
+            "requestId": request_id,
+            "date": duty_date,
+            "firstEmployee": {
+                "employeeId": first_id,
+                "name": first.get("name") or (employee_by_id(first_id) or {}).get("name"),
+                "assignedDuty": first.get("assignedDuty"),
+                "groupName": first.get("groupName"),
+            },
+            "secondEmployee": {
+                "employeeId": second_id,
+                "name": second.get("name") or (employee_by_id(second_id) or {}).get("name"),
+                "assignedDuty": second.get("assignedDuty"),
+                "groupName": second.get("groupName"),
+            },
+            "reason": reason,
+            "status": "Pending",
+            "stage": "other_employee",
+            "requestedBy": actor,
+            "requestedAt": now,
+            "updatedAt": now,
+            "sicApprovals": sic_approvals,
+            "dicApprovals": dic_approvals,
+            "decisionHistory": [{
+                "action": "Requested",
+                "actedBy": actor,
+                "actorRole": "Requesting employee",
+                "actedAt": now,
+            }],
+        }
+        inserted = duty_exchange_request_collection.insert_one(request)
+        employee_daily_collection.update_many(
+            {"_id": {"$in": [first["_id"], second["_id"]]}},
+            {"$set": {"exchangeRequestId": request_id, "exchangeStatus": "Pending"}},
+        )
+        notify_all(
+            employee_ids=[second_id],
+            subject="Duty exchange approval required",
+            message=(
+                f"{request['firstEmployee']['name'] or first_id} requested a duty exchange with you "
+                f"on {duty_date}. Review and approve or reject the request."
+            ),
+            ref_id=str(inserted.inserted_id),
+            action="VIEW_CALENDAR",
+            type="DUTY",
+        )
+        return {
+            "message": "Duty exchange request submitted for approval",
+            "requestId": request_id,
+            "pendingApproval": True,
+            "stage": "other_employee",
+        }
 
     exchange_id = str(uuid.uuid4())
     changed_on = datetime.utcnow()
@@ -865,6 +1004,235 @@ def exchange_employee_duties(
     }
 
 
+@router.get("/duty-switch/exchange-requests")
+def list_duty_exchange_requests(
+    status: str = Query("Pending"),
+    user=Depends(get_authenticated_user),
+):
+    actor_id = str(user.get("employeeId") or user.get("userId") or "").strip()
+    query = {} if status.lower() == "all" else {"status": status}
+    if str(user.get("role") or "").lower() != "admin" and actor_id != "50041":
+        query["$or"] = [
+            {"firstEmployee.employeeId": actor_id},
+            {"secondEmployee.employeeId": actor_id},
+            {"sicApprovals.employeeIds": actor_id},
+            {"dicApprovals.employeeIds": actor_id},
+        ]
+    rows = duty_exchange_request_collection.find(query).sort([("requestedAt", -1)]).limit(250)
+    return [exchange_request_summary(item, actor_id) for item in rows]
+
+
+@router.put("/duty-switch/exchange-requests/{request_id}/decision")
+def decide_duty_exchange_request(
+    request_id: str,
+    payload: dict,
+    user=Depends(get_authenticated_user),
+):
+    try:
+        object_id = ObjectId(request_id)
+    except Exception as exc:
+        raise HTTPException(400, "Invalid duty-exchange request") from exc
+    decision = str(payload.get("decision") or "").strip().lower()
+    comment = str(payload.get("comment") or "").strip()
+    if decision not in {"approve", "reject"}:
+        raise HTTPException(400, "Decision must be approve or reject")
+    if decision == "reject" and not comment:
+        raise HTTPException(400, "A rejection comment is required")
+
+    request = duty_exchange_request_collection.find_one({"_id": object_id})
+    if not request:
+        raise HTTPException(404, "Duty-exchange request not found")
+    if request.get("status") != "Pending":
+        raise HTTPException(409, f"This request is already {request.get('status') or 'closed'}")
+    stale_reason = ""
+    for key_name in ("firstEmployee", "secondEmployee"):
+        snapshot = request.get(key_name) or {}
+        current = employee_daily_collection.find_one({
+            "employeeId": employee_id_filter(snapshot.get("employeeId")),
+            "date": request.get("date"),
+        })
+        if not current:
+            stale_reason = "A duty record no longer exists"
+            break
+        if current.get("leaveStatus") in ACTIVE_LEAVE_STATUSES:
+            stale_reason = f"{current.get('name') or snapshot.get('employeeId')} is now on leave"
+            break
+        if (
+            current.get("assignedDuty") != snapshot.get("assignedDuty")
+            or current.get("groupName") != snapshot.get("groupName")
+        ):
+            stale_reason = f"The duty of {current.get('name') or snapshot.get('employeeId')} has changed since this request"
+            break
+    if stale_reason:
+        cancelled_at = datetime.utcnow()
+        duty_exchange_request_collection.update_one(
+            {"_id": object_id, "status": "Pending"},
+            {
+                "$set": {
+                    "status": "Cancelled", "stage": "complete",
+                    "updatedAt": cancelled_at, "cancellationReason": stale_reason,
+                },
+                "$push": {"decisionHistory": {
+                    "action": "Cancelled", "actedBy": "SYSTEM", "actorRole": "System",
+                    "actedAt": cancelled_at, "reason": stale_reason,
+                }},
+            },
+        )
+        employee_daily_collection.update_many(
+            {"exchangeRequestId": request.get("requestId")},
+            {"$unset": {"exchangeRequestId": "", "exchangeStatus": ""}},
+        )
+        raise HTTPException(409, f"Duty-exchange request cancelled: {stale_reason}")
+    actor_id = str(user.get("employeeId") or user.get("userId") or "").strip()
+    stage = request.get("stage") or "other_employee"
+    summary = exchange_request_summary(request, actor_id)
+    if not summary["canAct"]:
+        raise HTTPException(403, "This approval is not pending with the logged-in employee")
+
+    now = datetime.utcnow()
+    history_entry = {
+        "action": "Approved" if decision == "approve" else "Rejected",
+        "actedBy": actor_id,
+        "actorRole": summary["actorRole"],
+        "actedAt": now,
+        "reason": comment or None,
+    }
+    participant_ids = [value for value in dict.fromkeys([
+        str((request.get("firstEmployee") or {}).get("employeeId") or ""),
+        str((request.get("secondEmployee") or {}).get("employeeId") or ""),
+    ]) if value]
+
+    if decision == "reject":
+        duty_exchange_request_collection.update_one(
+            {"_id": object_id, "status": "Pending"},
+            {"$set": {
+                "status": "Rejected", "stage": "complete", "updatedAt": now,
+                "rejectionComment": comment,
+            }, "$push": {"decisionHistory": history_entry}},
+        )
+        employee_daily_collection.update_many(
+            {"exchangeRequestId": request.get("requestId")},
+            {"$unset": {"exchangeRequestId": "", "exchangeStatus": ""}},
+        )
+        notify_all(
+            employee_ids=participant_ids,
+            subject="Duty exchange request rejected",
+            message=f"Duty exchange for {request.get('date')} was rejected by {summary['actorRole']}. Comment: {comment}",
+            ref_id=request_id,
+            action="VIEW_CALENDAR",
+            type="DUTY",
+        )
+        return {"message": "Duty exchange request rejected", "status": "Rejected"}
+
+    if stage == "other_employee":
+        next_stage = "sic"
+        duty_exchange_request_collection.update_one(
+            {"_id": object_id, "status": "Pending", "stage": stage},
+            {"$set": {
+                "otherEmployeeApproval": {
+                    "status": "Approved", "actedBy": actor_id, "actedAt": now,
+                },
+                "stage": next_stage, "updatedAt": now,
+            }, "$push": {"decisionHistory": history_entry}},
+        )
+        sic_ids = list(dict.fromkeys(
+            employee_id
+            for entry in request.get("sicApprovals") or []
+            for employee_id in normalized_categories(entry.get("employeeIds"))
+        ))
+        notify_all(
+            employee_ids=sic_ids,
+            subject="Duty exchange requires SIC approval",
+            message=f"Employee duty exchange on {request.get('date')} is accepted by both employees and awaits SIC approval.",
+            ref_id=request_id,
+            action="VIEW_CALENDAR",
+            type="DUTY",
+        )
+        return {"message": "Employee approval recorded; sent to both Shift-in-Charges", "status": "Pending", "stage": next_stage}
+
+    if stage == "sic":
+        approvals = request.get("sicApprovals") or []
+        actor_matched = False
+        for entry in approvals:
+            if entry.get("status") == "Pending" and actor_id in normalized_categories(entry.get("employeeIds")):
+                entry.update({"status": "Approved", "actedBy": actor_id, "actedAt": now})
+                actor_matched = True
+        if not actor_matched:
+            raise HTTPException(403, "No pending SIC approval is assigned to the logged-in employee")
+        all_sic_approved = all(entry.get("status") == "Approved" for entry in approvals)
+        next_stage = "dic" if all_sic_approved else "sic"
+        duty_exchange_request_collection.update_one(
+            {"_id": object_id, "status": "Pending", "stage": stage},
+            {"$set": {"sicApprovals": approvals, "stage": next_stage, "updatedAt": now},
+             "$push": {"decisionHistory": history_entry}},
+        )
+        if all_sic_approved:
+            dic_ids = list(dict.fromkeys(
+                employee_id
+                for entry in request.get("dicApprovals") or []
+                for employee_id in normalized_categories(entry.get("employeeIds"))
+            ))
+            notify_all(
+                employee_ids=dic_ids,
+                subject="Duty exchange requires final approval",
+                message=f"Both SIC approvals are complete for the duty exchange on {request.get('date')}. Final DIC approval is required.",
+                ref_id=request_id,
+                action="VIEW_CALENDAR",
+                type="DUTY",
+            )
+        return {
+            "message": "SIC approval recorded" + ("; sent for final DIC approval" if all_sic_approved else "; awaiting the other SIC"),
+            "status": "Pending", "stage": next_stage,
+        }
+
+    # Final DIC approval claims the request before applying the exchange so a
+    # repeated click cannot swap the two duties a second time.
+    claimed = duty_exchange_request_collection.update_one(
+        {"_id": object_id, "status": "Pending", "stage": "dic"},
+        {"$set": {"status": "Applying", "updatedAt": now}, "$push": {"decisionHistory": history_entry}},
+    )
+    if claimed.modified_count != 1:
+        raise HTTPException(409, "The duty-exchange request is already being processed")
+    try:
+        exchange_result = exchange_employee_duties(
+            {
+                "date": request.get("date"),
+                "firstEmployeeId": (request.get("firstEmployee") or {}).get("employeeId"),
+                "secondEmployeeId": (request.get("secondEmployee") or {}).get("employeeId"),
+                "reason": f"Approved employee exchange: {request.get('reason')}",
+            },
+            user,
+        )
+    except Exception:
+        duty_exchange_request_collection.update_one(
+            {"_id": object_id, "status": "Applying"},
+            {"$set": {"status": "Pending", "updatedAt": datetime.utcnow()}},
+        )
+        raise
+    completed_at = datetime.utcnow()
+    duty_exchange_request_collection.update_one(
+        {"_id": object_id, "status": "Applying"},
+        {"$set": {
+            "status": "Approved", "stage": "complete", "updatedAt": completed_at,
+            "completedAt": completed_at, "exchangeId": exchange_result.get("exchangeId"),
+            "finalApprovedBy": actor_id,
+        }},
+    )
+    employee_daily_collection.update_many(
+        {"exchangeRequestId": request.get("requestId")},
+        {"$unset": {"exchangeRequestId": "", "exchangeStatus": ""}},
+    )
+    notify_all(
+        employee_ids=participant_ids,
+        subject="Duty exchange finally approved",
+        message=f"The duty exchange on {request.get('date')} has been approved and applied.",
+        ref_id=request_id,
+        action="VIEW_CALENDAR",
+        type="DUTY",
+    )
+    return {"message": "Duty exchange finally approved and applied", "status": "Approved", **exchange_result}
+
+
 @router.put("/duty-switch/cross-date")
 def move_employee_duty_to_another_date(
     payload: dict,
@@ -884,11 +1252,9 @@ def move_employee_duty_to_another_date(
             raise HTTPException(400, f"{label} must use YYYY-MM-DD format") from exc
     if not employee_id or not reason:
         raise HTTPException(400, "Employee and reason are required")
-    if source_date == destination_date:
-        raise HTTPException(400, "Source and destination dates must be different")
-
     actor = require_duty_switch_authority(user, source_date)
-    require_duty_switch_authority(user, destination_date)
+    if destination_date != source_date:
+        require_duty_switch_authority(user, destination_date)
     linked_leave = None
     linked_leave_duty = None
     if leave_id:
@@ -944,6 +1310,174 @@ def move_employee_duty_to_another_date(
     moved_duty = linked_leave_duty or requested_destination_duty or source_duty
     if normalized_duty(moved_duty) not in SHIFT_DUTIES:
         raise HTTPException(400, "Destination shift must be Morning, Evening or Night duty")
+
+    # A same-date operation is a single reassignment, not a swap. This is
+    # useful when an authority needs to change or add one duty without moving
+    # a second assignment in the opposite direction.
+    if source_date == destination_date:
+        if linked_leave:
+            replacement_result = assign_replacement(
+                leave_id,
+                {
+                    "replacementEmployeeId": employee_id,
+                    "mode": "normal",
+                    "halfDuty": False,
+                    "reason": reason,
+                },
+                user=user,
+            )
+            refreshed_leave = leave_request_collection.find_one({"_id": linked_leave["_id"]}) or linked_leave
+            replacement = refreshed_leave.get("replacement") or {}
+            refreshed_daily = employee_daily_collection.find_one({
+                "employeeId": employee_id_filter(employee_id),
+                "date": source_date,
+            }) or {}
+            updated = {
+                "assignedDuty": refreshed_daily.get("assignedDuty") or linked_leave_duty,
+                "groupName": refreshed_daily.get("groupName") or linked_leave.get("groupName"),
+                "replacementDuty": True,
+            }
+            previous = {
+                "assignedDuty": source_duty,
+                "groupName": source_record.get("groupName"),
+                "replacementDuty": bool(source_record.get("replacementDuty")),
+            }
+            return {
+                "message": "Single leave-replacement duty assigned successfully",
+                "singleAssignment": True,
+                "source": {"date": source_date, "previous": previous, "updated": updated},
+                "destination": {"date": destination_date, "previous": previous, "updated": updated},
+                "compOffAwarded": bool(replacement.get("compOffAwarded")),
+                "compOffId": replacement.get("compOffId"),
+                "linkedLeave": {
+                    "id": leave_id,
+                    "employeeId": linked_leave.get("employeeId"),
+                    "name": linked_leave.get("name"),
+                    "assignedDuty": linked_leave.get("assignedDuty"),
+                    "groupName": linked_leave.get("groupName"),
+                },
+                "replacementResult": replacement_result,
+            }
+
+        switch_id = str(uuid.uuid4())
+        changed_on = datetime.utcnow()
+        updated_group = (
+            linked_leave.get("groupName")
+            if linked_leave
+            else source_record.get("groupName")
+        )
+        previous = {
+            "assignedDuty": source_duty,
+            "groupName": source_record.get("groupName"),
+            "replacementDuty": bool(source_record.get("replacementDuty")),
+        }
+        updated = {
+            "assignedDuty": moved_duty,
+            "groupName": updated_group,
+            "replacementDuty": bool(source_record.get("replacementDuty")),
+        }
+        common_switch = {
+            "switchId": switch_id,
+            "changedBy": actor,
+            "changedOn": changed_on,
+            "reason": reason,
+            "source": "Single-date duty assignment",
+            "sourceDate": source_date,
+            "destinationDate": destination_date,
+            "leaveId": leave_id or None,
+        }
+        result = employee_daily_collection.update_one(
+            {"_id": source_record["_id"], "assignedDuty": source_duty},
+            {"$set": {
+                "assignedDuty": moved_duty,
+                "groupName": updated_group,
+                "lastDutySwitch": {
+                    **common_switch,
+                    "previous": previous,
+                    "direction": "single",
+                },
+            }},
+        )
+        if result.modified_count != 1:
+            raise HTTPException(409, "The duty changed before this assignment could be saved")
+
+        employee = employee_by_id(employee_id) or {}
+        audit = {
+            **common_switch,
+            "date": source_date,
+            "direction": "single",
+            "employeeId": employee_id,
+            "employeeName": source_record.get("name") or employee.get("name"),
+            "designation": source_record.get("designation") or employee.get("designation"),
+            "previous": previous,
+            "updated": updated,
+        }
+        duty_switch_collection.insert_one(audit)
+        comp_off_id = award_off_day_comp_off(
+            employee_id=employee_id,
+            duty_date=source_date,
+            previous_duty=source_duty,
+            assigned_duty=moved_duty,
+            group_name=updated_group,
+            switch_id=switch_id,
+            source=common_switch["source"],
+        )
+        if comp_off_id:
+            duty_switch_collection.update_many(
+                {"switchId": switch_id, "direction": "single"},
+                {"$set": {"compOffAwarded": True, "compOffId": comp_off_id}},
+            )
+            employee_daily_collection.update_one(
+                {"_id": source_record["_id"]},
+                {"$set": {"lastDutySwitch.compOffAwarded": True, "lastDutySwitch.compOffId": comp_off_id}},
+            )
+
+        replacement_result = None
+        if linked_leave:
+            replacement_result = assign_replacement(
+                leave_id,
+                {
+                    "replacementEmployeeId": employee_id,
+                    "mode": "normal",
+                    "halfDuty": False,
+                    "reason": reason,
+                },
+                user=user,
+            )
+        notify_all(
+            employee_ids=[employee_id],
+            subject="Duty assignment changed",
+            message=(
+                f"Your duty on {source_date} was changed from {source_duty or '-'} "
+                f"to {moved_duty or '-'}."
+                + (
+                    f" You were linked as replacement for {linked_leave.get('name') or linked_leave.get('employeeId')}."
+                    if linked_leave else ""
+                )
+                + f" Reason: {reason}"
+            ),
+            ref_id=switch_id,
+            action="VIEW_CALENDAR",
+            type="DUTY",
+        )
+        return {
+            "message": "Single duty assigned successfully",
+            "switchId": switch_id,
+            "singleAssignment": True,
+            "source": {"date": source_date, "previous": previous, "updated": updated},
+            "destination": {"date": destination_date, "previous": previous, "updated": updated},
+            "compOffAwarded": bool(comp_off_id),
+            "compOffId": comp_off_id,
+            "linkedLeave": {
+                "id": leave_id,
+                "employeeId": linked_leave.get("employeeId"),
+                "name": linked_leave.get("name"),
+                "assignedDuty": linked_leave.get("assignedDuty"),
+                "groupName": linked_leave.get("groupName"),
+            } if linked_leave else None,
+            "replacementResult": replacement_result,
+        }
+
     transfer_from_working_day = source_duty_normalized in SHIFT_DUTIES
     additional_off_day_duty = (
         source_duty_normalized in OFF_DUTIES
@@ -2095,6 +2629,78 @@ def assign_replacement(leave_id: str, payload: dict, user=Depends(get_authentica
     # FINAL RETURN
     # =============================
     return {"message": "Replacement processed successfully"}
+
+
+@router.delete("/assign/{leave_id}")
+def delete_replacement_assignment(
+    leave_id: str,
+    payload: Optional[dict] = None,
+    user=Depends(get_authenticated_user),
+):
+    try:
+        object_id = ObjectId(leave_id)
+    except Exception as exc:
+        raise HTTPException(400, "Invalid leave identifier") from exc
+    leave = leave_request_collection.find_one({"_id": object_id})
+    if not leave:
+        raise HTTPException(404, "Leave not found")
+    require_replacement_authority(user, leave)
+    replacement = leave.get("replacement") or {}
+    replacement_id = str(replacement.get("employeeId") or "").strip()
+    if not replacement_id:
+        raise HTTPException(409, "No replacement assignment exists for this leave")
+    reason = str((payload or {}).get("reason") or "Replacement assignment deleted").strip()
+    actor_id = str(user.get("employeeId") or user.get("userId") or "ADMIN").strip()
+    actor_role = "Administrator" if str(user.get("role") or "").lower() == "admin" else "Replacement authority"
+    replacement_daily = employee_daily_collection.find_one({
+        "employeeId": employee_id_filter(replacement_id),
+        "date": leave.get("date"),
+    }) or {}
+
+    release_replacement_assignment(leave, reason, actor_id, actor_role)
+    now = datetime.utcnow()
+    duty_notification_collection.update_many(
+        {"leaveId": str(leave["_id"]), "status": {"$nin": ["Superseded", "Cancelled"]}},
+        {
+            "$set": {
+                "status": "Cancelled", "decision": reason, "updatedAt": now,
+            },
+            "$push": {"decisionHistory": {
+                "action": "AssignmentDeleted", "actedBy": actor_id,
+                "actorRole": actor_role, "actedAt": now, "reason": reason,
+            }},
+        },
+    )
+    inserted = duty_switch_collection.insert_one({
+        "date": leave.get("date"),
+        "employeeId": replacement_id,
+        "employeeName": replacement.get("name") or replacement_daily.get("name"),
+        "previous": {
+            "assignedDuty": replacement_daily.get("assignedDuty"),
+            "groupName": replacement_daily.get("groupName"),
+            "replacementDuty": True,
+        },
+        "updated": {"replacementDuty": False},
+        "reason": reason,
+        "changedBy": actor_id,
+        "changedOn": now,
+        "source": "Replacement assignment deleted",
+        "leaveId": str(leave["_id"]),
+        "replacedEmployeeId": str(leave.get("employeeId") or ""),
+        "replacedEmployeeName": leave.get("name"),
+    })
+    notify_all(
+        employee_ids=[replacement_id, str(leave.get("employeeId") or "")],
+        subject="Replacement assignment cancelled",
+        message=(
+            f"The replacement assignment for {leave.get('date')} was cancelled by "
+            f"{actor_role}. Reason: {reason}"
+        ),
+        ref_id=str(inserted.inserted_id),
+        action="VIEW_CALENDAR",
+        type="DUTY",
+    )
+    return {"message": "Replacement assignment deleted and original duty restored"}
 
 # =========================================================
 # REPLACEMENT HISTORY

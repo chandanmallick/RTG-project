@@ -49,6 +49,7 @@ export default function DutyReassignmentPanel({
   const [employees, setEmployees] = useState([]);
   const [leaves, setLeaves] = useState([]);
   const [history, setHistory] = useState([]);
+  const [exchangeRequests, setExchangeRequests] = useState([]);
   const [firstId, setFirstId] = useState("");
   const [secondId, setSecondId] = useState("");
   const [destinationDate, setDestinationDate] = useState(dayjs(initialDate || undefined).add(1, "day").format("YYYY-MM-DD"));
@@ -68,7 +69,10 @@ export default function DutyReassignmentPanel({
       const roleResult = await api.get("/leave/my-role");
       const nextRole = roleResult.data || {};
       const manager = Boolean(nextRole.isAdmin || nextRole.isDeptIC || nextRole.isLeaveAuthority);
-      const requests = [api.get("/replacement/duty-switch/options", { params: { date } })];
+      const requests = [
+        api.get("/replacement/duty-switch/options", { params: { date } }),
+        api.get("/replacement/duty-switch/exchange-requests", { params: { status: "Pending" } }),
+      ];
       if (manager) {
         requests.push(api.get("/replacement/pending"));
         requests.push(api.get("/replacement/duty-switch/history", {
@@ -78,9 +82,10 @@ export default function DutyReassignmentPanel({
           },
         }));
       }
-      const [optionResult, leaveResult, historyResult] = await Promise.all(requests);
+      const [optionResult, exchangeResult, leaveResult, historyResult] = await Promise.all(requests);
       setRole(nextRole);
       setEmployees(optionResult.data || []);
+      setExchangeRequests(exchangeResult.data || []);
       const fetchedLeaves = leaveResult?.data || [];
       setLeaves(
         initialLeave && !fetchedLeaves.some((item) => item.id === initialLeave.id)
@@ -140,13 +145,18 @@ export default function DutyReassignmentPanel({
         setNotice({ severity: "success", text: "Single leave replacement assigned and recorded." });
       } else if (mode === "exchange") {
         if (!firstId || !secondId) throw new Error("Select both employees for the exchange.");
-        await api.put("/replacement/duty-switch/exchange", {
+        const result = await api.put("/replacement/duty-switch/exchange", {
           date,
           firstEmployeeId: firstId,
           secondEmployeeId: secondId,
           reason: reason.trim(),
         });
-        setNotice({ severity: "success", text: "Both employees’ duties and groups were exchanged." });
+        setNotice({
+          severity: "success",
+          text: result.data?.pendingApproval
+            ? "Duty exchange requested. It now requires the other employee, both SICs, and final DIC approval."
+            : "Both employees’ duties and groups were exchanged.",
+        });
       } else {
         if (!canManage || !firstId || !destinationDate) throw new Error("Select an employee and destination date.");
         if (!destinationAssignment) throw new Error("The employee has no roster duty on the destination date.");
@@ -161,7 +171,7 @@ export default function DutyReassignmentPanel({
         setNotice({
           severity: "success",
           text: [
-            "Duty moved across dates and recorded.",
+            result.data?.singleAssignment ? "Single duty assigned and recorded." : "Duty moved across dates and recorded.",
             result.data?.linkedLeave ? `Replacement linked for ${result.data.linkedLeave.name || result.data.linkedLeave.employeeId}.` : "",
             result.data?.compOffAwarded ? "A C-OFF credit was added for duty on the OFF day." : "",
           ].filter(Boolean).join(" "),
@@ -174,6 +184,28 @@ export default function DutyReassignmentPanel({
       onChanged?.();
     } catch (error) {
       setNotice({ severity: "error", text: error.response?.data?.detail || error.message || "The duty change could not be saved." });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const decideExchange = async (request, decision) => {
+    let comment = "";
+    if (decision === "reject") {
+      comment = window.prompt("Enter the rejection comment:", "") ?? "";
+      if (!comment.trim()) return;
+    }
+    setLoading(true);
+    try {
+      const result = await api.put(`/replacement/duty-switch/exchange-requests/${request.id}/decision`, {
+        decision,
+        comment: comment.trim(),
+      });
+      setNotice({ severity: "success", text: result.data?.message || "Duty-exchange decision recorded." });
+      await load();
+      onChanged?.();
+    } catch (error) {
+      setNotice({ severity: "error", text: error.response?.data?.detail || "Duty-exchange decision could not be recorded." });
     } finally {
       setLoading(false);
     }
@@ -282,7 +314,7 @@ export default function DutyReassignmentPanel({
             </Grid>
           ) : (
             <Grid item xs={12} md={3}>
-              <Field label="Destination duty date" helper="The two date assignments will be swapped; duty is not duplicated.">
+              <Field label="Destination duty date" helper={destinationDate === date ? "Same date: only the selected duty will be assigned; no second duty is moved." : "Different dates: the two date assignments will be swapped; duty is not duplicated."}>
                 <input type="date" value={destinationDate} onChange={(event) => { setDestinationDate(event.target.value); setLeaveId(""); }} style={{ width: "100%", height: 40, padding: "0 11px", border: "1px solid #CBD5E1", borderRadius: 8, color: "#0F172A", background: "#FFFFFF", fontWeight: 750, boxSizing: "border-box" }} />
               </Field>
             </Grid>
@@ -340,7 +372,7 @@ export default function DutyReassignmentPanel({
           </Grid>
           <Grid item xs={12} md={2.5} sx={{ display: "flex", alignItems: "flex-end" }}>
             <Button fullWidth variant="contained" disabled={loading || !firstId || (mode === "single" ? !leaveId : mode === "exchange" ? !secondId : !destinationAssignment || !destinationDuty)} onClick={save} sx={{ minHeight: 40, background: "#0057B7", fontWeight: 900 }}>
-              {mode === "single" ? "Assign replacement" : mode === "cross_date" ? "Move duty" : "Exchange duties"}
+              {mode === "single" ? "Assign replacement" : mode === "cross_date" ? (destinationDate === date ? "Assign duty" : "Move duty") : "Exchange duties"}
             </Button>
           </Grid>
         </Grid>
@@ -353,11 +385,11 @@ export default function DutyReassignmentPanel({
             {mode === "cross_date" && destinationAssignment && (
               <>
                 <Typography sx={{ mt: .4, fontSize: 12, fontWeight: 800 }}>
-                  Destination: {dayjs(destinationDate).format("DD MMM YYYY")} · currently {destinationAssignment.assignedDuty || "No duty"} · will become {destinationDuty || first?.assignedDuty || "-"} · {destinationAssignment.groupName || "No group"}
+                  {destinationDate === date ? "Single assignment" : "Destination"}: {dayjs(destinationDate).format("DD MMM YYYY")} · currently {destinationAssignment.assignedDuty || "No duty"} · will become {destinationDuty || first?.assignedDuty || "-"} · {destinationAssignment.groupName || "No group"}
                 </Typography>
                 {["OFF", "O1", "O2"].includes(String(destinationAssignment.assignedDuty || "").toUpperCase()) && first && (
                   ["OFF", "O1", "O2"].includes(String(first.assignedDuty || "").toUpperCase()) ? (
-                    <Chip sx={{ mt: 1, background: "#DCFCE7", color: "#166534", fontWeight: 900 }} size="small" label="C-OFF will be registered: source and destination are both OFF" />
+                    <Chip sx={{ mt: 1, background: "#DCFCE7", color: "#166534", fontWeight: 900 }} size="small" label={destinationDate === date ? "C-OFF will be registered for this additional OFF-day duty" : "C-OFF will be registered: source and destination are both OFF"} />
                   ) : (
                     <Chip sx={{ mt: 1, background: "#FEF3C7", color: "#92400E", fontWeight: 900 }} size="small" label="No C-OFF: an existing working duty is being shifted to this OFF day" />
                   )
@@ -365,6 +397,51 @@ export default function DutyReassignmentPanel({
               </>
             )}
           </Box>
+        )}
+
+        {exchangeRequests.length > 0 && (
+          <>
+            <Typography sx={{ mt: 2.5, mb: 1, color: "#0F172A", fontWeight: 900 }}>Duty exchange approvals</Typography>
+            <TableContainer sx={{ maxHeight: 300, border: "1px solid #BFDBFE", borderRadius: 2 }}>
+              <Table size="small" stickyHeader>
+                <TableHead><TableRow>
+                  <TableCell>Date</TableCell><TableCell>Requested exchange</TableCell><TableCell>Current stage</TableCell><TableCell>Approval progress</TableCell><TableCell align="right">Action</TableCell>
+                </TableRow></TableHead>
+                <TableBody>
+                  {exchangeRequests.map((request) => {
+                    const firstPerson = request.firstEmployee || {};
+                    const secondPerson = request.secondEmployee || {};
+                    const sicDone = (request.sicApprovals || []).filter((item) => item.status === "Approved").length;
+                    const sicTotal = (request.sicApprovals || []).length;
+                    return (
+                      <TableRow key={request.id} hover>
+                        <TableCell>{dayjs(request.date).format("DD MMM YYYY")}</TableCell>
+                        <TableCell>
+                          <strong>{firstPerson.name || firstPerson.employeeId}</strong> ({firstPerson.assignedDuty || "-"}, {firstPerson.groupName || "-"})
+                          <br /><Typography variant="caption">with {secondPerson.name || secondPerson.employeeId} ({secondPerson.assignedDuty || "-"}, {secondPerson.groupName || "-"})</Typography>
+                          <br /><Typography variant="caption" color="text.secondary">{request.reason}</Typography>
+                        </TableCell>
+                        <TableCell><Chip size="small" color={request.stage === "dic" ? "warning" : "info"} label={request.stage === "other_employee" ? "Other employee" : request.stage === "sic" ? "SIC approval" : "Final DIC"} /></TableCell>
+                        <TableCell>
+                          <Typography variant="caption" display="block">Other employee: {request.stage === "other_employee" ? "Pending" : "Approved"}</Typography>
+                          <Typography variant="caption" display="block">SIC: {sicDone}/{sicTotal}</Typography>
+                          <Typography variant="caption" display="block">DIC: {request.stage === "dic" ? "Pending" : "Not reached"}</Typography>
+                        </TableCell>
+                        <TableCell align="right">
+                          {request.canAct ? (
+                            <Box sx={{ display: "flex", justifyContent: "flex-end", gap: .75 }}>
+                              <Button size="small" color="success" variant="contained" onClick={() => decideExchange(request, "approve")}>Approve</Button>
+                              <Button size="small" color="error" variant="outlined" onClick={() => decideExchange(request, "reject")}>Reject</Button>
+                            </Box>
+                          ) : <Typography variant="caption" color="text.secondary">Awaiting concerned approver</Typography>}
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </TableContainer>
+          </>
         )}
 
         {canManage && (

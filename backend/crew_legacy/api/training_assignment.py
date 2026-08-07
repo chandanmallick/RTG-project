@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pymongo import UpdateOne
 
 from crew_legacy.admin_logic.auth_utils import get_authenticated_user, require_page_write
+from crew_legacy.admin_logic.notification_service import notify_all
 from crew_legacy.api.admin_api import resolve_employee_organization
 from crew_legacy.database.database_mongo import (
     employee_collection,
@@ -67,6 +68,25 @@ def employee_snapshot(employee: dict | None):
         "name": employee.get("name"),
         "designation": employee.get("designation"),
     }
+
+
+def financial_year_bounds(value: str):
+    moment = datetime.strptime(value, "%Y-%m-%d")
+    start_year = moment.year if moment.month >= 4 else moment.year - 1
+    return f"{start_year}-04-01", f"{start_year + 1}-03-31"
+
+
+def recipient_emails(employee_ids):
+    ids = [clean_id(value) for value in dict.fromkeys(employee_ids or []) if clean_id(value)]
+    if not ids:
+        return []
+    output, seen = [], set()
+    for item in employee_collection.find({"$or": [{"userId": {"$in": ids}}, {"employeeId": {"$in": ids}}]}):
+        value = clean_id(item.get("gmail") or item.get("email") or item.get("mailId"))
+        if value and "@" in value and value.lower() not in seen:
+            seen.add(value.lower())
+            output.append(value)
+    return output
 
 
 def shift_group_context(emp_id: str):
@@ -212,7 +232,10 @@ def serialize_nomination(record: dict, actor_id: str | None = None, is_admin: bo
         group_context = {**group_context, **shift_group_context(record.get("employeeId"))}
     return {
         "id": str(record["_id"]),
+        "workflowKind": record.get("workflowKind") or "Training",
+        "parentNominationId": clean_id(record.get("parentNominationId")),
         "trainingName": record.get("trainingName"),
+        "trainingLocation": record.get("trainingLocation"),
         "trainingDate": record.get("trainingDate") or record.get("startDate"),
         "startDate": record.get("startDate") or record.get("trainingDate"),
         "endDate": record.get("endDate") or record.get("trainingDate"),
@@ -226,6 +249,7 @@ def serialize_nomination(record: dict, actor_id: str | None = None, is_admin: bo
         "replacementRequired": bool(record.get("replacementRequired")),
         "replacementEmployee": record.get("replacementEmployee"),
         "actingSICEmployee": record.get("actingSICEmployee"),
+        "adjacentOff": record.get("adjacentOff") or {"before": False, "after": False},
         "replacementDecisionHistory": record.get("replacementDecisionHistory") or [],
         "status": record.get("status"),
         "approvalChain": chain,
@@ -377,6 +401,42 @@ def finalize_daily_records(record: dict):
     if operations:
         employee_daily_collection.bulk_write(operations)
 
+    adjacent_off = record.get("adjacentOff") or {}
+    boundary_dates = []
+    if adjacent_off.get("before"):
+        boundary_dates.append((datetime.strptime(record.get("startDate"), "%Y-%m-%d") - timedelta(days=1)).strftime("%Y-%m-%d"))
+    if adjacent_off.get("after"):
+        boundary_dates.append((datetime.strptime(record.get("endDate"), "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d"))
+    for off_date in boundary_dates:
+        current = employee_daily_collection.find_one({"employeeId": record.get("employeeId"), "date": off_date}) or {}
+        employee_daily_collection.update_one(
+            {"employeeId": record.get("employeeId"), "date": off_date},
+            {
+                "$set": {
+                    "assignedDuty": "OFF",
+                    "actualStatus": "OFF",
+                    "trainingAdjacentOff": {
+                        "nominationId": str(record["_id"]),
+                        "trainingName": record.get("trainingName"),
+                        "status": "Approved",
+                    },
+                    "trainingAdjacentOffOriginalAssignment": current.get("trainingAdjacentOffOriginalAssignment") or {
+                        "assignedDuty": current.get("assignedDuty"),
+                        "actualStatus": current.get("actualStatus"),
+                        "groupName": current.get("groupName"),
+                    },
+                    "updatedOn": datetime.utcnow(),
+                },
+                "$setOnInsert": {
+                    "employeeId": record.get("employeeId"), "name": record.get("employeeName"),
+                    "designation": record.get("employeeDesignation"), "date": off_date,
+                    "year": int(off_date[:4]), "month": int(off_date[5:7]),
+                    "groupName": record.get("groupName") or "Other Employees", "createdOn": datetime.utcnow(),
+                },
+            },
+            upsert=True,
+        )
+
 
 @router.get("/calendar/{startDate}/{endDate}")
 def get_training_calendar(startDate: str, endDate: str):
@@ -408,6 +468,34 @@ def get_training_calendar(startDate: str, endDate: str):
         },
     ))
     employee_map = {employee_id(item): item for item in employees if employee_id(item)}
+    fy_start, fy_end = financial_year_bounds(startDate)
+    training_days = {}
+    for item in training_nomination_history_collection.find(
+        {
+            "status": "Approved",
+            "startDate": {"$lte": fy_end},
+            "workflowKind": {"$ne": "Adjacent OFF"},
+            "$or": [
+                {"endDate": {"$gte": fy_start}},
+                {"endDate": {"$exists": False}, "trainingDate": {"$gte": fy_start}},
+            ],
+        },
+        {"employeeId": 1, "startDate": 1, "endDate": 1},
+    ):
+        try:
+            period_start = max(
+                datetime.strptime(item.get("startDate"), "%Y-%m-%d"),
+                datetime.strptime(fy_start, "%Y-%m-%d"),
+            )
+            period_end = min(
+                datetime.strptime(item.get("endDate") or item.get("startDate"), "%Y-%m-%d"),
+                datetime.strptime(fy_end, "%Y-%m-%d"),
+            )
+            days = (period_end - period_start).days + 1
+        except (TypeError, ValueError):
+            days = 0
+        emp_key = clean_id(item.get("employeeId"))
+        training_days[emp_key] = training_days.get(emp_key, 0) + max(0, days)
 
     active_shift_ids = set()
     for group in roster_group_collection.find(
@@ -431,6 +519,7 @@ def get_training_calendar(startDate: str, endDate: str):
             non_shift_duties.setdefault(emp_id, {})[record.get("date")] = {
                 "shift": record.get("assignedDuty"),
                 "leaveStatus": record.get("leaveStatus"),
+                "leaveType": record.get("leaveType"),
                 "trainingName": record.get("trainingName"),
                 "trainingStatus": (record.get("trainingFinal") or {}).get("status")
                 or (record.get("trainingNomination") or {}).get("status"),
@@ -445,11 +534,13 @@ def get_training_calendar(startDate: str, endDate: str):
             "designation": record.get("designation") or employee.get("designation"),
             "organization": employee.get("department") or employee.get("vertical"),
             "employeeType": "Shift",
+            "financialYearTrainingDays": training_days.get(emp_id, 0),
             "duties": {},
         })
         person["duties"][record.get("date")] = {
             "shift": record.get("assignedDuty"),
             "leaveStatus": record.get("leaveStatus"),
+            "leaveType": record.get("leaveType"),
             "trainingName": record.get("trainingName"),
             "trainingStatus": (record.get("trainingFinal") or {}).get("status")
             or (record.get("trainingNomination") or {}).get("status"),
@@ -475,6 +566,7 @@ def get_training_calendar(startDate: str, endDate: str):
             "designation": employee.get("designation"),
             "organization": organization,
             "employeeType": "Non-shift",
+            "financialYearTrainingDays": training_days.get(emp_id, 0),
             "duties": non_shift_duties.get(emp_id, {}),
         }
 
@@ -510,6 +602,102 @@ def get_pending(user=Depends(get_authenticated_user)):
         ("createdOn", 1),
     ])
     return [serialize_nomination(item, actor_id, is_admin) for item in records]
+
+
+@router.get("/my-approved")
+def get_my_approved_training(user=Depends(get_authenticated_user)):
+    """Return the logged-in employee's approved training and linked OFF request."""
+    actor_id = clean_id(user.get("employeeId"))
+    if not actor_id:
+        raise HTTPException(401, "Employee identity is required")
+    records = list(training_nomination_history_collection.find({
+        "employeeId": actor_id,
+        "status": "Approved",
+        "workflowKind": {"$ne": "Adjacent OFF"},
+    }).sort("startDate", -1).limit(100))
+    parent_ids = [str(item["_id"]) for item in records]
+    requests = list(training_nomination_history_collection.find({
+        "workflowKind": "Adjacent OFF",
+        "parentNominationId": {"$in": parent_ids},
+    }).sort("createdOn", -1)) if parent_ids else []
+    request_by_parent = {}
+    for item in requests:
+        request_by_parent.setdefault(clean_id(item.get("parentNominationId")), item)
+    output = []
+    for item in records:
+        serialized = serialize_nomination(item, actor_id, False)
+        linked = request_by_parent.get(str(item["_id"]))
+        serialized["adjacentOffRequest"] = (
+            serialize_nomination(linked, actor_id, False) if linked else None
+        )
+        output.append(serialized)
+    return output
+
+
+@router.post("/request-adjacent-off/{nomination_id}")
+def request_training_adjacent_off(
+    nomination_id: str,
+    data: dict,
+    user=Depends(get_authenticated_user),
+):
+    """Start a new hierarchy approval after the employee's training is approved."""
+    if not ObjectId.is_valid(nomination_id):
+        raise HTTPException(400, "Invalid training nomination")
+    actor_id = clean_id(user.get("employeeId"))
+    parent = training_nomination_history_collection.find_one({
+        "_id": ObjectId(nomination_id),
+        "employeeId": actor_id,
+        "status": "Approved",
+        "workflowKind": {"$ne": "Adjacent OFF"},
+    })
+    if not parent:
+        raise HTTPException(404, "Approved training was not found for this employee")
+    adjacent_off = {
+        "before": bool(data.get("before")),
+        "after": bool(data.get("after")),
+    }
+    if not any(adjacent_off.values()):
+        raise HTTPException(400, "Select the day before, the day after, or both")
+    existing = training_nomination_history_collection.find_one({
+        "workflowKind": "Adjacent OFF",
+        "parentNominationId": nomination_id,
+        "status": {"$nin": ["Rejected", "Cancelled"]},
+    })
+    if existing:
+        raise HTTPException(409, "An adjacent OFF request already exists for this training")
+    employee = employee_collection.find_one({
+        "$or": [{"userId": actor_id}, {"employeeId": actor_id}],
+    }) or {}
+    chain = approval_chain(employee)
+    if not chain:
+        raise HTTPException(409, "Organization reporting hierarchy is not mapped")
+    now = datetime.utcnow()
+    linked = {
+        **{key: parent.get(key) for key in (
+            "trainingName", "trainingLocation", "trainingDate", "startDate", "endDate",
+            "employeeId", "employeeName", "employeeDesignation", "employeeType",
+            "groupName", "isShiftEmployee", "isGroupSIC",
+        )},
+        "workflowKind": "Adjacent OFF",
+        "parentNominationId": nomination_id,
+        "adjacentOff": adjacent_off,
+        "replacementRequired": False,
+        "replacementEmployee": None,
+        "actingSICEmployee": None,
+        "replacementDecisionHistory": [],
+        "status": "Pending Approval",
+        "approvalChain": chain,
+        "currentApprovalIndex": 0,
+        "currentApproverId": chain[0]["employeeId"],
+        "nominatedBy": employee_snapshot(employee),
+        "createdOn": now,
+        "updatedOn": now,
+    }
+    result = training_nomination_history_collection.insert_one(linked)
+    return {
+        "id": str(result.inserted_id),
+        "message": "Adjacent OFF request sent through the reporting hierarchy",
+    }
 
 
 @router.get("/replacement-candidates/{nomination_id}")
@@ -622,6 +810,7 @@ def get_training_replacement_candidates(
 def nominate_training(data: dict, user=Depends(get_authenticated_user)):
     require_page_write(user, "crew_training")
     training_name = str(data.get("trainingName") or "").strip()
+    training_location = str(data.get("trainingLocation") or "").strip()
     start_date = data.get("startDate") or data.get("date")
     end_date = data.get("endDate") or start_date
     list(date_range(start_date, end_date))
@@ -679,6 +868,7 @@ def nominate_training(data: dict, user=Depends(get_authenticated_user)):
         group_context = shift_group_context(snapshot["employeeId"])
         result = training_nomination_history_collection.insert_one({
             "trainingName": training_name,
+            "trainingLocation": training_location,
             "trainingDate": start_date,
             "startDate": start_date,
             "endDate": end_date,
@@ -692,6 +882,8 @@ def nominate_training(data: dict, user=Depends(get_authenticated_user)):
             "replacementRequired": False,
             "replacementEmployee": None,
             "actingSICEmployee": None,
+            "workflowKind": "Training",
+            "adjacentOff": {"before": False, "after": False},
             "replacementDecisionHistory": [],
             "status": "Pending Approval",
             "approvalChain": chain,
@@ -883,7 +1075,31 @@ def approve_training(data: dict, user=Depends(get_authenticated_user)):
             },
         )
         if update["status"] == "Approved":
-            finalize_daily_records({**record, **update})
+            approved_record = {**record, **update}
+            finalize_daily_records(approved_record)
+            chain_ids = [clean_id(item.get("employeeId")) for item in chain]
+            recipient_ids = list(dict.fromkeys([clean_id(record.get("employeeId")), *chain_ids]))
+            adjacent = record.get("adjacentOff") or {}
+            off_text = ", ".join(label for label, enabled in (("day before", adjacent.get("before")), ("day after", adjacent.get("after"))) if enabled) or "Not requested"
+            is_adjacent_off = record.get("workflowKind") == "Adjacent OFF"
+            notify_all(
+                email_list=recipient_emails(recipient_ids), employee_ids=recipient_ids,
+                subject="Training adjacent OFF approved" if is_adjacent_off else "Training nomination approved",
+                message=(
+                    f"Adjacent OFF has been approved for {record.get('employeeName')} against {record.get('trainingName')}."
+                    if is_adjacent_off else
+                    f"{record.get('employeeName')} has been approved for {record.get('trainingName')} ({record.get('startDate')} to {record.get('endDate')})."
+                ),
+                ref_id=str(record["_id"]), action="/crew/training", type="TRAINING",
+                template_key="training_adjacent_off_approved" if is_adjacent_off else "training_approved",
+                template_values={
+                    "employee_name": record.get("employeeName"), "employee_id": record.get("employeeId"),
+                    "training_name": record.get("trainingName"),
+                    "training_period": f"{record.get('startDate')} to {record.get('endDate')}",
+                    "training_location": record.get("trainingLocation") or "Not specified",
+                    "adjacent_off": off_text,
+                },
+            )
     return {"message": f"{len(records)} nomination(s) approved and forwarded"}
 
 

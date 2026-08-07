@@ -56,6 +56,28 @@ WORKFLOW_MAIL_DEFAULTS = {
         "subjectTemplate": "Leave Rejected",
         "bodyTemplate": "Your leave has been rejected.\n\nDate: {leave_date}\nType: {leave_type}\nComment: {comment}",
     },
+    "training_approved": {
+        "label": "Training nomination finally approved",
+        "enabled": True,
+        "subjectTemplate": "Training approved - {training_name}",
+        "bodyTemplate": (
+            "Training nomination has been approved.\n\n"
+            "Employee: {employee_name} ({employee_id})\n"
+            "Training: {training_name}\nPeriod: {training_period}\n"
+            "Location: {training_location}\nAdjacent OFF: {adjacent_off}"
+        ),
+    },
+    "training_adjacent_off_approved": {
+        "label": "Training adjacent OFF finally approved",
+        "enabled": True,
+        "subjectTemplate": "Training adjacent OFF approved - {training_name}",
+        "bodyTemplate": (
+            "Adjacent OFF has been approved.\n\n"
+            "Employee: {employee_name} ({employee_id})\n"
+            "Training: {training_name}\nPeriod: {training_period}\n"
+            "Location: {training_location}\nApproved OFF: {adjacent_off}"
+        ),
+    },
 }
 
 

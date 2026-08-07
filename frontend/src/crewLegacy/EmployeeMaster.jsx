@@ -254,6 +254,19 @@ export default function EmployeeMaster() {
     setFormData(emptyForm);
   };
 
+  const toggleEmployeeStatus = async (employee) => {
+    const activate = employee.isActive === false;
+    const reason = activate
+      ? "Reactivated by administrator"
+      : window.prompt("Reason for deactivation / transfer", "Transferred / relieved");
+    if (!activate && reason === null) return;
+    await api.patch(`/admin/employees/${employee.id}/status`, {
+      isActive: activate,
+      reason: reason || "Transferred / relieved",
+    });
+    await fetchEmployees();
+  };
+
   // ðŸ”„ Sort Handler
   const handleSort = (column) => {
     const isAsc = orderBy === column && orderDirection === "asc";
@@ -568,12 +581,13 @@ export default function EmployeeMaster() {
               <TableCell><strong>Vertical(s)</strong></TableCell>
               <TableCell><strong>Reporting Officer(s)</strong></TableCell>
               <TableCell><strong>Function(s)</strong></TableCell>
+              <TableCell><strong>Status</strong></TableCell>
               <TableCell><strong>Action</strong></TableCell>
             </TableRow>
 
             {/* ðŸ”Ž Search Row */}
             <TableRow>
-              <TableCell colSpan={13}>
+              <TableCell colSpan={14}>
                 <TextField
                   fullWidth
                   size="small"
@@ -590,7 +604,7 @@ export default function EmployeeMaster() {
 
           <TableBody>
             {paginatedData.map((emp) => (
-              <TableRow key={emp.id}>
+              <TableRow key={emp.id} sx={{ opacity: emp.isActive === false ? .62 : 1 }}>
                 <TableCell>{emp.seniorityOrder || "-"}</TableCell>
                 <TableCell>{emp.name}</TableCell>
                 <TableCell>{emp.designation}</TableCell>
@@ -603,8 +617,12 @@ export default function EmployeeMaster() {
                 <TableCell>{normalizeListValue(emp.verticals || emp.vertical).join(", ") || "-"}</TableCell>
                 <TableCell>{normalizeListValue(emp.reportingOfficerNames || emp.reportingOfficerName).join(", ") || "-"}</TableCell>
                 <TableCell>{normalizeListValue(emp.functionNames).join(", ") || "-"}</TableCell>
+                <TableCell><Chip size="small" label={emp.isActive === false ? "Inactive / Transferred" : "Active"} color={emp.isActive === false ? "default" : "success"} sx={{ fontWeight: 800 }} /></TableCell>
                 <TableCell>
-                  <Button onClick={() => handleEdit(emp)}>Edit</Button>
+                  <Stack direction="row" spacing={.5}>
+                    <Button onClick={() => handleEdit(emp)} disabled={emp.isActive === false}>Edit</Button>
+                    <Button color={emp.isActive === false ? "success" : "warning"} onClick={() => toggleEmployeeStatus(emp)}>{emp.isActive === false ? "Activate" : "Deactivate"}</Button>
+                  </Stack>
                 </TableCell>
               </TableRow>
             ))}

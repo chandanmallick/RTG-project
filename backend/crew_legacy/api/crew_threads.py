@@ -1,0 +1,454 @@
+import hashlib
+import json
+import re
+import uuid
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+from urllib.parse import urlparse
+
+from bson import ObjectId
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
+from fastapi.responses import FileResponse
+from pydantic import BaseModel, Field
+
+from crew_legacy.admin_logic.auth_utils import (
+    get_authenticated_user,
+    require_page_view,
+    require_page_write,
+)
+from crew_legacy.database.database_mongo import (
+    crew_thread_collection,
+    crew_thread_message_collection,
+    employee_collection,
+    organization_unit_collection,
+    roster_group_collection,
+)
+from crew_legacy.security_utils import ensure_upload_allowed
+
+
+router = APIRouter()
+UPLOAD_ROOT = Path(__file__).resolve().parents[2] / "uploads" / "crew_threads"
+UPLOAD_ROOT.mkdir(parents=True, exist_ok=True)
+crew_thread_collection.create_index([("updatedAt", -1)])
+crew_thread_message_collection.create_index([("threadId", 1), ("createdAt", -1)])
+MAX_FILE_BYTES = 25 * 1024 * 1024
+MAX_FILES_PER_MESSAGE = 10
+ALLOWED_EXTENSIONS = {
+    "txt", "csv", "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx",
+    "png", "jpg", "jpeg", "gif", "webp", "bmp",
+}
+ALLOWED_CONTENT_TYPES = {
+    "text/plain", "text/csv", "application/pdf", "application/msword",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/vnd.ms-excel",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "application/vnd.ms-powerpoint",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    "application/zip", "application/x-zip-compressed",
+    "image/png", "image/jpeg", "image/gif", "image/webp", "image/bmp",
+    "application/octet-stream",
+}
+
+
+class ThreadCreate(BaseModel):
+    title: str
+    description: str = ""
+    audience: Dict[str, Any] = Field(default_factory=dict)
+
+
+def now_utc():
+    return datetime.utcnow()
+
+
+def actor(user: dict):
+    return {
+        "employeeId": str(user.get("employeeId") or user.get("userId") or "").strip(),
+        "name": str(user.get("name") or "").strip(),
+        "designation": str(user.get("designation") or "").strip(),
+    }
+
+
+def employee_identity(user: dict):
+    employee_id = str(user.get("employeeId") or user.get("userId") or "").strip()
+    employee = employee_collection.find_one(
+        {"$or": [{"userId": employee_id}, {"employeeId": employee_id}]},
+        {
+            "userId": 1, "employeeId": 1, "functionIds": 1, "verticalIds": 1,
+            "sectionIds": 1, "departmentIds": 1,
+        },
+    ) or {}
+    unit_ids = set()
+    for key in ("functionIds", "verticalIds", "sectionIds", "departmentIds"):
+        values = employee.get(key) or []
+        if not isinstance(values, list):
+            values = [values]
+        unit_ids.update(str(value).strip() for value in values if str(value).strip())
+    groups = roster_group_collection.find({
+        "isActive": {"$ne": False},
+        "$or": [
+            {"members.employeeId": employee_id}, {"members.userId": employee_id},
+            {"shiftInCharge.employeeId": employee_id}, {"shiftInCharge.userId": employee_id},
+        ],
+    }, {"groupName": 1})
+    return {
+        "employeeId": employee_id,
+        "unitIds": sorted(unit_ids),
+        "groupNames": sorted({str(item.get("groupName") or "").strip() for item in groups if item.get("groupName")}),
+    }
+
+
+def thread_access_query(user: dict):
+    identity = employee_identity(user)
+    conditions = [
+        {"audience.scope": {"$in": [None, "", "everyone"]}},
+        {"audience": {"$exists": False}},
+        {"createdBy.employeeId": identity["employeeId"]},
+        {"audience.employeeIds": identity["employeeId"]},
+    ]
+    if identity["unitIds"]:
+        conditions.append({"audience.unitIds": {"$in": identity["unitIds"]}})
+    if identity["groupNames"]:
+        conditions.append({"audience.groupNames": {"$in": identity["groupNames"]}})
+    return {"$or": conditions}
+
+
+def can_access_thread(user: dict, thread: dict):
+    audience = thread.get("audience") or {"scope": "everyone"}
+    if audience.get("scope") != "restricted":
+        return True
+    identity = employee_identity(user)
+    if str((thread.get("createdBy") or {}).get("employeeId") or "") == identity["employeeId"]:
+        return True
+    return bool(
+        identity["employeeId"] in (audience.get("employeeIds") or [])
+        or set(identity["unitIds"]) & set(audience.get("unitIds") or [])
+        or set(identity["groupNames"]) & set(audience.get("groupNames") or [])
+    )
+
+
+def resolve_audience(raw: dict):
+    if str(raw.get("scope") or "everyone").lower() != "restricted":
+        return {"scope": "everyone", "employees": [], "units": [], "groups": [], "employeeIds": [], "unitIds": [], "groupNames": []}
+    employee_ids = list(dict.fromkeys(str(value).strip() for value in raw.get("employeeIds") or [] if str(value).strip()))
+    unit_ids = list(dict.fromkeys(str(value).strip() for value in raw.get("unitIds") or [] if str(value).strip()))
+    group_names = list(dict.fromkeys(str(value).strip() for value in raw.get("groupNames") or [] if str(value).strip()))
+    employees = list(employee_collection.find(
+        {"$or": [{"userId": {"$in": employee_ids}}, {"employeeId": {"$in": employee_ids}}]},
+        {"userId": 1, "employeeId": 1, "name": 1, "designation": 1},
+    )) if employee_ids else []
+    valid_units = [ObjectId(value) for value in unit_ids if ObjectId.is_valid(value)]
+    units = list(organization_unit_collection.find(
+        {"_id": {"$in": valid_units}, "isActive": {"$ne": False}},
+        {"name": 1, "unitType": 1},
+    )) if valid_units else []
+    valid_groups = list(roster_group_collection.find(
+        {"groupName": {"$in": group_names}, "isActive": {"$ne": False}},
+        {"groupName": 1},
+    )) if group_names else []
+    result = {
+        "scope": "restricted",
+        "employees": [{
+            "id": str(item.get("userId") or item.get("employeeId") or ""),
+            "name": item.get("name") or item.get("userId") or item.get("employeeId"),
+            "designation": item.get("designation") or "",
+        } for item in employees],
+        "units": [{"id": str(item["_id"]), "name": item.get("name"), "type": item.get("unitType")} for item in units],
+        "groups": [{"name": item.get("groupName")} for item in valid_groups],
+    }
+    result["employeeIds"] = [item["id"] for item in result["employees"]]
+    result["unitIds"] = [item["id"] for item in result["units"]]
+    result["groupNames"] = [item["name"] for item in result["groups"]]
+    if not (result["employeeIds"] or result["unitIds"] or result["groupNames"]):
+        raise HTTPException(400, "Select at least one employee, organization unit or shift group")
+    return result
+
+
+def sharepoint_link(value: dict):
+    if not isinstance(value, dict):
+        raise HTTPException(400, "Invalid SharePoint attachment data")
+    url = str(value.get("url") or "").strip()
+    parsed = urlparse(url)
+    host = (parsed.hostname or "").lower()
+    if parsed.scheme != "https" or not (host == "sharepoint.com" or host.endswith(".sharepoint.com")):
+        raise HTTPException(400, "Only secure SharePoint links are supported")
+    name = str(value.get("name") or Path(parsed.path).name or "SharePoint attachment").strip()[:180]
+    extension = (Path(parsed.path).suffix or Path(name).suffix).lower().lstrip(".")
+    return {"id": uuid.uuid4().hex, "name": name, "url": url, "extension": extension}
+
+
+def object_id(value: str, label: str = "record"):
+    try:
+        return ObjectId(value)
+    except Exception as exc:
+        raise HTTPException(400, f"Invalid {label} identifier") from exc
+
+
+def iso(value):
+    return value.isoformat() + "Z" if isinstance(value, datetime) else value
+
+
+def clean_filename(value: str):
+    original = Path(str(value or "attachment")).name
+    stem = re.sub(r"[^A-Za-z0-9._ -]+", "_", original).strip(" .") or "attachment"
+    return stem[:180]
+
+
+def thread_response(item: dict):
+    return {
+        "id": str(item["_id"]),
+        "title": item.get("title"),
+        "description": item.get("description"),
+        "createdBy": item.get("createdBy") or {},
+        "createdAt": iso(item.get("createdAt")),
+        "updatedAt": iso(item.get("updatedAt")),
+        "lastMessage": item.get("lastMessage") or {},
+        "messageCount": int(item.get("messageCount") or 0),
+        "isClosed": bool(item.get("isClosed")),
+        "audience": item.get("audience") or {"scope": "everyone"},
+    }
+
+
+def message_response(item: dict):
+    attachments = []
+    for attachment in item.get("attachments") or []:
+        attachments.append({
+            "id": attachment.get("id"),
+            "name": attachment.get("name"),
+            "size": attachment.get("size"),
+            "contentType": attachment.get("contentType"),
+            "extension": attachment.get("extension"),
+            "isImage": bool(attachment.get("isImage")),
+            "downloadUrl": f"/api/crew/threads/attachments/{item['_id']}/{attachment.get('id')}",
+        })
+    return {
+        "id": str(item["_id"]),
+        "threadId": str(item.get("threadId")),
+        "text": item.get("text") or "",
+        "attachments": attachments,
+        "sharePointLinks": item.get("sharePointLinks") or [],
+        "createdBy": item.get("createdBy") or {},
+        "createdAt": iso(item.get("createdAt")),
+        "editedAt": iso(item.get("editedAt")),
+    }
+
+
+@router.get("")
+def list_threads(
+    search: str = "",
+    limit: int = Query(100, ge=1, le=250),
+    user=Depends(get_authenticated_user),
+):
+    require_page_view(user, "crew_threads")
+    query = {"deleted": {"$ne": True}, **thread_access_query(user)}
+    if search.strip():
+        safe_search = re.escape(search.strip())
+        access_conditions = query.pop("$or")
+        query["$and"] = [
+            {"$or": access_conditions},
+            {"$or": [
+                {"title": {"$regex": safe_search, "$options": "i"}},
+                {"description": {"$regex": safe_search, "$options": "i"}},
+            ]},
+        ]
+    rows = crew_thread_collection.find(query).sort([("updatedAt", -1)]).limit(limit)
+    return [thread_response(item) for item in rows]
+
+
+@router.get("/options")
+def thread_options(user=Depends(get_authenticated_user)):
+    require_page_view(user, "crew_threads")
+    employees = employee_collection.find(
+        {"isActive": {"$ne": False}},
+        {"userId": 1, "employeeId": 1, "name": 1, "designation": 1},
+    ).sort([("name", 1)])
+    units = organization_unit_collection.find(
+        {"isActive": {"$ne": False}},
+        {"name": 1, "unitType": 1},
+    ).sort([("unitType", 1), ("name", 1)])
+    groups = roster_group_collection.find(
+        {"isActive": {"$ne": False}}, {"groupName": 1},
+    ).sort([("groupName", 1)])
+    return {
+        "employees": [{
+            "id": str(item.get("userId") or item.get("employeeId") or ""),
+            "name": item.get("name") or item.get("userId") or item.get("employeeId"),
+            "designation": item.get("designation") or "",
+        } for item in employees if item.get("userId") or item.get("employeeId")],
+        "units": [{"id": str(item["_id"]), "name": item.get("name"), "type": item.get("unitType")} for item in units],
+        "groups": [{"name": item.get("groupName")} for item in groups if item.get("groupName")],
+    }
+
+
+@router.post("")
+def create_thread(data: ThreadCreate, user=Depends(get_authenticated_user)):
+    require_page_write(user, "crew_threads")
+    title = " ".join(data.title.split()).strip()
+    if len(title) < 3:
+        raise HTTPException(400, "Thread title must contain at least 3 characters")
+    if len(title) > 160:
+        raise HTTPException(400, "Thread title is too long")
+    now = now_utc()
+    document = {
+        "title": title,
+        "description": data.description.strip()[:1000],
+        "createdBy": actor(user),
+        "createdAt": now,
+        "updatedAt": now,
+        "messageCount": 0,
+        "lastMessage": {},
+        "isClosed": False,
+        "deleted": False,
+        "audience": resolve_audience(data.audience),
+    }
+    result = crew_thread_collection.insert_one(document)
+    document["_id"] = result.inserted_id
+    return thread_response(document)
+
+
+@router.get("/{thread_id}/messages")
+def list_messages(
+    thread_id: str,
+    limit: int = Query(200, ge=1, le=500),
+    user=Depends(get_authenticated_user),
+):
+    require_page_view(user, "crew_threads")
+    thread_oid = object_id(thread_id, "thread")
+    thread = crew_thread_collection.find_one({"_id": thread_oid, "deleted": {"$ne": True}})
+    if not thread or not can_access_thread(user, thread):
+        raise HTTPException(404, "Thread not found")
+    rows = list(
+        crew_thread_message_collection.find({"threadId": thread_oid, "deleted": {"$ne": True}})
+        .sort([("createdAt", -1)]).limit(limit)
+    )
+    rows.reverse()
+    return [message_response(item) for item in rows]
+
+
+@router.post("/{thread_id}/messages")
+def post_message(
+    thread_id: str,
+    text: str = Form(""),
+    sharepoint_links: str = Form("[]"),
+    files: Optional[List[UploadFile]] = File(None),
+    user=Depends(get_authenticated_user),
+):
+    require_page_write(user, "crew_threads")
+    thread_oid = object_id(thread_id, "thread")
+    thread = crew_thread_collection.find_one({"_id": thread_oid, "deleted": {"$ne": True}})
+    if not thread or not can_access_thread(user, thread):
+        raise HTTPException(404, "Thread not found")
+    if thread.get("isClosed"):
+        raise HTTPException(409, "This thread is closed")
+    body = text.strip()
+    upload_files = [item for item in (files or []) if item and item.filename]
+    try:
+        raw_sharepoint_links = json.loads(sharepoint_links or "[]")
+        if not isinstance(raw_sharepoint_links, list):
+            raise ValueError
+    except (TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise HTTPException(400, "Invalid SharePoint attachment data") from exc
+    if len(raw_sharepoint_links) > MAX_FILES_PER_MESSAGE:
+        raise HTTPException(400, f"A message can contain up to {MAX_FILES_PER_MESSAGE} SharePoint links")
+    resolved_sharepoint_links = [sharepoint_link(item) for item in raw_sharepoint_links]
+    if not body and not upload_files and not resolved_sharepoint_links:
+        raise HTTPException(400, "Write a message or attach at least one file")
+    if len(body) > 10000:
+        raise HTTPException(400, "Message is too long")
+    if len(upload_files) > MAX_FILES_PER_MESSAGE:
+        raise HTTPException(400, f"A message can contain up to {MAX_FILES_PER_MESSAGE} files")
+
+    message_id = ObjectId()
+    message_folder = UPLOAD_ROOT / str(thread_oid) / str(message_id)
+    attachments = []
+    try:
+        for upload in upload_files:
+            content = ensure_upload_allowed(
+                upload,
+                allowed_content_types=ALLOWED_CONTENT_TYPES,
+                allowed_extensions=ALLOWED_EXTENSIONS,
+                max_bytes=MAX_FILE_BYTES,
+            )
+            safe_name = clean_filename(upload.filename)
+            extension = safe_name.rsplit(".", 1)[-1].lower() if "." in safe_name else ""
+            attachment_id = uuid.uuid4().hex
+            stored_name = f"{attachment_id}_{safe_name}"
+            message_folder.mkdir(parents=True, exist_ok=True)
+            target = message_folder / stored_name
+            target.write_bytes(content)
+            attachments.append({
+                "id": attachment_id,
+                "name": safe_name,
+                "storedName": stored_name,
+                "relativePath": str(target.relative_to(UPLOAD_ROOT)),
+                "size": len(content),
+                "contentType": upload.content_type,
+                "extension": extension,
+                "isImage": extension in {"png", "jpg", "jpeg", "gif", "webp", "bmp"},
+                "sha256": hashlib.sha256(content).hexdigest(),
+            })
+    except Exception:
+        if message_folder.exists():
+            for candidate in message_folder.iterdir():
+                candidate.unlink(missing_ok=True)
+            message_folder.rmdir()
+        raise
+
+    now = now_utc()
+    document = {
+        "_id": message_id,
+        "threadId": thread_oid,
+        "text": body,
+        "attachments": attachments,
+        "sharePointLinks": resolved_sharepoint_links,
+        "createdBy": actor(user),
+        "createdAt": now,
+        "deleted": False,
+    }
+    crew_thread_message_collection.insert_one(document)
+    preview = body[:180] if body else f"Shared {len(attachments) + len(resolved_sharepoint_links)} attachment(s)"
+    crew_thread_collection.update_one(
+        {"_id": thread_oid},
+        {
+            "$set": {
+                "updatedAt": now,
+                "lastMessage": {"text": preview, "createdBy": actor(user), "createdAt": now},
+            },
+            "$inc": {"messageCount": 1},
+        },
+    )
+    return message_response(document)
+
+
+@router.get("/attachments/{message_id}/{attachment_id}")
+def download_attachment(
+    message_id: str,
+    attachment_id: str,
+    user=Depends(get_authenticated_user),
+):
+    require_page_view(user, "crew_threads")
+    message = crew_thread_message_collection.find_one({
+        "_id": object_id(message_id, "message"),
+        "deleted": {"$ne": True},
+        "attachments.id": attachment_id,
+    })
+    if not message:
+        raise HTTPException(404, "Attachment not found")
+    thread = crew_thread_collection.find_one({"_id": message.get("threadId"), "deleted": {"$ne": True}})
+    if not thread or not can_access_thread(user, thread):
+        raise HTTPException(404, "Attachment not found")
+    attachment = next(
+        (item for item in message.get("attachments") or [] if item.get("id") == attachment_id),
+        None,
+    )
+    if not attachment:
+        raise HTTPException(404, "Attachment not found")
+    candidate = (UPLOAD_ROOT / str(attachment.get("relativePath") or "")).resolve()
+    root = UPLOAD_ROOT.resolve()
+    if root not in candidate.parents or not candidate.is_file():
+        raise HTTPException(404, "Attachment file is unavailable")
+    return FileResponse(
+        candidate,
+        filename=attachment.get("name") or "attachment",
+        media_type=attachment.get("contentType") or "application/octet-stream",
+    )

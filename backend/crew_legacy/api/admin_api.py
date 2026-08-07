@@ -61,11 +61,34 @@ def normalize_seniority_order(value):
     return order if order > 0 else None
 
 
+def organization_snapshot(employee: dict, *, end_date=None, reason=None):
+    return {
+        "startDate": employee.get("organizationAssignedOn") or employee.get("createdOn") or employee.get("createdAt"),
+        "endDate": end_date,
+        "reason": reason,
+        "functionIds": normalize_list(employee.get("functionIds")),
+        "verticalIds": normalize_list(employee.get("verticalIds")),
+        "verticals": normalize_list(employee.get("verticals") or employee.get("vertical")),
+        "sectionIds": normalize_list(employee.get("sectionIds")),
+        "sections": normalize_list(employee.get("sections")),
+        "departmentIds": normalize_list(employee.get("departmentIds")),
+        "departments": normalize_list(employee.get("departments") or employee.get("department")),
+        "reportingOfficerIds": normalize_list(employee.get("reportingOfficerIds") or employee.get("reportingOfficerId")),
+        "intermediaryReportingId": employee.get("intermediaryReportingId"),
+        "hodId": employee.get("hodId"),
+    }
+
+
 def resolve_employee_organization(function_ids=None, employee_id=None):
     """Resolve employee hierarchy only from the Organization Master."""
     employee_id = str(employee_id or "").strip()
     units = list(organization_unit_collection.find({"isActive": {"$ne": False}}))
     unit_by_id = {str(unit["_id"]): unit for unit in units}
+    active_employee_ids = {
+        str(item.get("userId") or item.get("employeeId") or "").strip()
+        for item in employee_collection.find({"isActive": {"$ne": False}}, {"userId": 1, "employeeId": 1})
+    }
+    active_employee_ids.discard("")
 
     manual_function_ids = [
         unit_id for unit_id in normalize_list(function_ids)
@@ -104,7 +127,7 @@ def resolve_employee_organization(function_ids=None, employee_id=None):
         employee_is_current_head = employee_id in configured_current_heads
         current_heads = [
             value for value in configured_current_heads
-            if value and value != employee_id
+            if value and value != employee_id and value in active_employee_ids
         ]
         direct_found = False
         if current_heads and not employee_is_current_head:
@@ -124,7 +147,7 @@ def resolve_employee_organization(function_ids=None, employee_id=None):
 
             parent_heads = [
                 value for value in normalize_list(parent.get("headEmployeeIds"))
-                if value and value != employee_id
+                if value and value != employee_id and value in active_employee_ids
             ]
             if parent_heads:
                 if not direct_found:
@@ -174,19 +197,25 @@ def resolve_employee_organization(function_ids=None, employee_id=None):
 
 
 def sync_employee_organization():
-    for employee in employee_collection.find({}, {"userId": 1, "functionIds": 1, "manualFunctionIds": 1}):
+    for employee in employee_collection.find({}):
         resolved = resolve_employee_organization(
             employee.get("manualFunctionIds", employee.get("functionIds")),
             employee.get("userId"),
         )
-        employee_collection.update_one(
-            {"_id": employee["_id"]},
-            {"$set": {
+        next_values = {
                 **resolved,
                 "vertical": (resolved.get("verticals") or [None])[0],
                 "updatedAt": datetime.utcnow(),
-            }},
-        )
+            }
+        old_snapshot = organization_snapshot(employee)
+        new_snapshot = organization_snapshot({**employee, **next_values})
+        compare_keys = ("functionIds", "verticalIds", "sectionIds", "departmentIds", "reportingOfficerIds", "intermediaryReportingId", "hodId")
+        changed = any(old_snapshot.get(key) != new_snapshot.get(key) for key in compare_keys)
+        mutation = {"$set": next_values}
+        if changed:
+            next_values["organizationAssignedOn"] = datetime.utcnow()
+            mutation["$push"] = {"organizationHistory": organization_snapshot(employee, end_date=datetime.utcnow(), reason="Organization hierarchy synchronized")}
+        employee_collection.update_one({"_id": employee["_id"]}, mutation)
 
 
 def serialize(emp):
@@ -230,6 +259,10 @@ def serialize(emp):
         "gmail": emp.get("gmail"),
         "dutyType": emp.get("dutyType"),
         "category": normalize_list(emp.get("category")),
+        "isActive": emp.get("isActive", True) is not False,
+        "deactivatedOn": emp.get("deactivatedOn"),
+        "deactivationReason": emp.get("deactivationReason"),
+        "organizationHistory": emp.get("organizationHistory") or [],
 
         # ðŸ”¥ NEW FIELDS
         "verticals": verticals,
@@ -577,6 +610,8 @@ def map_employee_designation(designation_id: str, data: dict):
 
 @router.post("/employees")  #### save employee entry to database
 def create_employee(employee: dict):
+    employee.setdefault("isActive", True)
+    employee.setdefault("organizationAssignedOn", datetime.utcnow())
     employee.update(resolve_employee_organization(
         employee.get("manualFunctionIds", employee.get("functionIds")),
         employee.get("userId"),
@@ -938,6 +973,9 @@ def get_organization_tree():
 
 @router.put("/employees/{employee_id}")
 def update_employee(employee_id: str, data: dict):
+    existing = employee_collection.find_one({"_id": ObjectId(employee_id)})
+    if not existing:
+        raise HTTPException(404, "Employee not found")
     organization = resolve_employee_organization(
         data.get("manualFunctionIds", data.get("functionIds")),
         data.get("userId"),
@@ -972,19 +1010,50 @@ def update_employee(employee_id: str, data: dict):
         "roleFunctionIds": organization["roleFunctionIds"],
         "intermediaryReportingId": organization["intermediaryReportingId"],
         "hodId": organization["hodId"],
+        "isActive": existing.get("isActive", True) is not False,
     }
+
+    old_snapshot = organization_snapshot(existing)
+    new_snapshot = organization_snapshot({**existing, **update_data})
+    compare_keys = ("functionIds", "verticalIds", "sectionIds", "departmentIds", "reportingOfficerIds", "intermediaryReportingId", "hodId")
+    organization_changed = any(old_snapshot.get(key) != new_snapshot.get(key) for key in compare_keys)
+    if organization_changed:
+        update_data["organizationAssignedOn"] = datetime.utcnow()
 
     password = data.get("password")
     if password:
         validate_password_policy(password)
         update_data["password"] = password if password.startswith("$2") else hash_password(password)
 
-    employee_collection.update_one(
-        {"_id": ObjectId(employee_id)},
-        {"$set": update_data}
-    )
+    mutation = {"$set": update_data}
+    if organization_changed:
+        mutation["$push"] = {"organizationHistory": organization_snapshot(existing, end_date=datetime.utcnow(), reason="Organization mapping changed")}
+    employee_collection.update_one({"_id": ObjectId(employee_id)}, mutation)
 
     return {"message": "Employee updated successfully"}
+
+
+@router.patch("/employees/{employee_id}/status")
+def set_employee_status(employee_id: str, data: dict):
+    if not ObjectId.is_valid(employee_id):
+        raise HTTPException(400, "Invalid employee ID")
+    employee = employee_collection.find_one({"_id": ObjectId(employee_id)})
+    if not employee:
+        raise HTTPException(404, "Employee not found")
+    active = bool(data.get("isActive"))
+    now = datetime.utcnow()
+    update = {"isActive": active, "updatedAt": now}
+    mutation = {"$set": update}
+    if active:
+        update.update({"reactivatedOn": now, "organizationAssignedOn": now})
+        mutation["$unset"] = {"deactivatedOn": "", "deactivationReason": ""}
+    else:
+        reason = str(data.get("reason") or "Transferred / relieved").strip()
+        update.update({"deactivatedOn": now, "deactivationReason": reason})
+        mutation["$push"] = {"organizationHistory": organization_snapshot(employee, end_date=now, reason=reason)}
+    employee_collection.update_one({"_id": employee["_id"]}, mutation)
+    sync_employee_organization()
+    return {"message": "Employee activated" if active else "Employee deactivated", "isActive": active}
 
 ############## Duty leave tyoe area start ############
 
