@@ -80,7 +80,9 @@ export default function ReplacementManagement() {
   const sicShortcutHandled = useRef(false);
   const [activeWorkflow, setActiveWorkflow] = useState(() => {
     const params = new URLSearchParams(window.location.search);
-    return params.get("action") === "assign-sic" ? "sic" : null;
+    if (params.get("action") === "assign-sic") return "sic";
+    if (params.get("action") === "leave") return "leave";
+    return null;
   });
 
   const openWorkflow = (workflow) => {
@@ -104,7 +106,16 @@ export default function ReplacementManagement() {
   const fetchPendingLeaves = async () => {
     try {
       const res = await api.get("/replacement/pending");
-      setPendingLeaves(res.data || []);
+      const rows = res.data || [];
+      setPendingLeaves(rows);
+      const params = new URLSearchParams(window.location.search);
+      if (params.get("action") === "leave" && !selectedLeave) {
+        const target = rows.find((leave) => leave.date === params.get("date") && String(leave.employeeId || "") === String(params.get("employeeId") || ""));
+        if (target) {
+          setActiveWorkflow("leave");
+          openCandidateDialog(target);
+        }
+      }
     } catch (err) {
       console.error(err);
       alert("Failed to load replacement data");

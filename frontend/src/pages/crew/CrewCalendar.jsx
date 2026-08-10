@@ -3,9 +3,11 @@ import {
   Alert, Box, Button, Chip, CircularProgress, Dialog, DialogContent, DialogTitle,
   IconButton, Paper, Stack, Table, TableBody, TableCell, TableHead, TableRow, Typography,
 } from "@mui/material";
-import { ArrowLeftRight, CalendarDays, ChevronLeft, ChevronRight, RefreshCw, Users, X } from "lucide-react";
+import { ArrowLeftRight, CalendarDays, CheckCircle2, ChevronLeft, ChevronRight, RefreshCw, Users, X } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 
 import AppShell from "../../components/layout/AppShell";
+import { useAuth } from "../../auth/AuthContext";
 import GlassCard from "../../components/ui/GlassCard";
 import DutyReassignmentPanel from "../../components/crew/DutyReassignmentPanel";
 import crewApi from "../../services/crewApi";
@@ -71,7 +73,7 @@ const shiftStyle = (duty) => {
   return { background: "#F8FAFC", color: "#000000", border: "#D6DEE8" };
 };
 
-const EmployeeRow = memo(({ person, groupName, active, dates, selectedColumn, onSelectRow, onSelectDuty }) => {
+const EmployeeRow = memo(({ person, groupName, active, dates, selectedColumn, onSelectRow, onSelectDuty, canManageReplacement }) => {
   return (
     <TableRow hover onClick={() => onSelectRow(person.employeeId)} sx={{ cursor: "pointer", background: active ? "#F0FDFA" : person.IsSIC ? "#F8FFFC" : "#FFF" }}>
       <TableCell sx={{ position: "sticky", left: 0, zIndex: 2, minWidth: 235, background: active ? "#D1FAE5" : person.IsSIC ? "#ECFDF5" : "#FFF", borderRight: "1px solid #E2E8F0" }}>
@@ -81,6 +83,8 @@ const EmployeeRow = memo(({ person, groupName, active, dates, selectedColumn, on
         const duty = person.duties?.[date] || { shift: "-" };
         const palette = shiftStyle(duty);
         const columnActive = selectedColumn === date;
+        const replacementPending = Boolean(canManageReplacement && duty.replacementRequired && !duty.replacementEmployee?.name);
+        const leaveApproved = String(duty.leaveStatus || "").toLowerCase() === "approved";
         return <TableCell key={date} align="center" sx={{ p: .7, background: active ? "#F0FDFA" : columnActive ? "#F0FDF4" : "#FFF" }}>
           <Paper
             role="button"
@@ -109,6 +113,8 @@ const EmployeeRow = memo(({ person, groupName, active, dates, selectedColumn, on
             <Typography sx={{ fontSize: 12.5, fontWeight: 900 }}>{duty.shift || "-"}</Typography>
             {duty.leaveStatus && <Typography sx={{ fontSize: 9.5, fontWeight: 800, lineHeight: 1.2 }}>{duty.leaveType || "Leave"} · {duty.leaveStatus}</Typography>}
             {duty.trainingName && <Typography sx={{ fontSize: 9.5, fontWeight: 800 }}>{duty.trainingName}</Typography>}
+            {leaveApproved && <CheckCircle2 size={13} color="#15803D" strokeWidth={3} aria-label="Leave finally approved" style={{ alignSelf: "center" }} />}
+            {replacementPending && <Typography sx={{ mt: .25, px: .6, py: .15, borderRadius: 1, background: "#FEF3C7", color: "#B45309", fontSize: 9.5, fontWeight: 950, animation: "calendarReplacementPulse 1s ease-in-out infinite", "@keyframes calendarReplacementPulse": { "50%": { opacity: .35, transform: "scale(.92)" } } }}>R · Replacement required</Typography>}
             {duty.replacementEmployee?.name && <Typography sx={replacementLabelSx}>Replacement: {duty.replacementEmployee.name}</Typography>}
             {duty.replacementFor?.name && <Typography sx={replacementLabelSx}>Replacement for: {duty.replacementFor.name}</Typography>}
             {duty.isActingSIC && <Typography sx={{ fontSize: 9.5, fontWeight: 900, color: "#6A1B9A" }}>Acting SIC · {duty.actingSICGroup || groupName}</Typography>}
@@ -120,6 +126,8 @@ const EmployeeRow = memo(({ person, groupName, active, dates, selectedColumn, on
 });
 
 export default function CrewCalendar() {
+  const { user } = useAuth();
+  const navigate = useNavigate();
   const today = iso(new Date());
   const [startDate, setStartDate] = useState(addDays(today, -2));
   const [endDate, setEndDate] = useState(addDays(today, 10));
@@ -130,6 +138,11 @@ export default function CrewCalendar() {
   const [selectedColumn, setSelectedColumn] = useState("");
   const [exchangeOpen, setExchangeOpen] = useState(false);
   const [selectedDuty, setSelectedDuty] = useState(null);
+  const [replacementPopup, setReplacementPopup] = useState(null);
+  const [replacementCandidates, setReplacementCandidates] = useState([]);
+  const [replacementLoading, setReplacementLoading] = useState(false);
+  const [replacementError, setReplacementError] = useState("");
+  const [assigningCandidate, setAssigningCandidate] = useState("");
   const loadIdRef = useRef(0);
 
   const dates = useMemo(() => {
@@ -184,6 +197,67 @@ export default function CrewCalendar() {
   const totalCrew = data.reduce((count, group) => count + group.employees.length, 0);
   const activeGroups = data;
   const activeCrewCount = activeGroups.reduce((count, group) => count + group.employees.length, 0);
+  const canManageReplacement = Boolean(user?.role === "admin" || user?.permissions?.crew_replacement?.write || user?.permissions?.crew_leave?.write || user?.permissions?.crew_training?.write);
+  const openLeaveWorkflow = () => {
+    if (!selectedDuty) return;
+    navigate(`/crew/leave?view=calendar&from=${selectedDuty.date}&to=${selectedDuty.date}&employeeId=${encodeURIComponent(selectedDuty.person.employeeId)}`);
+  };
+  const openReplacementWorkflow = () => {
+    if (!selectedDuty) return;
+    navigate(`/crew/replacement?action=leave&date=${selectedDuty.date}&employeeId=${encodeURIComponent(selectedDuty.person.employeeId)}`);
+  };
+  const openTrainingWorkflow = () => {
+    if (!selectedDuty) return;
+    navigate(`/crew/training?section=pending&date=${selectedDuty.date}&employeeId=${encodeURIComponent(selectedDuty.person.employeeId)}`);
+  };
+
+  const openReplacementCandidates = useCallback(async (selection) => {
+    setSelectedRow(selection.person.employeeId);
+    setSelectedColumn(selection.date);
+    setSelectedDuty(null);
+    setReplacementPopup({ ...selection, leave: null });
+    setReplacementCandidates([]);
+    setReplacementError("");
+    setReplacementLoading(true);
+    try {
+      const pending = await crewApi.pendingReplacements();
+      const leave = pending.find((item) => (
+        item.date === selection.date
+        && String(item.employeeId || "") === String(selection.person.employeeId || "")
+      ));
+      if (!leave) {
+        setReplacementError("This replacement request is not available in your current approval scope. Open Replacement Management to review it.");
+        return;
+      }
+      const candidates = await crewApi.replacementCandidates(leave.id, leave.isSIC ? "sic" : "shift_engineer");
+      setReplacementPopup((current) => current ? { ...current, leave } : current);
+      setReplacementCandidates(candidates || []);
+    } catch (requestError) {
+      setReplacementError(requestError.response?.data?.detail || "Replacement candidates could not be loaded.");
+    } finally {
+      setReplacementLoading(false);
+    }
+  }, []);
+
+  const assignCandidate = async (candidate) => {
+    if (!replacementPopup?.leave?.id) return;
+    setAssigningCandidate(candidate.employeeId);
+    setReplacementError("");
+    try {
+      await crewApi.assignReplacement(replacementPopup.leave.id, {
+        replacementEmployeeId: candidate.employeeId,
+        mode: "normal",
+        halfDuty: false,
+        reason: "Assigned from the duty calendar",
+      });
+      setReplacementPopup(null);
+      await load();
+    } catch (requestError) {
+      setReplacementError(requestError.response?.data?.detail || "Replacement could not be assigned.");
+    } finally {
+      setAssigningCandidate("");
+    }
+  };
 
   const handleSelectRow = useCallback((employeeId) => {
     setSelectedRow(employeeId);
@@ -192,8 +266,12 @@ export default function CrewCalendar() {
   const handleSelectDuty = useCallback((selection) => {
     setSelectedRow(selection.person.employeeId);
     setSelectedColumn(selection.date);
+    if (canManageReplacement && selection.duty.replacementRequired && !selection.duty.replacementEmployee?.name) {
+      openReplacementCandidates(selection);
+      return;
+    }
     setSelectedDuty(selection);
-  }, []);
+  }, [canManageReplacement, openReplacementCandidates]);
 
   return (
     <AppShell>
@@ -253,6 +331,7 @@ export default function CrewCalendar() {
                       selectedColumn={selectedColumn}
                       onSelectRow={handleSelectRow}
                       onSelectDuty={handleSelectDuty}
+                      canManageReplacement={canManageReplacement}
                     />
                   ))
                 ])}
@@ -283,6 +362,14 @@ export default function CrewCalendar() {
                 <Alert severity="info">
                   {selectedDuty.duty.leaveType || "Leave"} · {selectedDuty.duty.leaveStatus}
                 </Alert>
+              )}
+              {(selectedDuty.duty.leaveStatus || selectedDuty.duty.trainingName) && (
+                <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+                  {selectedDuty.duty.leaveStatus && <Button size="small" variant="contained" onClick={openLeaveWorkflow} sx={{ textTransform: "none", fontWeight: 900, background: "#0057B7" }}>Open leave approval</Button>}
+                  {selectedDuty.duty.trainingName && <Button size="small" variant="contained" onClick={openTrainingWorkflow} sx={{ textTransform: "none", fontWeight: 900, background: "#6A1B9A" }}>Open training approval</Button>}
+                  {canManageReplacement && String(selectedDuty.duty.leaveStatus || "").toLowerCase() === "approved" && <Button size="small" variant="outlined" onClick={openReplacementWorkflow} sx={{ textTransform: "none", fontWeight: 900, borderColor: "#D97706", color: "#B45309", ...(selectedDuty.duty.replacementRequired && !selectedDuty.duty.replacementEmployee?.name ? { animation: "calendarReplacementPulse 1s ease-in-out infinite" } : {}) }}>Assign replacement</Button>}
+                  {canManageReplacement && selectedDuty.duty.trainingName && <Button size="small" variant="outlined" onClick={openReplacementWorkflow} sx={{ textTransform: "none", fontWeight: 900, borderColor: "#D97706", color: "#B45309", ...(selectedDuty.duty.replacementRequired && !selectedDuty.duty.replacementEmployee?.name ? { animation: "calendarReplacementPulse 1s ease-in-out infinite" } : {}) }}>Assign replacement</Button>}
+                </Stack>
               )}
               {selectedDuty.duty.replacementEmployee?.name && (
                 <Paper variant="outlined" sx={{ p: 1.5, borderColor: "#86D3A5", background: "#F0FDF4" }}>
@@ -316,6 +403,44 @@ export default function CrewCalendar() {
               )}
             </Stack>
           )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={Boolean(replacementPopup)} onClose={() => setReplacementPopup(null)} fullWidth maxWidth="md">
+        <DialogTitle sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", color: "#0F172A", fontWeight: 900 }}>
+          Replacement candidates
+          <IconButton onClick={() => setReplacementPopup(null)}><X size={19} /></IconButton>
+        </DialogTitle>
+        <DialogContent dividers sx={{ p: { xs: 1.5, md: 2.25 } }}>
+          {replacementPopup && <Stack spacing={1.5}>
+            <Alert severity="warning" sx={{ fontWeight: 700 }}>
+              Replacement required for {replacementPopup.person.name || replacementPopup.person.employeeId} on {displayDate(replacementPopup.date)} · {replacementPopup.duty.shift || "Duty"} · {replacementPopup.groupName}
+            </Alert>
+            {replacementError && <Alert severity="error" action={<Button size="small" onClick={() => navigate(`/crew/replacement?action=leave&date=${replacementPopup.date}&employeeId=${encodeURIComponent(replacementPopup.person.employeeId)}`)}>Open module</Button>}>{replacementError}</Alert>}
+            {replacementLoading ? <Box sx={{ py: 5, display: "grid", placeItems: "center" }}><CircularProgress /></Box> : !replacementError && (
+              <Box sx={{ overflowX: "auto", maxHeight: "58vh" }}>
+                <Table size="small" stickyHeader>
+                  <TableHead><TableRow>
+                    <TableCell sx={{ fontWeight: 900 }}>Candidate</TableCell>
+                    <TableCell sx={{ fontWeight: 900 }}>Current / next duty</TableCell>
+                    <TableCell sx={{ fontWeight: 900 }}>Last matching duty</TableCell>
+                    <TableCell sx={{ fontWeight: 900 }}>Source</TableCell>
+                    <TableCell align="right" sx={{ fontWeight: 900 }}>Action</TableCell>
+                  </TableRow></TableHead>
+                  <TableBody>
+                    {!replacementCandidates.length && <TableRow><TableCell colSpan={5} align="center" sx={{ py: 4, color: "#64748B" }}>No eligible replacement candidate was found.</TableCell></TableRow>}
+                    {replacementCandidates.map((candidate) => <TableRow key={candidate.employeeId} hover>
+                      <TableCell><Typography sx={{ fontWeight: 900 }}>{candidate.name || candidate.employeeId}</Typography><Typography variant="caption">{candidate.designation || "—"} · {candidate.employeeId}</Typography></TableCell>
+                      <TableCell>{candidate.assignedDuty || "—"}<Typography variant="caption" display="block">Next: {candidate.nextDayDuty || "—"}</Typography></TableCell>
+                      <TableCell>{candidate.lastMatchingDutyDate || "Never recorded"}<Typography variant="caption" display="block">{candidate.daysSinceMatchingDuty == null ? "" : `${candidate.daysSinceMatchingDuty} day(s) ago`}</Typography></TableCell>
+                      <TableCell>{candidate.organization?.displayName || candidate.eligibility || candidate.source || "—"}</TableCell>
+                      <TableCell align="right"><Button size="small" variant="contained" disabled={Boolean(assigningCandidate)} onClick={() => assignCandidate(candidate)} sx={{ textTransform: "none", fontWeight: 850, background: "#15803D" }}>{assigningCandidate === candidate.employeeId ? "Assigning…" : "Assign"}</Button></TableCell>
+                    </TableRow>)}
+                  </TableBody>
+                </Table>
+              </Box>
+            )}
+          </Stack>}
         </DialogContent>
       </Dialog>
 

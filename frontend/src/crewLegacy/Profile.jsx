@@ -15,6 +15,11 @@ import {
   Divider,
   Paper,
   Stack,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableRow,
   TextField,
   Typography,
 } from "@mui/material";
@@ -55,7 +60,7 @@ function InfoLine({ icon, label, value }) {
   );
 }
 
-function StatPill({ label, value, tone = "blue" }) {
+function StatPill({ label, value, detail = "", tone = "blue" }) {
   const palette = {
     blue: ["#EEF2FF", "#4F46E5"],
     green: ["#E9FBF2", "#039855"],
@@ -67,6 +72,7 @@ function StatPill({ label, value, tone = "blue" }) {
     <Box sx={{ p: 1.4, borderRadius: 3, background: palette[0], minWidth: 0 }}>
       <Typography sx={{ fontSize: 11, color: "#72789A", fontWeight: 850 }}>{label}</Typography>
       <Typography sx={{ mt: 0.4, color: palette[1], fontSize: 24, fontWeight: 950, lineHeight: 1 }}>{numberText(value)}</Typography>
+      {detail && <Typography sx={{ mt: .45, fontSize: 10.5, color: "#64748B", fontWeight: 800 }}>{detail}</Typography>}
     </Box>
   );
 }
@@ -101,6 +107,7 @@ export default function Profile() {
   const [leaveYear, setLeaveYear] = useState(new Date().getFullYear());
   const [fy, setFy] = useState("2025-26");
   const [coffStats, setCoffStats] = useState({ summary: {}, details: [] });
+  const [activitySummary, setActivitySummary] = useState({});
   const [openCoff, setOpenCoff] = useState(false);
   const [loginHistory, setLoginHistory] = useState([]);
   const [timelineData, setTimelineData] = useState([]);
@@ -156,6 +163,11 @@ export default function Profile() {
     setCoffStats(res.data || { summary: {}, details: [] });
   };
 
+  const fetchActivitySummary = async () => {
+    const res = await api.get("/profile/activity-report", { params: { employeeId } });
+    setActivitySummary(res.data?.summary || {});
+  };
+
   const fetchLoginHistory = async () => {
     const res = await api.get(`/auth/login-history/${employeeId}`);
     setLoginHistory(res.data || []);
@@ -190,6 +202,7 @@ export default function Profile() {
           fetchLeaveStats(),
           fetchTrainingStats(),
           fetchCoffStats(),
+          fetchActivitySummary(),
           fetchLoginHistory(),
           fetchTimeline(),
         ]);
@@ -429,10 +442,10 @@ export default function Profile() {
               {loadingSecondary && <CircularProgress size={18} sx={{ color: "#5B55B2" }} />}
             </Stack>
             <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr 1fr", md: "repeat(4, 1fr)" }, gap: 1.3 }}>
-              <StatPill label="Duty" value={dutyTotal} tone="blue" />
-              <StatPill label="Leave" value={leaveTotal} tone="pink" />
-              <StatPill label="Training" value={trainingTotal} tone="green" />
-              <StatPill label="C-OFF" value={coffStats.summary?.available || 0} tone="amber" />
+              <StatPill label="Leave" value={activitySummary.leave ?? leaveTotal} detail={`${activitySummary.leaveApproved || 0} approved`} tone="pink" />
+              <StatPill label="Training" value={activitySummary.training ?? trainingTotal} detail={`${activitySummary.trainingDays || 0} approved day(s)`} tone="green" />
+              <StatPill label="C-OFF" value={activitySummary.compOff ?? coffStats.summary?.total ?? 0} detail={`${activitySummary.compOffUsedDays || 0} used day(s)`} tone="amber" />
+              <StatPill label="Replacement duty" value={activitySummary.replacement || 0} tone="blue" />
             </Box>
           </Paper>
 
@@ -457,7 +470,7 @@ export default function Profile() {
               title="Login history"
               emptyText="No login records."
               items={loginHistory.slice(0, 3)}
-              action={<Button size="small" onClick={() => setOpenLogin(true)} sx={{ textTransform: "none", fontWeight: 900 }}>View all</Button>}
+              action={<Button size="small" onClick={() => setOpenLogin(true)} sx={{ textTransform: "none", fontWeight: 900 }}>All login details</Button>}
               renderItem={(item, index) => (
                 <Box key={`${item.loginTime}-${index}`} sx={{ p: 1.2, borderRadius: 3, background: "#F8FAFF" }}>
                   <Typography sx={{ fontSize: 12, fontWeight: 900, color: "#24213F" }}>{shortDate(item.loginTime)}</Typography>
@@ -496,22 +509,26 @@ export default function Profile() {
         </Box>
       </Box>
 
-      <Dialog open={openCoff} onClose={() => setOpenCoff(false)} fullWidth maxWidth="sm">
-        <DialogTitle>C-OFF Details</DialogTitle>
-        <DialogContent>
-          {coffStats.details?.length ? coffStats.details.map((item, index) => (
-            <Box key={`${item.earnedDate}-${index}`} sx={{ p: 1.5, mb: 1, borderRadius: 2.5, background: item.status === "Used" ? "#FFF0F3" : "#ECFDF3" }}>
-              <Typography sx={{ fontWeight: 900 }}>Earned: {item.earnedDate || "-"}</Typography>
-              <Typography sx={{ fontSize: 13 }}>Expiry: {item.expiryDate || "-"}</Typography>
-              <Typography sx={{ fontSize: 13 }}>Status: {item.status || "-"}</Typography>
-              {item.usedDate && <Typography sx={{ fontSize: 13 }}>Used On: {item.usedDate}</Typography>}
-            </Box>
-          )) : <Typography>No data</Typography>}
+      <Dialog open={openCoff} onClose={() => setOpenCoff(false)} fullWidth maxWidth="md">
+        <DialogTitle>C-OFF Register</DialogTitle>
+        <DialogContent dividers sx={{ p: 2 }}>
+          {(() => {
+            const available = (coffStats.details || []).filter((item) => String(item.status || "Available").toLowerCase() === "available");
+            const used = (coffStats.details || []).filter((item) => String(item.status || "").toLowerCase() === "used");
+            const CoffTable = ({ title, rows, usedTable = false, tone }) => <Paper variant="outlined" sx={{ overflow: "hidden", borderColor: tone, boxShadow: "none" }}>
+              <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ px: 1.5, py: 1, background: `${tone}16` }}><Typography sx={{ fontWeight: 950, color: "#0F172A" }}>{title}</Typography><Chip size="small" label={`${rows.length} day(s)`} sx={{ fontWeight: 850, background: tone, color: "#fff" }} /></Stack>
+              <Box sx={{ overflowX: "auto" }}><Table size="small"><TableHead><TableRow><TableCell sx={{ fontWeight: 900 }}>Earned date</TableCell><TableCell sx={{ fontWeight: 900 }}>Expiry date</TableCell>{usedTable && <TableCell sx={{ fontWeight: 900 }}>Used date</TableCell>}<TableCell sx={{ fontWeight: 900 }}>Source / reason</TableCell></TableRow></TableHead><TableBody>
+                {!rows.length && <TableRow><TableCell colSpan={usedTable ? 4 : 3} align="center" sx={{ py: 2.5, color: "#64748B" }}>No records.</TableCell></TableRow>}
+                {rows.map((item, index) => <TableRow key={`${item.earnedDate}-${item.usedDate || ""}-${index}`}><TableCell>{shortDate(item.earnedDate)}</TableCell><TableCell>{shortDate(item.expiryDate)}</TableCell>{usedTable && <TableCell>{shortDate(item.usedDate)}</TableCell>}<TableCell>{item.reason || "—"}</TableCell></TableRow>)}
+              </TableBody></Table></Box>
+            </Paper>;
+            return <Stack spacing={2}><CoffTable title="Available C-OFF" rows={available} tone="#15803D" /><CoffTable title="Used C-OFF" rows={used} usedTable tone="#C62828" /></Stack>;
+          })()}
         </DialogContent>
       </Dialog>
 
       <Dialog open={openLogin} onClose={() => setOpenLogin(false)} fullWidth maxWidth="sm">
-        <DialogTitle>Full Login History</DialogTitle>
+        <DialogTitle>All Login Details</DialogTitle>
         <DialogContent>
           {loginHistory.map((item, index) => (
             <Box key={`${item.loginTime}-${index}`} sx={{ mb: 1, p: 1.2, borderBottom: "1px solid #E5E7EB" }}>

@@ -395,9 +395,11 @@ scheduler.add_job(
 
     hour=9,
 
-    minute=0,
+    minute=30,
 
-    id="psp_daily_demand_sources_9am",
+    timezone="Asia/Kolkata",
+
+    id="psp_daily_demand_sources_0930",
 
     max_instances=1,
 
@@ -413,11 +415,13 @@ scheduler.add_job(
 
     trigger="cron",
 
-    hour=11,
+    hour=10,
 
-    minute=0,
+    minute=30,
 
-    id="psp_daily_demand_sources_11am_retry",
+    timezone="Asia/Kolkata",
+
+    id="psp_daily_demand_sources_1030_retry",
 
     kwargs={
         "retry_failed_only": True

@@ -32,6 +32,7 @@ UPLOAD_ROOT = Path(__file__).resolve().parents[2] / "uploads" / "crew_threads"
 UPLOAD_ROOT.mkdir(parents=True, exist_ok=True)
 crew_thread_collection.create_index([("updatedAt", -1)])
 crew_thread_message_collection.create_index([("threadId", 1), ("createdAt", -1)])
+crew_thread_message_collection.create_index([("threadId", 1), ("meetingAt", 1), ("createdAt", 1)])
 MAX_FILE_BYTES = 25 * 1024 * 1024
 MAX_FILES_PER_MESSAGE = 10
 ALLOWED_EXTENSIONS = {
@@ -54,7 +55,18 @@ ALLOWED_CONTENT_TYPES = {
 class ThreadCreate(BaseModel):
     title: str
     description: str = ""
+    meetingAt: Optional[datetime] = None
     audience: Dict[str, Any] = Field(default_factory=dict)
+
+
+class ThreadMeetingUpdate(BaseModel):
+    meetingAt: Optional[datetime] = None
+
+
+class MessageUpdate(BaseModel):
+    heading: Optional[str] = None
+    text: Optional[str] = None
+    meetingAt: Optional[datetime] = None
 
 
 def now_utc():
@@ -194,11 +206,24 @@ def clean_filename(value: str):
     return stem[:180]
 
 
-def thread_response(item: dict):
-    return {
+def user_read_at(item: dict, user: Optional[dict] = None):
+    if not user:
+        return None
+    employee_id = str(user.get("employeeId") or user.get("userId") or "").strip()
+    if not employee_id:
+        return None
+    for marker in item.get("readBy") or []:
+        if str(marker.get("employeeId") or "").strip() == employee_id:
+            return marker.get("readAt")
+    return None
+
+
+def thread_response(item: dict, user: Optional[dict] = None):
+    response = {
         "id": str(item["_id"]),
         "title": item.get("title"),
         "description": item.get("description"),
+        "meetingAt": iso(item.get("meetingAt")),
         "createdBy": item.get("createdBy") or {},
         "createdAt": iso(item.get("createdAt")),
         "updatedAt": iso(item.get("updatedAt")),
@@ -207,6 +232,18 @@ def thread_response(item: dict):
         "isClosed": bool(item.get("isClosed")),
         "audience": item.get("audience") or {"scope": "everyone"},
     }
+    if user:
+        employee_id = str(user.get("employeeId") or user.get("userId") or "").strip()
+        read_at = user_read_at(item, user)
+        unread_query = {
+            "threadId": item["_id"],
+            "deleted": {"$ne": True},
+            "createdBy.employeeId": {"$ne": employee_id},
+        }
+        if read_at:
+            unread_query["createdAt"] = {"$gt": read_at}
+        response["unreadCount"] = crew_thread_message_collection.count_documents(unread_query)
+    return response
 
 
 def message_response(item: dict):
@@ -224,7 +261,9 @@ def message_response(item: dict):
     return {
         "id": str(item["_id"]),
         "threadId": str(item.get("threadId")),
+        "heading": item.get("heading") or "",
         "text": item.get("text") or "",
+        "meetingAt": iso(item.get("meetingAt")),
         "attachments": attachments,
         "sharePointLinks": item.get("sharePointLinks") or [],
         "createdBy": item.get("createdBy") or {},
@@ -251,8 +290,11 @@ def list_threads(
                 {"description": {"$regex": safe_search, "$options": "i"}},
             ]},
         ]
-    rows = crew_thread_collection.find(query).sort([("updatedAt", -1)]).limit(limit)
-    return [thread_response(item) for item in rows]
+    # A notice represents a meeting/occurrence. Keep the board aligned to that
+    # date instead of moving old meetings to the top when somebody adds a post.
+    rows = list(crew_thread_collection.find(query).limit(limit))
+    rows.sort(key=lambda item: item.get("meetingAt") or item.get("createdAt") or datetime.min, reverse=True)
+    return [thread_response(item, user) for item in rows]
 
 
 @router.get("/options")
@@ -292,6 +334,7 @@ def create_thread(data: ThreadCreate, user=Depends(get_authenticated_user)):
     document = {
         "title": title,
         "description": data.description.strip()[:1000],
+        "meetingAt": data.meetingAt,
         "createdBy": actor(user),
         "createdAt": now,
         "updatedAt": now,
@@ -304,6 +347,30 @@ def create_thread(data: ThreadCreate, user=Depends(get_authenticated_user)):
     result = crew_thread_collection.insert_one(document)
     document["_id"] = result.inserted_id
     return thread_response(document)
+
+
+@router.patch("/{thread_id}")
+def update_thread(
+    thread_id: str,
+    data: ThreadMeetingUpdate,
+    user=Depends(get_authenticated_user),
+):
+    require_page_write(user, "crew_threads")
+    thread_oid = object_id(thread_id, "thread")
+    thread = crew_thread_collection.find_one({"_id": thread_oid, "deleted": {"$ne": True}})
+    if not thread:
+        raise HTTPException(404, "Thread not found")
+    update_fields = {
+        "updatedAt": now_utc(),
+    }
+    if data.meetingAt is not None:
+        update_fields["meetingAt"] = data.meetingAt
+    crew_thread_collection.update_one(
+        {"_id": thread_oid},
+        {"$set": update_fields},
+    )
+    updated = crew_thread_collection.find_one({"_id": thread_oid})
+    return thread_response(updated)
 
 
 @router.get("/{thread_id}/messages")
@@ -319,16 +386,39 @@ def list_messages(
         raise HTTPException(404, "Thread not found")
     rows = list(
         crew_thread_message_collection.find({"threadId": thread_oid, "deleted": {"$ne": True}})
-        .sort([("createdAt", -1)]).limit(limit)
+        .sort([("meetingAt", 1), ("createdAt", 1)]).limit(limit)
     )
-    rows.reverse()
-    return [message_response(item) for item in rows]
+    read_at = user_read_at(thread, user)
+    employee_id = str(user.get("employeeId") or user.get("userId") or "").strip()
+    response = []
+    for item in rows:
+        value = message_response(item)
+        value["isUnread"] = bool(
+            str((item.get("createdBy") or {}).get("employeeId") or "") != employee_id
+            and (not read_at or item.get("createdAt") > read_at)
+        )
+        response.append(value)
+
+    # Opening a thread acknowledges every post currently visible to that user.
+    now = now_utc()
+    if employee_id:
+        crew_thread_collection.update_one(
+            {"_id": thread_oid},
+            {"$pull": {"readBy": {"employeeId": employee_id}}},
+        )
+        crew_thread_collection.update_one(
+            {"_id": thread_oid},
+            {"$push": {"readBy": {"employeeId": employee_id, "readAt": now}}},
+        )
+    return response
 
 
 @router.post("/{thread_id}/messages")
 def post_message(
     thread_id: str,
+    heading: str = Form(""),
     text: str = Form(""),
+    meeting_at: Optional[datetime] = Form(None),
     sharepoint_links: str = Form("[]"),
     files: Optional[List[UploadFile]] = File(None),
     user=Depends(get_authenticated_user),
@@ -340,6 +430,7 @@ def post_message(
         raise HTTPException(404, "Thread not found")
     if thread.get("isClosed"):
         raise HTTPException(409, "This thread is closed")
+    post_heading = " ".join(heading.split()).strip()
     body = text.strip()
     upload_files = [item for item in (files or []) if item and item.filename]
     try:
@@ -351,8 +442,12 @@ def post_message(
     if len(raw_sharepoint_links) > MAX_FILES_PER_MESSAGE:
         raise HTTPException(400, f"A message can contain up to {MAX_FILES_PER_MESSAGE} SharePoint links")
     resolved_sharepoint_links = [sharepoint_link(item) for item in raw_sharepoint_links]
+    if not post_heading:
+        raise HTTPException(400, "Enter a heading for the timeline post")
     if not body and not upload_files and not resolved_sharepoint_links:
-        raise HTTPException(400, "Write a message or attach at least one file")
+        raise HTTPException(400, "Write a description or attach at least one file")
+    if len(post_heading) > 180:
+        raise HTTPException(400, "Post heading is too long")
     if len(body) > 10000:
         raise HTTPException(400, "Message is too long")
     if len(upload_files) > MAX_FILES_PER_MESSAGE:
@@ -398,7 +493,9 @@ def post_message(
     document = {
         "_id": message_id,
         "threadId": thread_oid,
+        "heading": post_heading,
         "text": body,
+        "meetingAt": meeting_at or now,
         "attachments": attachments,
         "sharePointLinks": resolved_sharepoint_links,
         "createdBy": actor(user),
@@ -418,6 +515,39 @@ def post_message(
         },
     )
     return message_response(document)
+
+
+@router.patch("/messages/{message_id}")
+def update_message(
+    message_id: str,
+    data: MessageUpdate,
+    user=Depends(get_authenticated_user),
+):
+    require_page_write(user, "crew_threads")
+    message_oid = object_id(message_id, "message")
+    message = crew_thread_message_collection.find_one({"_id": message_oid, "deleted": {"$ne": True}})
+    if not message:
+        raise HTTPException(404, "Post not found")
+    thread = crew_thread_collection.find_one({"_id": message.get("threadId"), "deleted": {"$ne": True}})
+    if not thread or not can_access_thread(user, thread):
+        raise HTTPException(404, "Post not found")
+    updates = {"editedAt": now_utc()}
+    if data.heading is not None:
+        heading = " ".join(data.heading.split()).strip()
+        if len(heading) > 180:
+            raise HTTPException(400, "Post heading is too long")
+        updates["heading"] = heading
+    if data.text is not None:
+        text = data.text.strip()
+        if len(text) > 10000:
+            raise HTTPException(400, "Post text is too long")
+        updates["text"] = text
+    if data.meetingAt is not None:
+        updates["meetingAt"] = data.meetingAt
+    crew_thread_message_collection.update_one({"_id": message_oid}, {"$set": updates})
+    crew_thread_collection.update_one({"_id": message.get("threadId")}, {"$set": {"updatedAt": now_utc()}})
+    updated = crew_thread_message_collection.find_one({"_id": message_oid})
+    return message_response(updated)
 
 
 @router.get("/attachments/{message_id}/{attachment_id}")

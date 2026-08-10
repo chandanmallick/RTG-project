@@ -426,6 +426,7 @@ export default function PSPDashboard({ highlightsOnly = false }) {
   const [statusData, setStatusData] = useState([]);
   const [loading, setLoading] = useState(false);
   const [sourceRefreshLoading, setSourceRefreshLoading] = useState(false);
+  const [sourceRefreshMessage, setSourceRefreshMessage] = useState(null);
 
   // Real MongoDB Analytics State
   const [analyticsData, setAnalyticsData] = useState(null);
@@ -1022,10 +1023,26 @@ export default function PSPDashboard({ highlightsOnly = false }) {
   const handleFetchSources = async () => {
     try {
       setSourceRefreshLoading(true);
+      setSourceRefreshMessage(null);
       const targetDate = selectedDate || latestDate || "";
       const res = await API.refreshPspSources(targetDate);
       if (!res.success) {
         console.warn("PSP source refresh completed with failures:", res.failed || res.results || res.message);
+        const failedSources = Object.values(res.failed || {})
+          .map((item) => `${item.label || "Source"}: ${item.message || "No data returned"}`)
+          .join(" · ");
+        setSourceRefreshMessage({
+          type: "error",
+          text: failedSources || res.message || "One or more dashboard sources could not be refreshed."
+        });
+      } else {
+        const nldcCount = Object.values(res.results || {})
+          .filter((item) => String(item.label || "").toLowerCase().includes("nldc") || String(item.label || "").toLowerCase().includes("india 15"))
+          .reduce((total, item) => total + Number(item.records || 0), 0);
+        setSourceRefreshMessage({
+          type: "success",
+          text: `Dashboard sources refreshed${nldcCount ? ` · NLDC rows saved: ${nldcCount.toLocaleString("en-IN")}` : ""}.`
+        });
       }
       const refreshedDate = res.date || targetDate;
       setSelectedDate(refreshedDate);
@@ -1041,6 +1058,7 @@ export default function PSPDashboard({ highlightsOnly = false }) {
       ], 240);
     } catch (err) {
       console.error("Error refreshing PSP source data:", err);
+      setSourceRefreshMessage({ type: "error", text: err.response?.data?.message || err.message || "Dashboard source refresh failed." });
     } finally {
       setSourceRefreshLoading(false);
     }
@@ -1286,7 +1304,7 @@ export default function PSPDashboard({ highlightsOnly = false }) {
                 className="btn theme-btn-banner-refresh d-flex align-items-center gap-2"
                 onClick={handleFetchSources}
                 disabled={sourceRefreshLoading || loading || analyticsLoading}
-                title="Fetch PSP, loadshed/hourly, outage, portfolio, and curve data from source and cache it"
+                title="Fetch PSP, NLDC demand sources, loadshed/hourly, outage, portfolio and curve data from source and cache it"
               >
                 <Database size={14} className={sourceRefreshLoading ? "animate-spin-custom" : ""} />
                 <span>Fetch Dashboard</span>
@@ -1302,6 +1320,17 @@ export default function PSPDashboard({ highlightsOnly = false }) {
             </div>
           </div>
         </div>
+
+        {sourceRefreshMessage && (
+          <div
+            className={`alert ${sourceRefreshMessage.type === "error" ? "alert-danger" : "alert-success"} d-flex align-items-start gap-2 py-2 mb-3`}
+            role="alert"
+            style={{ borderRadius: "12px", fontSize: "0.8rem", fontWeight: 650 }}
+          >
+            {sourceRefreshMessage.type === "error" ? <AlertTriangle size={17} className="flex-shrink-0 mt-1" /> : <CheckCircle size={17} className="flex-shrink-0 mt-1" />}
+            <span>{sourceRefreshMessage.text}</span>
+          </div>
+        )}
 
         {/* ROW 1: SUMMARY ROW */}
         <div className="row g-3" style={{ marginBottom: "20px" }}>

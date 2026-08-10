@@ -554,6 +554,53 @@ def thermal_availability(report_date):
     }
 
 
+def current_generation_outage_summary(report_date):
+    """Summarise installed MW currently reported under generator outages.
+
+    This deliberately uses the same CRMS generator-outage source as the
+    thermal availability calculation, while splitting Planned/Forced and
+    Thermal/Hydro for the DSO report.
+    """
+    db = MongoService()
+    rows, from_cache, source_url = fetch_generation_outage_history_rows(
+        db, report_date, report_date, session=make_legacy_session()
+    )
+    unit_lookup = build_unit_lookup(db)
+    fuel_lookup = {}
+    for unit in db.unit_collection.find({}, {"_id": 0, "Unit_Name": 1, "fuel_type": 1}):
+        key = compact(unit.get("Unit_Name"))
+        if key:
+            fuel_lookup[key] = unit.get("fuel_type")
+
+    totals = {
+        "THERMAL": {"planned_mw": 0.0, "forced_mw": 0.0, "planned_units": 0, "forced_units": 0},
+        "HYDRO": {"planned_mw": 0.0, "forced_mw": 0.0, "planned_units": 0, "forced_units": 0},
+    }
+    seen = set()
+    for row in rows:
+        name = row.get("ELEMENT_NAME") or row.get("elementName") or row.get("ElementName") or ""
+        unit = unit_lookup.get(" ".join(str(name).strip().upper().split())) or {}
+        fuel = compact(fuel_lookup.get(compact(name)) or row.get("FUEL_TYPE") or row.get("FUEL"))
+        fuel_group = "HYDRO" if "HYDRO" in fuel else "THERMAL" if any(word in fuel for word in ("THERMAL", "COAL", "LIGNITE", "GAS", "DIESEL")) else ""
+        outage_type = compact(row.get("TYPE") or row.get("OUTAGE_TYPE") or row.get("outageCategory"))
+        outage_group = "FORCED" if "FORCED" in outage_type else "PLANNED" if "PLANNED" in outage_type else ""
+        capacity = to_float(row.get("INSTALLED_CAPACITY") or row.get("installedCapacity") or unit.get("installed_capacity"))
+        identity = (fuel_group, outage_group, compact(name), capacity)
+        if not fuel_group or not outage_group or not capacity or identity in seen:
+            continue
+        seen.add(identity)
+        bucket = totals[fuel_group]
+        bucket[f"{outage_group.lower()}_mw"] += capacity
+        bucket[f"{outage_group.lower()}_units"] += 1
+
+    for bucket in totals.values():
+        bucket["planned_mw"] = round(bucket["planned_mw"], 3)
+        bucket["forced_mw"] = round(bucket["forced_mw"], 3)
+        bucket["total_mw"] = round(bucket["planned_mw"] + bucket["forced_mw"], 3)
+        bucket["total_units"] = bucket["planned_units"] + bucket["forced_units"]
+    return {"by_fuel": totals, "source_url": source_url, "from_cache": from_cache}
+
+
 def build_results(rows, limits):
     max_demand, max_demand_time, _ = extrema(rows, "demand", "max")
     min_demand, min_demand_time, _ = extrema(rows, "demand", "min")
@@ -740,6 +787,7 @@ async def process_report(
                 "input_summary": input_summary,
                 "results": build_results(rows, master.get("limits") or {}),
                 "thermal_availability": thermal_availability(report_date),
+                "generation_outage_summary": current_generation_outage_summary(report_date),
                 "processed_at": now,
             }
         collection().replace_one(key, document, upsert=True)
@@ -1069,12 +1117,12 @@ async def download_report(report_type: str, report_date: str):
 
     metrics = doc["results"]["demand_frequency"]
     freq = doc["results"]["frequency_distribution"]
-    sheet["A3"], sheet["B3"], sheet["C3"] = "", "MW/Hz", "Time (Hrs)"
+    sheet["A3"], sheet["B3"], sheet["C3"] = "", "Value", "Time (Hrs)"
     demand_rows = (
-        ("Max demand met", metrics.get("max_demand_mw"), metrics.get("max_demand_time")),
-        ("Min demand met", metrics.get("min_demand_mw"), metrics.get("min_demand_time")),
-        ("Max freq.", metrics.get("max_frequency_hz"), metrics.get("max_frequency_time")),
-        ("Min freq.", metrics.get("min_frequency_hz"), metrics.get("min_frequency_time")),
+        ("Max demand met (MW)", metrics.get("max_demand_mw"), metrics.get("max_demand_time")),
+        ("Min demand met (MW)", metrics.get("min_demand_mw"), metrics.get("min_demand_time")),
+        ("Max freq. (Hz)", metrics.get("max_frequency_hz"), metrics.get("max_frequency_time")),
+        ("Min freq. (Hz)", metrics.get("min_frequency_hz"), metrics.get("min_frequency_time")),
     )
     for row_number, values in enumerate(demand_rows, 4):
         for column, value in enumerate(values, 1):
@@ -1151,8 +1199,20 @@ async def download_report(report_type: str, report_date: str):
     def formatted(value, digits=3):
         return f"{value:.{digits}f}" if value is not None else "—"
 
-    merged_title("A19:L19", "Major OD/UD by states/generators:", fill=pale_green, font_color="006845")
-    sheet.merge_cells("A20:L22")
+    outage_summary = (doc.get("generation_outage_summary") or {}).get("by_fuel") or {}
+    merged_title("A19:E19", "Current generation under planned & forced outage (MW)", fill="FFF7DB", font_color="7C4A03")
+    sheet["A20"], sheet["B20"], sheet["C20"], sheet["D20"] = "Fuel", "Planned outage (MW)", "Forced outage (MW)", "Total under outage (MW)"
+    for row_number, fuel in enumerate(("THERMAL", "HYDRO"), 21):
+        item = outage_summary.get(fuel) or {}
+        sheet.cell(row_number, 1, fuel.title())
+        sheet.cell(row_number, 2, item.get("planned_mw"))
+        sheet.cell(row_number, 3, item.get("forced_mw"))
+        sheet.cell(row_number, 4, item.get("total_mw"))
+    style_range("A20:D22", center=True)
+    style_range("A20:D20", fill=pale_blue, bold=True, center=True)
+
+    merged_title("A24:L24", "Major OD/UD by states/generators:", fill=pale_green, font_color="006845")
+    sheet.merge_cells("A25:L27")
     default_od_text = (
         f"Freq. touched {formatted(metrics.get('min_frequency_hz'))} Hz at {metrics.get('min_frequency_time') or '—'} Hrs, "
         f"OD by states in ER: {', '.join(od_states) or 'NIL'}"
@@ -1161,17 +1221,17 @@ async def download_report(report_type: str, report_date: str):
         f"Freq. touched {formatted(metrics.get('max_frequency_hz'))} Hz at {metrics.get('max_frequency_time') or '—'} Hrs, "
         f"UD by states in ER: {', '.join(ud_states) or 'NIL'}"
     )
-    sheet["A20"] = f"{doc.get('major_od_text') or default_od_text}\n{doc.get('major_ud_text') or default_ud_text}"
-    style_range("A20:L22")
-
-    merged_title("A24:L24", "Important Events (FTC/GD/GI/Load crash etc.):", fill=pale_green, font_color="006845")
-    sheet.merge_cells("A25:L27")
-    sheet["A25"] = doc.get("important_events") or "NIL"
+    sheet["A25"] = f"{doc.get('major_od_text') or default_od_text}\n{doc.get('major_ud_text') or default_ud_text}"
     style_range("A25:L27")
-    sheet["A29"] = doc.get("signoff_regards") or "Regards"
-    sheet["A30"] = doc.get("signoff_name") or "Ashoke Kumar Basak, SIC ERLDC"
-    sheet["A29"].font = Font(name="Arial", size=10, bold=True)
-    sheet["A30"].font = Font(name="Arial", size=10)
+
+    merged_title("A29:L29", "Important Events (FTC/GD/GI/Load crash etc.):", fill=pale_green, font_color="006845")
+    sheet.merge_cells("A30:L32")
+    sheet["A30"] = doc.get("important_events") or "NIL"
+    style_range("A30:L32")
+    sheet["A34"] = doc.get("signoff_regards") or "Regards"
+    sheet["A35"] = doc.get("signoff_name") or "Ashoke Kumar Basak, SIC ERLDC"
+    sheet["A34"].font = Font(name="Arial", size=10, bold=True)
+    sheet["A35"].font = Font(name="Arial", size=10)
 
     widths = {"A": 22, "B": 18, "C": 22, "D": 18, "E": 22, "F": 15}
     for letter in "GHIJKL":
@@ -1180,14 +1240,14 @@ async def download_report(report_type: str, report_date: str):
         sheet.column_dimensions[letter].width = width
     for row_number in range(12, 18):
         sheet.row_dimensions[row_number].height = 25
-    sheet.row_dimensions[20].height = 32
-    sheet.row_dimensions[25].height = 28
+    sheet.row_dimensions[25].height = 32
+    sheet.row_dimensions[30].height = 28
     sheet.freeze_panes = "A3"
     sheet.page_setup.orientation = "landscape"
     sheet.page_setup.fitToWidth = 1
     sheet.page_setup.fitToHeight = 1
     sheet.sheet_properties.pageSetUpPr.fitToPage = True
-    sheet.print_area = "A1:L30"
+    sheet.print_area = "A1:L35"
     output = io.BytesIO()
     workbook.save(output)
     output.seek(0)
@@ -1340,11 +1400,11 @@ def report_pdf_response(doc, report_type, report_date):
         metrics = results.get("demand_frequency") or {}
         add_section("Demand and Frequency Summary")
         add_table([
-            ["Parameter", "MW / Hz", "Time (Hrs)"],
-            ["Max demand met", value(metrics.get("max_demand_mw"), 0), metrics.get("max_demand_time")],
-            ["Min demand met", value(metrics.get("min_demand_mw"), 0), metrics.get("min_demand_time")],
-            ["Max frequency", value(metrics.get("max_frequency_hz"), 3), metrics.get("max_frequency_time")],
-            ["Min frequency", value(metrics.get("min_frequency_hz"), 3), metrics.get("min_frequency_time")],
+            ["Parameter", "Value", "Time (Hrs)"],
+            ["Max demand met (MW)", value(metrics.get("max_demand_mw"), 0), metrics.get("max_demand_time")],
+            ["Min demand met (MW)", value(metrics.get("min_demand_mw"), 0), metrics.get("min_demand_time")],
+            ["Max frequency (Hz)", value(metrics.get("max_frequency_hz"), 3), metrics.get("max_frequency_time")],
+            ["Min frequency (Hz)", value(metrics.get("min_frequency_hz"), 3), metrics.get("min_frequency_time")],
         ], [65 * mm, 45 * mm, 40 * mm])
         frequency = results.get("frequency_distribution") or {}
         add_table([
@@ -1359,6 +1419,21 @@ def report_pdf_response(doc, report_type, report_date):
             [value(thermal.get("revived_capacity_mw"), 0), value(thermal.get("outage_capacity_mw"), 0), value(thermal.get("net_capacity_change_mw"), 0)],
             [thermal.get("revived_details") or "NIL", thermal.get("outage_details") or "NIL", ""],
         ], [72 * mm, 100 * mm, 55 * mm])
+
+        outage_summary = (doc.get("generation_outage_summary") or {}).get("by_fuel") or {}
+        add_section("Current Generation under Planned & Forced Outage")
+        add_table(
+            [["Fuel", "Planned outage (MW)", "Forced outage (MW)", "Total under outage (MW)"]] + [
+                [
+                    fuel.title(),
+                    value((outage_summary.get(fuel) or {}).get("planned_mw"), 0),
+                    value((outage_summary.get(fuel) or {}).get("forced_mw"), 0),
+                    value((outage_summary.get(fuel) or {}).get("total_mw"), 0),
+                ]
+                for fuel in ("THERMAL", "HYDRO")
+            ],
+            [55 * mm, 55 * mm, 55 * mm, 55 * mm],
+        )
 
         add_section("TTC / ATC, Schedule and Actual")
         states = results.get("states") or {}

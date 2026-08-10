@@ -110,17 +110,19 @@ export default function LeaveManagement() {
   const [replacementChoices, setReplacementChoices] = useState({});
   const [completedFrom, setCompletedFrom] = useState(dayjs().subtract(1, "day").format("YYYY-MM-DD"));
   const [completedTo, setCompletedTo] = useState("");
-  const [workflowView, setWorkflowView] = useState("table");
+  const [workflowView, setWorkflowView] = useState(() => new URLSearchParams(window.location.search).get("view") === "calendar" ? "calendar" : "table");
   const [approvalRoster, setApprovalRoster] = useState([]);
   const [approvalDates, setApprovalDates] = useState([]);
-  const [approvalFrom, setApprovalFrom] = useState("");
-  const [approvalTo, setApprovalTo] = useState("");
+  const [approvalFrom, setApprovalFrom] = useState(() => new URLSearchParams(window.location.search).get("from") || "");
+  const [approvalTo, setApprovalTo] = useState(() => new URLSearchParams(window.location.search).get("to") || "");
   const [approvalCalendarLoading, setApprovalCalendarLoading] = useState(false);
   const [approvalCalendarError, setApprovalCalendarError] = useState("");
   const [rejectDialog, setRejectDialog] = useState({ open: false, stage: "sic", leaves: [] });
   const [rejectComment, setRejectComment] = useState("");
   const [activeSection, setActiveSection] = useState(null);
   const [approvedTraining, setApprovedTraining] = useState([]);
+  const [pendingTrainingApprovals, setPendingTrainingApprovals] = useState([]);
+  const [selectedTrainingApprovalIds, setSelectedTrainingApprovalIds] = useState([]);
   const [trainingOffChoices, setTrainingOffChoices] = useState({});
 
   const openSection = (section) => {
@@ -169,7 +171,20 @@ export default function LeaveManagement() {
       setApprovedTraining([]);
     }
   };
-  useEffect(() => { loadApprovedTraining(); }, []);
+  const loadPendingTrainingApprovals = async () => {
+    try {
+      const { data } = await api.get("/training-assign/pending");
+      const approvable = (data || []).filter((item) => item.canApprove);
+      setPendingTrainingApprovals(approvable);
+      setSelectedTrainingApprovalIds((current) => current.filter((id) => approvable.some((item) => item.id === id)));
+    } catch (error) {
+      setPendingTrainingApprovals([]);
+    }
+  };
+  useEffect(() => {
+    loadApprovedTraining();
+    loadPendingTrainingApprovals();
+  }, []);
   useEffect(() => {
     const stopDrag = () => { dragFill.current = null; };
     window.addEventListener("pointerup", stopDrag);
@@ -277,6 +292,23 @@ export default function LeaveManagement() {
       await loadApprovedTraining();
     } catch (error) {
       setNotice({ severity: "error", text: error.response?.data?.detail || error.message || "Training OFF request could not be submitted." });
+    } finally {
+      setWorking(false);
+    }
+  };
+  const approveTrainingFromLeave = async () => {
+    if (!selectedTrainingApprovalIds.length) {
+      setNotice({ severity: "warning", text: "Select at least one training nomination to approve." });
+      return;
+    }
+    setWorking(true);
+    try {
+      const { data } = await api.post("/training-assign/approve", { ids: selectedTrainingApprovalIds });
+      setNotice({ severity: "success", text: data.message || "Training nominations approved and forwarded." });
+      setSelectedTrainingApprovalIds([]);
+      await Promise.all([loadPendingTrainingApprovals(), loadApprovedTraining(), loadLeaves()]);
+    } catch (error) {
+      setNotice({ severity: "error", text: error.response?.data?.detail || error.message || "Training approval could not be completed." });
     } finally {
       setWorking(false);
     }
@@ -891,7 +923,7 @@ export default function LeaveManagement() {
         {[
           { key: "apply", title: "Apply Leave", subtitle: "Select employee, dates and leave type", count: null, color: "#0057B7", tint: "#EAF2FF" },
           { key: "exchange", title: "Apply for Duty Exchange", subtitle: "Exchange duty through the approval workflow", count: null, color: "#0369A1", tint: "#F0F9FF" },
-          { key: "training", title: "View Training", subtitle: "Approved training and before/after OFF", count: approvedTraining.length, color: "#7C3AED", tint: "#F5F3FF" },
+          { key: "training", title: "Training & Approval", subtitle: pendingTrainingApprovals.length ? `${pendingTrainingApprovals.length} nomination(s) awaiting your approval` : "Approved training and before/after OFF", count: pendingTrainingApprovals.length || approvedTraining.length, color: "#7C3AED", tint: "#F5F3FF" },
           { key: "pending", title: "Pending Leave Workflow", subtitle: "Review, approve, forward or reject", count: pending.length, color: "#17876D", tint: "#EAF8F3" },
           { key: "completed", title: "Completed Leave", subtitle: "Approved, rejected and cancelled records", count: completed.length, color: "#4338CA", tint: "#EEF2FF" },
         ].map((tile) => (
@@ -943,6 +975,38 @@ export default function LeaveManagement() {
 
       <Collapse in={activeSection === "training"} timeout={420} unmountOnExit>
       <Box id="leave-workspace-training" sx={{ scrollMarginTop: 110 }}>
+      {!!pendingTrainingApprovals.length && <Paper sx={{ p: 2.5, mb: 2.5, borderColor: "#DDD6FE", background: "#FCFAFF" }}>
+        <SectionTitle icon={ShieldCheck} title="Training Approval Inbox" subtitle="Training nominations assigned to you through the reporting hierarchy. Select one or more nominations to approve and forward." count={pendingTrainingApprovals.length} />
+        <Alert severity="info" sx={{ mb: 1.5 }}>
+          If a shift employee needs a replacement duty or an Acting SIC, use the full Training module to make that assignment before approval.
+        </Alert>
+        <TableContainer sx={{ border: "1px solid #DDD6FE", borderRadius: 2 }}>
+          <Table size="small">
+            <TableHead><TableRow sx={{ background: "#F5F3FF" }}>
+              <TableCell padding="checkbox"><Checkbox checked={pendingTrainingApprovals.length > 0 && selectedTrainingApprovalIds.length === pendingTrainingApprovals.length} indeterminate={selectedTrainingApprovalIds.length > 0 && selectedTrainingApprovalIds.length < pendingTrainingApprovals.length} onChange={(event) => setSelectedTrainingApprovalIds(event.target.checked ? pendingTrainingApprovals.map((item) => item.id) : [])} /></TableCell>
+              <TableCell sx={{ fontWeight: 900 }}>Employee</TableCell>
+              <TableCell sx={{ fontWeight: 900 }}>Training</TableCell>
+              <TableCell sx={{ fontWeight: 900 }}>Period / location</TableCell>
+              <TableCell sx={{ fontWeight: 900 }}>Your approval stage</TableCell>
+              <TableCell sx={{ fontWeight: 900 }}>Shift cover</TableCell>
+            </TableRow></TableHead>
+            <TableBody>
+              {pendingTrainingApprovals.map((training) => <TableRow key={training.id} hover>
+                <TableCell padding="checkbox"><Checkbox checked={selectedTrainingApprovalIds.includes(training.id)} onChange={(event) => setSelectedTrainingApprovalIds((current) => event.target.checked ? [...current, training.id] : current.filter((id) => id !== training.id))} /></TableCell>
+                <TableCell><Typography sx={{ fontWeight: 850 }}>{training.employeeName || training.employeeId}</Typography><Typography sx={{ fontSize: 11, color: "#64748B" }}>{training.employeeDesignation || training.employeeId}</Typography></TableCell>
+                <TableCell sx={{ fontWeight: 800 }}>{training.trainingName}</TableCell>
+                <TableCell><Typography sx={{ fontSize: 12, fontWeight: 750 }}>{dayjs(training.startDate).format("DD MMM YYYY")} to {dayjs(training.endDate).format("DD MMM YYYY")}</Typography><Typography sx={{ fontSize: 11, color: "#64748B" }}>{training.trainingLocation || "Location not specified"}</Typography></TableCell>
+                <TableCell><Chip size="small" label={training.currentApproverLevel || "Reporting Officer"} color="warning" variant="outlined" sx={{ fontWeight: 800 }} /></TableCell>
+                <TableCell>{training.isShiftEmployee ? <Stack spacing={.35} alignItems="flex-start"><Chip size="small" label={training.groupName || "Shift group"} variant="outlined" /><Typography sx={{ fontSize: 10.5, color: training.replacementRequired ? "#D97706" : "#64748B", fontWeight: 800 }}>{training.replacementRequired ? "Replacement required" : "No replacement marked"}{training.isGroupSIC ? " · SIC" : ""}</Typography></Stack> : <Typography sx={{ fontSize: 12, color: "#64748B" }}>Non-shift employee</Typography>}</TableCell>
+              </TableRow>)}
+            </TableBody>
+          </Table>
+        </TableContainer>
+        <Stack direction={{ xs: "column", sm: "row" }} spacing={1} justifyContent="flex-end" sx={{ mt: 1.5 }}>
+          <Button variant="outlined" onClick={() => window.location.assign("/crew/training?section=pending")}>Open detailed training approval</Button>
+          <Button color="success" variant="contained" startIcon={<CheckCircle2 size={16} />} onClick={approveTrainingFromLeave} disabled={working || !selectedTrainingApprovalIds.length}>Approve &amp; Forward selected ({selectedTrainingApprovalIds.length})</Button>
+        </Stack>
+      </Paper>}
       <Paper sx={{ p: 2.5 }}>
         <SectionTitle icon={GraduationCap} title="Approved Training & Adjacent OFF" subtitle="The before/after day is roster OFF, not a leave application. It follows the reporting approval workflow." count={approvedTraining.length} />
         <Alert severity="info" sx={{ mb: 1.5 }}>

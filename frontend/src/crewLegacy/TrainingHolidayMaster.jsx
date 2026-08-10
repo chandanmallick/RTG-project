@@ -117,7 +117,7 @@ const [historyEmployee,setHistoryEmployee]=useState("")
 const [myApprovedTraining,setMyApprovedTraining]=useState([])
 const [myOffChoices,setMyOffChoices]=useState({})
 const [notice,setNotice]=useState(null)
-const [activeSection,setActiveSection]=useState(null)
+const [activeSection,setActiveSection]=useState(()=>new URLSearchParams(window.location.search).get("section") || null)
 
 const openSection=(section)=>{
 setActiveSection(section)

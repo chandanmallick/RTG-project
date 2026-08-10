@@ -2406,6 +2406,34 @@ def refresh_psp_operational_sources(target_date: date):
     date_str = target_date.strftime("%Y-%m-%d")
     results = {}
 
+    # These three NLDC documents power the NLDC cards, demand trend and
+    # All-India generation views.  They must be refreshed with the normal
+    # dashboard source action; previously this action never invoked them and
+    # could misleadingly return success with no NLDC data saved.
+    nldc_sources = (
+        ("nldc_demand", "NLDC maximum demand", PSPService.fetch_and_save_nldc_demand_date),
+        ("india_15_min_demand", "India 15-minute demand/generation", PSPService.fetch_and_save_india_15_min_demand_date),
+        ("all_state_demand", "NLDC state demand", PSPService.fetch_and_save_all_state_demand_date),
+    )
+    for source_key, label, fetcher in nldc_sources:
+        try:
+            source_result = fetcher(target_date) or {}
+            records = int(source_result.get("records") or 0)
+            if not source_result.get("success") or records <= 0:
+                raise ValueError(source_result.get("message") or f"{label} returned no records.")
+            results[source_key] = {
+                "success": True,
+                "label": label,
+                "records": records,
+                "message": source_result.get("message") or f"{label} refreshed.",
+            }
+        except Exception as exc:
+            results[source_key] = {
+                "success": False,
+                "label": label,
+                "message": str(exc),
+            }
+
     try:
         psp_result = PSPService.fetch_and_save_date(target_date)
         results["psp_data"] = {"success": True, "result": psp_result}

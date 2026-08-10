@@ -9,7 +9,7 @@ client.interceptors.request.use((config) => {
   const token = localStorage.getItem("portalToken");
   if (token) config.headers.Authorization = `Bearer ${token}`;
   const method = (config.method || "GET").toUpperCase();
-  if (!["GET", "HEAD", "OPTIONS"].includes(method) && storedPermissions()[pageKeyForPath()]?.write === false) {
+  if (!["GET", "HEAD", "OPTIONS"].includes(method) && !config.allowCrossPageWrite && storedPermissions()[pageKeyForPath()]?.write === false) {
     return Promise.reject(new Error("This page is read-only for your account."));
   }
   return config;
@@ -33,6 +33,13 @@ const crewApi = {
   pushRoster: (id) => client.post(url(`/rosters/${id}/push`)).then((response) => response.data),
   calendar: (startDate, endDate) => client.get(url("/calendar"), {
     params: { start_date: startDate, end_date: endDate },
+  }).then((response) => response.data),
+  pendingReplacements: () => client.get(url("/replacement/pending")).then((response) => response.data),
+  replacementCandidates: (leaveId, roleFilter = "auto") => client.get(url(`/replacement/candidates/${leaveId}`), {
+    params: { roleFilter },
+  }).then((response) => response.data),
+  assignReplacement: (leaveId, payload) => client.put(url(`/replacement/assign/${leaveId}`), payload, {
+    allowCrossPageWrite: true,
   }).then((response) => response.data),
 };
 

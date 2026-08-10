@@ -672,13 +672,23 @@ export default function TopNavbar() {
                           allowWorkflowAccess
                         />
                         <DropdownItem
-                          title="Crew Threads"
-                          description="Team discussion and file sharing"
-                          icon={MessageSquare}
-                          iconColor="#0057B7"
-                          iconBg="#EAF2FF"
+                    title="Crew Notices"
+                    description="Team announcements and file sharing"
+                    icon={MessageSquare}
+                    iconColor="#0057B7"
+                    iconBg="#EAF2FF"
                           path="/crew/threads"
                           active={location.pathname === "/crew/threads"}
+                          onClick={handleNavigate}
+                        />
+                        <DropdownItem
+                          title="Crew Reports"
+                          description="Leave, training, C-OFF and replacement duty"
+                          icon={FileText}
+                          iconColor="#0057B7"
+                          iconBg="#EAF2FF"
+                          path="/crew/reports"
+                          active={location.pathname === "/crew/reports"}
                           onClick={handleNavigate}
                         />
                       </Box>

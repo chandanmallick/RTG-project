@@ -434,6 +434,8 @@ def calendar_view(start_date: str = Query(...), end_date: str = Query(...)):
             "assignedDuty": 1,
             "leaveType": 1,
             "leaveStatus": 1,
+            "leaveRequestId": 1,
+            "replacementRequired": 1,
             "trainingName": 1,
             "replacementDuty": 1,
             "replacementFor": 1,
@@ -508,6 +510,8 @@ def calendar_view(start_date: str = Query(...), end_date: str = Query(...)):
             daily[(emp_id, date)] = {
                 "shift": record.get("assignedDuty") or "-", "leaveType": record.get("leaveType"),
                 "leaveStatus": record.get("leaveStatus"), "trainingName": record.get("trainingName"),
+                "leaveRequestId": record.get("leaveRequestId"),
+                "replacementRequired": bool(record.get("replacementRequired")),
                 "replacementEmployee": replacement_map.get((emp_id, date)),
                 "replacementFor": replacement_for_map.get((emp_id, date)),
                 "isActingSIC": bool(record.get("isActingSIC")),

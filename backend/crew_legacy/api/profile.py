@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from bson import ObjectId
 
@@ -10,6 +10,7 @@ from crew_legacy.database.database_mongo import (
     compensatory_off_collection,
     employee_collection,
     employee_daily_collection,
+    leave_request_collection,
     roster_master_collection,
     training_nomination_history_collection,
     organization_unit_collection,
@@ -169,6 +170,30 @@ def _latest_profile_file(employee_id: str) -> Path | None:
     return latest
 
 
+def _report_date(value) -> str:
+    if isinstance(value, datetime):
+        return value.strftime("%Y-%m-%d")
+    return str(value or "")[:10]
+
+
+def _report_actor_can_view_all(user: dict) -> bool:
+    return str(user.get("role") or "").lower() == "admin" or str(user.get("employeeId") or "") == "50041"
+
+
+def _inclusive_days(start_value, end_value=None, window_start: str | None = None, window_end: str | None = None) -> int:
+    """Inclusive calendar days, optionally limited to the selected report period."""
+    try:
+        start = datetime.strptime(_report_date(start_value), "%Y-%m-%d").date()
+        end = datetime.strptime(_report_date(end_value or start_value), "%Y-%m-%d").date()
+    except ValueError:
+        return 0
+    if window_start:
+        start = max(start, datetime.strptime(window_start, "%Y-%m-%d").date())
+    if window_end:
+        end = min(end, datetime.strptime(window_end, "%Y-%m-%d").date())
+    return max(0, (end - start).days + 1)
+
+
 # ----------------------------------------
 # Profile field editing configuration
 # (must be registered before /{employeeId})
@@ -192,6 +217,199 @@ def update_profile_edit_settings(data: dict, user=Depends(get_current_user)):
         upsert=True,
     )
     return _profile_edit_settings()
+
+
+# ---------------------------------
+# Crew activity report and profile tiles
+# ---------------------------------
+@router.get("/activity-report")
+def activity_report(
+    employeeId: str | None = Query(default=None),
+    employeeIds: str | None = Query(default=None),
+    startDate: str | None = Query(default=None),
+    endDate: str | None = Query(default=None),
+    user=Depends(get_current_user),
+):
+    """Single audit/report feed for leave, training, C-OFF and replacement duties."""
+    actor_id = str(user.get("employeeId") or "").strip()
+    can_view_all = _report_actor_can_view_all(user)
+    requested_ids = [value.strip() for value in str(employeeIds or employeeId or actor_id).split(",") if value.strip()]
+    target_all = any(value.lower() == "all" for value in requested_ids)
+    target_ids = [] if target_all else list(dict.fromkeys(requested_ids))
+    target_id = target_ids[0] if len(target_ids) == 1 else ""
+    if not target_ids and not target_all:
+        raise HTTPException(400, detail="Employee ID is required")
+    if (target_all or any(value != actor_id for value in target_ids)) and not can_view_all:
+        raise HTTPException(403, detail="You can view only your own crew activity report")
+
+    date_filter = {}
+    if startDate:
+        date_filter["$gte"] = startDate
+    if endDate:
+        date_filter["$lte"] = endDate
+
+    def within(value) -> bool:
+        value = _report_date(value)
+        return bool(value) and (not startDate or value >= startDate) and (not endDate or value <= endDate)
+
+    rows = []
+    leave_query = ({"employeeId": target_ids[0]} if len(target_ids) == 1 else {"employeeId": {"$in": target_ids}}) if target_ids else {}
+    if date_filter:
+        leave_query["date"] = date_filter
+    leaves = list(leave_request_collection.find(leave_query).sort("date", -1).limit(2000))
+    leave_context = {}
+    leave_dates = list({str(item.get("date") or "") for item in leaves if item.get("date")})
+    leave_employee_ids = list({str(item.get("employeeId") or "") for item in leaves if item.get("employeeId")})
+    if leave_dates and leave_employee_ids:
+        for item in employee_daily_collection.find(
+            {"employeeId": {"$in": leave_employee_ids}, "date": {"$in": leave_dates}},
+            {"employeeId": 1, "date": 1, "isHoliday": 1, "holidayName": 1},
+        ):
+            leave_context[(str(item.get("employeeId") or ""), item.get("date"))] = item
+    for item in leaves:
+        leave_date = item.get("date")
+        context = leave_context.get((str(item.get("employeeId") or ""), leave_date), {})
+        try:
+            is_weekend = datetime.strptime(str(leave_date), "%Y-%m-%d").weekday() >= 5
+        except ValueError:
+            is_weekend = False
+        is_holiday = str(context.get("isHoliday") or "").upper() == "Y"
+        day_label = f"Holiday · {context.get('holidayName') or 'Holiday'}" if is_holiday else "Weekend" if is_weekend else "Working day"
+        rows.append({
+            "id": str(item.get("_id")), "kind": "Leave", "date": item.get("date"),
+            "employeeId": item.get("employeeId"), "employeeName": item.get("name"),
+            "title": item.get("leaveType") or "Leave", "status": item.get("finalStatus") or "Applied",
+            "detail": item.get("reason") or "", "groupName": item.get("groupName") or "",
+            "appliedOn": item.get("appliedOn") or item.get("createdOn"), "dayLabel": day_label,
+            "isWeekend": is_weekend, "isHoliday": is_holiday,
+        })
+
+    training_query = ({"employeeId": target_ids[0]} if len(target_ids) == 1 else {"employeeId": {"$in": target_ids}}) if target_ids else {}
+    trainings = list(training_nomination_history_collection.find(training_query).sort("startDate", -1).limit(2000))
+    filtered_trainings = [item for item in trainings if within(item.get("startDate")) or within(item.get("endDate"))]
+    for item in filtered_trainings:
+        rows.append({
+            "id": str(item.get("_id")), "kind": "Training", "date": item.get("startDate"),
+            "endDate": item.get("endDate"), "employeeId": item.get("employeeId"),
+            "employeeName": item.get("employeeName") or item.get("name"),
+            "title": item.get("trainingName") or "Training", "status": item.get("status") or "Pending",
+            "detail": item.get("location") or item.get("trainingLocation") or "", "groupName": item.get("groupName") or "",
+        })
+
+    coff_query = ({"employeeId": target_ids[0]} if len(target_ids) == 1 else {"employeeId": {"$in": target_ids}}) if target_ids else {}
+    coff_records = list(compensatory_off_collection.find(coff_query).sort("earnedDate", -1).limit(2000))
+    filtered_coff_records = []
+    for item in coff_records:
+        earned_date = item.get("earnedDate") or item.get("date")
+        if not within(earned_date):
+            continue
+        filtered_coff_records.append(item)
+        rows.append({
+            "id": str(item.get("_id")), "kind": "C-OFF", "date": earned_date,
+            "employeeId": item.get("employeeId"), "employeeName": "", "title": "Compensatory off",
+            "status": item.get("status") or "Available", "detail": item.get("reason") or item.get("reference", {}).get("type") or "",
+            "expiryDate": item.get("expiryDate"), "usedDate": item.get("usedDate"),
+        })
+
+    replacement_query = ({"replacement.employeeId": target_ids[0]} if len(target_ids) == 1 else {"replacement.employeeId": {"$in": target_ids}}) if target_ids else {"replacement.employeeId": {"$exists": True, "$ne": None}}
+    if date_filter:
+        replacement_query["date"] = date_filter
+    replacements = list(leave_request_collection.find(replacement_query).sort("date", -1).limit(2000))
+    for item in replacements:
+        replacement = item.get("replacement") or {}
+        rows.append({
+            "id": str(item.get("_id")), "kind": "Replacement duty", "date": item.get("date"),
+            "employeeId": replacement.get("employeeId"), "employeeName": replacement.get("name"),
+            "title": item.get("assignedDuty") or item.get("dutyType") or "Replacement duty",
+            "status": replacement.get("status") or item.get("finalStatus") or "Assigned",
+            "detail": f"In place of {item.get('name') or item.get('employeeId') or 'employee'}", "groupName": item.get("groupName") or "",
+        })
+
+    rows.sort(key=lambda item: (_report_date(item.get("date")), item.get("kind") or ""), reverse=True)
+    employee_ids = {str(item.get("employeeId") or "").strip() for item in rows if item.get("employeeId")}
+    employee_names = {
+        str(item.get("userId") or item.get("employeeId") or "").strip(): item.get("name") or ""
+        for item in employee_collection.find(
+            {"$or": [{"userId": {"$in": list(employee_ids)}}, {"employeeId": {"$in": list(employee_ids)}}]},
+            {"userId": 1, "employeeId": 1, "name": 1},
+        )
+    } if employee_ids else {}
+    for row in rows:
+        canonical_id = str(row.get("employeeId") or "").strip()
+        # Employee Master is the single source for a printable employee name.
+        row["employeeName"] = employee_names.get(canonical_id) or row.get("employeeName") or canonical_id
+    summary = {
+        "leave": len(leaves),
+        "leaveApproved": sum(1 for item in leaves if str(item.get("finalStatus") or "").lower() == "approved"),
+        "leaveWeekend": sum(1 for item in rows if item.get("kind") == "Leave" and item.get("isWeekend") and not item.get("isHoliday")),
+        "leaveHoliday": sum(1 for item in rows if item.get("kind") == "Leave" and item.get("isHoliday")),
+        "training": len(filtered_trainings),
+        "trainingApproved": sum(1 for item in filtered_trainings if str(item.get("status") or "").lower() == "approved"),
+        "trainingDays": sum(_inclusive_days(item.get("startDate"), item.get("endDate"), startDate, endDate) for item in filtered_trainings if str(item.get("status") or "").lower() == "approved"),
+        "compOff": len(filtered_coff_records),
+        "compOffAvailable": sum(1 for item in filtered_coff_records if str(item.get("status") or "Available").lower() == "available"),
+        "compOffUsed": sum(1 for item in filtered_coff_records if str(item.get("status") or "").lower() == "used"),
+        "compOffUsedDays": sum(1 for item in filtered_coff_records if str(item.get("status") or "").lower() == "used"),
+        "compOffDates": [_report_date(item.get("earnedDate") or item.get("date")) for item in filtered_coff_records],
+        "replacement": len(replacements),
+    }
+    employee_options = []
+    if can_view_all:
+        employee_options = [{
+            "employeeId": str(item.get("userId") or item.get("employeeId") or ""),
+            "name": item.get("name") or "", "designation": item.get("designation") or "",
+        } for item in employee_collection.find({"isActive": {"$ne": False}}, {"userId": 1, "employeeId": 1, "name": 1, "designation": 1}).sort("name", 1)]
+        employee_options = [item for item in employee_options if item["employeeId"]]
+
+    return {"employeeId": "all" if target_all else target_id, "employeeIds": target_ids, "canViewAll": can_view_all, "employees": employee_options, "summary": summary, "rows": rows}
+
+
+@router.get("/activity-matrix")
+def activity_matrix(
+    startDate: str | None = Query(default=None),
+    endDate: str | None = Query(default=None),
+    user=Depends(get_current_user),
+):
+    """Employee-wise approved leave and training-day matrix for the selected period."""
+    if not _report_actor_can_view_all(user):
+        raise HTTPException(403, detail="Employee activity matrix is available to administrators")
+    if not startDate or not endDate or startDate > endDate:
+        raise HTTPException(400, detail="A valid From and To date are required")
+
+    people = {
+        str(item.get("userId") or item.get("employeeId") or "").strip(): {
+            "employeeId": str(item.get("userId") or item.get("employeeId") or "").strip(),
+            "employeeName": item.get("name") or "", "designation": item.get("designation") or "",
+            "trainingDays": 0, "leaveTotal": 0, "leaveByType": {},
+        }
+        for item in employee_collection.find({"isActive": {"$ne": False}}, {"userId": 1, "employeeId": 1, "name": 1, "designation": 1})
+    }
+    people = {key: value for key, value in people.items() if key}
+    categories = set()
+
+    for leave in leave_request_collection.find({"date": {"$gte": startDate, "$lte": endDate}, "finalStatus": "Approved"}):
+        employee_id = str(leave.get("employeeId") or "").strip()
+        if not employee_id:
+            continue
+        row = people.setdefault(employee_id, {"employeeId": employee_id, "employeeName": leave.get("name") or employee_id, "designation": "", "trainingDays": 0, "leaveTotal": 0, "leaveByType": {}})
+        leave_type = str(leave.get("leaveType") or "Other").strip() or "Other"
+        categories.add(leave_type)
+        row["leaveTotal"] += 1
+        row["leaveByType"][leave_type] = row["leaveByType"].get(leave_type, 0) + 1
+
+    for nomination in training_nomination_history_collection.find({"status": "Approved", "startDate": {"$lte": endDate}, "endDate": {"$gte": startDate}}):
+        employee_id = str(nomination.get("employeeId") or "").strip()
+        if not employee_id:
+            continue
+        row = people.setdefault(employee_id, {"employeeId": employee_id, "employeeName": nomination.get("employeeName") or nomination.get("name") or employee_id, "designation": "", "trainingDays": 0, "leaveTotal": 0, "leaveByType": {}})
+        row["trainingDays"] += _inclusive_days(nomination.get("startDate"), nomination.get("endDate"), startDate, endDate)
+
+    category_order = sorted(categories, key=lambda value: (value not in {"CL", "C-OFF"}, value))
+    rows = sorted(
+        [row for row in people.values() if row["trainingDays"] or row["leaveTotal"]],
+        key=lambda row: ((row["employeeName"] or "").lower(), row["employeeId"]),
+    )
+    return {"startDate": startDate, "endDate": endDate, "leaveCategories": category_order, "rows": rows}
 
 
 # -----------------------------

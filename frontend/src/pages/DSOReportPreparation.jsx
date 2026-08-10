@@ -188,6 +188,7 @@ export default function DSOReportPreparation({ reportType = "evening" }) {
   const frequency = report?.results?.frequency_distribution || {};
   const stateRows = useMemo(() => report?.results?.states || {}, [report]);
   const thermal = report?.thermal_availability || {};
+  const generationOutage = report?.generation_outage_summary?.by_fuel || {};
   const odItems = STATES
     .map((state) => ({ state, value: stateRows[state]?.od_at_min_frequency_mw }))
     .filter((item) => Number(item.value) > 0);
@@ -317,12 +318,12 @@ export default function DSOReportPreparation({ reportType = "evening" }) {
               <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", lg: "1.35fr .75fr" }, gap: 2 }}>
                 <Box sx={{ overflowX: "auto" }}>
                   <Box component="table" sx={{ ...tableSx, minWidth: { xs: 480, lg: 0 } }}>
-                    <thead><tr><th></th><th>MW/Hz</th><th>Time (Hrs)</th></tr></thead>
+                    <thead><tr><th></th><th>Value</th><th>Time (Hrs)</th></tr></thead>
                     <tbody>
-                      <tr><td style={{ textAlign: "left", fontWeight: 900 }}>Max demand met</td><td>{number(metrics.max_demand_mw, 0)}</td><td>{metrics.max_demand_time}</td></tr>
-                      <tr><td style={{ textAlign: "left", fontWeight: 900 }}>Min demand met</td><td>{number(metrics.min_demand_mw, 0)}</td><td>{metrics.min_demand_time}</td></tr>
-                      <tr><td style={{ textAlign: "left", fontWeight: 900 }}>Max freq.</td><td>{number(metrics.max_frequency_hz, 3)}</td><td>{metrics.max_frequency_time}</td></tr>
-                      <tr><td style={{ textAlign: "left", fontWeight: 900 }}>Min freq.</td><td>{number(metrics.min_frequency_hz, 3)}</td><td>{metrics.min_frequency_time}</td></tr>
+                      <tr><td style={{ textAlign: "left", fontWeight: 900 }}>Max demand met (MW)</td><td>{number(metrics.max_demand_mw, 0)}</td><td>{metrics.max_demand_time}</td></tr>
+                      <tr><td style={{ textAlign: "left", fontWeight: 900 }}>Min demand met (MW)</td><td>{number(metrics.min_demand_mw, 0)}</td><td>{metrics.min_demand_time}</td></tr>
+                      <tr><td style={{ textAlign: "left", fontWeight: 900 }}>Max freq. (Hz)</td><td>{number(metrics.max_frequency_hz, 3)}</td><td>{metrics.max_frequency_time}</td></tr>
+                      <tr><td style={{ textAlign: "left", fontWeight: 900 }}>Min freq. (Hz)</td><td>{number(metrics.min_frequency_hz, 3)}</td><td>{metrics.min_frequency_time}</td></tr>
                     </tbody>
                   </Box>
                 </Box>
@@ -380,13 +381,32 @@ export default function DSOReportPreparation({ reportType = "evening" }) {
               </Card>
             </Box>
 
-            <Card sx={{ p: 0, mb: 2, overflow: "hidden" }}>
-              <Typography sx={{ px: 1.7, py: 1.1, color: "#006845", bgcolor: "#E9F8F0", fontWeight: 900, textDecoration: "underline" }}>Major OD/UD by states/generators:</Typography>
-              <Box sx={{ p: 1.7, fontSize: 13, lineHeight: 1.8 }}>
-                <div>{report.major_od_text || defaultMajorOdText}</div>
-                <div>{report.major_ud_text || defaultMajorUdText}</div>
-              </Box>
-            </Card>
+            <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", xl: "1.12fr .88fr" }, gap: 2, mb: 2 }}>
+              <Card sx={{ p: 0, overflow: "hidden" }}>
+                <Typography sx={{ px: 1.7, py: 1.1, color: "#7C4A03", bgcolor: "#FFF7DB", fontWeight: 900 }}>
+                  Current generation under planned & forced outage (MW)
+                </Typography>
+                <Box sx={{ overflowX: "auto", p: 1.5 }}>
+                  <Box component="table" sx={{ ...tableSx, minWidth: 520 }}>
+                    <thead><tr><th>Fuel</th><th>Planned outage (MW)</th><th>Forced outage (MW)</th><th>Total under outage (MW)</th></tr></thead>
+                    <tbody>
+                      {["THERMAL", "HYDRO"].map((fuel) => {
+                        const item = generationOutage[fuel] || {};
+                        return <tr key={fuel}><td style={{ fontWeight: 900 }}>{fuel}</td><td>{number(item.planned_mw, 0)}{item.planned_units ? ` (${item.planned_units} units)` : ""}</td><td>{number(item.forced_mw, 0)}{item.forced_units ? ` (${item.forced_units} units)` : ""}</td><td style={{ fontWeight: 900 }}>{number(item.total_mw, 0)}{item.total_units ? ` (${item.total_units} units)` : ""}</td></tr>;
+                      })}
+                    </tbody>
+                  </Box>
+                </Box>
+              </Card>
+
+              <Card sx={{ p: 0, overflow: "hidden" }}>
+                <Typography sx={{ px: 1.7, py: 1.1, color: "#006845", bgcolor: "#E9F8F0", fontWeight: 900, textDecoration: "underline" }}>Major OD/UD by states/generators:</Typography>
+                <Box sx={{ p: 1.7, fontSize: 13, lineHeight: 1.8 }}>
+                  <div>{report.major_od_text || defaultMajorOdText}</div>
+                  <div>{report.major_ud_text || defaultMajorUdText}</div>
+                </Box>
+              </Card>
+            </Box>
 
             <Card sx={{ p: 0, mb: 2, overflow: "hidden" }}>
               <Typography sx={{ px: 1.7, py: 1.1, color: "#006845", bgcolor: "#E9F8F0", fontWeight: 900, textDecoration: "underline" }}>Important Events (FTC/GD/GI/Load crash etc.):</Typography>

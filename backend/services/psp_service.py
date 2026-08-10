@@ -179,6 +179,10 @@ class PSPService:
         rows = response.json()
         if not isinstance(rows, list):
             raise ValueError("NLDC demand API did not return a list.")
+        if not rows:
+            # Do not overwrite a previously usable daily document with an empty
+            # response.  The caller must see this as a failed source fetch.
+            raise ValueError("NLDC demand API returned no rows.")
 
         normalized_rows = []
         region_map = {}
@@ -263,6 +267,8 @@ class PSPService:
         rows = response.json()
         if not isinstance(rows, list):
             raise ValueError("India 15 Min demand API did not return a list.")
+        if not rows:
+            raise ValueError("India 15 Min demand API returned no rows.")
 
         normalized_rows = []
         states = {}
@@ -348,6 +354,8 @@ class PSPService:
         rows = response.json()
         if not isinstance(rows, list):
             raise ValueError("All State demand API did not return a list.")
+        if not rows:
+            raise ValueError("All State demand API returned no rows.")
 
         normalized_rows = []
         state_map = {}

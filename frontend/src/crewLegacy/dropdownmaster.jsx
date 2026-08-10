@@ -21,6 +21,7 @@ export default function DropdownMaster() {
 
   const [type, setType] = useState("");
   const [value, setValue] = useState("");
+  const [status, setStatus] = useState("Active");
   const [dropdownList, setDropdownList] = useState([]);
 
   // Fetch values from backend
@@ -31,7 +32,9 @@ export default function DropdownMaster() {
     }
 
     try {
-      const res = await api.get(`/admin/dropdown/${selectedType}`);
+      const res = selectedType === "leaveType"
+        ? await api.get("/admin/DutyLeaveType/leaveType")
+        : await api.get(`/admin/dropdown/${selectedType}`);
       setDropdownList(res.data);
     } catch (error) {
       console.error("Fetch error:", error);
@@ -47,10 +50,15 @@ export default function DropdownMaster() {
     if (!type || !value) return;
 
     try {
-      await api.post(`/admin/dropdown`, {
-        type,
-        value
-      });
+      if (type === "leaveType") {
+        await api.post("/admin/DutyLeaveType", {
+          dutyLeaveType_cat: "leaveType",
+          value: value.trim(),
+          status,
+        });
+      } else {
+        await api.post(`/admin/dropdown`, { type, value: value.trim() });
+      }
 
       setValue("");
       fetchDropdownValues(type); // Refresh from backend
@@ -79,6 +87,7 @@ export default function DropdownMaster() {
               onChange={(e) => setType(e.target.value)}
             >
               <MenuItem value="dutyType">Duty Type</MenuItem>
+              <MenuItem value="leaveType">Leave Type</MenuItem>
               <MenuItem value="category">Category</MenuItem>
               <MenuItem value="vertical">Vertical</MenuItem>
               <MenuItem value="department">Department</MenuItem>
@@ -93,6 +102,13 @@ export default function DropdownMaster() {
               onChange={(e) => setValue(e.target.value)}
             />
           </Grid>
+
+          {type === "leaveType" && <Grid item xs={12} md={2}>
+            <TextField select label="Status" fullWidth value={status} onChange={(e) => setStatus(e.target.value)}>
+              <MenuItem value="Active">Active</MenuItem>
+              <MenuItem value="Inactive">Inactive</MenuItem>
+            </TextField>
+          </Grid>}
 
           <Grid item xs={12}>
             <Button variant="contained" onClick={handleSubmit}>
@@ -110,18 +126,20 @@ export default function DropdownMaster() {
           <TableHead>
             <TableRow sx={{backgroundColor: "#d9f2d9"}}>
               <TableCell><strong>Value</strong></TableCell>
+              {type === "leaveType" && <TableCell><strong>Status</strong></TableCell>}
             </TableRow>
           </TableHead>
           <TableBody>
             {dropdownList.map((item) => (
               <TableRow key={item.id}>
                 <TableCell>{item.value}</TableCell>
+                {type === "leaveType" && <TableCell>{item.status || "Active"}</TableCell>}
               </TableRow>
             ))}
 
             {dropdownList.length === 0 && (
               <TableRow>
-                <TableCell align="center">
+                <TableCell colSpan={type === "leaveType" ? 2 : 1} align="center">
                   No values available
                 </TableCell>
               </TableRow>

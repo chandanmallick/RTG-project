@@ -24,6 +24,7 @@ export const ROUTE_PAGE_KEYS = {
   "/crew/replacement": "crew_replacement",
   "/crew/training": "crew_training",
   "/crew/threads": "crew_threads",
+  "/crew/reports": "crew_reports",
   "/crew/setup": "crew_setup",
   "/crew/employees": "crew_employees",
   "/crew/dropdowns": "crew_admin",

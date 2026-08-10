@@ -1262,6 +1262,11 @@ def get_calendar_view(
             "shift": rec.get("assignedDuty") or "-",
             "leaveType": rec.get("leaveType"),
             "leaveStatus": rec.get("leaveStatus"),
+            "trainingName": rec.get("trainingName"),
+            "replacementRequired": bool(
+                rec.get("replacementRequired")
+                or (rec.get("trainingFinal") or {}).get("replacementRequired")
+            ),
 
             # ðŸ”¥ FIX: Inject correct replacement
             "replacementEmployee": replacement,
@@ -1315,6 +1320,8 @@ def get_calendar_view(
                         "shift": "-",
                         "leaveType": None,
                         "leaveStatus": None,
+                        "trainingName": None,
+                        "replacementRequired": False,
                         "replacementEmployee": None,
                         "tempSIC": False
                     }

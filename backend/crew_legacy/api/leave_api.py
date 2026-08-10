@@ -1491,7 +1491,10 @@ def approve_leave_bulk(data: dict, user=Depends(get_authenticated_user)):
                 "date": leave["date"]
             },
             {
-                "$set": {"leaveStatus": "Approved"}
+                "$set": {
+                    "leaveStatus": "Approved",
+                    "replacementRequired": dic_replacement_required,
+                }
             }
         )
 
