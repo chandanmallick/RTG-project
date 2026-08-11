@@ -338,11 +338,29 @@ def activity_report(
         canonical_id = str(row.get("employeeId") or "").strip()
         # Employee Master is the single source for a printable employee name.
         row["employeeName"] = employee_names.get(canonical_id) or row.get("employeeName") or canonical_id
+    def leave_notice_hours(item):
+        """Hours between submission and the start of the requested leave day."""
+        applied_on = item.get("appliedOn") or item.get("createdOn")
+        leave_date = _report_date(item.get("date"))
+        if not applied_on or not leave_date:
+            return None
+        try:
+            applied = datetime.fromisoformat(str(applied_on).replace("Z", "+00:00")).replace(tzinfo=None)
+            leave_start = datetime.strptime(leave_date, "%Y-%m-%d")
+            return (leave_start - applied).total_seconds() / 3600
+        except (TypeError, ValueError):
+            return None
+
+    leave_notice_values = [leave_notice_hours(item) for item in leaves]
+    leave_notice_values = [hours for hours in leave_notice_values if hours is not None]
     summary = {
         "leave": len(leaves),
         "leaveApproved": sum(1 for item in leaves if str(item.get("finalStatus") or "").lower() == "approved"),
         "leaveWeekend": sum(1 for item in rows if item.get("kind") == "Leave" and item.get("isWeekend") and not item.get("isHoliday")),
         "leaveHoliday": sum(1 for item in rows if item.get("kind") == "Leave" and item.get("isHoliday")),
+        "leaveWorkingDay": sum(1 for item in rows if item.get("kind") == "Leave" and not item.get("isWeekend") and not item.get("isHoliday")),
+        "leaveAppliedWithin24Hours": sum(1 for hours in leave_notice_values if hours <= 24),
+        "leaveAppliedPrior24Hours": sum(1 for hours in leave_notice_values if hours > 24),
         "training": len(filtered_trainings),
         "trainingApproved": sum(1 for item in filtered_trainings if str(item.get("status") or "").lower() == "approved"),
         "trainingDays": sum(_inclusive_days(item.get("startDate"), item.get("endDate"), startDate, endDate) for item in filtered_trainings if str(item.get("status") or "").lower() == "approved"),

@@ -34,6 +34,7 @@ PAGE_CATALOG = [
     ("outage_analysis", "S/D Analysis", "/outage-analysis"),
     ("mis_report", "Generic Reports", "/mis-report"),
     ("nldc_plots", "MIS — NLDC Plots", "/mis/nldc-plots"),
+    ("schedule_data", "MIS — Schedule Data", "/mis/schedule-data"),
     ("dso_evening_report", "DSO Evening Report", "/report-preparation/dso-evening"),
     ("dso_morning_report", "DSO Morning Report", "/report-preparation/dso-morning"),
     ("psp_highlights_report", "PSP Highlights Report", "/report-preparation/psp-highlights"),

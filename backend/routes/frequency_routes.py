@@ -31,11 +31,12 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image, Page
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib import colors
 
-from fastapi import APIRouter, File, UploadFile, Query, Form, Body
+from fastapi import APIRouter, File, UploadFile, Query, Form, Body, HTTPException, Depends
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import Optional, List
 from services.db_handler import MongoService
+from crew_legacy.admin_logic.auth_utils import get_authenticated_user
 
 router = APIRouter(
     prefix="/api/frequency",
@@ -537,6 +538,207 @@ async def get_plant_mapping():
                 row[key] = clean_mapping_value(key, row.get(key, ""))
     return {"success": True, "data": data}
 
+
+def _schedule_data_generators():
+    """Return the WBES generator choices from the maintained frequency map."""
+    db = MongoService()
+    choices = {}
+    for row in db.map_collection.find({}, {"_id": 0, "plant_id": 1, "plant_name": 1, "STAGE_NAME": 1, "mis_name": 1, "station_name": 1, "scada_header": 1, "scada_actual_name": 1, "wbes_name": 1, "wbes_acronym": 1, "utility_type": 1, "type": 1, "is_state": 1}):
+        identifier = normalize_wbes_identifier(row.get("wbes_name") or row.get("wbes_acronym"))
+        if not identifier or identifier in {"NOTAVAILABLE", "NOT_AVAILABLE", "NA", "NONE"}:
+            continue
+        mis_name = str(row.get("mis_name") or "").strip()
+        display_name = mis_name or row.get("plant_name") or row.get("STAGE_NAME") or identifier
+        utility_type = str(row.get("utility_type") or row.get("type") or "Generator").strip()
+        choices.setdefault(identifier, {
+            "id": identifier,
+            "label": display_name,
+            "mis_name": mis_name,
+            "kind": "state" if bool(row.get("is_state")) or utility_type.lower() in {"state", "state_ipp"} else "generator",
+            "wbes_name": row.get("wbes_name") or row.get("wbes_acronym") or identifier,
+            "plant_id": row.get("plant_id") or "",
+        })
+    return sorted(choices.values(), key=lambda item: str(item.get("label") or "").upper())
+
+
+@router.get("/schedule-data/generators")
+async def get_schedule_data_generators():
+    return {"success": True, "data": _schedule_data_generators()}
+
+
+@router.get("/schedule-data")
+async def get_schedule_data(
+    start_date: str = Query(..., description="Start date in YYYY-MM-DD"),
+    end_date: str = Query(..., description="End date in YYYY-MM-DD"),
+    generator: str = Query("", description="Mapped WBES name(s), comma separated"),
+    generators: str = Query("", description="Mapped WBES name(s), comma separated"),
+    kind: str = Query("all", description="all, generator or state"),
+    frequency: int = Query(15, description="Output interval: 15, 5 or 1 minutes"),
+):
+    """Load WBES schedules for a date range and resample the 15-minute source."""
+    try:
+        start = datetime.strptime(start_date, "%Y-%m-%d").date()
+        end = datetime.strptime(end_date, "%Y-%m-%d").date()
+    except ValueError as exc:
+        raise HTTPException(400, "Dates must be in YYYY-MM-DD format.") from exc
+    if end < start:
+        raise HTTPException(400, "End date must be on or after start date.")
+    if frequency not in {1, 5, 15}:
+        raise HTTPException(400, "Frequency must be 15, 5 or 1 minutes.")
+    choices = _schedule_data_generators()
+    by_id = {item["id"]: item for item in choices}
+    requested = [value.strip() for value in (generators or generator).split(",") if value.strip()]
+    selected = [by_id.get(normalize_wbes_identifier(value)) for value in requested] if requested else choices
+    selected = [item for item in selected if item and (kind in {"all", ""} or item.get("kind") == kind)]
+    if requested and not selected:
+        raise HTTPException(404, "The selected generator is not present in the WBES mapping.")
+    if not selected:
+        return {"success": True, "frequency_minutes": frequency, "generators": [], "rows": [], "message": "No WBES generator mappings are configured."}
+
+    acronyms = [item["id"] for item in selected]
+    output_rows = []
+    diagnostics = []
+    current = start
+    while current <= end:
+        source = fetch_wbes_schedule_raw(current.strftime("%d-%m-%Y"), acronyms, diagnostics=diagnostics)
+        source_by_acronym = {normalize_wbes_identifier(item.get("Acronym")): item for item in source or []}
+        # WBES returns 96 quarter-hour samples. Repeat each sample for the
+        # requested finer interval; this preserves the published schedule
+        # step until a finer source is available.
+        steps_per_source = 15 // frequency
+        slots = 96 * steps_per_source
+        for slot in range(slots):
+            minutes = slot * frequency
+            timestamp = datetime.combine(current, time(0, 0)) + timedelta(minutes=minutes)
+            row = {"timestamp": timestamp.isoformat(timespec="minutes")}
+            source_slot = min(95, slot // steps_per_source)
+            for item in selected:
+                payload = source_by_acronym.get(item["id"]) or {}
+                series = (payload.get("NetScheduleSummary") or {}).get("TotalNetSchdAmount") or []
+                row[item["id"]] = float(series[source_slot] or 0) if source_slot < len(series) else None
+            output_rows.append(row)
+        current += timedelta(days=1)
+    return {
+        "success": True,
+        "frequency_minutes": frequency,
+        "start_date": start_date,
+        "end_date": end_date,
+        "generators": selected,
+        "rows": output_rows,
+        "diagnostics": diagnostics,
+        "source": "WBES schedule API / existing frequency mapping",
+    }
+
+
+SCHEDULE_DATA_ACTUAL_URL = "http://10.3.230.62:5010/GetThermalGeneratorData"
+SCHEDULE_DATA_STATE_ACTUAL_URL = "http://10.3.230.62:5010/GetStateData"
+
+
+def _actual_value_list(item):
+    for key in ("actual", "Actual", "generation", "Generation", "output", "Output", "values", "data", "mw", "MW", "value", "Value"):
+        value = item.get(key) if isinstance(item, dict) else None
+        if isinstance(value, list):
+            return value
+    return []
+
+
+@router.get("/schedule-data/actual")
+async def get_schedule_data_actual(
+    start_date: str = Query(...),
+    end_date: str = Query(...),
+    station_names: str = Query(..., description="MIS names, comma separated"),
+    frequency: int = Query(1, description="1 minute actual data"),
+    kind: str = Query("generator"),
+):
+    """Fetch MIS actual generation and return a normalized timestamp matrix."""
+    if frequency not in {1, 5, 15}:
+        raise HTTPException(400, "Actual frequency must be 1, 5 or 15 minutes.")
+    try:
+        start = datetime.strptime(start_date, "%Y-%m-%d")
+        end = datetime.strptime(end_date, "%Y-%m-%d")
+    except ValueError as exc:
+        raise HTTPException(400, "Dates must be in YYYY-MM-DD format.") from exc
+    stations = [value.strip() for value in station_names.split(",") if value.strip()]
+    if not stations:
+        raise HTTPException(400, "Select at least one MIS name.")
+    params = {
+        "startDate": start.strftime("%Y-%m-%d 00:00"),
+        "endDate": end.strftime("%Y-%m-%d 23:59"),
+        "stationName": ",".join(stations),
+        "time": frequency,
+    }
+    try:
+        actual_url = SCHEDULE_DATA_STATE_ACTUAL_URL if kind == "state" else SCHEDULE_DATA_ACTUAL_URL
+        response = requests.get(actual_url, params=params, timeout=180)
+        response.raise_for_status()
+        raw = response.json()
+    except Exception as exc:
+        raise HTTPException(502, f"Actual data fetch failed: {exc}") from exc
+    data = raw.get("data") or raw.get("rows") or raw.get("result") if isinstance(raw, dict) else raw
+    data = data if isinstance(data, list) else []
+    series = {}
+    for index, item in enumerate(data):
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("stationName") or item.get("StationName") or item.get("name") or item.get("Name") or (stations[index] if index < len(stations) else "")).strip()
+        values = _actual_value_list(item)
+        if name and values:
+            series[name] = values
+    if not series and data and all(isinstance(item, dict) for item in data):
+        # Some responses are row-oriented: {dateTime, APNRL MW: value, ...}.
+        for item in data:
+            for station in stations:
+                if station in item:
+                    series.setdefault(station, []).append(item.get(station))
+    max_len = max((len(values) for values in series.values()), default=0)
+    interval_count = int(((end - start).total_seconds() // 60) // frequency) + 1
+    max_len = max(max_len, interval_count if series else 0)
+    rows = []
+    for index in range(max_len):
+        timestamp = start + timedelta(minutes=index * frequency)
+        row = {"timestamp": timestamp.isoformat(timespec="minutes")}
+        for station in stations:
+            values = series.get(station, [])
+            value = values[index] if index < len(values) else None
+            try:
+                row[station] = round(float(value), 3) if value is not None else None
+            except (TypeError, ValueError):
+                row[station] = None
+        rows.append(row)
+    return {"success": True, "kind": kind, "frequency_minutes": frequency, "stations": stations, "rows": rows, "raw": raw if not rows else None}
+
+
+@router.get("/schedule-data/raw")
+async def get_schedule_data_raw(
+    date: str = Query(..., description="Date in DD-MM-YYYY or YYYY-MM-DD"),
+    generator: str = Query(..., description="Mapped WBES acronym"),
+    user=Depends(get_authenticated_user),
+):
+    """Return the cached/API WBES payload for administrator troubleshooting."""
+    employee_id = str(user.get("employeeId") or user.get("userId") or "").strip()
+    if str(user.get("role") or "").lower() != "admin" and employee_id != "50041":
+        raise HTTPException(403, "Raw WBES responses are available to administrators only.")
+    try:
+        parsed = datetime.strptime(date, "%Y-%m-%d")
+        dmy = parsed.strftime("%d-%m-%Y")
+    except ValueError:
+        try:
+            dmy = datetime.strptime(date, "%d-%m-%Y").strftime("%d-%m-%Y")
+        except ValueError as exc:
+            raise HTTPException(400, "Date must be YYYY-MM-DD or DD-MM-YYYY.") from exc
+    identifier = normalize_wbes_identifier(generator)
+    if not identifier:
+        raise HTTPException(400, "A WBES generator acronym is required.")
+    diagnostics = []
+    payload = fetch_wbes_schedule_raw(dmy, [identifier], diagnostics=diagnostics)
+    return {
+        "success": bool(payload),
+        "date": dmy,
+        "generator": identifier,
+        "diagnostics": diagnostics,
+        "payload": payload,
+    }
+
 # ──────────────────────────────────────────────────────────────
 # PUT /api/frequency/plant-mapping
 # ──────────────────────────────────────────────────────────────
@@ -563,6 +765,7 @@ async def update_plant_mapping(payload = Body(...)):
 
         set_doc = {
             "wbes_name":          row.get("wbes_name", ""),
+            "mis_name":           row.get("mis_name", ""),
             "wbes_acronym":       row.get("wbes_acronym", ""),
             "scada_key":          normalize_scada_key_value(row.get("scada_key", "")),
             "scada_header":       row.get("scada_header", ""),
@@ -1530,11 +1733,12 @@ def build_saved_event_response(db, event_id: str, entity_list: list, start_dt: d
         ],
     }, None
 
-def fetch_wbes_schedule_raw(date_str: str, acronyms: list):
+def fetch_wbes_schedule_raw(date_str: str, acronyms: list, diagnostics: list | None = None):
     """
     date_str is in DD-MM-YYYY format
     """
     db = MongoService()
+    diagnostics = diagnostics if diagnostics is not None else []
     results = []
     missing_acronyms = []
     acronyms = [normalize_wbes_identifier(acr) for acr in acronyms or [] if normalize_wbes_identifier(acr)]
@@ -1544,10 +1748,14 @@ def fetch_wbes_schedule_raw(date_str: str, acronyms: list):
             cached = get_event_raw_data(db, date_str, wbes_name=acr)
             cached_schedule = get_source_series(cached, "wbes", "schedule")
             cached_dc = get_source_series(cached, "wbes", "dc")
+            cached_components = get_source_series(cached, "wbes", "schedule_components")
             if cached_schedule is not None or cached_dc is not None:
                 results.append({
                     "Acronym": acr,
-                    "NetScheduleSummary": {"TotalNetSchdAmount": cached_schedule or [0.0]*96},
+                    "NetScheduleSummary": {
+                        "TotalNetSchdAmount": cached_schedule or [0.0]*96,
+                        "NetSchdDataList": cached_components or [],
+                    },
                     "DeclarationList": [{
                         "DeclarationData": {
                             "ThermalDCJsonData": {
@@ -1590,38 +1798,53 @@ def fetch_wbes_schedule_raw(date_str: str, acronyms: list):
     if not missing_acronyms:
         return results
 
-    cfg = db.pipeline_config_collection.find_one({"config_type": "SCHEDULE"})
+    # WBES credentials and endpoint are maintained in PSP Settings.  The
+    # legacy SCHEDULE config is retained only as a migration fallback; no
+    # credentials are embedded in this fetcher.
+    cfg = db.pipeline_config_collection.find_one({"config_type": "PSP"}) or db.pipeline_config_collection.find_one({"config_type": "SCHEDULE"})
     if not cfg:
-        cfg = {
-            "schedule_url": "https://gateway.grid-india.in/POSOCO/reports/1.0/WebAccessAPI/GetUtilityExternalSharedData",
-            "schedule_api_key": "6dc32d47-f46a-45c9-afaf-c6ce73c4ca71",
-            "schedule_username": "erldc_internal_prod",
-            "schedule_password": "ErldcPr0d@052024"
-        }
-    
-    url = f"{cfg['schedule_url']}?apikey={cfg['schedule_api_key']}"
+        diagnostics.append({"date": date_str, "status": "error", "message": "WBES settings are not configured in PSP Settings."})
+        return results
+    schedule_url = cfg.get("wbes_url") or cfg.get("schedule_url")
+    api_key = cfg.get("wbes_api_key") or cfg.get("schedule_api_key")
+    username = cfg.get("wbes_username") or cfg.get("schedule_username")
+    password = cfg.get("wbes_password") or cfg.get("schedule_password")
+    if not schedule_url or not api_key or not username or not password:
+        diagnostics.append({"date": date_str, "status": "error", "message": "WBES PSP Settings are incomplete (URL, API key, username or password missing)."})
+        return results
+
+    url = f"{schedule_url}?apikey={api_key}"
     data = {
         "Date": date_str,
         "SchdRevNo": -1,
-        "UserName": cfg["schedule_username"],
+        "UserName": username,
         "UtilAcronymList": missing_acronyms,
         "UtilRegionIdList": [1]
     }
-    auth = (cfg["schedule_username"], cfg["schedule_password"])
+    auth = (username, password)
     
     try:
         session = get_legacy_session_no_verify()
-        res = session.post(url, json=data, auth=auth, timeout=5)
+        res = session.post(url, json=data, auth=auth, timeout=30)
         status_code = res.status_code
         if status_code == 200:
             resp_body = res.json().get("ResponseBody", {}) or {}
             group_list = resp_body.get("GroupWiseDataList", []) or []
+            returned = {normalize_wbes_identifier(item.get("Acronym")) for item in group_list if item.get("Acronym")}
+            missing_returned = [acr for acr in missing_acronyms if acr not in returned]
+            if missing_returned:
+                diagnostics.append({"date": date_str, "status": "no_data", "generators": missing_returned, "message": "WBES returned no record for the requested generator."})
             
             for fsData in group_list:
                 acr = normalize_wbes_identifier(fsData.get("Acronym"))
                 if not acr: continue
                 
-                totalNetSchdAmount = fsData.get('NetScheduleSummary', {}).get('TotalNetSchdAmount', [0.0]*96)
+                net_summary = fsData.get('NetScheduleSummary') or {}
+                # WBES publishes the canonical net schedule and its component
+                # breakdown together. Keep both so schedule updates and later
+                # category views use the same source payload.
+                totalNetSchdAmount = net_summary.get('TotalNetSchdAmount') or [0.0] * 96
+                netScheduleDataList = net_summary.get('NetSchdDataList') or []
                 
                 DCList = [0.0] * 96
                 for declaration_entry in fsData.get('DeclarationList', []):
@@ -1640,6 +1863,7 @@ def fetch_wbes_schedule_raw(date_str: str, acronyms: list):
                     wbes_name=acr,
                     set_fields={
                         "sources.wbes.schedule": normalize_series(totalNetSchdAmount),
+                        "sources.wbes.schedule_components": netScheduleDataList,
                         "sources.wbes.dc": normalize_series(DCList),
                         "sources.wbes.fetched_at": datetime.utcnow().isoformat(),
                     },
@@ -1650,9 +1874,11 @@ def fetch_wbes_schedule_raw(date_str: str, acronyms: list):
             log_api_hit("WBES_SCHEDULE", date_str, ",".join(missing_acronyms), url, "success", 200, data_count=len(group_list), data_saved=True)
             return results
         else:
+            diagnostics.append({"date": date_str, "status": "error", "http_status": status_code, "message": f"WBES returned HTTP {status_code}: {res.text[:500]}"})
             log_api_hit("WBES_SCHEDULE", date_str, ",".join(missing_acronyms), url, "failed", status_code, f"Response: {res.text[:200]}")
     except Exception as e:
         print("Error fetching WBES schedule:", e)
+        diagnostics.append({"date": date_str, "status": "error", "message": str(e)})
         log_api_hit("WBES_SCHEDULE", date_str, ",".join(missing_acronyms), url, "failed", 0, str(e))
         
     return results
@@ -2435,7 +2661,7 @@ async def export_mapping():
     ws.title = "Mappings"
     
     headers = [
-        "plant_id", "plant_name", "STAGE_ID", "STAGE_NAME", "wbes_name",
+        "plant_id", "plant_name", "STAGE_ID", "STAGE_NAME", "wbes_name", "mis_name",
         "wbes_acronym", "crms_utility_name", "scada_key", "scada_header", "scada_schedule_key",
         "scada_schedule_header", "scada_dc_key", "scada_dc_header",
         "schedule_source", "dc_source", "actual_source",

@@ -24,6 +24,7 @@ import {
   Settings2,
   Trash2,
   Upload,
+  RefreshCw,
 } from "lucide-react";
 import AppShell from "../components/layout/AppShell";
 import { useAuth } from "../auth/AuthContext";
@@ -62,6 +63,7 @@ export default function DSOReportPreparation({ reportType = "evening" }) {
   const [limits, setLimits] = useState(Object.fromEntries(STATES.map((state) => [state, { ttc: "", atc: "" }])));
   const [report, setReport] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [crmsLoading, setCrmsLoading] = useState(false);
   const [masterOpen, setMasterOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [editDraft, setEditDraft] = useState(null);
@@ -132,6 +134,25 @@ export default function DSOReportPreparation({ reportType = "evening" }) {
     executeProcess(false);
   };
 
+  const fetchCrmsOutageData = async () => {
+    setCrmsLoading(true);
+    setMessage({ type: "", text: "" });
+    try {
+      const data = await API.fetchDsoCrmsOutageData(reportType, reportDate);
+      if (data.report) setReport(data.report);
+      const summary = data.summary || data.report?.generation_outage_summary || {};
+      if (summary.error) {
+        setMessage({ type: "error", text: `CRMS outage fetch failed: ${summary.error}` });
+      } else {
+        setMessage({ type: "success", text: `CRMS outage data fetched (${summary.row_count || 0} records) for ${reportDate}.` });
+      }
+    } catch (error) {
+      setMessage({ type: "error", text: error.response?.data?.detail || error.message || "CRMS outage data could not be fetched." });
+    } finally {
+      setCrmsLoading(false);
+    }
+  };
+
   const deleteReport = async () => {
     if (!window.confirm(`Delete the saved DSO ${isEvening ? "Evening" : "Morning"} report for ${reportDate}?`)) return;
     try {
@@ -189,6 +210,7 @@ export default function DSOReportPreparation({ reportType = "evening" }) {
   const stateRows = useMemo(() => report?.results?.states || {}, [report]);
   const thermal = report?.thermal_availability || {};
   const generationOutage = report?.generation_outage_summary?.by_fuel || {};
+  const generationOutageMeta = report?.generation_outage_summary || {};
   const odItems = STATES
     .map((state) => ({ state, value: stateRows[state]?.od_at_min_frequency_mw }))
     .filter((item) => Number(item.value) > 0);
@@ -276,6 +298,7 @@ export default function DSOReportPreparation({ reportType = "evening" }) {
                 <Typography sx={{ fontSize: 12, fontWeight: 900 }}>{reportDate.split("-").reverse().join("-")}</Typography>
               </Box>
               <Button disabled={!canWrite} onClick={() => setMasterOpen(true)} startIcon={<Settings2 size={16} />} variant="contained" sx={{ bgcolor: "#fff", color: "#0057B7", fontWeight: 900, "&:hover": { bgcolor: "#EAF3FF" } }}>TTC/ATC Master</Button>
+              <Button disabled={!canWrite || crmsLoading} onClick={fetchCrmsOutageData} startIcon={crmsLoading ? <CircularProgress size={15} color="inherit" /> : <RefreshCw size={16} />} variant="contained" sx={{ bgcolor: "#fff", color: "#0057B7", fontWeight: 900, "&:hover": { bgcolor: "#EAF3FF" } }}>{crmsLoading ? "Fetching CRMS…" : "Fetch CRMS Outage"}</Button>
               {report && <Button disabled={!canWrite} onClick={openReportEditor} startIcon={<Pencil size={16} />} variant="contained" sx={{ bgcolor: "#fff", color: "#0057B7", fontWeight: 900, "&:hover": { bgcolor: "#EAF3FF" } }}>Edit Report</Button>}
               {report && <Button href={API.dsoReportExcelUrl(reportType, reportDate)} startIcon={<Download size={16} />} variant="outlined" sx={{ borderColor: "#fff", color: "#fff", fontWeight: 900 }}>Download Excel</Button>}
               {report && <Button onClick={downloadVisiblePdf} startIcon={<Download size={16} />} variant="outlined" sx={{ borderColor: "#fff", color: "#fff", fontWeight: 900 }}>Download PDF</Button>}
@@ -385,6 +408,9 @@ export default function DSOReportPreparation({ reportType = "evening" }) {
               <Card sx={{ p: 0, overflow: "hidden" }}>
                 <Typography sx={{ px: 1.7, py: 1.1, color: "#7C4A03", bgcolor: "#FFF7DB", fontWeight: 900 }}>
                   Current generation under planned & forced outage (MW)
+                </Typography>
+                <Typography sx={{ px: 1.7, pt: 0.8, color: generationOutageMeta.error ? "#B91C1C" : "#64748B", fontSize: 11.5 }}>
+                  Source: {generationOutageMeta.source_name || "CRMS GenOutagesHistoryData"}{generationOutageMeta.error ? ` · Fetch failed: ${String(generationOutageMeta.error).slice(0, 140)}` : ` · ${generationOutageMeta.row_count || 0} outage records`}
                 </Typography>
                 <Box sx={{ overflowX: "auto", p: 1.5 }}>
                   <Box component="table" sx={{ ...tableSx, minWidth: 520 }}>

@@ -12,6 +12,7 @@ from crew_legacy.database.database_mongo import (
     deleted_leave_collection,
     page_access_collection,
     roster_group_collection,
+    roster_master_collection,
     holiday_master_collection,
 )
 
@@ -207,6 +208,52 @@ def shift_group_for_date(employee_id: str, date_str: str) -> dict:
             {"members.employeeId": employee_id},
         ],
     }, sort=[("startDate", -1)]) or {}
+
+
+def group_contains_employee(group: dict, employee_id: str) -> bool:
+    """Match legacy group snapshots that may use employeeId, userId, or id."""
+    employee_id = clean_id(employee_id)
+    people = [group.get("shiftInCharge") or {}] + list(group.get("members") or [])
+    return any(
+        clean_id(person.get("employeeId") or person.get("userId") or person.get("id")) == employee_id
+        for person in people
+    )
+
+
+def is_control_room_employee(employee_id: str) -> bool:
+    """An active roster-group member is governed by the published shift roster."""
+    employee_id = clean_id(employee_id)
+    groups = roster_group_collection.find({"isActive": {"$ne": False}}, {"shiftInCharge": 1, "members": 1})
+    return any(group_contains_employee(group, employee_id) for group in groups)
+
+
+def published_roster_for_employee_date(employee_id: str, date_str: str) -> Optional[dict]:
+    """Return only a final roster that has actually been published to the calendar."""
+    rosters = roster_master_collection.find(
+        {
+            "isFinal": True,
+            "calendarPushed": True,
+            "startDate": {"$lte": date_str},
+            "endDate": {"$gte": date_str},
+        },
+        {"startDate": 1, "endDate": 1, "groupDetails": 1},
+    )
+    return next(
+        (roster for roster in rosters if any(group_contains_employee(group, employee_id) for group in roster.get("groupDetails") or [])),
+        None,
+    )
+
+
+def ensure_leave_roster_is_published(employee_id: str, date_str: str) -> None:
+    """Prevent control-room leave beyond the currently published roster coverage."""
+    if not is_control_room_employee(employee_id):
+        return
+    if published_roster_for_employee_date(employee_id, date_str):
+        return
+    raise HTTPException(
+        400,
+        f"Leave for shift/control-room employees can be applied only within a published roster period. No published roster covers {date_str}.",
+    )
 
 
 def general_duty_record(employee_id: str, date_str: str, *, persist: bool = False) -> Optional[dict]:
@@ -1008,6 +1055,8 @@ def apply_leave_v2(data: dict, user=Depends(get_authenticated_user)):
         if not can_apply_for(user, employee_id, date_str):
             raise HTTPException(403, f"You cannot apply leave for this employee on {date_str}")
 
+        ensure_leave_roster_is_published(employee_id, date_str)
+
         duty = daily_record(employee_id, date_str) or general_duty_record(employee_id, date_str, persist=True)
         if not duty:
             raise HTTPException(404, f"Duty not found for {date_str}")
@@ -1805,6 +1854,12 @@ def get_duty_detailed(
 
         if not can_apply_for(user, employeeId, date_str):
             raise HTTPException(403, f"You cannot view this employee's duty on {date_str}")
+
+        # Do not generate a General-duty fallback for control-room staff outside
+        # a final roster that has been published to the calendar.
+        if is_control_room_employee(employeeId) and not published_roster_for_employee_date(employeeId, date_str):
+            current += timedelta(days=1)
+            continue
 
         rec = daily_record(employeeId, date_str) or general_duty_record(employeeId, date_str)
 

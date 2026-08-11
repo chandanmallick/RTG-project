@@ -76,6 +76,20 @@ const popupStyles = {
   },
 };
 
+const compactPopupText = (value, fallback) => {
+  const text = String(value || fallback || "").trim();
+  if (!text) return "";
+
+  // Raw transport errors can be very long and are not useful to portal users.
+  if (/HTTPSConnectionPool|ConnectTimeout|ReadTimeout|timed out|Max retries exceeded/i.test(text)) {
+    return "The source server did not respond in time. Please try again later.";
+  }
+  if (/Network Error|Failed to fetch/i.test(text)) {
+    return "Unable to reach the source service. Please check the connection and try again.";
+  }
+  return text.length > 180 ? `${text.slice(0, 177).trim()}…` : text;
+};
+
 export const showModernPopup = ({
   type = "success",
   title = "",
@@ -83,6 +97,15 @@ export const showModernPopup = ({
   description = "",
 }) => {
   const config = popupStyles[type] || popupStyles.info;
+  const compactSubtitle = compactPopupText(subtitle, title);
+  const compactDescription = compactPopupText(
+    description,
+    type === "success"
+      ? "Operation completed successfully."
+      : type === "error"
+      ? "The request could not be completed."
+      : "No action required."
+  );
 
   toast.custom(
     (t) => (
@@ -108,13 +131,13 @@ export const showModernPopup = ({
       >
         <Box
           sx={{
-            width: 420,
+            width: "min(360px, calc(100vw - 32px))",
 
             position: "relative",
 
             overflow: "visible",
 
-            borderRadius: "18px",
+            borderRadius: "14px",
 
             background: config.bgSoft,
 
@@ -125,9 +148,9 @@ export const showModernPopup = ({
 
             boxShadow: config.shadow,
 
-            pt: 9,
-            pb: 4,
-            px: 4,
+            pt: 5.5,
+            pb: 2.5,
+            px: 2.5,
 
             textAlign: "center",
           }}
@@ -138,11 +161,11 @@ export const showModernPopup = ({
             sx={{
               position: "absolute",
 
-              bottom: -18,
+              bottom: -12,
               left: "8%",
 
               width: "84%",
-              height: 32,
+              height: 22,
 
               borderRadius: "24px",
 
@@ -162,14 +185,14 @@ export const showModernPopup = ({
             sx={{
               position: "absolute",
 
-              top: -80,
+              top: -48,
               left: "50%",
 
               transform:
                 "translateX(-50%)",
 
-              width: 220,
-              height: 220,
+              width: 150,
+              height: 150,
 
               borderRadius: "50%",
 
@@ -188,11 +211,11 @@ export const showModernPopup = ({
             sx={{
               position: "absolute",
 
-              top: 16,
-              right: 16,
+              top: 10,
+              right: 10,
 
-              width: 34,
-              height: 34,
+              width: 28,
+              height: 28,
 
               background:
                 "rgba(255,255,255,0.75)",
@@ -207,7 +230,7 @@ export const showModernPopup = ({
           >
             <CloseRoundedIcon
               sx={{
-                fontSize: 18,
+                fontSize: 16,
               }}
             />
           </IconButton>
@@ -218,14 +241,14 @@ export const showModernPopup = ({
             sx={{
               position: "absolute",
 
-              top: -58,
+              top: -36,
               left: "50%",
 
               transform:
                 "translateX(-50%)",
 
-              width: 118,
-              height: 118,
+              width: 74,
+              height: 74,
 
               borderRadius: "50%",
 
@@ -251,8 +274,8 @@ export const showModernPopup = ({
 
             <Box
               sx={{
-                width: 86,
-                height: 86,
+                width: 56,
+                height: 56,
 
                 borderRadius: "50%",
 
@@ -270,7 +293,7 @@ export const showModernPopup = ({
                   "0 18px 40px rgba(0,0,0,0.14)",
 
                 "& svg": {
-                  fontSize: 48,
+                  fontSize: 31,
                 },
               }}
             >
@@ -284,11 +307,11 @@ export const showModernPopup = ({
             sx={{
               position: "absolute",
 
-              top: 90,
-              left: 28,
+              top: 55,
+              left: 18,
 
-              width: 8,
-              height: 8,
+              width: 6,
+              height: 6,
 
               borderRadius: "50%",
 
@@ -300,11 +323,11 @@ export const showModernPopup = ({
             sx={{
               position: "absolute",
 
-              top: 120,
-              right: 36,
+              top: 76,
+              right: 22,
 
-              width: 10,
-              height: 10,
+              width: 7,
+              height: 7,
 
               borderRadius: "50%",
 
@@ -316,9 +339,9 @@ export const showModernPopup = ({
 
           <Typography
             sx={{
-              mt: 1,
+              mt: 0.5,
 
-              fontSize: 16,
+              fontSize: 13,
 
               fontWeight: 600,
 
@@ -334,49 +357,47 @@ export const showModernPopup = ({
 
           <Typography
             sx={{
-              mt: 1.5,
+              mt: 0.75,
 
-              fontSize: 34,
+              fontSize: 17,
 
-              lineHeight: 1.15,
+              lineHeight: 1.35,
 
-              fontWeight: 800,
+              fontWeight: 700,
 
               color: "#111827",
 
-              letterSpacing: "-0.05em",
+              letterSpacing: "-0.01em",
+              overflowWrap: "anywhere",
             }}
           >
-            {subtitle}
+            {compactSubtitle}
           </Typography>
 
           {/* DESCRIPTION */}
 
           <Typography
             sx={{
-              mt: 2,
-              fontSize: 13,
-              lineHeight: 1.6,
+              mt: 1,
+              fontSize: 12,
+              lineHeight: 1.45,
               color: "#6B7280",
-              maxWidth: 340,
+              maxWidth: 300,
               mx: "auto",
               whiteSpace: "pre-line",
-              maxHeight: "150px",
+              maxHeight: "72px",
               overflowY: "auto",
+              overflowWrap: "anywhere",
             }}
           >
-            {description || (type === "success"
-              ? "RTG synchronization process completed successfully."
-              : type === "error"
-              ? "An error occurred during the sync process."
-              : "No action required.")}
+            {compactDescription}
           </Typography>
 
           {/* ACTION */}
 
           <Box
             sx={{
-              mt: 4,
+              mt: 2,
 
               display: "flex",
 
@@ -388,16 +409,17 @@ export const showModernPopup = ({
                 toast.dismiss(t.id)
               }
               sx={{
-                px: 4,
-                py: 1.5,
+                px: 2.5,
+                py: 0.85,
 
-                borderRadius: "18px",
+                borderRadius: "10px",
 
                 background: config.gradient,
 
                 color: "#fff",
 
                 fontWeight: 700,
+                fontSize: 12,
 
                 cursor: "pointer",
 

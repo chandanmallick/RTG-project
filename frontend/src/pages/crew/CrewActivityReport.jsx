@@ -75,9 +75,9 @@ export default function CrewActivityReport() {
   const rows = useMemo(() => (report.rows || []).filter((row) => kind === "All" || row.kind === kind), [report.rows, kind]);
 
   return <AppShell>
-    <Paper className="dso-report-banner" elevation={0} sx={{ p: { xs: 2, md: 2.5 }, borderRadius: 3 }}>
+    <Paper elevation={0} sx={{ p: { xs: 1.75, md: 2.1 }, borderRadius: 3, color: "#fff", background: "linear-gradient(105deg,#08103A 0%,#0057B7 62%,#1378DD 100%)" }}>
       <Stack direction={{ xs: "column", md: "row" }} spacing={2} justifyContent="space-between" alignItems={{ md: "center" }}>
-        <Box><Typography sx={{ fontWeight: 950, fontSize: 24 }}>Crew Activity Report</Typography><Typography sx={{ opacity: .9, fontSize: 13, fontWeight: 700 }}>Leave, training, C-OFF and replacement duty history.</Typography></Box>
+        <Box><Typography sx={{ fontWeight: 950, fontSize: 22 }}>Crew Activity Report</Typography><Typography sx={{ opacity: .9, fontSize: 12, fontWeight: 700 }}>Leave, training, C-OFF and replacement duty history.</Typography></Box>
         <Button variant="outlined" startIcon={<RefreshCw size={16} />} onClick={load} sx={{ color: "#fff", borderColor: "rgba(255,255,255,.72)", textTransform: "none", fontWeight: 900 }}>Refresh</Button>
       </Stack>
     </Paper>
@@ -116,6 +116,11 @@ export default function CrewActivityReport() {
       <SummaryTile title="C-OFF" value={report.summary?.compOff} detail={`${report.summary?.compOffAvailable || 0} available · ${report.summary?.compOffUsedDays || 0} used · ${(report.summary?.compOffDates || []).slice(0, 2).map(displayDate).join(", ") || "no dates"}`} tone="coff" />
       <SummaryTile title="Replacement duty" value={report.summary?.replacement} detail="Duties performed for leave coverage" tone="replacement" />
     </Box>
+    <Paper elevation={0} sx={{ px: 1.5, py: 0.9, borderRadius: 2.5, border: "1px solid #F2CDD4", background: "#FFF9FA" }}>
+      <Typography sx={{ fontSize: 11.5, fontWeight: 850, color: "#7F1D1D" }}>
+        Leave split: {report.summary?.leaveWorkingDay || 0} weekday · {report.summary?.leaveWeekend || 0} weekend · {report.summary?.leaveHoliday || 0} holiday · {report.summary?.leaveAppliedWithin24Hours || 0} applied within 24 hours · {report.summary?.leaveAppliedPrior24Hours || 0} applied more than 24 hours earlier
+      </Typography>
+    </Paper>
 
     {reportMode === "detail" ? <Paper elevation={0} sx={{ overflow: "hidden", borderRadius: 3 }}>
       <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ px: 2, py: 1.4, borderBottom: "1px solid #E2E8F0" }}><Typography sx={{ fontWeight: 950, color: "#0F172A" }}>Activity details</Typography><Chip label={`${rows.length} record(s)`} size="small" sx={{ fontWeight: 850 }} /></Stack>

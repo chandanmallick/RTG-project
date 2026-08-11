@@ -338,18 +338,18 @@ export default function CrewThreads() {
 
   return (
     <Box sx={{ p: { xs: 1.5, md: 2.5 }, minHeight: "calc(100vh - 92px)", background: "#F4F7FB" }}>
-      <Box sx={{ mb: 2, px: { xs: 2, md: 3 }, py: 2.2, color: "#fff", borderRadius: 4, background: "linear-gradient(105deg,#08103A 0%,#0057B7 62%,#1378DD 100%)" }}>
+      <Box sx={{ mb: 1.25, px: { xs: 1.75, md: 2.25 }, py: 1.15, color: "#fff", borderRadius: 3, background: "linear-gradient(105deg,#08103A 0%,#0057B7 62%,#1378DD 100%)" }}>
         <Stack direction={{ xs: "column", md: "row" }} alignItems={{ md: "center" }} justifyContent="space-between" gap={1.5}>
           <Box>
             <Stack direction="row" alignItems="center" gap={1} sx={{ mb: 0.35 }}>
               <Chip size="small" icon={<CalendarClock size={12} />} label="Crew notices" sx={{ color: "#E8F2FF", bgcolor: "rgba(255,255,255,.14)", fontWeight: 900 }} />
             </Stack>
-            <Typography sx={{ fontSize: 25, fontWeight: 950 }}>Crew Notices</Typography>
-            <Typography sx={{ mt: 0.25, fontSize: 12.5, opacity: 0.9 }}>Publish dated notices, meeting notes and documents with audience control.</Typography>
+            <Typography sx={{ fontSize: 20, fontWeight: 950 }}>Crew Notices</Typography>
+            <Typography sx={{ mt: 0.1, fontSize: 11.5, opacity: 0.9 }}>Publish dated notices, meeting notes and documents with audience control.</Typography>
           </Box>
           <Stack direction="row" spacing={0.75} alignItems="center">
-            <Button onClick={() => { loadThreads(); if (selectedId) loadMessages(selectedId); }} startIcon={<RefreshCw size={14} />} sx={{ minHeight: 34, px: 1.15, py: 0.35, color: "#fff", border: "1px solid rgba(255,255,255,.55)", fontSize: 11, fontWeight: 850 }}>Refresh</Button>
-            {canWrite && <Button variant="contained" onClick={() => setNewOpen(true)} startIcon={<Plus size={15} />} sx={{ minHeight: 34, px: 1.2, py: 0.35, bgcolor: "#fff", color: "#0057B7", fontSize: 11, fontWeight: 900, "&:hover": { bgcolor: "#EAF2FF" } }}>New notice</Button>}
+            <Button onClick={() => { loadThreads(); if (selectedId) loadMessages(selectedId); }} startIcon={<RefreshCw size={14} />} sx={{ minHeight: 30, px: 1, py: 0.25, color: "#fff", border: "1px solid rgba(255,255,255,.55)", fontSize: 10.5, fontWeight: 850 }}>Refresh</Button>
+            {canWrite && <Button variant="contained" onClick={() => setNewOpen(true)} startIcon={<Plus size={15} />} sx={{ minHeight: 30, px: 1.05, py: 0.25, bgcolor: "#fff", color: "#0057B7", fontSize: 10.5, fontWeight: 900, "&:hover": { bgcolor: "#EAF2FF" } }}>New notice</Button>}
           </Stack>
         </Stack>
       </Box>
@@ -471,13 +471,13 @@ export default function CrewThreads() {
                       <Box sx={{ position: "absolute", top: 8, left: "50%", transform: "translateX(-50%)", width: 16, height: 16, borderRadius: "50%", bgcolor: own ? "#0057B7" : "#00A39A", border: "3px solid #F3F8FF", boxShadow: "0 0 0 2px #78B7F5" }} />
                     </Box>
                     <Box sx={{ gridColumn: { xs: 2, sm: isRight ? 3 : 1 }, gridRow: 1, minWidth: 0 }}>
-                        <Stack direction="row" alignItems="center" gap={0.75} sx={{ mb: 0.5, flexWrap: "wrap" }}>
-                          <Chip size="small" label={`Post ${index + 1}`} sx={{ height: 21, bgcolor: own ? "#DDEBFF" : "#E7F8F5", color: own ? "#0057B7" : "#087A72", fontWeight: 900 }} />
+                        <Stack direction={isRight ? "row" : "row-reverse"} alignItems="center" gap={0.75} sx={{ mb: 0.5, flexWrap: "wrap" }}>
+                          <Chip size="small" label={title} sx={{ height: 21, maxWidth: 220, bgcolor: own ? "#DDEBFF" : "#E7F8F5", color: own ? "#0057B7" : "#087A72", fontWeight: 900 }} />
                           {item.isUnread && <Chip size="small" label="New" sx={{ height: 21, bgcolor: "#FFE4E6", color: "#BE123C", fontWeight: 950 }} />}
                           <Typography sx={{ color: "#64748B", fontSize: 10.5, fontWeight: 800 }}>{postMoment.format("DD MMM YYYY, HH:mm")}</Typography>
                            <Typography sx={{ color: "#94A3B8", fontSize: 10.5 }}>·</Typography>
                           <Typography sx={{ color: "#64748B", fontSize: 10.5, fontWeight: 800 }}>{item.createdBy?.name || item.createdBy?.employeeId}</Typography>
-                          <Avatar sx={{ width: 25, height: 25, ml: "auto", bgcolor: own ? "#0057B7" : "#DCE8F5", color: own ? "#fff" : "#31577D", fontSize: 9, fontWeight: 900 }}>{initials(item.createdBy?.name)}</Avatar>
+                          <Avatar sx={{ width: 25, height: 25, ml: isRight ? "auto" : 0, mr: isRight ? 0 : "auto", bgcolor: own ? "#0057B7" : "#DCE8F5", color: own ? "#fff" : "#31577D", fontSize: 9, fontWeight: 900 }}>{initials(item.createdBy?.name)}</Avatar>
                           {canWrite && <IconButton size="small" onClick={() => openPostEditor(item)} sx={{ width: 25, height: 25, color: "#0057B7", border: "1px solid #CFE0F5" }}><PencilLine size={13} /></IconButton>}
                         </Stack>
                         <Box sx={{ px: 1.2, py: 0.95, border: "1px solid", borderColor: own ? "#B8D3F3" : "#BFD9F8", borderRadius: 2.5, background: own ? "#EAF3FF" : "#F3F8FF", boxShadow: "0 4px 14px rgba(15,23,42,.045)" }}>

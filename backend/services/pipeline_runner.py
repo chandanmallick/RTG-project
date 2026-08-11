@@ -99,12 +99,22 @@ class PipelineRunner:
             # CONFIG
             # =========================================
 
-            config = (
-                PipelineConfigService()
-                .get_config(
-                    "SCHEDULE"
-                )
-            )
+            config_service = PipelineConfigService()
+            # WBES credentials are maintained in PSP Settings.  Keep the
+            # legacy SCHEDULE record as a compatibility fallback, but never
+            # embed credentials in the runner.
+            schedule_config = config_service.get_config("SCHEDULE") or {}
+            psp_config = config_service.get_config("PSP") or {}
+            config = dict(schedule_config)
+            for key in (
+                "wbes_url", "wbes_api_key", "wbes_username", "wbes_password",
+            ):
+                if psp_config.get(key):
+                    config[key] = psp_config[key]
+            config["schedule_url"] = config.get("wbes_url") or config.get("schedule_url")
+            config["schedule_api_key"] = config.get("wbes_api_key") or config.get("schedule_api_key")
+            config["schedule_username"] = config.get("wbes_username") or config.get("schedule_username")
+            config["schedule_password"] = config.get("wbes_password") or config.get("schedule_password")
 
             logger.log(
 
@@ -134,6 +144,21 @@ class PipelineRunner:
                     "Pipeline config not found"
                 )
 
+                return
+
+            required_schedule_keys = (
+                "schedule_url", "schedule_api_key", "schedule_username", "schedule_password",
+            )
+            missing_config = [key for key in required_schedule_keys if not config.get(key)]
+            if missing_config:
+                logger.log(
+                    revision_id,
+                    "SCHEDULE",
+                    "CONFIG",
+                    "FAILED",
+                    "WBES endpoint/authentication is incomplete in PSP Settings",
+                    {"missing": missing_config},
+                )
                 return
 
             # =========================================
@@ -250,11 +275,16 @@ class PipelineRunner:
                 )
             )
 
-            a = response[
-                "ResponseBody"
-            ][
-                "GroupWiseDataList"
-            ]
+            a = ((response or {}).get("ResponseBody") or {}).get("GroupWiseDataList") or []
+            if not a:
+                logger.log(
+                    revision_id,
+                    "SCHEDULE",
+                    "WBES_FETCH",
+                    "FAILED",
+                    "WBES returned no GroupWiseDataList records",
+                )
+                return
 
             ######## **** Add log for data fetch ****
 
@@ -289,13 +319,10 @@ class PipelineRunner:
                     'DeclarationList'
                 ]
 
-                NetScheduleAmount = (
-                    entitySCHD[
-                        'NetScheduleSummary'
-                    ][
-                        'TotalNetSchdAmount'
-                    ]
-                )
+                net_summary = entitySCHD.get("NetScheduleSummary") or {}
+                # TotalNetSchdAmount is the canonical 96-slot net schedule.
+                # NetSchdDataList is retained below for Q-sold/category data.
+                NetScheduleAmount = net_summary.get("TotalNetSchdAmount") or [0] * 96
 
                 Schd_tuples = [
 
@@ -395,39 +422,17 @@ class PipelineRunner:
 
                 qsold = {}
 
-                for e in entitySCHD[
-                    'NetScheduleSummary'
-                ][
-                    'NetSchdDataList'
-                ]:
+                for e in (net_summary.get("NetSchdDataList") or []):
 
-                    if (
-
-                        e[
-                            'EnergyScheduleTypeName'
-                        ]
-
-                        ==
-
-                        'OA_PX'
-                    ):
+                    if e.get('EnergyScheduleTypeName') == 'OA_PX':
 
                         key = (
 
-                            e[
-                                'PXTransactionTypeName'
-                            ]
-
-                            +
-
-                            e[
-                                'PXExchangeTypeName'
-                            ]
+                            str(e.get('PXTransactionTypeName') or '')
+                            + str(e.get('PXExchangeTypeName') or '')
                         )
 
-                        qsold[key] = e[
-                            'NetSchdAmount'
-                        ]
+                        qsold[key] = e.get('NetSchdAmount') or [0] * 96
 
                 Qsold_tuples = [
 

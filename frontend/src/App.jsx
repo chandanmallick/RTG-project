@@ -18,6 +18,7 @@ const PSPReportChecking = lazy(() => import("./pages/PSPReportChecking"));
 const FrequencyReport = lazy(() => import("./pages/FrequencyReport"));
 const MISReport = lazy(() => import("./pages/MISReport"));
 const NLDCPlots = lazy(() => import("./pages/NLDCPlots"));
+const ScheduleData = lazy(() => import("./pages/ScheduleData"));
 const DSOReportPreparation = lazy(() => import("./pages/DSOReportPreparation"));
 const DSOMorningReport = lazy(() => import("./pages/DSOMorningReport"));
 const PlantDeviationMOP = lazy(() => import("./pages/PlantDeviationMOP"));
@@ -122,6 +123,11 @@ export default function App() {
         <Route
           path="/mis/nldc-plots"
           element={protectedPage("nldc_plots", <NLDCPlots />)}
+        />
+
+        <Route
+          path="/mis/schedule-data"
+          element={protectedPage("schedule_data", <ScheduleData />)}
         />
 
         <Route

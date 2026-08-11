@@ -7,6 +7,7 @@ export const ROUTE_PAGE_KEYS = {
   "/outage-analysis/ml-training": "outage_analysis",
   "/mis-report": "mis_report",
   "/mis/nldc-plots": "nldc_plots",
+  "/mis/schedule-data": "schedule_data",
   "/report-preparation/dso-evening": "dso_evening_report",
   "/report-preparation/dso-morning": "dso_morning_report",
   "/report-preparation/plant-deviation": "plant_deviation_report",

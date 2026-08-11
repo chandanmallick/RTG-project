@@ -123,10 +123,10 @@ def get_generation_outage_history_url(db):
     config = PipelineConfigService().get_config("OUTAGE") or {}
     return config.get("generation_outage_history_url") or default_url
 
-def fetch_generation_outage_history_rows(db, start_date: str, end_date: str, session=None):
+def fetch_generation_outage_history_rows(db, start_date: str, end_date: str, session=None, force_refresh: bool = False):
     cache_key = f"{start_date}|{end_date}"
     cached = db.db["pipeline_generation_outage_history_range"].find_one({"_id": cache_key})
-    if cached:
+    if cached and not force_refresh:
         return cached.get("rows", []), True, cached.get("source_url", "")
 
     url = get_generation_outage_history_url(db)
@@ -166,6 +166,9 @@ def build_unit_lookup(db):
             "Generating_Station_Name": 1,
             "installed_capacity": 1,
             "plant_id": 1,
+            "fuel_type": 1,
+            "FuelName": 1,
+            "fuel": 1,
         }
     ))
     lookup = {}

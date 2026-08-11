@@ -362,6 +362,17 @@ export default function TopNavbar() {
                     active={location.pathname === "/mis/nldc-plots"}
                     onClick={handleNavigate}
                   />
+                  <Typography sx={{ px: 1.5, pt: 1, pb: .4, color: "#64748B", fontSize: 10, fontWeight: 900, letterSpacing: .7 }}>DATA</Typography>
+                  <DropdownItem
+                    title="Schedule Data"
+                    description="WBES generator schedules by date and resolution"
+                    icon={Database}
+                    iconColor="#0057B7"
+                    iconBg="#EAF2FF"
+                    path="/mis/schedule-data"
+                    active={location.pathname === "/mis/schedule-data"}
+                    onClick={handleNavigate}
+                  />
                 </Box>
               </motion.div>
             )}

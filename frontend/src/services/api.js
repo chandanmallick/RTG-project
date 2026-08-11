@@ -814,6 +814,11 @@ const API = {
     return res.data;
   },
 
+  getScheduleDataGenerators: async () => (await axios.get(`${BASE_URL}/frequency/schedule-data/generators`)).data,
+  getScheduleData: async (params) => (await axios.get(`${BASE_URL}/frequency/schedule-data`, { params })).data,
+  getScheduleDataRaw: async (params) => (await axios.get(`${BASE_URL}/frequency/schedule-data/raw`, { params })).data,
+  getScheduleDataActual: async (params) => (await axios.get(`${BASE_URL}/frequency/schedule-data/actual`, { params })).data,
+
   getFrequencyReportData: async (date) => {
     const res = await axios.get(`${BASE_URL}/frequency/report-data?date=${date}`);
     return res.data;
@@ -1009,6 +1014,11 @@ const API = {
 
   getDsoReport: async (reportType, reportDate) => {
     const res = await axios.get(`${BASE_URL}/dso-reports/${reportType}/${reportDate}`);
+    return res.data;
+  },
+
+  fetchDsoCrmsOutageData: async (reportType, reportDate) => {
+    const res = await axios.post(`${BASE_URL}/dso-reports/${reportType}/${reportDate}/fetch-crms`);
     return res.data;
   },
 

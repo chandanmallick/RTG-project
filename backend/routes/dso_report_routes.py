@@ -22,6 +22,7 @@ router = APIRouter(prefix="/api/dso-reports", tags=["DSO Report Preparation"])
 COLLECTION = "dso_reports"
 INDIA_1_MIN_COLLECTION = "India 1 min Data"
 INDIA_1_MIN_FIELDS = ("india_demand", "thermal", "hydro", "wind", "solar", "gas", "nuclear")
+CURRENT_CRMS_GENERATOR_OUTAGES_URL = "https://crms.erldc.in/Codebook/getCurrentTrElementOutagesData"
 STATES = ("BIHAR", "JHARKHAND", "DVC", "ODISHA", "WB", "SIKKIM")
 
 STATE_COLUMNS = {
@@ -438,14 +439,14 @@ def build_morning_results(rows, report_date):
         values = [last.get(key) for key in keys if last.get(key) is not None]
         return round(sum(values), 3) if values else None
     hvdc = {
-        "AGRA_ALIPURDUAR": {"label": "± 800 kV Agra-Alipurduar", "value_mw": summed("alipurduar_pole_3", "alipurduar_pole_4"), "region": "NR", "time": last["time"]},
-        "AGRA_BNC": {"label": "± 800 kV Agra-BNC", "value_mw": summed("bnc_pole_1", "bnc_pole_2"), "region": "NR", "time": last["time"]},
+        "AGRA_ALIPURDUAR": {"label": "+/- 800 kV Alipurduar - Agra", "value_mw": summed("alipurduar_pole_3", "alipurduar_pole_4"), "region": "NR", "time": last["time"]},
+        "AGRA_BNC": {"label": "+/- 800 kV BNC - Agra", "value_mw": summed("bnc_pole_1", "bnc_pole_2"), "region": "NR", "time": last["time"]},
         "TALCHER_KOLAR": {"label": "± 500 kV Talcher-Kolar", "value_mw": last.get("talcher_kolar"), "region": "SR", "time": last["time"]},
         "GAZUWAKA": {"label": "HVDC Gazuwaka", "value_mw": summed("jeypore_gazuwaka_1", "jeypore_gazuwaka_2"), "region": "SR", "time": last["time"]},
         "BHERAMARA": {"label": "HVDC Bheramara", "value_mw": last.get("bheramara"), "region": "BAN", "time": last["time"]},
     }
-    hvdc["AGRA_ALIPURDUAR"]["label"] = "+/- 800 kV Agra-Alipurduar"
-    hvdc["AGRA_BNC"]["label"] = "+/- 800 kV Agra-BNC"
+    hvdc["AGRA_ALIPURDUAR"]["label"] = "+/- 800 kV Alipurduar - Agra"
+    hvdc["AGRA_BNC"]["label"] = "+/- 800 kV BNC - Agra"
     hvdc["TALCHER_KOLAR"]["label"] = "+/- 500 kV Talcher-Kolar"
     psp = psp_morning_values(report_date)
     # PSP curve metrics do not retain the min-demand timestamp; use the matching
@@ -493,10 +494,10 @@ def thermal_availability(report_date):
     )
     unit_lookup = build_unit_lookup(db)
     fuel_lookup = {}
-    for unit in db.unit_collection.find({}, {"_id": 0, "Unit_Name": 1, "fuel_type": 1}):
+    for unit in db.unit_collection.find({}, {"_id": 0, "Unit_Name": 1, "fuel_type": 1, "FuelName": 1, "fuel": 1}):
         key = compact(unit.get("Unit_Name"))
         if key:
-            fuel_lookup[key] = unit.get("fuel_type")
+            fuel_lookup[key] = unit.get("fuel_type") or unit.get("FuelName") or unit.get("fuel")
     revived, outage = {}, {}
     details = {"revived": [], "outage": []}
     target = date.fromisoformat(report_date)
@@ -510,9 +511,16 @@ def thermal_availability(report_date):
         return not match or (int(match.group(1)), int(match.group(2))) <= (17, 0)
 
     for row in rows:
-        name = row.get("ELEMENT_NAME") or row.get("elementName") or row.get("ElementName") or ""
+        name = (
+            row.get("ELEMENT_NAME") or row.get("ELEMENTNAME") or row.get("elementName")
+            or row.get("ElementName") or row.get("UNIT_NAME") or row.get("Unit_Name") or ""
+        )
         unit = unit_lookup.get(" ".join(str(name).strip().upper().split())) or {}
-        fuel = compact(fuel_lookup.get(compact(name)) or row.get("FUEL_TYPE") or row.get("FUEL"))
+        fuel = compact(
+            fuel_lookup.get(compact(name)) or unit.get("fuel_type") or unit.get("FuelName") or unit.get("fuel")
+            or row.get("FUEL_TYPE") or row.get("FuelName")
+            or row.get("FUEL") or row.get("fuel_type") or row.get("fuel")
+        )
         if fuel and not any(word in fuel for word in ("THERMAL", "COAL", "LIGNITE", "GAS", "DIESEL")):
             continue
         capacity = to_float(
@@ -554,7 +562,28 @@ def thermal_availability(report_date):
     }
 
 
-def current_generation_outage_summary(report_date):
+def fetch_current_crms_generator_outages():
+    """Fetch open generating-unit outages from the current CRMS codebook.
+
+    CRMS exposes this endpoint as a GET in production (the web form also
+    accepts the same entityFeatureName filter).  Keeping the filter explicit
+    prevents transmission-element outages from leaking into the DSO totals.
+    """
+    http = make_legacy_session()
+    response = http.get(
+        CURRENT_CRMS_GENERATOR_OUTAGES_URL,
+        params={"entityFeatureName": "GENERATING_UNIT"},
+        timeout=120,
+    )
+    response.raise_for_status()
+    payload = response.json()
+    data = payload.get("data") if isinstance(payload, dict) else payload
+    if isinstance(data, dict):
+        data = data.get("currentTrElementOutages") or data.get("rows") or data.get("data") or []
+    return (data if isinstance(data, list) else []), response.url
+
+
+def current_generation_outage_summary(report_date, force_refresh=False):
     """Summarise installed MW currently reported under generator outages.
 
     This deliberately uses the same CRMS generator-outage source as the
@@ -562,15 +591,30 @@ def current_generation_outage_summary(report_date):
     Thermal/Hydro for the DSO report.
     """
     db = MongoService()
-    rows, from_cache, source_url = fetch_generation_outage_history_rows(
-        db, report_date, report_date, session=make_legacy_session()
-    )
+    try:
+        rows, source_url = fetch_current_crms_generator_outages()
+        from_cache = False
+    except Exception as exc:
+        # Keep the processed report readable, but expose the failed source so
+        # an empty table is not presented as a genuine zero generation value.
+        return {
+            "by_fuel": {
+                "THERMAL": {"planned_mw": 0.0, "forced_mw": 0.0, "total_mw": 0.0, "planned_units": 0, "forced_units": 0, "total_units": 0},
+                "HYDRO": {"planned_mw": 0.0, "forced_mw": 0.0, "total_mw": 0.0, "planned_units": 0, "forced_units": 0, "total_units": 0},
+            },
+            "source_name": "CRMS current generating-unit outages (GENERATING_UNIT) + RTG generator unit master",
+            "source_url": CURRENT_CRMS_GENERATOR_OUTAGES_URL,
+            "unit_master_source": "https://rtgapi.grid-india.in/sendData/generator/filtered_details/?region_name=ERLDC",
+            "row_count": 0,
+            "error": str(exc),
+            "from_cache": False,
+        }
     unit_lookup = build_unit_lookup(db)
     fuel_lookup = {}
-    for unit in db.unit_collection.find({}, {"_id": 0, "Unit_Name": 1, "fuel_type": 1}):
+    for unit in db.unit_collection.find({}, {"_id": 0, "Unit_Name": 1, "fuel_type": 1, "FuelName": 1, "fuel": 1}):
         key = compact(unit.get("Unit_Name"))
         if key:
-            fuel_lookup[key] = unit.get("fuel_type")
+            fuel_lookup[key] = unit.get("fuel_type") or unit.get("FuelName") or unit.get("fuel")
 
     totals = {
         "THERMAL": {"planned_mw": 0.0, "forced_mw": 0.0, "planned_units": 0, "forced_units": 0},
@@ -578,13 +622,23 @@ def current_generation_outage_summary(report_date):
     }
     seen = set()
     for row in rows:
-        name = row.get("ELEMENT_NAME") or row.get("elementName") or row.get("ElementName") or ""
+        name = (
+            row.get("ELEMENT_NAME") or row.get("ELEMENTNAME") or row.get("elementName")
+            or row.get("ElementName") or row.get("UNIT_NAME") or row.get("Unit_Name") or ""
+        )
         unit = unit_lookup.get(" ".join(str(name).strip().upper().split())) or {}
-        fuel = compact(fuel_lookup.get(compact(name)) or row.get("FUEL_TYPE") or row.get("FUEL"))
+        fuel = compact(
+            fuel_lookup.get(compact(name)) or row.get("FUEL_TYPE") or row.get("FuelName")
+            or row.get("FUEL") or row.get("fuel_type") or row.get("fuel")
+        )
         fuel_group = "HYDRO" if "HYDRO" in fuel else "THERMAL" if any(word in fuel for word in ("THERMAL", "COAL", "LIGNITE", "GAS", "DIESEL")) else ""
         outage_type = compact(row.get("TYPE") or row.get("OUTAGE_TYPE") or row.get("outageCategory"))
         outage_group = "FORCED" if "FORCED" in outage_type else "PLANNED" if "PLANNED" in outage_type else ""
-        capacity = to_float(row.get("INSTALLED_CAPACITY") or row.get("installedCapacity") or unit.get("installed_capacity"))
+        capacity = to_float(
+            row.get("INSTALLED_CAPACITY") or row.get("installedCapacity")
+            or row.get("Installed_Capacity") or row.get("CAPACITY") or row.get("unit_capacity")
+            or unit.get("installed_capacity")
+        )
         identity = (fuel_group, outage_group, compact(name), capacity)
         if not fuel_group or not outage_group or not capacity or identity in seen:
             continue
@@ -598,7 +652,14 @@ def current_generation_outage_summary(report_date):
         bucket["forced_mw"] = round(bucket["forced_mw"], 3)
         bucket["total_mw"] = round(bucket["planned_mw"] + bucket["forced_mw"], 3)
         bucket["total_units"] = bucket["planned_units"] + bucket["forced_units"]
-    return {"by_fuel": totals, "source_url": source_url, "from_cache": from_cache}
+    return {
+        "by_fuel": totals,
+        "source_url": source_url,
+        "source_name": "CRMS current generating-unit outages (GENERATING_UNIT) + RTG generator unit master",
+        "unit_master_source": "https://rtgapi.grid-india.in/sendData/generator/filtered_details/?region_name=ERLDC",
+        "from_cache": from_cache,
+        "row_count": len(rows),
+    }
 
 
 def build_results(rows, limits):
@@ -770,6 +831,7 @@ async def process_report(
                 "input_summary": input_summary,
                 "india_1_min_saved_dates": india_1_min_saved_dates,
                 "morning_results": morning_results,
+                "generation_outage_summary": current_generation_outage_summary(report_date),
                 "processed_at": now,
             }
         else:
@@ -808,6 +870,27 @@ async def get_report(report_type: str, report_date: str):
         {"_id": 0},
     )
     return {"success": True, "report": doc}
+
+
+@router.post("/{report_type}/{report_date}/fetch-crms")
+async def fetch_crms_outage_data(report_type: str, report_date: str):
+    """Fetch the CRMS generator outage source independently of SCADA upload."""
+    if report_type not in {"evening", "morning"}:
+        raise HTTPException(400, "Report type must be evening or morning.")
+    try:
+        date.fromisoformat(report_date)
+    except ValueError as exc:
+        raise HTTPException(400, "report_date must be in YYYY-MM-DD format.") from exc
+
+    summary = current_generation_outage_summary(report_date, force_refresh=True)
+    key = {"doc_type": "processed_report", "report_type": report_type, "report_date": report_date}
+    existing = collection().find_one(key, {"_id": 0})
+    if existing:
+        collection().update_one(key, {"$set": {"generation_outage_summary": summary, "crms_outage_fetched_at": datetime.utcnow().isoformat()}})
+        existing["generation_outage_summary"] = summary
+        existing["crms_outage_fetched_at"] = datetime.utcnow().isoformat()
+        return {"success": True, "report": existing, "summary": summary}
+    return {"success": True, "report": None, "summary": summary}
 
 
 @router.delete("/{report_type}/{report_date}")
@@ -951,7 +1034,7 @@ def morning_excel_response(doc, report_date):
     today_text = datetime.strptime(results.get("today_date") or report_date, "%Y-%m-%d").strftime("%d-%m-%Y")
 
     title("A1:L1", f"DSO Morning Shift Report — {today_text}", fill=navy, size=14)
-    title("A3:E3", f"Demand / Frequency — Night Shift after 00:00 Hrs {today_text}", fill=pale_green, color="006845")
+    title("A3:E3", f"Demand / Frequency — Night Shift Value (00:00–07:00 Hrs) {today_text}", fill=pale_green, color="006845")
     title("F3:J3", f"During Yesterday {date_text} — PSP Report Database", fill=pale_blue, color=navy)
     sheet["A4"], sheet["B4"], sheet["C4"], sheet["D4"], sheet["E4"] = "Parameter", "Value", "Time", "Unit", "Source"
     sheet["F4"], sheet["G4"], sheet["H4"], sheet["I4"], sheet["J4"] = "Parameter", "Value", "Time", "Unit", "Source"
@@ -1033,6 +1116,21 @@ def morning_excel_response(doc, report_date):
         sheet.cell(row_number, 3, values.get("actual_mu"))
     style("A20:C24")
     style("A20:C20", fill=pale_blue, bold=True, center=True)
+
+    # Keep the live CRMS outage summary alongside the international exchange
+    # table so the morning report has the same at-a-glance comparison as the
+    # evening report.
+    title("G19:L19", "Current generation under planned & forced outage (MW)", fill="FFF7DB", color="7C4A03")
+    sheet["G20"], sheet["H20"], sheet["I20"], sheet["J20"] = "Fuel", "Planned outage", "Forced outage", "Total under outage"
+    outage_summary = (doc.get("generation_outage_summary") or {}).get("by_fuel") or {}
+    for row_number, fuel in enumerate(("THERMAL", "HYDRO"), 21):
+        item = outage_summary.get(fuel) or {}
+        sheet.cell(row_number, 7, fuel.title())
+        sheet.cell(row_number, 8, item.get("planned_mw"))
+        sheet.cell(row_number, 9, item.get("forced_mw"))
+        sheet.cell(row_number, 10, item.get("total_mw"))
+    style("G20:J22", center=True)
+    style("G20:J20", fill=pale_blue, bold=True, center=True)
 
     title("A26:L26", "Important Events (FTC/GD/GI/Load crash etc.)", fill=pale_green, color="006845")
     sheet.merge_cells("A27:L29")

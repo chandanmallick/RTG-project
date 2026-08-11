@@ -15,7 +15,7 @@ import {
   TextField,
   Typography,
 } from "@mui/material";
-import { Download, FileSpreadsheet, Pencil, Trash2, Upload } from "lucide-react";
+import { Download, FileSpreadsheet, Pencil, RefreshCw, Trash2, Upload } from "lucide-react";
 import AppShell from "../components/layout/AppShell";
 import { useAuth } from "../auth/AuthContext";
 import API from "../services/api";
@@ -79,6 +79,7 @@ export default function DSOMorningReport() {
   const [sicName, setSicName] = useState(defaultSicName);
   const [report, setReport] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [crmsLoading, setCrmsLoading] = useState(false);
   const [message, setMessage] = useState({ type: "", text: "" });
   const [editOpen, setEditOpen] = useState(false);
   const [overwriteOpen, setOverwriteOpen] = useState(false);
@@ -135,6 +136,17 @@ export default function DSOMorningReport() {
       return;
     }
     executeProcess(false);
+  };
+
+  const fetchCrmsOutageData = async () => {
+    setCrmsLoading(true);
+    try {
+      const data = await API.fetchDsoCrmsOutageData("morning", reportDate);
+      if (data.report) setReport(data.report);
+      setMessage({ type: "success", text: `CRMS current generating-unit outages refreshed (${data.summary?.row_count || 0} rows).` });
+    } catch (error) {
+      setMessage({ type: "error", text: error.response?.data?.detail || error.message || "CRMS outage refresh failed." });
+    } finally { setCrmsLoading(false); }
   };
 
   const deleteReport = async () => {
@@ -197,6 +209,7 @@ export default function DSOMorningReport() {
   const generation = results.generation || {};
   const hvdc = results.hvdc || {};
   const exchanges = psp.international_exchange || {};
+  const outageByFuel = report?.generation_outage_summary?.by_fuel || {};
 
   const change = (path, value) => {
     setDraft((current) => {
@@ -248,6 +261,7 @@ export default function DSOMorningReport() {
                 <Typography sx={{ fontSize: 12, fontWeight: 900 }}>{displayDate(reportDate)}</Typography>
               </Box>
               {report && <Button disabled={!canWrite} onClick={openEditor} startIcon={<Pencil size={16} />} variant="contained" sx={{ bgcolor: "#fff", color: "#0057B7", fontWeight: 900 }}>Edit Report</Button>}
+              {report && <Button disabled={!canWrite || crmsLoading} onClick={fetchCrmsOutageData} startIcon={<RefreshCw size={16} />} variant="outlined" sx={{ color: "#fff", borderColor: "#fff", fontWeight: 900 }}>{crmsLoading ? "Refreshing…" : "Refresh CRMS Outage"}</Button>}
               {report && <Button href={API.dsoReportExcelUrl("morning", reportDate)} startIcon={<Download size={16} />} variant="outlined" sx={{ color: "#fff", borderColor: "#fff", fontWeight: 900 }}>Download Excel</Button>}
               {report && <Button onClick={downloadVisiblePdf} startIcon={<Download size={16} />} variant="outlined" sx={{ color: "#fff", borderColor: "#fff", fontWeight: 900 }}>Download PDF</Button>}
               {report && <Button onClick={downloadImage} startIcon={<Download size={16} />} variant="outlined" sx={{ color: "#fff", borderColor: "#fff", fontWeight: 900 }}>Download Image</Button>}
@@ -280,7 +294,7 @@ export default function DSOMorningReport() {
             </Typography>
             <Box sx={{ overflowX: "auto" }}>
               <Box component="table" sx={{ ...tableSx, minWidth: { xs: 760, lg: 0 } }}>
-                <thead><tr><th>Parameter</th><th>Night Shift Value</th><th>Time</th><th>During Yesterday (PSP)</th><th>Time</th><th>Unit</th></tr></thead>
+                <thead><tr><th>Parameter</th><th>Night Shift Value (00:00–07:00 hrs)</th><th>Time</th><th>During Yesterday (PSP)</th><th>Time</th><th>Unit</th></tr></thead>
                 <tbody>{METRICS.map(([label, nKey, yKey, yTime, unit]) => <tr key={label}><td>{label}</td><td>{show(night[nKey]?.value, unit === "Hz" ? 3 : 0)}</td><td>{night[nKey]?.time || "—"}</td><td>{show(yesterday[yKey], unit === "Hz" ? 3 : 0)}</td><td>{yesterday[yTime] || "—"}</td><td>{unit}</td></tr>)}</tbody>
               </Box>
             </Box>
@@ -299,18 +313,25 @@ export default function DSOMorningReport() {
             </Card>
           </Box>
 
-          <Card title={`International Exchange During Yesterday ${displayDate(reportDate)} (Import +ve / Export -ve)`} sx={{ mb: 2 }}>
-            <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", lg: "1.35fr .65fr" }, gap: 2 }}>
-              <Box sx={{ overflowX: "auto" }}><Box component="table" sx={{ ...tableSx, minWidth: { xs: 520, lg: 0 } }}><thead><tr><th>Entity</th><th>Schedule (MU)</th><th>Actual (MU)</th></tr></thead><tbody>
+          <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", lg: "repeat(3, 1fr)" }, gap: 2, mb: 2 }}>
+            <Card title="Current generation under planned & forced outage (MW)">
+              <Box sx={{ overflowX: "auto" }}><Box component="table" sx={{ ...tableSx, minWidth: { xs: 360, lg: 0 } }}><thead><tr><th>Fuel</th><th>Planned</th><th>Forced</th><th>Total</th></tr></thead><tbody>
+                {["THERMAL", "HYDRO"].map((fuel) => { const item = outageByFuel[fuel] || {}; return <tr key={fuel}><td>{fuel}</td><td>{show(item.planned_mw, 0)}</td><td>{show(item.forced_mw, 0)}</td><td><b>{show(item.total_mw, 0)}</b></td></tr>; })}
+              </tbody></Box></Box>
+            </Card>
+            <Card title={`International Exchange During Yesterday ${displayDate(reportDate)} (Import +ve / Export -ve)`}>
+              <Box sx={{ overflowX: "auto" }}><Box component="table" sx={{ ...tableSx, minWidth: { xs: 360, lg: 0 } }}><thead><tr><th>Entity</th><th>Schedule (MU)</th><th>Actual (MU)</th></tr></thead><tbody>
                 {EXCHANGES.map((name) => <tr key={name}><td>{name}</td><td>{show(exchanges[name]?.schedule_mu, 3)}</td><td>{show(exchanges[name]?.actual_mu, 3)}</td></tr>)}
               </tbody></Box></Box>
+            </Card>
+            <Card title="Frequency during yesterday">
               <Box sx={{ overflowX: "auto" }}><Box component="table" sx={{ ...tableSx, minWidth: { xs: 300, lg: 0 } }}><thead><tr><th>Frequency band</th><th>% of time</th></tr></thead><tbody>
                 <tr><td>&gt; 50.05 Hz</td><td>{show(frequency.above_50_05_pct, 2)}%</td></tr>
                 <tr><td>Within band</td><td>{show(frequency.within_band_pct, 2)}%</td></tr>
                 <tr><td>&lt; 49.9 Hz</td><td>{show(frequency.below_49_9_pct, 2)}%</td></tr>
               </tbody></Box></Box>
-            </Box>
-          </Card>
+            </Card>
+          </Box>
           <Card title="Important Events (FTC/GD/GI/Load crash etc.)">
             <Typography sx={{ minHeight: 55, whiteSpace: "pre-wrap", fontSize: 13 }}>{report.important_events || "NIL"}</Typography>
           </Card>
