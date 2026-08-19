@@ -60,7 +60,12 @@ import {
   PieChart,
   Pie,
   Cell,
-  Tooltip
+  Tooltip,
+  RadarChart,
+  PolarGrid,
+  PolarAngleAxis,
+  PolarRadiusAxis,
+  Radar,
 } from "recharts";
 
 import GradientButton from "../components/ui/GradientButton";
@@ -112,6 +117,8 @@ export default function RTGDashboard() {
     loadTrendData();
     loadSnapshotTrend();
     loadPipelineStatus();
+    loadCurrentCrmsOutages();
+    loadCurrentCrmsTransmissionOutages();
   }, []);
 
   const [data, setData] = useState([]);
@@ -132,6 +139,10 @@ export default function RTGDashboard() {
 
   const [pipelineStatus, setPipelineStatus] = useState([]);
 
+  const [crmsOutages, setCrmsOutages] = useState({ summary: {}, groups: {} });
+  const [crmsOutageLoading, setCrmsOutageLoading] = useState(false);
+  const [crmsTransmissionOutages, setCrmsTransmissionOutages] = useState({ total: 0, over_15_days: 0, rows: [] });
+
   // Pipeline Monitor state
   const [selectedPipeline, setSelectedPipeline] = useState(null);
   const [openLogs, setOpenLogs] = useState(false);
@@ -147,6 +158,10 @@ export default function RTGDashboard() {
   const [showUnreqDialog, setShowUnreqDialog] = useState(false);
 
   const [showOutageSummaryDialog, setShowOutageSummaryDialog] = useState(false);
+
+  const [showCrmsOutageDialog, setShowCrmsOutageDialog] = useState(false);
+
+  const [showTransmissionOutageDialog, setShowTransmissionOutageDialog] = useState(false);
 
   const [showOutageCategoryDialog, setShowOutageCategoryDialog] = useState(false);
 
@@ -294,6 +309,35 @@ export default function RTGDashboard() {
     } catch (err) {
 
       setTrendData([]);
+    }
+  };
+
+  const loadCurrentCrmsOutages = async (refresh = false) => {
+    try {
+      setCrmsOutageLoading(true);
+      const res = await API.getCurrentCRMSOutages(refresh);
+      if (res.success) {
+        setCrmsOutages(res);
+      } else {
+        throw new Error(res.message || "CRMS outage data could not be loaded.");
+      }
+    } catch (err) {
+      showModernPopup({
+        type: "error",
+        title: "CRMS Outage Fetch Failed",
+        subtitle: err?.response?.data?.message || err.message || "Unable to reach CRMS.",
+      });
+    } finally {
+      setCrmsOutageLoading(false);
+    }
+  };
+
+  const loadCurrentCrmsTransmissionOutages = async (refresh = false) => {
+    try {
+      const res = await API.getCurrentCRMSTransmissionOutages(refresh);
+      if (res.success) setCrmsTransmissionOutages(res);
+    } catch (err) {
+      console.error("CRMS transmission outage fetch failed", err);
     }
   };
 
@@ -506,6 +550,10 @@ export default function RTGDashboard() {
                 await loadSnapshotTrend();
 
                 await loadPipelineStatus();
+
+                await loadCurrentCrmsOutages(true);
+
+                await loadCurrentCrmsTransmissionOutages(true);
             }
 
             } catch(err){
@@ -643,6 +691,22 @@ export default function RTGDashboard() {
         (a,b) =>
           b.total - a.total
       );
+
+    const currentOutageSummary = Object.values(
+      filteredData.reduce((summary, row) => {
+        const total = [row.forced_outage, row.planned_outage, row.fuel_shortage, row.commercial_issues, row.rsd]
+          .reduce((sum, value) => sum + Number(value || 0), 0);
+        if (!total) return summary;
+
+        const state = String(row.state_name || "Unmapped").trim() || "Unmapped";
+        const fuel = String(row.fuel_type || row.fuel || "Other").trim() || "Other";
+        const key = `${state}__${fuel}`;
+        if (!summary[key]) summary[key] = { state, fuel, plants: 0, outage: 0 };
+        summary[key].plants += 1;
+        summary[key].outage += total;
+        return summary;
+      }, {})
+    ).sort((a, b) => b.outage - a.outage).slice(0, 8);
 
     const unreqColumns = [
       {
@@ -1008,9 +1072,9 @@ export default function RTGDashboard() {
         }}
       >
         <Box>
-          <Typography sx={{ fontSize: 24, fontWeight: 600, lineHeight: 1.15 }}>RTG Dashboard</Typography>
+          <Typography sx={{ fontSize: 24, fontWeight: 700, lineHeight: 1.15 }}>CR Health Card</Typography>
           <Typography sx={{ mt: 0.45, fontSize: 12, color: "rgba(255,255,255,.9)" }}>
-            Live generation, schedules, outages and operational trends
+            Current control-room generation health, schedules and outage position
           </Typography>
         </Box>
         <Box sx={{ display: "flex", gap: 1.2, alignItems: "center", flexWrap: { xs: "wrap", md: "nowrap" } }}>
@@ -1177,6 +1241,8 @@ export default function RTGDashboard() {
       </Dialog>
       )}
 
+      <Paper elevation={0} sx={{ mb: 1.5, p: { xs: 1.2, md: 2 }, borderRadius: "24px", bgcolor: "#126681", border: "2px solid #083247" }}>
+        <Typography sx={{ mb: 1.1, px: .6, color: "#FFFFFF", fontSize: 25, fontWeight: 500 }}>RTG Data</Typography>
       <Grid
         container
         sx={{
@@ -1185,12 +1251,12 @@ export default function RTGDashboard() {
           gridTemplateColumns: {
             xs: "minmax(0,1fr)",
             md: "minmax(0,1fr) minmax(0,1fr)",
-            lg: "190px 210px minmax(250px,1fr) 150px 220px",
+            lg: "minmax(560px,1fr) 150px 250px",
           },
           gridTemplateAreas: {
-            xs: '"activity" "pipelines" "schedule" "snapshot" "generation" "actual" "historical"',
-            md: '"activity pipelines" "snapshot snapshot" "generation schedule" "actual historical"',
-            lg: '"activity pipelines snapshot snapshot generation" "schedule schedule schedule actual historical"',
+            xs: '"snapshot" "generation" "schedule" "actual" "pipeline"',
+            md: '"snapshot snapshot" "generation pipeline" "schedule schedule" "actual actual"',
+            lg: '"snapshot snapshot generation" "schedule schedule pipeline" "schedule schedule actual"',
           },
           gap: 1.25,
           alignItems: "stretch",
@@ -1199,7 +1265,7 @@ export default function RTGDashboard() {
         }}
       >
 
-        <Grid item sx={{ gridArea: "historical", width: "100%", maxWidth: "none !important" }}>
+        <Grid item sx={{ gridArea: "historical", display: "none" }}>
           <Paper
             component="button"
             type="button"
@@ -1235,7 +1301,7 @@ export default function RTGDashboard() {
           </Paper>
         </Grid>
 
-        <Grid item sx={{ gridArea: "activity", width: "100%", maxWidth: "none !important" }}>
+        <Grid item sx={{ gridArea: "activity", display: "none" }}>
 
           <RTGDayTrend
             data={trendData}
@@ -1591,7 +1657,7 @@ export default function RTGDashboard() {
         </Grid>
 
         {/* ── PIPELINE MONITOR CARDS ── */}
-        <Grid item sx={{ gridArea: "pipelines", width: "100%", maxWidth: "none !important" }}>
+        <Grid item sx={{ gridArea: "pipelines", display: "none" }}>
           <Box sx={{ display: "grid", gridTemplateColumns: "1fr", gap: 0.8, height: "100%", minHeight: 0 }}>
             {pipelineStatus.map((item) => {
               const success = item.last_status === "SUCCESS";
@@ -1669,6 +1735,32 @@ export default function RTGDashboard() {
           </Paper>
         </Grid>
 
+        <Grid item sx={{ gridArea: "current", display: "none" }}>
+          <Paper elevation={0} sx={{ height: "100%", minHeight: 228, p: 1.35, borderRadius: "22px", border: "1px solid #BFE4D8", background: "linear-gradient(145deg,#FFFFFF,#F1FAF7)", boxShadow: "0 14px 30px rgba(15,23,42,.06)" }}>
+            <Box sx={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 1, mb: 1 }}>
+              <Box>
+                <Typography sx={{ fontSize: 14, fontWeight: 950, color: "#0F172A" }}>Current-date CRMS outage</Typography>
+                <Typography sx={{ fontSize: 9.5, color: "#64748B", mt: .2 }}>Thermal, hydro and state-wise outage position</Typography>
+              </Box>
+              <Chip label={`${outageSummaryRows.length} units`} size="small" sx={{ height: 20, bgcolor: "#FFF1F2", color: "#DC2626", fontWeight: 900, fontSize: 9 }} />
+            </Box>
+            <Box sx={{ display: "flex", flexDirection: "column", gap: .6 }}>
+              {currentOutageSummary.length ? currentOutageSummary.map((row) => (
+                <Box key={`${row.state}-${row.fuel}`} sx={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) auto", gap: .7, alignItems: "center", px: .85, py: .65, borderRadius: "10px", bgcolor: "#FFFFFF", border: "1px solid #E2E8F0" }}>
+                  <Box sx={{ minWidth: 0 }}>
+                    <Typography sx={{ fontSize: 10.5, fontWeight: 900, color: "#0F172A", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{row.state}</Typography>
+                    <Typography sx={{ fontSize: 8.5, color: "#64748B" }}>{row.fuel} · {row.plants} unit{row.plants === 1 ? "" : "s"}</Typography>
+                  </Box>
+                  <Typography sx={{ fontSize: 11.5, fontWeight: 950, color: "#DC2626", whiteSpace: "nowrap" }}>{formatMW(row.outage)} MW</Typography>
+                </Box>
+              )) : (
+                <Typography sx={{ py: 3.2, textAlign: "center", color: "#64748B", fontSize: 11, fontWeight: 700 }}>No current outage is reported for this selection.</Typography>
+              )}
+            </Box>
+            <GradientButton onClick={() => setShowOutageSummaryDialog(true)} sx={{ mt: 1, width: "100%", minHeight: 28, fontSize: 9.5 }}>View outage details</GradientButton>
+          </Paper>
+        </Grid>
+
         <Grid item sx={{ gridArea: "snapshot", width: "100%", minWidth: 0, maxWidth: "none !important", "& > .MuiPaper-root": { height: "100%", mb: 0 } }}>
           <RTGSnapshotTrend
             date={snapshotTrendDate}
@@ -1679,12 +1771,213 @@ export default function RTGDashboard() {
           />
         </Grid>
 
+        <Grid item sx={{ gridArea: "pipeline", width: "100%", maxWidth: "none !important" }}>
+          <Paper elevation={0} sx={{ height: "100%", minHeight: 76, p: 1, borderRadius: "14px", border: "2px solid #082F49", bgcolor: "#116681", color: "#FFFFFF", display: "grid", placeItems: "center" }}>
+            <GradientButton
+              onClick={() => {
+                const outagePipeline = pipelineStatus.find((item) => String(item.pipeline).toUpperCase() === "OUTAGE");
+                if (outagePipeline) fetchLogs(outagePipeline.revision_id, outagePipeline);
+              }}
+              sx={{ width: "100%", minHeight: 42, bgcolor: "#0A5572", fontSize: 14 }}
+            >
+              Outage pipeline
+            </GradientButton>
+          </Paper>
+        </Grid>
+
       </Grid>
+      </Paper>
+
+      <Paper elevation={0} sx={{ mb: 2.5, p: { xs: 1.2, md: 2 }, minHeight: 300, borderRadius: "20px", bgcolor: "#126681", border: "2px solid #083247" }}>
+        <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 1, mb: 1.1 }}>
+          <Typography sx={{ px: .4, color: "#FFFFFF", fontSize: 25, fontWeight: 500 }}>CRMS Data</Typography>
+          <GradientButton disabled={crmsOutageLoading} onClick={() => Promise.all([loadCurrentCrmsOutages(true), loadCurrentCrmsTransmissionOutages(true)])} sx={{ minHeight: 34, bgcolor: "#08103A", fontSize: 10.5 }}>
+            {crmsOutageLoading ? "Fetching CRMS..." : "Refresh CRMS Outage"}
+          </GradientButton>
+        </Box>
+        <Box sx={{ display: "flex", alignItems: "stretch", gap: 1.2, flexWrap: "wrap" }}>
+        <Paper
+          component="button"
+          type="button"
+          onClick={() => setShowCrmsOutageDialog(true)}
+          elevation={0}
+          sx={{ width: { xs: "100%", sm: 360 }, p: 1.2, borderRadius: "4px", border: "2px solid #082F49", bgcolor: "#DCEAF7", textAlign: "left", cursor: "pointer", "&:hover": { transform: "translateY(-2px)", boxShadow: "0 12px 25px rgba(0,0,0,.18)" } }}
+        >
+          <Typography sx={{ color: "#D40000", fontSize: 22, fontWeight: 500 }}>Outage snapshot</Typography>
+          <Box sx={{ height: 205, bgcolor: "#FFFFFF", mt: .5 }}>
+            <ResponsiveContainer width="100%" height="100%">
+              <RadarChart data={[
+                { name: "Thermal State", value: crmsOutages.summary?.thermal_state?.mw || 0 },
+                { name: "Hydro State", value: crmsOutages.summary?.hydro_state?.mw || 0 },
+                { name: "Thermal Central", value: crmsOutages.summary?.thermal_central?.mw || 0 },
+                { name: "Hydro Central", value: crmsOutages.summary?.hydro_central?.mw || 0 },
+              ]} outerRadius="68%">
+                <PolarGrid />
+                <PolarAngleAxis dataKey="name" tick={{ fill: "#475569", fontSize: 10 }} />
+                <PolarRadiusAxis tick={{ fill: "#64748B", fontSize: 8 }} />
+                <Radar dataKey="value" stroke="#0E6686" fill="#0E6686" fillOpacity={.86} />
+                <Tooltip formatter={(value) => [`${formatMW(value)} MW`, "Outage"]} />
+              </RadarChart>
+            </ResponsiveContainer>
+          </Box>
+          <Typography sx={{ mt: .55, color: "#0057B7", fontSize: 9.5, fontWeight: 900 }}>CLICK FOR FOUR OUTAGE TABLES</Typography>
+        </Paper>
+        <Paper
+          component="button"
+          type="button"
+          onClick={() => setShowTransmissionOutageDialog(true)}
+          elevation={0}
+          sx={{ width: { xs: "100%", sm: 210 }, p: 1.3, borderRadius: "10px", border: crmsTransmissionOutages.over_15_days ? "2px solid #DC2626" : "2px solid #082F49", bgcolor: "#FFFFFF", textAlign: "left", cursor: "pointer", display: "flex", flexDirection: "column", justifyContent: "space-between", "&:hover": { transform: "translateY(-2px)", boxShadow: "0 12px 25px rgba(0,0,0,.18)" } }}
+        >
+          <Box>
+            <Typography sx={{ color: "#0F172A", fontSize: 13, fontWeight: 950 }}>Voltage Regulation</Typography>
+            <Typography sx={{ mt: .25, color: "#64748B", fontSize: 9.5 }}>Transmission elements</Typography>
+          </Box>
+          <Typography sx={{ my: 1, color: "#0057B7", fontSize: 36, lineHeight: 1, fontWeight: 950 }}>{crmsTransmissionOutages.total || 0}</Typography>
+          <Box sx={{ p: .7, borderRadius: "8px", bgcolor: crmsTransmissionOutages.over_15_days ? "#FEF2F2" : "#F1F5F9", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <Typography sx={{ color: crmsTransmissionOutages.over_15_days ? "#B91C1C" : "#64748B", fontSize: 9, fontWeight: 800 }}>More than 15 days</Typography>
+            <Typography sx={{ color: crmsTransmissionOutages.over_15_days ? "#DC2626" : "#475569", fontSize: 16, fontWeight: 950 }}>{crmsTransmissionOutages.over_15_days || 0}</Typography>
+          </Box>
+        </Paper>
+        </Box>
+      </Paper>
 
       {showHistoricalDownload && (
         <Box sx={{ mb: 2.5, animation: "rtgDownloadOpen .24s ease-out", "@keyframes rtgDownloadOpen": { from: { opacity: 0, transform: "translateY(-8px)" }, to: { opacity: 1, transform: "translateY(0)" } } }}>
           <RTGHistoricalDownload />
         </Box>
+      )}
+
+      {showCrmsOutageDialog && (
+        <Dialog
+          open={showCrmsOutageDialog}
+          onClose={() => setShowCrmsOutageDialog(false)}
+          maxWidth="xl"
+          fullWidth
+          PaperProps={{ sx: { borderRadius: "24px", overflow: "hidden", background: "#F8FAFC" } }}
+        >
+          <DialogTitle sx={{ px: 2.5, py: 1.7, color: "#FFFFFF", background: "linear-gradient(105deg,#08103A,#0057B7,#0F6FDB)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <Box>
+              <Typography sx={{ fontSize: 20, fontWeight: 900 }}>Current-date CRMS Generator Outage</Typography>
+              <Typography sx={{ mt: .25, fontSize: 10.5, color: "rgba(255,255,255,.86)" }}>
+                GENERATING_UNIT filter · {crmsOutages.row_count || 0} CRMS records · {crmsOutages.cached ? "Last successful cached response" : "Live response"}
+              </Typography>
+            </Box>
+            <IconButton onClick={() => setShowCrmsOutageDialog(false)} sx={{ color: "#FFFFFF", bgcolor: "rgba(255,255,255,.12)" }}><CloseRoundedIcon /></IconButton>
+          </DialogTitle>
+          <DialogContent sx={{ p: 2.2 }}>
+            <Box sx={{ height: 310, mb: 2, borderRadius: "18px", border: "1px solid #D7E4F3", bgcolor: "#FFFFFF" }}>
+              <ResponsiveContainer width="100%" height="100%">
+                <RadarChart data={[
+                  { name: "Thermal State", value: crmsOutages.summary?.thermal_state?.mw || 0 },
+                  { name: "Hydro State", value: crmsOutages.summary?.hydro_state?.mw || 0 },
+                  { name: "Thermal Central", value: crmsOutages.summary?.thermal_central?.mw || 0 },
+                  { name: "Hydro Central", value: crmsOutages.summary?.hydro_central?.mw || 0 },
+                ]} outerRadius="72%">
+                  <PolarGrid stroke="#CBD5E1" />
+                  <PolarAngleAxis dataKey="name" tick={{ fill: "#334155", fontSize: 12, fontWeight: 700 }} />
+                  <PolarRadiusAxis tick={{ fill: "#64748B", fontSize: 9 }} />
+                  <Radar name="Outage capacity" dataKey="value" stroke="#0E6686" fill="#0E6686" fillOpacity={.82} />
+                  <Tooltip formatter={(value) => [`${formatMW(value)} MW`, "Outage capacity"]} />
+                </RadarChart>
+              </ResponsiveContainer>
+            </Box>
+
+            <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", lg: "1fr 1fr" }, gap: 1.4 }}>
+              {[
+                ["thermal_state", "Thermal · State Sector"],
+                ["hydro_state", "Hydro · State Sector"],
+                ["thermal_central", "Thermal · Central Sector"],
+                ["hydro_central", "Hydro · Central Sector"],
+              ].map(([key, label]) => {
+                const rows = crmsOutages.groups?.[key] || [];
+                const total = crmsOutages.summary?.[key] || {};
+                return (
+                  <Paper key={key} elevation={0} sx={{ overflow: "hidden", borderRadius: "15px", border: "1px solid #D7E4F3" }}>
+                    <Box sx={{ px: 1.4, py: 1, bgcolor: "#EAF2FF", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                      <Typography sx={{ fontSize: 13, fontWeight: 900, color: "#0057B7" }}>{label}</Typography>
+                      <Typography sx={{ fontSize: 11, fontWeight: 900, color: "#0F172A" }}>{formatMW(total.mw)} MW · {total.units || 0} units</Typography>
+                    </Box>
+                    <TableContainer sx={{ maxHeight: 260 }}>
+                      <Table stickyHeader size="small">
+                        <TableHead>
+                          <TableRow>
+                            {[
+                              ["Unit / Station", "left"], ["State", "left"], ["Type", "left"], ["MW", "right"], ["Reason", "left"], ["Expected Revival", "left"],
+                            ].map(([heading, align]) => <TableCell key={heading} align={align} sx={{ py: .8, px: 1, fontSize: 9.5, whiteSpace: "nowrap" }}>{heading}</TableCell>)}
+                          </TableRow>
+                        </TableHead>
+                        <TableBody>
+                          {rows.map((row, index) => (
+                            <TableRow key={`${row.unit_name}-${index}`} hover>
+                              <TableCell sx={{ py: .75, px: 1, minWidth: 155 }}><Typography sx={{ fontSize: 10, fontWeight: 850 }}>{row.unit_name || "-"}</Typography><Typography sx={{ fontSize: 8.5, color: "#64748B" }}>{row.station_name || ""}</Typography></TableCell>
+                              <TableCell sx={{ py: .75, px: 1, fontSize: 9.5 }}>{row.state_name || "-"}</TableCell>
+                              <TableCell sx={{ py: .75, px: 1, fontSize: 9.5 }}>{row.outage_type || "-"}</TableCell>
+                              <TableCell align="right" sx={{ py: .75, px: 1, fontSize: 10, fontWeight: 900, color: "#DC2626" }}>{formatMW(row.capacity_mw)}</TableCell>
+                              <TableCell sx={{ py: .75, px: 1, minWidth: 170, fontSize: 9.5 }}>{row.reason || "-"}</TableCell>
+                              <TableCell sx={{ py: .75, px: 1, minWidth: 115, fontSize: 9.5 }}>{row.expected_revival || "-"}</TableCell>
+                            </TableRow>
+                          ))}
+                          {!rows.length && <TableRow><TableCell colSpan={6} align="center" sx={{ py: 3, color: "#64748B", fontSize: 10.5 }}>No current outage in this category.</TableCell></TableRow>}
+                        </TableBody>
+                      </Table>
+                    </TableContainer>
+                  </Paper>
+                );
+              })}
+            </Box>
+          </DialogContent>
+        </Dialog>
+      )}
+
+      {showTransmissionOutageDialog && (
+        <Dialog
+          open={showTransmissionOutageDialog}
+          onClose={() => setShowTransmissionOutageDialog(false)}
+          maxWidth="xl"
+          fullWidth
+          PaperProps={{ sx: { borderRadius: "22px", overflow: "hidden", background: "#F8FAFC" } }}
+        >
+          <DialogTitle sx={{ px: 2.5, py: 1.6, color: "#FFFFFF", background: "linear-gradient(105deg,#08103A,#0057B7,#0F6FDB)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <Box>
+              <Typography sx={{ fontSize: 20, fontWeight: 900 }}>Transmission Outage · Voltage Regulation</Typography>
+              <Typography sx={{ mt: .25, fontSize: 10.5, color: "rgba(255,255,255,.86)" }}>
+                {crmsTransmissionOutages.total || 0} elements · {crmsTransmissionOutages.over_15_days || 0} out for more than 15 days
+              </Typography>
+            </Box>
+            <IconButton onClick={() => setShowTransmissionOutageDialog(false)} sx={{ color: "#FFFFFF", bgcolor: "rgba(255,255,255,.12)" }}><CloseRoundedIcon /></IconButton>
+          </DialogTitle>
+          <DialogContent sx={{ p: 2 }}>
+            <Typography sx={{ mb: 1, color: "#64748B", fontSize: 10.5 }}>
+              Filter: ERLDC/NLDC Initiated - Voltage Regulation. Lines exceeding 15 days are placed first and highlighted.
+            </Typography>
+            <TableContainer component={Paper} elevation={0} sx={{ maxHeight: 600, border: "1px solid #D7E4F3", borderRadius: "14px" }}>
+              <Table stickyHeader size="small">
+                <TableHead>
+                  <TableRow>
+                    {[
+                      ["Transmission element", "left"], ["Owner", "left"], ["State", "left"], ["Outage since", "left"], ["Days out", "right"], ["Reason", "left"], ["Expected revival", "left"],
+                    ].map(([heading, align]) => <TableCell key={heading} align={align} sx={{ py: 1, fontSize: 10, whiteSpace: "nowrap" }}>{heading}</TableCell>)}
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {(crmsTransmissionOutages.rows || []).map((row, index) => (
+                    <TableRow key={`${row.line_name}-${index}`} hover sx={{ bgcolor: row.over_15_days ? "#FFF1F2" : "#FFFFFF", "& td:first-of-type": { borderLeft: row.over_15_days ? "4px solid #DC2626" : "4px solid transparent" } }}>
+                      <TableCell sx={{ py: .9, minWidth: 240 }}><Typography sx={{ fontSize: 11, fontWeight: 900, color: row.over_15_days ? "#B91C1C" : "#0F172A" }}>{row.line_name}</Typography><Typography sx={{ fontSize: 8.5, color: "#64748B" }}>{row.entity_name}</Typography></TableCell>
+                      <TableCell sx={{ py: .9, fontSize: 10 }}>{row.owner || "-"}</TableCell>
+                      <TableCell sx={{ py: .9, fontSize: 10 }}>{row.state_name || "-"}</TableCell>
+                      <TableCell sx={{ py: .9, fontSize: 10, whiteSpace: "nowrap" }}>{row.outage_at ? new Date(row.outage_at).toLocaleString("en-IN") : [row.outage_date, row.outage_time].filter(Boolean).join(" ") || "-"}</TableCell>
+                      <TableCell align="right" sx={{ py: .9, fontSize: 11, fontWeight: 950, color: row.over_15_days ? "#DC2626" : "#0F172A" }}>{row.days_out}</TableCell>
+                      <TableCell sx={{ py: .9, minWidth: 220, fontSize: 10 }}>{row.reason || "-"}</TableCell>
+                      <TableCell sx={{ py: .9, minWidth: 130, fontSize: 10 }}>{row.expected_revival || "-"}</TableCell>
+                    </TableRow>
+                  ))}
+                  {!crmsTransmissionOutages.rows?.length && <TableRow><TableCell colSpan={7} align="center" sx={{ py: 6, color: "#64748B", fontWeight: 700 }}>No transmission element is currently under voltage-regulation outage.</TableCell></TableRow>}
+                </TableBody>
+              </Table>
+            </TableContainer>
+          </DialogContent>
+        </Dialog>
       )}
 
       {showOutageDialog && (

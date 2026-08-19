@@ -228,10 +228,15 @@ def is_control_room_employee(employee_id: str) -> bool:
 
 
 def published_roster_for_employee_date(employee_id: str, date_str: str) -> Optional[dict]:
-    """Return only a final roster that has actually been published to the calendar."""
+    """Return a roster actually published to the active duty calendar.
+
+    A published draft is intentionally a valid active roster: the duty-roster
+    screen supports publishing a draft before it is saved as final. Leave
+    eligibility must therefore follow ``calendarPushed`` rather than the
+    document's final/draft label.
+    """
     rosters = roster_master_collection.find(
         {
-            "isFinal": True,
             "calendarPushed": True,
             "startDate": {"$lte": date_str},
             "endDate": {"$gte": date_str},

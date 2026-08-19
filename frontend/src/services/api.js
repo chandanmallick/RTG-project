@@ -206,6 +206,20 @@ const API = {
     return res.data;
   },
 
+  getCurrentCRMSOutages: async (refresh = false) => {
+    const res = await axios.get(`${BASE_URL}/rtg-dashboard/current-crms-outages`, {
+      params: { refresh },
+    });
+    return res.data;
+  },
+
+  getCurrentCRMSTransmissionOutages: async (refresh = false) => {
+    const res = await axios.get(`${BASE_URL}/rtg-dashboard/current-crms-transmission-outages`, {
+      params: { refresh },
+    });
+    return res.data;
+  },
+
   getRTGTodayTrend: async () => {
 
     const res = await axios.get(

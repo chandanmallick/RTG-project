@@ -71,6 +71,20 @@ def compact(value):
     return re.sub(r"[^A-Z0-9]+", "", str(value or "").upper())
 
 
+def outage_fuel_group(value) -> str:
+    """Map RTG master and CRMS fuel labels to the two DSO report groups.
+
+    The RTG unit master uses ``HYDEL`` for hydro stations, while the reporting
+    fields commonly use ``HYDRO``. Both must be included in the DSO breakup.
+    """
+    fuel = compact(value)
+    if any(label in fuel for label in ("HYDRO", "HYDEL", "HYDROELECTRIC")):
+        return "HYDRO"
+    if any(label in fuel for label in ("THERMAL", "COAL", "LIGNITE", "GAS", "DIESEL")):
+        return "THERMAL"
+    return ""
+
+
 def json_safe(value):
     if isinstance(value, (datetime, date, time)):
         return value.isoformat()
@@ -631,7 +645,7 @@ def current_generation_outage_summary(report_date, force_refresh=False):
             fuel_lookup.get(compact(name)) or row.get("FUEL_TYPE") or row.get("FuelName")
             or row.get("FUEL") or row.get("fuel_type") or row.get("fuel")
         )
-        fuel_group = "HYDRO" if "HYDRO" in fuel else "THERMAL" if any(word in fuel for word in ("THERMAL", "COAL", "LIGNITE", "GAS", "DIESEL")) else ""
+        fuel_group = outage_fuel_group(fuel)
         outage_type = compact(row.get("TYPE") or row.get("OUTAGE_TYPE") or row.get("outageCategory"))
         outage_group = "FORCED" if "FORCED" in outage_type else "PLANNED" if "PLANNED" in outage_type else ""
         capacity = to_float(

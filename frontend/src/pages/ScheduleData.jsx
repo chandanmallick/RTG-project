@@ -70,7 +70,13 @@ export default function ScheduleData() {
   const [selectedGenerators, setSelectedGenerators] = useState([]);
   const [kind, setKind] = useState("generator");
   const [frequency, setFrequency] = useState(15);
-  const [metrics, setMetrics] = useState(["schedule", "actual", "deviation"]);
+  const [metrics, setMetrics] = useState([
+    "schedule",
+    "actual",
+    "deviation",
+    "dc",
+    "normative_dc",
+  ]);
   const [generators, setGenerators] = useState([]);
   const [result, setResult] = useState(null);
   const [actual, setActual] = useState(null);
@@ -206,9 +212,15 @@ export default function ScheduleData() {
         const schedule = Number(row[item.id]);
         const signed = item.kind === "generator" ? -schedule : schedule;
         const value = ar[key] == null ? null : Number(ar[key]);
+        const dc = Number(row[`${item.id}_dc`]);
+        const normativeDc = Number(row[`${item.id}_normative_dc`]);
         next[`${item.id}_schedule`] = Number.isFinite(signed) ? signed : null;
         next[`${item.id}_actual`] = Number.isFinite(value) ? value : null;
         next[`${item.id}_deviation`] = value == null ? null : value - signed;
+        next[`${item.id}_dc`] = Number.isFinite(dc) ? dc : null;
+        next[`${item.id}_normative_dc`] = Number.isFinite(normativeDc)
+          ? normativeDc
+          : null;
       });
       return next;
     });
@@ -270,6 +282,8 @@ export default function ScheduleData() {
     schedule: "Schedule",
     actual: "Actual",
     deviation: "Deviation",
+    dc: "DC (On-bar)",
+    normative_dc: "Normative DC",
   };
   const toggleMetric = (metric) =>
     setMetrics((current) =>
@@ -284,6 +298,8 @@ export default function ScheduleData() {
     const scheduleColors = ["#2563EB", "#1D4ED8", "#0EA5E9", "#4F46E5"];
     const actualColors = ["#059669", "#0F766E", "#16A34A", "#0891B2"];
     const deviationColors = ["#EA580C", "#DC2626", "#D97706", "#DB2777"];
+    const dcColors = ["#7C3AED", "#9333EA", "#A21CAF", "#C026D3"];
+    const normativeDcColors = ["#64748B", "#475569", "#334155", "#0F172A"];
     const boundaries = timestamps.reduce((items, timestamp, index) => {
       const date = String(timestamp).slice(0, 10);
       const previousDate = index
@@ -315,7 +331,11 @@ export default function ScheduleData() {
             ? scheduleColors[itemIndex % scheduleColors.length]
             : metric === "actual"
               ? actualColors[itemIndex % actualColors.length]
-              : deviationColors[itemIndex % deviationColors.length];
+              : metric === "deviation"
+                ? deviationColors[itemIndex % deviationColors.length]
+                : metric === "dc"
+                  ? dcColors[itemIndex % dcColors.length]
+                  : normativeDcColors[itemIndex % normativeDcColors.length];
         return {
           name: `${item.mis_name || item.label} ${metricLabels[metric]}`,
           type: "line",
@@ -326,7 +346,11 @@ export default function ScheduleData() {
           symbol: "none",
           smooth: 0.18,
           connectNulls: false,
-          lineStyle: { width: metric === "deviation" ? 2.5 : 2.2, color },
+          lineStyle: {
+            width: metric === "deviation" ? 2.5 : 2.2,
+            type: metric === "normative_dc" ? "dashed" : "solid",
+            color,
+          },
           itemStyle: { color },
           areaStyle:
             metric === "deviation"

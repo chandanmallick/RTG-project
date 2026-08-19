@@ -561,6 +561,68 @@ def _schedule_data_generators():
     return sorted(choices.values(), key=lambda item: str(item.get("label") or "").upper())
 
 
+def _declaration_series(payload: dict, field_tokens: tuple[str, ...]) -> list:
+    """Find a declaration series by meaning, not a fixed WBES JSON branch.
+
+    WBES may expose ``ThermalDCJsonData`` or ``HydroDCJsonData`` (and can
+    vary declaration order/key casing). Search every DeclarationData block for
+    the requested field tokens and return the first numeric series found.
+    """
+    declarations = payload.get("DeclarationList") or []
+    if isinstance(declarations, dict):
+        declarations = [declarations]
+
+    # The normal WBES entity response contains DeclarationList. The same
+    # helper is also used with a DeclarationData object directly during
+    # troubleshooting/export, so support both shapes.
+    declaration_sources = []
+    if declarations:
+        declaration_sources.extend(
+            declaration.get("DeclarationData") or {}
+            for declaration in declarations
+            if isinstance(declaration, dict)
+        )
+    if isinstance(payload.get("DeclarationData"), dict):
+        declaration_sources.append(payload["DeclarationData"])
+    if any(str(key).lower().endswith("dcjsondata") for key in payload):
+        declaration_sources.append(payload)
+
+    def find_series(value):
+        if isinstance(value, dict):
+            for key, item in value.items():
+                normalized = re.sub(r"[^a-z0-9]", "", str(key).lower())
+                if all(token in normalized for token in field_tokens) and isinstance(item, list):
+                    return item
+            for item in value.values():
+                found = find_series(item)
+                if found:
+                    return found
+        elif isinstance(value, list):
+            for item in value:
+                found = find_series(item)
+                if found:
+                    return found
+        return []
+
+    for declaration_data in declaration_sources:
+        found = find_series(declaration_data)
+        if found:
+            return found
+    return []
+
+
+def _declaration_dc_series(payload: dict) -> tuple[list, list]:
+    """Return (on-bar DC, normative DC) from Thermal/Hydro WBES payloads."""
+    onbar = _declaration_series(payload, ("seller", "inp", "onbar", "amount"))
+    if not onbar:
+        # Legacy generator payloads may use SellerInpDCAmount instead.
+        onbar = _declaration_series(payload, ("seller", "inp", "dc", "amount"))
+    normative = _declaration_series(payload, ("onbar", "normative", "amount"))
+    if not normative:
+        normative = _declaration_series(payload, ("normative", "amount"))
+    return onbar, normative
+
+
 @router.get("/schedule-data/generators")
 async def get_schedule_data_generators():
     return {"success": True, "data": _schedule_data_generators()}
@@ -615,7 +677,18 @@ async def get_schedule_data(
             for item in selected:
                 payload = source_by_acronym.get(item["id"]) or {}
                 series = (payload.get("NetScheduleSummary") or {}).get("TotalNetSchdAmount") or []
+                dc_series, normative_dc_series = _declaration_dc_series(payload)
                 row[item["id"]] = float(series[source_slot] or 0) if source_slot < len(series) else None
+                row[f"{item['id']}_dc"] = (
+                    float(dc_series[source_slot] or 0)
+                    if source_slot < len(dc_series)
+                    else None
+                )
+                row[f"{item['id']}_normative_dc"] = (
+                    float(normative_dc_series[source_slot] or 0)
+                    if source_slot < len(normative_dc_series)
+                    else None
+                )
             output_rows.append(row)
         current += timedelta(days=1)
     return {

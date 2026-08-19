@@ -154,10 +154,11 @@ export default function TopNavbar() {
   const isMISActive = 
     location.pathname === "/psp-dashboard" || 
     location.pathname === "/rtg-dashboard" ||
-    location.pathname === "/mis/nldc-plots";
+    location.pathname === "/mis/nldc-plots" ||
+    location.pathname === "/mis/schedule-data" ||
+    location.pathname === "/psp-report-checking";
     
   const isAnalyticsActive =
-    location.pathname === "/psp-report-checking" ||
     location.pathname === "/frequency-report" ||
     location.pathname === "/outage-analysis" ||
     location.pathname === "/outage-analysis/ml-training" ||
@@ -285,7 +286,7 @@ export default function TopNavbar() {
           Homepage
         </Button>
 
-        {/* 2. MIS Dropdown */}
+        {/* 2. CR Assistant Dropdown */}
         <Box ref={misRef} sx={{ position: "relative" }}>
           <Button
             onClick={() => toggleDropdown("mis")}
@@ -314,7 +315,7 @@ export default function TopNavbar() {
               },
             }}
           >
-            MIS
+            CR Assistant
           </Button>
 
           <AnimatePresence>
@@ -333,6 +334,16 @@ export default function TopNavbar() {
                 <Box sx={dropdownBoxStyles}>
                   {caretElement}
                   <DropdownItem
+                    title="PSP Report Check"
+                    description="Verify daily PSP sheets and validation logs"
+                    icon={CheckSquare}
+                    iconColor="#1ABC9C"
+                    iconBg="#EAFAF1"
+                    path="/psp-report-checking"
+                    active={location.pathname === "/psp-report-checking"}
+                    onClick={handleNavigate}
+                  />
+                  <DropdownItem
                     title="PSP Dashboard"
                     description="Daily peak load curves and statistics"
                     icon={TrendingUp}
@@ -343,8 +354,8 @@ export default function TopNavbar() {
                     onClick={handleNavigate}
                   />
                   <DropdownItem
-                    title="RTG Dashboard"
-                    description="Real-time generation capacity and outages"
+                    title="CR Health Card"
+                    description="Current control-room generation health and outages"
                     icon={Zap}
                     iconColor="#03624C"
                     iconBg="#E8F5F1"
@@ -426,16 +437,6 @@ export default function TopNavbar() {
               >
                 <Box sx={dropdownBoxStyles}>
                   {caretElement}
-                  <DropdownItem
-                    title="PSP Report Check"
-                    description="Verify daily sheets and validation logs"
-                    icon={CheckSquare}
-                    iconColor="#1ABC9C"
-                    iconBg="#EAFAF1"
-                    path="/psp-report-checking"
-                    active={location.pathname === "/psp-report-checking"}
-                    onClick={handleNavigate}
-                  />
                   <DropdownItem
                     title="Frequency Data Analysis"
                     description="Frequency graphs and deviation logs"
