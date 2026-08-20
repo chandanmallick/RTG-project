@@ -43,7 +43,8 @@ import {
   Settings2,
   CalendarRange,
   LogOut,
-  MessageSquare
+  MessageSquare,
+  ClipboardList,
 } from "lucide-react";
 import { useAuth } from "../../auth/AuthContext";
 import { pageKeyForPath } from "../../auth/pageAccess";
@@ -172,7 +173,8 @@ export default function TopNavbar() {
     location.pathname === "/database-sync" ||
     location.pathname === "/psp-admin" ||
     location.pathname === "/admin/user-access" ||
-    location.pathname === "/admin/mail-settings";
+    location.pathname === "/admin/mail-settings" ||
+    location.pathname === "/admin/audit-trail";
 
   // Reusable framer-motion properties
   const dropdownMotionProps = {
@@ -927,6 +929,16 @@ export default function TopNavbar() {
                     active={location.pathname === "/admin/mail-settings"}
                     onClick={handleNavigate}
                   />
+                  <DropdownItem
+                    title="Portal Audit Trail"
+                    description="Review user-wise approvals and data changes"
+                    icon={ClipboardList}
+                    iconColor="#7C3AED"
+                    iconBg="#F3E8FF"
+                    path="/admin/audit-trail"
+                    active={location.pathname === "/admin/audit-trail"}
+                    onClick={handleNavigate}
+                  />
                 </Box>
               </motion.div>
             )}
@@ -1081,7 +1093,7 @@ export default function TopNavbar() {
               </Box>
               <Box>
                 <Typography sx={{ fontSize: 10, color: "#94A3B8", fontWeight: 700, uppercase: true }}>CONTROL ROOM DIRECT</Typography>
-                <Typography sx={{ fontSize: 13.5, color: "#334155", fontWeight: 700 }}>+91 (033) 2465-9871</Typography>
+                <Typography sx={{ fontSize: 13.5, color: "#334155", fontWeight: 700 }}>9007059660</Typography>
               </Box>
             </Box>
 
@@ -1091,7 +1103,7 @@ export default function TopNavbar() {
               </Box>
               <Box>
                 <Typography sx={{ fontSize: 10, color: "#94A3B8", fontWeight: 700, uppercase: true }}>EMAIL HELPDESK</Typography>
-                <Typography sx={{ fontSize: 13.5, color: "#334155", fontWeight: 700 }}>dhruv.support@powergrid.in</Typography>
+                <Typography sx={{ fontSize: 13.5, color: "#334155", fontWeight: 700 }}>chandan.mallick@grid-india.in</Typography>
               </Box>
             </Box>
 

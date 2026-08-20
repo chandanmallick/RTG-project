@@ -3,6 +3,7 @@ from apscheduler.schedulers.background import (
 )
 
 from datetime import date, datetime, timedelta
+from zoneinfo import ZoneInfo
 
 from services.pipeline_runner import (
     PipelineRunner
@@ -22,6 +23,68 @@ from crew_legacy.api.replacement import auto_accept_pending_duty_notifications
 from crew_legacy.api.morning_presentation import send_morning_presentation_reminders
 
 scheduler = BackgroundScheduler()
+
+
+def run_dso_shared_folder_sync(report_type):
+    from routes.dso_report_routes import sync_dso_report_from_folder
+
+    local_date = datetime.now(ZoneInfo("Asia/Kolkata")).date()
+    report_day = local_date - timedelta(days=1) if report_type == "morning" else local_date
+    revision_id = f"DSO_{report_type.upper()}_{local_date:%Y%m%d_%H%M%S}"
+    try:
+        result = sync_dso_report_from_folder(
+            report_type=report_type,
+            report_date=report_day.isoformat(),
+            overwrite=True,
+        )
+        PipelineLogger().log(
+            revision_id=revision_id,
+            pipeline_type="DSO_REPORT",
+            process_name=f"DSO_{report_type.upper()}_SHARED_FOLDER_SYNC",
+            status="SUCCESS",
+            message=f"Processed {result['source_file']}",
+            extra_data={"report_type": report_type, "report_date": report_day.isoformat()},
+        )
+        return result
+    except Exception as exc:
+        PipelineLogger().log(
+            revision_id=revision_id,
+            pipeline_type="DSO_REPORT",
+            process_name=f"DSO_{report_type.upper()}_SHARED_FOLDER_SYNC",
+            status="FAILED",
+            message=str(exc),
+            extra_data={"report_type": report_type, "report_date": report_day.isoformat()},
+        )
+        raise
+
+
+scheduler.add_job(
+    run_dso_shared_folder_sync,
+    trigger="cron",
+    hour=7,
+    minute=30,
+    timezone="Asia/Kolkata",
+    kwargs={"report_type": "morning"},
+    id="dso_morning_shared_folder_0730",
+    max_instances=1,
+    coalesce=True,
+    misfire_grace_time=1800,
+    replace_existing=True,
+)
+
+scheduler.add_job(
+    run_dso_shared_folder_sync,
+    trigger="cron",
+    hour=17,
+    minute=30,
+    timezone="Asia/Kolkata",
+    kwargs={"report_type": "evening"},
+    id="dso_evening_shared_folder_1730",
+    max_instances=1,
+    coalesce=True,
+    misfire_grace_time=1800,
+    replace_existing=True,
+)
 
 scheduler.add_job(
     auto_accept_pending_duty_notifications,

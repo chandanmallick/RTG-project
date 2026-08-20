@@ -46,6 +46,7 @@ duty_exchange_request_collection = db["duty_exchange_request_collection"]
 crew_thread_collection = db["crew_threads"]
 crew_thread_message_collection = db["crew_thread_messages"]
 employee_shift_history = db["employee_shift_history"]
+audit_trail_collection = db["portal_audit_trail"]
 
 duty_notification_collection =db["duty_notification_collection"]
 sequence_collection = db["sequence_collection"]

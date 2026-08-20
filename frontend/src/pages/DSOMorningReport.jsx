@@ -84,11 +84,18 @@ export default function DSOMorningReport() {
   const [editOpen, setEditOpen] = useState(false);
   const [overwriteOpen, setOverwriteOpen] = useState(false);
   const [draft, setDraft] = useState(null);
+  const [sourcePath, setSourcePath] = useState("W:\\ScadaData\\DSO_reports");
+  const [syncLoading, setSyncLoading] = useState(false);
+  const [configSaving, setConfigSaving] = useState(false);
 
   const load = async () => {
     try {
-      const data = await API.getDsoReport("morning", reportDate);
+      const [data, syncConfig] = await Promise.all([
+        API.getDsoReport("morning", reportDate),
+        API.getDsoSyncConfig(),
+      ]);
       setReport(data.report || null);
+      if (syncConfig?.source_path) setSourcePath(syncConfig.source_path);
       setEvents(data.report?.important_events || "");
       setSicName(data.report?.signoff_name || defaultSicName);
       setMessage({ type: "", text: "" });
@@ -136,6 +143,39 @@ export default function DSOMorningReport() {
       return;
     }
     executeProcess(false);
+  };
+
+  const saveSyncConfig = async () => {
+    setConfigSaving(true);
+    try {
+      const data = await API.saveDsoSyncConfig(sourcePath);
+      setSourcePath(data.source_path);
+      setMessage({ type: "success", text: "DSO shared-folder location saved." });
+    } catch (error) {
+      setMessage({ type: "error", text: error.response?.data?.detail || error.message });
+    } finally {
+      setConfigSaving(false);
+    }
+  };
+
+  const syncFromFolder = async () => {
+    setSyncLoading(true);
+    try {
+      const data = await API.syncDsoReport({
+        reportType: "morning",
+        reportDate,
+        importantEvents: events,
+        sicName,
+        overwrite: true,
+      });
+      setReport(data.report);
+      setFile(null);
+      setMessage({ type: "success", text: `Synced and processed ${data.source_file}.` });
+    } catch (error) {
+      setMessage({ type: "error", text: error.response?.data?.detail || error.message || "Shared-folder sync failed." });
+    } finally {
+      setSyncLoading(false);
+    }
   };
 
   const fetchCrmsOutageData = async () => {
@@ -272,6 +312,11 @@ export default function DSOMorningReport() {
 
         {message.text && <Alert severity={message.type || "info"} sx={{ mb: 2 }}>{message.text}</Alert>}
         <Card sx={{ mb: 2 }}>
+          <Box sx={{ mb: 1.5, display: "grid", gridTemplateColumns: { xs: "1fr", lg: "minmax(320px,1fr) auto auto" }, gap: 1, alignItems: "start" }}>
+            <TextField disabled={!canWrite} label="DSO reports shared-folder location" size="small" value={sourcePath} onChange={(event) => setSourcePath(event.target.value)} helperText="Morning auto-sync: 07:30 hrs · expected DSO_Morning_report_DDMMYYYY.xlsx" />
+            <Button disabled={!canWrite || configSaving} variant="outlined" onClick={saveSyncConfig} sx={{ minHeight: 40, fontWeight: 850 }}>{configSaving ? "Saving…" : "Save Location"}</Button>
+            <Button disabled={!canWrite || syncLoading} variant="contained" onClick={syncFromFolder} startIcon={syncLoading ? <CircularProgress size={15} color="inherit" /> : <RefreshCw size={16} />} sx={{ minHeight: 40, bgcolor: "#08755B", fontWeight: 900 }}>{syncLoading ? "Syncing…" : "Sync Folder"}</Button>
+          </Box>
           <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", xl: "210px minmax(300px,1fr) minmax(220px,.6fr) auto" }, gap: 1.5 }}>
             <TextField label="Yesterday / PSP report date" type="date" size="small" value={reportDate} onChange={(event) => setReportDate(event.target.value)} InputLabelProps={{ shrink: true }} />
             <Button disabled={!canWrite} component="label" variant="outlined" startIcon={<FileSpreadsheet size={17} />} sx={{ justifyContent: "flex-start", textTransform: "none", fontWeight: 800 }}>

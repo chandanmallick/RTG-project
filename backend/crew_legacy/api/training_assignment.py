@@ -76,6 +76,46 @@ def financial_year_bounds(value: str):
     return f"{start_year}-04-01", f"{start_year + 1}-03-31"
 
 
+def training_financial_year_summary(employee_id_value: str, reference_date: str) -> dict:
+    """Approved training days and drill-down history for the relevant FY."""
+    try:
+        fy_start, fy_end = financial_year_bounds(reference_date)
+    except (TypeError, ValueError):
+        return {"days": 0, "history": []}
+    history, total_days = [], 0
+    records = training_nomination_history_collection.find(
+        {
+            "employeeId": clean_id(employee_id_value),
+            "status": "Approved",
+            "workflowKind": {"$ne": "Adjacent OFF"},
+            "startDate": {"$lte": fy_end},
+            "$or": [
+                {"endDate": {"$gte": fy_start}},
+                {"endDate": {"$exists": False}, "trainingDate": {"$gte": fy_start}},
+            ],
+        },
+        {"trainingName": 1, "trainingLocation": 1, "startDate": 1, "endDate": 1, "trainingDate": 1},
+    ).sort("startDate", -1)
+    for item in records:
+        start_value = item.get("startDate") or item.get("trainingDate")
+        end_value = item.get("endDate") or start_value
+        try:
+            period_start = max(datetime.strptime(start_value, "%Y-%m-%d"), datetime.strptime(fy_start, "%Y-%m-%d"))
+            period_end = min(datetime.strptime(end_value, "%Y-%m-%d"), datetime.strptime(fy_end, "%Y-%m-%d"))
+            days = max(0, (period_end - period_start).days + 1)
+        except (TypeError, ValueError):
+            days = 0
+        total_days += days
+        history.append({
+            "trainingName": item.get("trainingName") or "Training",
+            "trainingLocation": item.get("trainingLocation") or "",
+            "startDate": start_value,
+            "endDate": end_value,
+            "days": days,
+        })
+    return {"days": total_days, "history": history, "financialYear": f"{fy_start} to {fy_end}"}
+
+
 def recipient_emails(employee_ids):
     ids = [clean_id(value) for value in dict.fromkeys(employee_ids or []) if clean_id(value)]
     if not ids:
@@ -230,6 +270,9 @@ def serialize_nomination(record: dict, actor_id: str | None = None, is_admin: bo
     }
     if not group_context["groupName"]:
         group_context = {**group_context, **shift_group_context(record.get("employeeId"))}
+    training_summary = training_financial_year_summary(
+        record.get("employeeId"), record.get("startDate") or record.get("trainingDate")
+    )
     return {
         "id": str(record["_id"]),
         "workflowKind": record.get("workflowKind") or "Training",
@@ -253,6 +296,9 @@ def serialize_nomination(record: dict, actor_id: str | None = None, is_admin: bo
         "replacementDecisionHistory": record.get("replacementDecisionHistory") or [],
         "status": record.get("status"),
         "approvalChain": chain,
+        "financialYearTrainingDays": training_summary["days"],
+        "financialYearTrainingHistory": training_summary["history"],
+        "financialYear": training_summary.get("financialYear"),
         "approvalProgress": f"{sum(1 for item in chain if item.get('status') == 'Approved')}/{len(chain)}",
         "currentApproverId": current.get("employeeId") if current else None,
         "currentApproverName": current.get("name") if current else None,

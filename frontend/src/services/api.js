@@ -220,10 +220,11 @@ const API = {
     return res.data;
   },
 
-  getRTGTodayTrend: async () => {
+  getRTGTodayTrend: async (dateStr) => {
 
     const res = await axios.get(
-      `${BASE_URL}/rtg-dashboard/trend/today`
+      `${BASE_URL}/rtg-dashboard/trend/today`,
+      { params: dateStr ? { date_str: dateStr } : {} }
     );
 
     return res.data;
@@ -1050,6 +1051,29 @@ const API = {
     form.append("overwrite", overwrite ? "true" : "false");
     form.append("file", file);
     const res = await axios.post(`${BASE_URL}/dso-reports/process`, form);
+    return res.data;
+  },
+
+  getDsoSyncConfig: async () => {
+    const res = await axios.get(`${BASE_URL}/dso-reports/sync-config`);
+    return res.data;
+  },
+
+  saveDsoSyncConfig: async (sourcePath) => {
+    const res = await axios.put(`${BASE_URL}/dso-reports/sync-config`, {
+      source_path: sourcePath,
+    });
+    return res.data;
+  },
+
+  syncDsoReport: async ({ reportType, reportDate, importantEvents, sicName, overwrite = true }) => {
+    const form = new FormData();
+    form.append("report_type", reportType);
+    form.append("report_date", reportDate);
+    form.append("important_events", importantEvents || "");
+    form.append("sic_name", sicName || "");
+    form.append("overwrite", overwrite ? "true" : "false");
+    const res = await axios.post(`${BASE_URL}/dso-reports/sync`, form);
     return res.data;
   },
 

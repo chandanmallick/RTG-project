@@ -7,8 +7,8 @@ export default function ProtectedRoute({ pageKey, children, allowWorkflowAccess 
   const { user, loading, logout } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
-  const supportEmail = "dhruv.support@powergrid.in";
-  const supportPhone = "+91 (033) 2465-9871";
+  const supportEmail = "chandan.mallick@grid-india.in";
+  const supportPhone = "9007059660";
 
   if (loading) return <Box sx={{ minHeight: "100vh", display: "grid", placeItems: "center", background: "#F8FAFC" }}><CircularProgress size={28} sx={{ color: "#03624C" }} /></Box>;
   if (!user) return <Navigate to="/login" replace state={{ from: location.pathname }} />;

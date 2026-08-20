@@ -45,6 +45,7 @@ PAGE_CATALOG = [
     ("crew_roster", "Duty Roster", "/crew/roster"),
     ("crew_presentation", "Morning Presentation Roster", "/crew/morning-presentation"),
     ("crew_leave", "Leave", "/crew/leave"),
+    ("leave_calendar_all", "Administration — View All Leave Calendars", "Special permission"),
     ("leave_master_delete", "Administration — Permanently Delete Leave Master Record", "Special permission"),
     ("crew_replacement", "Replacement", "/crew/replacement"),
     ("crew_training", "Holiday & Training", "/crew/training"),
@@ -57,6 +58,7 @@ PAGE_CATALOG = [
     ("psp_admin", "PSP Settings", "/psp-admin"),
     ("user_access", "User Access Control", "/admin/user-access"),
     ("mail_settings", "Mail & Two-Factor Authentication Settings", "/admin/mail-settings"),
+    ("audit_trail", "Portal Audit Trail", "/admin/audit-trail"),
     ("profile", "My Profile", "/crew/profile"),
 ]
 
@@ -93,7 +95,7 @@ def _ensure_access(user_id: str) -> dict:
 
 
 def _require_access_admin(user: dict):
-    if user.get("employeeId") != "50041" and user.get("role") != "admin":
+    if user.get("employeeId") != "50041":
         raise HTTPException(status_code=403, detail="User access administration is required")
 
 

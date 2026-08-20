@@ -15,11 +15,11 @@ import requests
 import pandas as pd
 import numpy as np
 
-# Non-interactive matplotlib backend
-import matplotlib
-matplotlib.use('Agg')
-import matplotlib.pyplot as plt
-import matplotlib.dates as mdates
+# Matplotlib is used only for PNG exports.  Keep it lazy so a blocked native
+# extension (for example, antivirus quarantining ft2font) does not prevent the
+# complete API, including login, from starting.
+plt = None
+mdates = None
 
 from docx import Document
 import docx.shared
@@ -2614,7 +2614,24 @@ def resolve_plant_data_series(
 # ──────────────────────────────────────────────────────────────
 
 def generate_plot_base64(row_data: dict, start_time: datetime, end_time: datetime):
-    import matplotlib.ticker as ticker
+    global plt, mdates
+    try:
+        if plt is None or mdates is None:
+            import matplotlib
+            matplotlib.use('Agg')
+            import matplotlib.pyplot as matplotlib_pyplot
+            import matplotlib.dates as matplotlib_dates
+            plt = matplotlib_pyplot
+            mdates = matplotlib_dates
+        import matplotlib.ticker as ticker
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Chart image export is unavailable because the local Python "
+                f"Matplotlib component could not load: {exc}"
+            ),
+        ) from exc
     timestamps_str = row_data["series_timestamps"]
     timestamps = [datetime.strptime(ts, '%Y-%m-%d %H:%M:%S') for ts in timestamps_str]
     deviations = row_data.get("series_deviation")

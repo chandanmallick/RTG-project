@@ -297,6 +297,7 @@ export default function UserAccessControl() {
                           <td>
                             <Typography sx={{ fontSize: 13, fontWeight: 700 }}>{page.label}</Typography>
                             <Typography sx={{ fontSize: 11, color: "#94A3B8" }}>{page.path}</Typography>
+                            {page.key === "leave_calendar_all" && <Typography sx={{ fontSize: 10.5, color: "#B45309", mt: .25 }}>Keep this disabled for normal officers. 50041 has it permanently; enabled users can view every employee's leave calendar.</Typography>}
                           </td>
                           <td style={{ textAlign: "center" }}>
                             <Checkbox checked={Boolean(access.view)} disabled={selectedId === "50041"} onChange={() => toggle(page.key, "view")} />

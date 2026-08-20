@@ -27,6 +27,7 @@ AccordionDetails,
 Alert,
 Chip,
 CircularProgress,
+Stack,
 } from "@mui/material"
 
 import { ExpandLess, ExpandMore  } from "@mui/icons-material"
@@ -108,6 +109,7 @@ const [selectedRows,setSelectedRows]=useState([])
 const [replacementChoices,setReplacementChoices]=useState({})
 const [replacementCandidates,setReplacementCandidates]=useState({})
 const [candidateLoading,setCandidateLoading]=useState({})
+const [expandedApprovalId,setExpandedApprovalId]=useState("")
 
 /* ================= HISTORY ================= */
 
@@ -118,6 +120,7 @@ const [myApprovedTraining,setMyApprovedTraining]=useState([])
 const [myOffChoices,setMyOffChoices]=useState({})
 const [notice,setNotice]=useState(null)
 const [activeSection,setActiveSection]=useState(()=>new URLSearchParams(window.location.search).get("section") || null)
+const selectedApprovalDetail = pendingList.find((row)=>row.id===expandedApprovalId)
 
 const openSection=(section)=>{
 setActiveSection(section)
@@ -1175,6 +1178,7 @@ Nominated Employees (Pending)
 <TableCell sx={{fontWeight:600}}>Training</TableCell>
 <TableCell sx={{fontWeight:600}}>Period</TableCell>
 <TableCell sx={{fontWeight:600}}>Employee</TableCell>
+<TableCell sx={{fontWeight:600}}>Training days</TableCell>
 <TableCell sx={{fontWeight:600}}>Status</TableCell>
 <TableCell sx={{fontWeight:600}}>Approval route</TableCell>
 <TableCell sx={{fontWeight:600,minWidth:300}}>Replacement / Acting SIC</TableCell>
@@ -1189,7 +1193,7 @@ Nominated Employees (Pending)
 {pendingList.length===0 ?
 
 <TableRow>
-<TableCell colSpan={8} align="center">
+<TableCell colSpan={9} align="center">
 No pending nominations
 </TableCell>
 </TableRow>
@@ -1242,6 +1246,10 @@ selectedRows.filter(id=>id!==row.id)
 <TableCell>
 <Typography sx={{fontWeight:800}}>{row.employeeName || row.employeeId}</Typography>
 <Typography variant="caption" color="text.secondary">{row.employeeDesignation || row.employeeId}</Typography>
+</TableCell>
+
+<TableCell>
+<Button size="small" variant="text" sx={{px:0,fontWeight:900}} onClick={()=>setExpandedApprovalId(expandedApprovalId===row.id?"":row.id)}>{row.financialYearTrainingDays || 0} / 7 days</Button>
 </TableCell>
 
 <TableCell>{row.status}</TableCell>
@@ -1365,6 +1373,30 @@ View Duty
 </TableBody>
 
 </Table>
+
+<Dialog open={Boolean(selectedApprovalDetail)} onClose={()=>setExpandedApprovalId("")} maxWidth="md" fullWidth>
+<DialogTitle sx={{fontWeight:900,color:"#4C1D95"}}>Training details & approval hierarchy</DialogTitle>
+<DialogContent dividers>
+{selectedApprovalDetail && <Box sx={{display:"grid",gap:1.25}}>
+<Typography sx={{fontWeight:900}}>{selectedApprovalDetail.employeeName || selectedApprovalDetail.employeeId} · {selectedApprovalDetail.financialYearTrainingDays || 0} / 7 training days</Typography>
+<Typography variant="caption" color="text.secondary">{selectedApprovalDetail.financialYear || "Current financial year"}</Typography>
+<Box sx={{display:"grid",gap:.55}}>
+<Typography sx={{fontSize:12,fontWeight:900}}>Approved training details</Typography>
+<Stack direction="row" spacing={.6} useFlexGap flexWrap="wrap">
+{(selectedApprovalDetail.financialYearTrainingHistory || []).map((item,index)=><Chip key={`${item.trainingName}-${index}`} size="small" label={`${item.trainingName} · ${item.startDate}${item.endDate && item.endDate!==item.startDate ? ` to ${item.endDate}` : ""} · ${item.days} day(s)`} sx={{background:"#F3E8FF",color:"#6B21A8",fontWeight:800}} />)}
+{!(selectedApprovalDetail.financialYearTrainingHistory || []).length && <Typography variant="caption" color="text.secondary">No approved training in this financial year.</Typography>}
+</Stack>
+</Box>
+<Box sx={{display:"grid",gap:.55}}>
+<Typography sx={{fontSize:12,fontWeight:900}}>Approval hierarchy</Typography>
+<Stack direction="row" spacing={.6} useFlexGap flexWrap="wrap" alignItems="center">
+{(selectedApprovalDetail.approvalChain || []).map((step,index)=><React.Fragment key={`${step.employeeId}-${index}`}><Chip size="small" label={`${step.level || "Approver"}: ${step.name || step.employeeId}`} sx={{background:step.status==="Approved" ? "#DCFCE7" : "#FFEDD5",color:step.status==="Approved" ? "#166534" : "#C2410C",border:`1px solid ${step.status==="Approved" ? "#86EFAC" : "#FDBA74"}`,fontWeight:850}} />{index<(selectedApprovalDetail.approvalChain || []).length-1 && <Typography sx={{fontWeight:900,color:"#94A3B8"}}>→</Typography>}</React.Fragment>)}
+</Stack>
+</Box>
+</Box>}
+</DialogContent>
+<DialogActions><Button onClick={()=>setExpandedApprovalId("")}>Close</Button></DialogActions>
+</Dialog>
 
 <Box sx={{mt:3,display:"flex",gap:2}}>
 

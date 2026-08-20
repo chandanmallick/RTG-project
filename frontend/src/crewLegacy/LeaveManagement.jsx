@@ -33,7 +33,6 @@ import {
 } from "@mui/material";
 import { CalendarDays, CheckCircle2, GraduationCap, GripVertical, RefreshCw, Send, ShieldCheck, User } from "lucide-react";
 import api from "./api";
-import crewApi from "../services/crewApi";
 import DutyReassignmentPanel from "../components/crew/DutyReassignmentPanel";
 
 const employeeIdOf = (employee) => String(employee?.employeeId || employee?.userId || "").trim();
@@ -117,6 +116,7 @@ export default function LeaveManagement() {
   const [approvalTo, setApprovalTo] = useState(() => new URLSearchParams(window.location.search).get("to") || "");
   const [approvalCalendarLoading, setApprovalCalendarLoading] = useState(false);
   const [approvalCalendarError, setApprovalCalendarError] = useState("");
+  const [approvalDepartment, setApprovalDepartment] = useState("");
   const [rejectDialog, setRejectDialog] = useState({ open: false, stage: "sic", leaves: [] });
   const [rejectComment, setRejectComment] = useState("");
   const [activeSection, setActiveSection] = useState(null);
@@ -124,6 +124,7 @@ export default function LeaveManagement() {
   const [pendingTrainingApprovals, setPendingTrainingApprovals] = useState([]);
   const [selectedTrainingApprovalIds, setSelectedTrainingApprovalIds] = useState([]);
   const [trainingOffChoices, setTrainingOffChoices] = useState({});
+  const [expandedTrainingApprovalId, setExpandedTrainingApprovalId] = useState("");
 
   const openSection = (section) => {
     setActiveSection(section);
@@ -378,21 +379,8 @@ export default function LeaveManagement() {
     () => selectedWorkflowLeaves.filter((leave) => leave.canFinalAct),
     [selectedWorkflowLeaves],
   );
-  const calendarLeaves = useMemo(() => {
-    const actionable = pending.filter((leave) => leave.canSICAct || leave.canFinalAct);
-    if (role.isAdmin || role.isDeptIC || role.isLeaveAuthority || role.isReportingOfficer) {
-      return pending.filter((leave) => leave.canSICAct || leave.canFinalAct || leave.isOrganizationObserver);
-    }
-    if (role.isSIC) {
-      return actionable.filter((leave) => leave.canSICAct && leave.groupName === role.groupName);
-    }
-    return [];
-  }, [pending, role]);
-  const calendarOverlayLeaves = useMemo(() => {
-    if (role.isAdmin || role.isDeptIC || role.isLeaveAuthority || role.isReportingOfficer) return leaves;
-    if (role.isSIC) return leaves.filter((leave) => leave.groupName === role.groupName);
-    return [];
-  }, [leaves, role]);
+  const calendarLeaves = pending;
+  const calendarOverlayLeaves = leaves;
   const pendingCalendarRange = useMemo(() => {
     const dates = calendarLeaves.map((leave) => leave.date).filter(Boolean).sort();
     const fallback = dayjs().format("YYYY-MM-DD");
@@ -403,7 +391,11 @@ export default function LeaveManagement() {
   const visibleCalendarLeaves = useMemo(() => calendarLeaves.filter((leave) => (
     (!effectiveApprovalFrom || leave.date >= effectiveApprovalFrom)
     && (!effectiveApprovalTo || leave.date <= effectiveApprovalTo)
-  )), [calendarLeaves, effectiveApprovalFrom, effectiveApprovalTo]);
+    && (!approvalDepartment || (leave.departments || []).includes(approvalDepartment))
+  )), [calendarLeaves, effectiveApprovalFrom, effectiveApprovalTo, approvalDepartment]);
+  const visibleCalendarOverlayLeaves = useMemo(() => calendarOverlayLeaves.filter((leave) => (
+    !approvalDepartment || (leave.departments || []).includes(approvalDepartment)
+  )), [calendarOverlayLeaves, approvalDepartment]);
   const calendarDates = useMemo(
     () => Array.from(new Set(calendarLeaves.map((leave) => leave.date).filter(Boolean))).sort(),
     [calendarLeaves],
@@ -431,16 +423,17 @@ export default function LeaveManagement() {
           chunks.push([cursor.format("YYYY-MM-DD"), chunkEnd.format("YYYY-MM-DD")]);
           cursor = chunkEnd.add(1, "day");
         }
-        const responses = await Promise.all(chunks.flatMap(([from, to]) => [
-          crewApi.calendar(from, to),
-          api.get("/leave/approval-calendar", { params: { startDate: from, endDate: to } }).then(({ data }) => data || []),
-        ]));
+        const responses = await Promise.all(chunks.map(([from, to]) => (
+          api.get("/leave/approval-calendar", { params: { startDate: from, endDate: to } }).then(({ data }) => data || [])
+        )));
         if (cancelled) return;
 
         const groupMap = new Map();
         responses.flat().forEach((group) => {
-          if (!groupMap.has(group.groupName)) groupMap.set(group.groupName, new Map());
-          const employeeMap = groupMap.get(group.groupName);
+          if (!groupMap.has(group.groupName)) groupMap.set(group.groupName, { departments: new Set(), employees: new Map() });
+          const groupEntry = groupMap.get(group.groupName);
+          (group.departments || []).forEach((department) => groupEntry.departments.add(department));
+          const employeeMap = groupEntry.employees;
           (group.employees || []).forEach((person) => {
             const key = String(person.employeeId || "");
             const current = employeeMap.get(key) || { ...person, duties: {} };
@@ -449,13 +442,11 @@ export default function LeaveManagement() {
           });
         });
 
-        let groups = Array.from(groupMap.entries()).map(([groupName, employeeMap]) => ({
+        const groups = Array.from(groupMap.entries()).map(([groupName, groupEntry]) => ({
           groupName,
-          employees: Array.from(employeeMap.values()).sort((a, b) => Number(Boolean(b.IsSIC)) - Number(Boolean(a.IsSIC))),
+          departments: Array.from(groupEntry.departments).sort(),
+          employees: Array.from(groupEntry.employees.values()).sort((a, b) => Number(Boolean(b.IsSIC)) - Number(Boolean(a.IsSIC))),
         })).sort((a, b) => a.groupName.localeCompare(b.groupName, undefined, { numeric: true }));
-        if (role.isSIC && !role.isAdmin && !role.isDeptIC && !role.isLeaveAuthority && !role.isReportingOfficer) {
-          groups = groups.filter((group) => group.groupName === role.groupName);
-        }
 
         const dates = [];
         let dateCursor = dayjs(start);
@@ -478,6 +469,19 @@ export default function LeaveManagement() {
     loadApprovalRoster();
     return () => { cancelled = true; };
   }, [workflowView, effectiveApprovalFrom, effectiveApprovalTo, role]);
+  const approvalDepartments = useMemo(() => Array.from(new Set(
+    approvalRoster.flatMap((group) => [
+      ...(group.departments || []),
+      ...(group.employees || []).flatMap((employee) => employee.departments || []),
+    ]).filter(Boolean),
+  )).sort(), [approvalRoster]);
+  const visibleApprovalRoster = useMemo(() => {
+    if (!approvalDepartment) return approvalRoster;
+    return approvalRoster.map((group) => ({
+      ...group,
+      employees: (group.employees || []).filter((employee) => (employee.departments || []).includes(approvalDepartment)),
+    })).filter((group) => group.employees.length);
+  }, [approvalRoster, approvalDepartment]);
   const usedCompOffIds = rows.map((row) => row.compOffId).filter(Boolean);
 
   const toggleWorkflowSelection = (leaveId, checked) => {
@@ -642,7 +646,7 @@ export default function LeaveManagement() {
     const hasFinalActions = visibleCalendarLeaves.some((leave) => leave.canFinalAct);
     const selectedVisibleCount = visibleCalendarLeaves.filter((leave) => selectedWorkflowIds.includes(leave.id)).length;
     const allVisibleSelected = visibleCalendarLeaves.length > 0 && selectedVisibleCount === visibleCalendarLeaves.length;
-    const leaveByEmployeeDate = new Map(calendarOverlayLeaves.map((leave) => [`${leave.employeeId}:${leave.date}`, leave]));
+    const leaveByEmployeeDate = new Map(visibleCalendarOverlayLeaves.map((leave) => [`${leave.employeeId}:${leave.date}`, leave]));
     return (
       <Box sx={{ display: "grid", gap: 1.1 }}>
         <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 1, flexWrap: "wrap" }}>
@@ -650,13 +654,22 @@ export default function LeaveManagement() {
             <TextField size="small" type="date" label="From" value={effectiveApprovalFrom} onChange={(event) => { const value = event.target.value; setApprovalFrom(value); if (effectiveApprovalTo < value) setApprovalTo(value); }} InputLabelProps={{ shrink: true }} inputProps={{ max: effectiveApprovalTo || undefined }} sx={{ width: 145 }} />
             <TextField size="small" type="date" label="To" value={effectiveApprovalTo} onChange={(event) => { const value = event.target.value; setApprovalTo(value); if (value < effectiveApprovalFrom) setApprovalFrom(value); }} InputLabelProps={{ shrink: true }} inputProps={{ min: effectiveApprovalFrom || undefined }} sx={{ width: 145 }} />
             <Button size="small" variant="text" onClick={() => { setApprovalFrom(""); setApprovalTo(""); }}>Pending dates</Button>
+            {role.canViewAll && (
+              <FormControl size="small" sx={{ minWidth: 190 }}>
+                <InputLabel>Department</InputLabel>
+                <Select value={approvalDepartment} label="Department" onChange={(event) => setApprovalDepartment(event.target.value)}>
+                  <MenuItem value="">All departments</MenuItem>
+                  {approvalDepartments.map((department) => <MenuItem key={department} value={department}>{department}</MenuItem>)}
+                </Select>
+              </FormControl>
+            )}
             <FormControlLabel
               sx={{ ml: .25, mr: 0 }}
               control={<Checkbox size="small" checked={allVisibleSelected} indeterminate={selectedVisibleCount > 0 && !allVisibleSelected} disabled={!visibleCalendarLeaves.length} onChange={(event) => toggleAllCalendarSelection(event.target.checked)} />}
               label={<Typography sx={{ fontSize: 10.8, fontWeight: 900 }}>Select all leaves ({visibleCalendarLeaves.length})</Typography>}
             />
           </Stack>
-          <Typography sx={{ color: "#64748B", fontSize: 10.8, fontWeight: 750 }}>
+          <Typography sx={{ color: "#64748B", fontSize: 10.8, fontWeight: 750, display: role.canViewAll ? "none" : "block" }}>
             {role.isSIC && !role.isAdmin && !role.isDeptIC ? `${role.groupName || "Your shift"} · complete crew view` : "All shift groups · complete crew view"}. Tick only highlighted leave cells.
           </Typography>
           <Stack direction="row" spacing={.7} useFlexGap flexWrap="wrap">
@@ -694,7 +707,7 @@ export default function LeaveManagement() {
                 </TableRow>
               </TableHead>
               <TableBody>
-                {approvalRoster.map((group) => <Fragment key={group.groupName}>
+                {visibleApprovalRoster.map((group) => <Fragment key={group.groupName}>
                   <TableRow key={`${group.groupName}-heading`}><TableCell colSpan={approvalDates.length + 1} sx={{ position: "sticky", left: 0, zIndex: 2, py: .3, px: 1, background: "#EAF8F3", color: "#03624C", fontSize: 10.5, fontWeight: 950 }}>{group.groupName}</TableCell></TableRow>
                   {(group.employees || []).map((person) => (
                     <TableRow key={`${group.groupName}-${person.employeeId}`} sx={{ height: 31 }}>
@@ -751,7 +764,7 @@ export default function LeaveManagement() {
                     </TableRow>
                   ))}
                 </Fragment>)}
-                {!approvalRoster.length && <TableRow><TableCell colSpan={Math.max(2, approvalDates.length + 1)} align="center" sx={{ py: 5, color: "#64748B" }}>No published shift roster is available for this leave period.</TableCell></TableRow>}
+                {!visibleApprovalRoster.length && <TableRow><TableCell colSpan={Math.max(2, approvalDates.length + 1)} align="center" sx={{ py: 5, color: "#64748B" }}>No employee is available in this authorized scope and period.</TableCell></TableRow>}
               </TableBody>
             </Table>
           </TableContainer>
@@ -984,21 +997,24 @@ export default function LeaveManagement() {
           <Table size="small">
             <TableHead><TableRow sx={{ background: "#F5F3FF" }}>
               <TableCell padding="checkbox"><Checkbox checked={pendingTrainingApprovals.length > 0 && selectedTrainingApprovalIds.length === pendingTrainingApprovals.length} indeterminate={selectedTrainingApprovalIds.length > 0 && selectedTrainingApprovalIds.length < pendingTrainingApprovals.length} onChange={(event) => setSelectedTrainingApprovalIds(event.target.checked ? pendingTrainingApprovals.map((item) => item.id) : [])} /></TableCell>
-              <TableCell sx={{ fontWeight: 900 }}>Employee</TableCell>
+              <TableCell sx={{ fontWeight: 900 }}>Employee / training days</TableCell>
               <TableCell sx={{ fontWeight: 900 }}>Training</TableCell>
               <TableCell sx={{ fontWeight: 900 }}>Period / location</TableCell>
               <TableCell sx={{ fontWeight: 900 }}>Your approval stage</TableCell>
               <TableCell sx={{ fontWeight: 900 }}>Shift cover</TableCell>
             </TableRow></TableHead>
             <TableBody>
-              {pendingTrainingApprovals.map((training) => <TableRow key={training.id} hover>
+              {pendingTrainingApprovals.map((training) => <Fragment key={training.id}>
+              <TableRow hover>
                 <TableCell padding="checkbox"><Checkbox checked={selectedTrainingApprovalIds.includes(training.id)} onChange={(event) => setSelectedTrainingApprovalIds((current) => event.target.checked ? [...current, training.id] : current.filter((id) => id !== training.id))} /></TableCell>
-                <TableCell><Typography sx={{ fontWeight: 850 }}>{training.employeeName || training.employeeId}</Typography><Typography sx={{ fontSize: 11, color: "#64748B" }}>{training.employeeDesignation || training.employeeId}</Typography></TableCell>
+                <TableCell><Typography sx={{ fontWeight: 850 }}>{training.employeeName || training.employeeId}</Typography><Typography sx={{ fontSize: 11, color: "#64748B" }}>{training.employeeDesignation || training.employeeId}</Typography><Button size="small" variant="text" sx={{ mt: .2, px: 0, minWidth: 0, fontSize: 10, fontWeight: 900 }} onClick={() => setExpandedTrainingApprovalId((current) => current === training.id ? "" : training.id)}>{expandedTrainingApprovalId === training.id ? "Hide details" : `${training.financialYearTrainingDays || 0} / 7 training days`}</Button></TableCell>
                 <TableCell sx={{ fontWeight: 800 }}>{training.trainingName}</TableCell>
                 <TableCell><Typography sx={{ fontSize: 12, fontWeight: 750 }}>{dayjs(training.startDate).format("DD MMM YYYY")} to {dayjs(training.endDate).format("DD MMM YYYY")}</Typography><Typography sx={{ fontSize: 11, color: "#64748B" }}>{training.trainingLocation || "Location not specified"}</Typography></TableCell>
                 <TableCell><Chip size="small" label={training.currentApproverLevel || "Reporting Officer"} color="warning" variant="outlined" sx={{ fontWeight: 800 }} /></TableCell>
                 <TableCell>{training.isShiftEmployee ? <Stack spacing={.35} alignItems="flex-start"><Chip size="small" label={training.groupName || "Shift group"} variant="outlined" /><Typography sx={{ fontSize: 10.5, color: training.replacementRequired ? "#D97706" : "#64748B", fontWeight: 800 }}>{training.replacementRequired ? "Replacement required" : "No replacement marked"}{training.isGroupSIC ? " · SIC" : ""}</Typography></Stack> : <Typography sx={{ fontSize: 12, color: "#64748B" }}>Non-shift employee</Typography>}</TableCell>
-              </TableRow>)}
+              </TableRow>
+              {expandedTrainingApprovalId === training.id && <TableRow><TableCell colSpan={6} sx={{ p: 1.2, bgcolor: "#FAFAFF" }}><Box sx={{ display: "grid", gap: .8 }}><Typography sx={{ fontSize: 11, fontWeight: 950, color: "#4C1D95" }}>Training record · {training.financialYear || "Current financial year"}</Typography><Stack direction="row" spacing={.6} useFlexGap flexWrap="wrap">{(training.financialYearTrainingHistory || []).map((item, index) => <Chip key={`${item.trainingName}-${index}`} size="small" label={`${item.trainingName}: ${dayjs(item.startDate).format("DD MMM")}–${dayjs(item.endDate).format("DD MMM")} · ${item.days} day(s)`} sx={{ bgcolor: "#F3E8FF", color: "#6B21A8", fontWeight: 800 }} />)}{!(training.financialYearTrainingHistory || []).length && <Typography sx={{ fontSize: 10.5, color: "#64748B" }}>No approved training in this financial year.</Typography>}</Stack><Typography sx={{ fontSize: 11, fontWeight: 950, color: "#334155" }}>Approval hierarchy</Typography><Stack direction="row" spacing={.6} useFlexGap flexWrap="wrap" alignItems="center">{(training.approvalChain || []).map((step, index) => <Fragment key={`${step.employeeId}-${index}`}><Chip size="small" label={`${step.level || "Approver"}: ${step.name || step.employeeId}`} sx={{ bgcolor: step.status === "Approved" ? "#DCFCE7" : "#FFEDD5", color: step.status === "Approved" ? "#166534" : "#C2410C", border: `1px solid ${step.status === "Approved" ? "#86EFAC" : "#FDBA74"}`, fontWeight: 850 }} />{index < (training.approvalChain || []).length - 1 && <Typography sx={{ color: "#94A3B8", fontWeight: 900 }}>→</Typography>}</Fragment>)}</Stack></Box></TableCell></TableRow>}
+              </Fragment>)}
             </TableBody>
           </Table>
         </TableContainer>

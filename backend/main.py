@@ -29,6 +29,7 @@ from routes.crew_routes import router as crew_router
 from routes.crew_legacy_routes import router as crew_legacy_router
 from routes.dso_report_routes import router as dso_report_router
 from routes.plant_deviation_routes import router as plant_deviation_router
+from crew_legacy.admin_logic.audit_service import record_audit_event
 
 import urllib3
 
@@ -73,7 +74,33 @@ async def log_requests(request: Request, call_next):
 
     start_time = time.perf_counter()
 
+    request_body = None
+    if request.method.upper() in {"POST", "PUT", "PATCH", "DELETE"}:
+        try:
+            request_body = await request.json()
+        except Exception:
+            request_body = None
+
     response = await call_next(request)
+
+    if request.method.upper() in {"POST", "PUT", "PATCH", "DELETE"} and response.status_code < 400:
+        try:
+            from crew_legacy.admin_logic.auth_utils import get_authenticated_user
+            actor = get_authenticated_user(request)
+        except Exception:
+            actor = {"employeeId": "System", "name": "System", "role": "system"}
+        try:
+            record_audit_event(
+                actor=actor,
+                method=request.method,
+                path=request.url.path,
+                status_code=response.status_code,
+                payload=request_body,
+                query=dict(request.query_params),
+                ip=request.client.host if request.client else None,
+            )
+        except Exception as audit_error:
+            print(f"AUDIT WRITE FAILED {request.method} {request.url.path}: {audit_error}", flush=True)
 
     duration_ms = (
         time.perf_counter() - start_time

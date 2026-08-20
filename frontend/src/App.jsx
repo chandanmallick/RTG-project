@@ -46,6 +46,7 @@ const CrewLoginAudit = lazy(() => import("./crewLegacy/AdminLoginHistory"));
 const Login = lazy(() => import("./pages/Login"));
 const UserAccessControl = lazy(() => import("./pages/UserAccessControl"));
 const MailSettings = lazy(() => import("./pages/MailSettings"));
+const AuditTrail = lazy(() => import("./pages/AuditTrail"));
 
 const protectedPage = (pageKey, element) => <ProtectedRoute pageKey={pageKey}>{element}</ProtectedRoute>;
 
@@ -193,6 +194,7 @@ export default function App() {
         <Route path="/crew/user-context" element={<Navigate to="/admin/user-access" replace />} />
         <Route path="/admin/user-access" element={protectedPage("user_access", <UserAccessControl />)} />
         <Route path="/admin/mail-settings" element={protectedPage("mail_settings", <MailSettings />)} />
+        <Route path="/admin/audit-trail" element={protectedPage("audit_trail", <AuditTrail />)} />
         <Route path="/crew/dashboard" element={protectedPage("crew_dashboard", <CrewLegacyShell><CrewDashboard /></CrewLegacyShell>)} />
         <Route path="/crew/leave" element={protectedPage("crew_leave", <CrewLegacyShell><CrewLeave /></CrewLegacyShell>)} />
         <Route

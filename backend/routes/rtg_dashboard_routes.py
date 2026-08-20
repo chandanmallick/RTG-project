@@ -47,6 +47,17 @@ def _parse_crms_datetime(date_value, time_value=""):
     return None
 
 
+def _transmission_element_type(entity_value: str) -> str:
+    entity = normalize_text(entity_value)
+    if entity == "AC_TRANSMISSION_LINE_CIRCUIT":
+        return "line"
+    if entity == "LINE_REACTOR":
+        return "line_reactor"
+    if entity in {"BUS_REACTOR", "BUS REACTOR"}:
+        return "bus_reactor"
+    return ""
+
+
 def _fetch_current_crms_transmission_rows():
     http = make_legacy_session()
     response = http.get(
@@ -69,6 +80,10 @@ def _current_crms_transmission_payload():
         raw_rows, source_url = _fetch_current_crms_transmission_rows()
         now = datetime.now()
         details = []
+        type_summary = {
+            "line": {"label": "Transmission Line", "total": 0, "over_15_days": 0},
+            "reactor": {"label": "Reactors (Line + Bus)", "total": 0, "over_90_days": 0},
+        }
         seen = set()
         target_category = "ERLDC/NLDC INITIATED - VOLTAGE REGULATION"
 
@@ -77,14 +92,18 @@ def _current_crms_transmission_payload():
             if normalize_text(category) != target_category:
                 continue
             entity = normalize_text(_first_value(raw, "ENTITY_NAME", "entityName", "EntityName", "ENTITY_TYPE", "entityFeatureName"))
-            if entity == "GENERATING_UNIT" or "GENERATING UNIT" in entity:
+            element_type = _transmission_element_type(entity)
+            if not element_type:
                 continue
             name = _first_value(raw, "ELEMENT_NAME", "ELEMENTNAME", "elementName", "ElementName", "LINE_NAME", "lineName")
             if not name:
                 continue
+            # CRMS current-element data supplies the authoritative ISO openingTime.
+            # It must win over legacy date/time fields, which are often blank.
+            opening_time = _first_value(raw, "openingTime", "OPENING_TIME", "opening_time")
             outage_date = _first_value(raw, "OUTAGE_DATE", "outageDate", "outage_date")
             outage_time = _first_value(raw, "OUTAGE_TIME", "outageTime", "outage_time", "Tripped_Time", "trippedTime")
-            outage_at = _parse_crms_datetime(outage_date, outage_time)
+            outage_at = _parse_crms_datetime(opening_time) or _parse_crms_datetime(outage_date, outage_time)
             if not outage_at:
                 outage_at = _parse_crms_datetime(_first_value(raw, "OUTAGE_DATE_TIME", "outageDateTime", "outage_datetime"))
             days_out = max(0, (now - outage_at).total_seconds() / 86400) if outage_at else 0
@@ -92,25 +111,35 @@ def _current_crms_transmission_payload():
             if identity in seen:
                 continue
             seen.add(identity)
+            age_threshold = 15 if element_type == "line" else 90
             details.append({
                 "line_name": str(name).strip(),
                 "entity_name": entity or "Transmission Element",
+                "element_type": element_type,
                 "owner": _first_value(raw, "OWNER", "owner", "Owners", "owners", "RequestingEntity", "requestingEntity"),
                 "state_name": _first_value(raw, "STATE_NAME", "stateName", "STATE", "state"),
                 "outage_category": category,
                 "reason": _first_value(raw, "REASON", "reason", "OUT_REASON", "outReason"),
                 "outage_at": outage_at.isoformat() if outage_at else "",
-                "outage_date": str(outage_date or ""),
+                "outage_date": str(opening_time or outage_date or ""),
                 "outage_time": str(outage_time or ""),
                 "days_out": round(days_out, 1),
                 "over_15_days": days_out > 15,
+                "age_threshold_days": age_threshold,
+                "over_age_threshold": days_out > age_threshold,
                 "expected_revival": " ".join(filter(None, [
                     str(_first_value(raw, "EXPECTED_REVIVAL_DATE", "expectedRevivalDate") or "").strip(),
                     str(_first_value(raw, "EXPECTED_REVIVAL_TIME", "expectedRevivalTime", "exprecteTimeOfRestoration", "expectedRestorationTime") or "").strip(),
                 ])).strip(),
             })
+            summary_key = "line" if element_type == "line" else "reactor"
+            type_summary[summary_key]["total"] += 1
+            if element_type == "line" and days_out > 15:
+                type_summary[summary_key]["over_15_days"] += 1
+            if element_type != "line" and days_out > 90:
+                type_summary[summary_key]["over_90_days"] += 1
 
-        details.sort(key=lambda item: (not item["over_15_days"], -item["days_out"], item["line_name"]))
+        details.sort(key=lambda item: (not item["over_age_threshold"], -item["days_out"], item["line_name"]))
         payload = {
             "success": True,
             "source": "CRMS current transmission-element outage API",
@@ -119,6 +148,8 @@ def _current_crms_transmission_payload():
             "fetched_at": datetime.utcnow().isoformat(),
             "total": len(details),
             "over_15_days": sum(1 for item in details if item["over_15_days"]),
+            "over_90_days": sum(1 for item in details if item["element_type"] != "line" and item["days_out"] > 90),
+            "type_summary": type_summary,
             "rows": details,
             "cached": False,
         }
@@ -447,13 +478,15 @@ async def get_live_dashboard():
 
 
 @router.get("/trend/today")
-async def get_today_trend():
+async def get_today_trend(
+    date_str: Optional[str] = None
+):
 
     try:
 
         data = (
             RTGDashboardService
-            .fetch_today_trend()
+            .fetch_today_trend(date_str)
         )
 
         return {

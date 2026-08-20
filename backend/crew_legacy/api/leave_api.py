@@ -77,6 +77,21 @@ def is_admin(user: dict) -> bool:
     return str(user.get("role") or "").lower() == "admin" or clean_id(user.get("employeeId")) == "50041"
 
 
+def can_view_all_leaves(user: dict) -> bool:
+    """Global leave visibility is intentionally separate from page access."""
+    # 50041 is the portal's configured leave-calendar administrator.  Other
+    # people, including users with an "admin" title, retain organisation-only
+    # visibility unless their account is explicitly made the configured admin.
+    employee_id = clean_id(user.get("employeeId") or user.get("userId"))
+    if employee_id == "50041":
+        return True
+    access = page_access_collection.find_one(
+        {"userId": employee_id},
+        {"pages.leave_calendar_all.view": 1},
+    ) or {}
+    return bool(((access.get("pages") or {}).get("leave_calendar_all") or {}).get("view"))
+
+
 def employee_id_filter(employee_id: str) -> dict:
     return {"$regex": rf"^\s*{re.escape(clean_id(employee_id))}\s*$"}
 
@@ -127,6 +142,34 @@ def direct_reporting_officer_ids(employee: dict) -> list[str]:
         value for value in dict.fromkeys(clean_id(item) for item in values)
         if value and value != employee_id
     ]
+
+
+def visible_leave_employee_ids(user: dict, employees: Optional[list[dict]] = None) -> set[str]:
+    """Actor plus every recursively reporting subordinate from Organization Master."""
+    active_employees = employees if employees is not None else list(
+        employee_collection.find({"isActive": {"$ne": False}})
+    )
+    all_ids = {
+        clean_id(employee.get("userId") or employee.get("employeeId"))
+        for employee in active_employees
+        if clean_id(employee.get("userId") or employee.get("employeeId"))
+    }
+    if can_view_all_leaves(user):
+        return all_ids
+
+    actor = clean_id(user.get("employeeId") or user.get("userId"))
+    visible = {actor} if actor else set()
+    changed = True
+    while changed:
+        changed = False
+        for employee in active_employees:
+            employee_id = clean_id(employee.get("userId") or employee.get("employeeId"))
+            if not employee_id or employee_id in visible:
+                continue
+            if visible.intersection(direct_reporting_officer_ids(employee)):
+                visible.add(employee_id)
+                changed = True
+    return visible
 
 
 def employee_by_id(employee_id: str) -> dict:
@@ -554,6 +597,7 @@ def get_my_role(user=Depends(get_authenticated_user)):
         "isLeaveAuthority": is_dept_ic,
         "isAdmin": is_admin(user),
         "isReportingOfficer": is_reporting_officer,
+        "canViewAll": can_view_all_leaves(user),
         "groupName": sic_record.get("groupName") if sic_record else None,
     }
 
@@ -614,22 +658,12 @@ def get_organization_approval_calendar(
     if end < start or (end - start).days > 92:
         raise HTTPException(400, "Select a calendar range of 93 days or less")
 
-    actor = clean_id(user.get("employeeId"))
-    shift_ids = set()
-    for group in roster_group_collection.find({"isActive": {"$ne": False}}, {"members": 1, "shiftInCharge": 1}):
-        for person in [*(group.get("members") or []), group.get("shiftInCharge") or {}]:
-            value = clean_id(person.get("employeeId") or person.get("userId"))
-            if value:
-                shift_ids.add(value)
-
-    employees = []
-    for employee in employee_collection.find({"isActive": {"$ne": False}}):
-        target_id = clean_id(employee.get("userId") or employee.get("employeeId"))
-        if not target_id or target_id in shift_ids or target_id == actor:
-            continue
-        if not is_admin(user) and actor not in organization_leave_observer_ids(employee):
-            continue
-        employees.append(employee)
+    active_employees = list(employee_collection.find({"isActive": {"$ne": False}}))
+    visible_ids = visible_leave_employee_ids(user, active_employees)
+    employees = [
+        employee for employee in active_employees
+        if clean_id(employee.get("userId") or employee.get("employeeId")) in visible_ids
+    ]
 
     employee_ids = [clean_id(item.get("userId") or item.get("employeeId")) for item in employees]
     daily = list(employee_daily_collection.find({
@@ -646,30 +680,53 @@ def get_organization_approval_calendar(
     groups = {}
     for employee in employees:
         target_id = clean_id(employee.get("userId") or employee.get("employeeId"))
-        department = clean_id(employee.get("department")) or "Unmapped department"
-        section = ", ".join(str(value) for value in (employee.get("sections") or []) if value)
-        group_name = f"General · {department}" + (f" · {section}" if section else "")
+        department_values = employee.get("departments") or employee.get("department") or []
+        if not isinstance(department_values, list):
+            department_values = [department_values]
+        departments = [clean_id(value) for value in department_values if clean_id(value)] or ["Unmapped department"]
+        employee_records = [duty_map.get((target_id, date), {}) for date in dates]
+        group_name = next(
+            (clean_id(record.get("groupName")) for record in employee_records
+             if clean_id(record.get("groupName")) and clean_id(record.get("groupName")).lower() != "general"),
+            f"General · {departments[0]}",
+        )
         duties = {}
         for date in dates:
             record = duty_map.get((target_id, date), {})
+            if not record:
+                record = general_duty_record(target_id, date) or {}
             duties[date] = {
                 "shift": record.get("assignedDuty") or "General",
                 "leaveType": record.get("leaveType"),
                 "leaveStatus": record.get("leaveStatus"),
                 "trainingName": record.get("trainingName"),
                 "replacementEmployee": record.get("replacementEmployee"),
+                "replacementRequired": bool(
+                    record.get("replacementRequired")
+                    or (record.get("trainingFinal") or {}).get("replacementRequired")
+                ),
             }
-        groups.setdefault(group_name, []).append({
+        group = groups.setdefault(group_name, {"departments": set(), "employees": []})
+        group["departments"].update(departments)
+        group["employees"].append({
             "employeeId": target_id,
             "name": employee.get("name") or target_id,
             "designation": employee.get("designation"),
-            "IsSIC": False,
-            "employeeType": "Non-shift",
+            "IsSIC": any(bool(record.get("isSIC")) for record in employee_records),
+            "employeeType": "Shift" if not group_name.startswith("General ·") else "Non-shift",
+            "departments": departments,
             "duties": duties,
         })
     return [
-        {"groupName": name, "employees": sorted(people, key=lambda item: clean_id(item.get("name")).lower())}
-        for name, people in sorted(groups.items())
+        {
+            "groupName": name,
+            "departments": sorted(group["departments"]),
+            "employees": sorted(
+                group["employees"],
+                key=lambda item: (not item.get("IsSIC"), clean_id(item.get("name")).lower()),
+            ),
+        }
+        for name, group in sorted(groups.items())
     ]
 
 
@@ -1725,6 +1782,7 @@ def get_leave_list(
     user=Depends(get_authenticated_user),
 ):
     actor = clean_id(user.get("employeeId"))
+    visible_employee_ids = visible_leave_employee_ids(user)
     delete_allowed = can_delete_leave_master(user)
     completed_statuses = ["Approved", "Rejected", "Withdrawn", "Cancelled"]
     completed_from = completedFrom or (datetime.utcnow() - timedelta(days=1)).strftime("%Y-%m-%d")
@@ -1758,8 +1816,12 @@ def get_leave_list(
         sic_allowed = can_sic_act(user, r)
         authority_allowed = can_authority_act(user, r)
         employee = employee_by_id(r.get("employeeId"))
-        organization_observer = actor in organization_leave_observer_ids(employee)
-        if not (is_admin(user) or delete_allowed or owner or sic_allowed or authority_allowed or organization_observer):
+        department_values = employee.get("departments") or employee.get("department") or []
+        if not isinstance(department_values, list):
+            department_values = [department_values]
+        departments = [clean_id(value) for value in department_values if clean_id(value)]
+        organization_observer = clean_id(r.get("employeeId")) in visible_employee_ids and not owner
+        if not (can_view_all_leaves(user) or delete_allowed or owner or sic_allowed or authority_allowed or organization_observer):
             continue
 
         others = list(employee_daily_collection.find({
@@ -1782,6 +1844,7 @@ def get_leave_list(
             "id": str(r["_id"]),
             "employeeId": clean_id(r.get("employeeId")),
             "name": r.get("name"),
+            "departments": departments,
             "groupName": r.get("groupName"),
             "isSIC": r.get("isSIC"),
             "date": r.get("date"),

@@ -819,11 +819,33 @@ class RTGDashboardService:
         return response.json()
 
     @staticmethod
-    def fetch_today_trend():
+    def fetch_today_trend(date_str=None):
 
         db = MongoService()
 
-        if ZoneInfo:
+        if date_str:
+
+            selected_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+
+            if ZoneInfo:
+
+                tz = ZoneInfo("Asia/Kolkata")
+
+                start_utc = datetime.combine(
+                    selected_date, time.min, tzinfo=tz
+                ).astimezone(ZoneInfo("UTC")).replace(tzinfo=None)
+
+                end_utc = datetime.combine(
+                    selected_date + timedelta(days=1), time.min, tzinfo=tz
+                ).astimezone(ZoneInfo("UTC")).replace(tzinfo=None)
+
+            else:
+
+                start_utc = datetime.combine(selected_date, time.min)
+
+                end_utc = start_utc + timedelta(days=1)
+
+        elif ZoneInfo:
 
             tz = ZoneInfo("Asia/Kolkata")
 
@@ -899,6 +921,31 @@ class RTGDashboardService:
                 for row in rows
             )
 
+            installed_capacity = sum(
+                RTGDashboardService._to_number(row.get("installed_capacity"))
+                for row in rows
+            )
+
+            cap_on_bar = sum(
+                RTGDashboardService._to_number(row.get("cap_on_bar"))
+                for row in rows
+            )
+
+            dc = sum(
+                RTGDashboardService._to_number(row.get("dc") or row.get("dc_derived"))
+                for row in rows
+            )
+
+            schedule = sum(
+                RTGDashboardService._to_number(row.get("schedule"))
+                for row in rows
+            )
+
+            actual_generation = sum(
+                RTGDashboardService._to_number(row.get("actual_gen") or row.get("actual_gen_derived"))
+                for row in rows
+            )
+
             snapshot_time = snapshot.get(
                 "snapshot_time"
             )
@@ -927,7 +974,12 @@ class RTGDashboardService:
             trend.append({
                 "time": display_time,
                 "outage": round(outage, 2),
-                "unreqPower": round(unreq_power, 2)
+                "unreqPower": round(unreq_power, 2),
+                "installed_capacity": round(installed_capacity, 2),
+                "cap_on_bar": round(cap_on_bar, 2),
+                "dc": round(dc, 2),
+                "schedule": round(schedule, 2),
+                "actual_gen": round(actual_generation, 2),
             })
 
         return trend

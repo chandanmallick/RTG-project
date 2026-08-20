@@ -1,6 +1,7 @@
 import io
 import re
 from datetime import date, datetime, time, timedelta
+from pathlib import Path
 from typing import Optional
 
 import openpyxl
@@ -23,6 +24,8 @@ COLLECTION = "dso_reports"
 INDIA_1_MIN_COLLECTION = "India 1 min Data"
 INDIA_1_MIN_FIELDS = ("india_demand", "thermal", "hydro", "wind", "solar", "gas", "nuclear")
 CURRENT_CRMS_GENERATOR_OUTAGES_URL = "https://crms.erldc.in/Codebook/getCurrentTrElementOutagesData"
+DSO_SYNC_CONFIG_TYPE = "DSO_REPORT_SYNC"
+DEFAULT_DSO_SOURCE_PATH = r"W:\ScadaData\DSO_reports"
 STATES = ("BIHAR", "JHARKHAND", "DVC", "ODISHA", "WB", "SIKKIM")
 
 STATE_COLUMNS = {
@@ -59,6 +62,16 @@ def collection():
 
 def master_collection():
     return MongoService().db["pipeline_config"]
+
+
+def dso_sync_config():
+    doc = master_collection().find_one(
+        {"config_type": DSO_SYNC_CONFIG_TYPE}, {"_id": 0}
+    ) or {}
+    return {
+        "source_path": str(doc.get("source_path") or DEFAULT_DSO_SOURCE_PATH).strip(),
+        "updated_at": doc.get("updated_at"),
+    }
 
 
 def india_1_min_collection():
@@ -735,6 +748,160 @@ def build_results(rows, limits):
     }
 
 
+def process_dso_report_contents(
+    report_type: str,
+    report_date: str,
+    contents: bytes,
+    source_file_name: str,
+    important_events: str = "",
+    sic_name: str = "",
+    overwrite: bool = False,
+    source_mode: str = "upload",
+):
+    if report_type not in {"evening", "morning"}:
+        raise ValueError("Report type must be evening or morning.")
+    date.fromisoformat(report_date)
+    if not contents:
+        raise ValueError("The SCADA workbook is empty.")
+    key = {"doc_type": "processed_report", "report_type": report_type, "report_date": report_date}
+    if collection().find_one(key, {"_id": 1}) and not overwrite:
+        raise FileExistsError("A saved report already exists for this date. Select overwrite to replace it.")
+    now = datetime.utcnow().isoformat()
+    if report_type == "morning":
+        rows, input_summary = parse_morning_scada(contents, report_date)
+        morning_results = build_morning_results(rows, report_date)
+        india_1_min_saved_dates = save_india_1_min_rows(
+            rows, source_file_name, "DSO Morning report preparation"
+        )
+        document = {
+            "doc_type": "processed_report",
+            "report_type": report_type,
+            "report_date": report_date,
+            "report_window": "Yesterday 00:00-Today 06:59",
+            "important_events": important_events.strip(),
+            "signoff_regards": "Regards",
+            "signoff_name": sic_name.strip(),
+            "source_file_name": source_file_name,
+            "source_mode": source_mode,
+            "input_summary": input_summary,
+            "india_1_min_saved_dates": india_1_min_saved_dates,
+            "morning_results": morning_results,
+            "generation_outage_summary": current_generation_outage_summary(report_date),
+            "processed_at": now,
+        }
+    else:
+        rows, input_summary = parse_scada(contents, report_type)
+        master = master_collection().find_one({"config_type": "DSO_TTC_ATC"}, {"_id": 0}) or {}
+        document = {
+            "doc_type": "processed_report",
+            "report_type": report_type,
+            "report_date": report_date,
+            "report_window": "00:00-16:59",
+            "important_events": important_events.strip(),
+            "signoff_regards": "Regards",
+            "signoff_name": sic_name.strip(),
+            "source_file_name": source_file_name,
+            "source_mode": source_mode,
+            "input_summary": input_summary,
+            "results": build_results(rows, master.get("limits") or {}),
+            "thermal_availability": thermal_availability(report_date),
+            "generation_outage_summary": current_generation_outage_summary(report_date),
+            "processed_at": now,
+        }
+    collection().replace_one(key, document, upsert=True)
+    document.pop("_id", None)
+    return document
+
+
+def expected_dso_source_file(report_type: str, report_date: str):
+    selected_date = date.fromisoformat(report_date)
+    source_date = selected_date + timedelta(days=1) if report_type == "morning" else selected_date
+    date_token = source_date.strftime("%d%m%Y")
+    base_name = (
+        f"DSO_Morning_report_{date_token}"
+        if report_type == "morning"
+        else f"SCHD_ACT_{date_token}"
+    )
+    folder = Path(dso_sync_config()["source_path"])
+    if not folder.is_dir():
+        raise FileNotFoundError(f"Configured DSO report folder is unavailable: {folder}")
+    files_by_name = {item.name.casefold(): item for item in folder.iterdir() if item.is_file()}
+    for extension in (".xlsx", ".xlsm"):
+        match = files_by_name.get(f"{base_name}{extension}".casefold())
+        if match:
+            return match
+    raise FileNotFoundError(
+        f"Expected source file was not found in {folder}: {base_name}.xlsx"
+    )
+
+
+def sync_dso_report_from_folder(
+    report_type: str,
+    report_date: str,
+    important_events: str = "",
+    sic_name: str = "",
+    overwrite: bool = True,
+):
+    source_file = expected_dso_source_file(report_type, report_date)
+    document = process_dso_report_contents(
+        report_type=report_type,
+        report_date=report_date,
+        contents=source_file.read_bytes(),
+        source_file_name=str(source_file),
+        important_events=important_events,
+        sic_name=sic_name,
+        overwrite=overwrite,
+        source_mode="shared_folder",
+    )
+    return {"success": True, "source_file": str(source_file), "report": document}
+
+
+@router.get("/sync-config")
+async def get_dso_sync_config():
+    return {
+        "success": True,
+        **dso_sync_config(),
+        "morning_schedule": "07:30 Asia/Kolkata",
+        "evening_schedule": "17:30 Asia/Kolkata",
+    }
+
+
+@router.put("/sync-config")
+async def save_dso_sync_config(payload: dict):
+    source_path = str(payload.get("source_path") or "").strip()
+    if not source_path:
+        raise HTTPException(400, "DSO report source path is required.")
+    now = datetime.utcnow().isoformat()
+    master_collection().update_one(
+        {"config_type": DSO_SYNC_CONFIG_TYPE},
+        {"$set": {"config_type": DSO_SYNC_CONFIG_TYPE, "source_path": source_path, "updated_at": now}},
+        upsert=True,
+    )
+    return {"success": True, "source_path": source_path, "updated_at": now}
+
+
+@router.post("/sync")
+async def sync_dso_report(
+    report_type: str = Form(...),
+    report_date: str = Form(...),
+    important_events: str = Form(""),
+    sic_name: str = Form(""),
+    overwrite: bool = Form(True),
+):
+    try:
+        return sync_dso_report_from_folder(
+            report_type, report_date, important_events, sic_name, overwrite
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except FileExistsError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(502, f"DSO shared-folder sync failed: {exc}") from exc
+
+
 @router.get("/master")
 async def get_master():
     doc = master_collection().find_one({"config_type": "DSO_TTC_ATC"}, {"_id": 0})
@@ -817,58 +984,19 @@ async def process_report(
     if report_type not in {"evening", "morning"}:
         raise HTTPException(400, "Report type must be evening or morning.")
     try:
-        date.fromisoformat(report_date)
         contents = await file.read()
-        if not contents:
-            raise ValueError("The uploaded SCADA workbook is empty.")
-        key = {"doc_type": "processed_report", "report_type": report_type, "report_date": report_date}
-        if collection().find_one(key, {"_id": 1}) and not overwrite:
-            raise HTTPException(409, "A saved report already exists for this date. Select overwrite to replace it.")
-        now = datetime.utcnow().isoformat()
-        if report_type == "morning":
-            rows, input_summary = parse_morning_scada(contents, report_date)
-            morning_results = build_morning_results(rows, report_date)
-            india_1_min_saved_dates = save_india_1_min_rows(
-                rows,
-                file.filename,
-                "DSO Morning report preparation",
-            )
-            document = {
-                "doc_type": "processed_report",
-                "report_type": report_type,
-                "report_date": report_date,
-                "report_window": "Yesterday 00:00-Today 06:59",
-                "important_events": important_events.strip(),
-                "signoff_regards": "Regards",
-                "signoff_name": sic_name.strip(),
-                "source_file_name": file.filename,
-                "input_summary": input_summary,
-                "india_1_min_saved_dates": india_1_min_saved_dates,
-                "morning_results": morning_results,
-                "generation_outage_summary": current_generation_outage_summary(report_date),
-                "processed_at": now,
-            }
-        else:
-            rows, input_summary = parse_scada(contents, report_type)
-            master = master_collection().find_one({"config_type": "DSO_TTC_ATC"}, {"_id": 0}) or {}
-            document = {
-                "doc_type": "processed_report",
-                "report_type": report_type,
-                "report_date": report_date,
-                "report_window": "00:00-16:59",
-                "important_events": important_events.strip(),
-                "signoff_regards": "Regards",
-                "signoff_name": sic_name.strip(),
-                "source_file_name": file.filename,
-                "input_summary": input_summary,
-                "results": build_results(rows, master.get("limits") or {}),
-                "thermal_availability": thermal_availability(report_date),
-                "generation_outage_summary": current_generation_outage_summary(report_date),
-                "processed_at": now,
-            }
-        collection().replace_one(key, document, upsert=True)
-        document.pop("_id", None)
+        document = process_dso_report_contents(
+            report_type=report_type,
+            report_date=report_date,
+            contents=contents,
+            source_file_name=file.filename or "uploaded_scada.xlsx",
+            important_events=important_events,
+            sic_name=sic_name,
+            overwrite=overwrite,
+        )
         return {"success": True, "report": document}
+    except FileExistsError as exc:
+        raise HTTPException(409, str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     except HTTPException:

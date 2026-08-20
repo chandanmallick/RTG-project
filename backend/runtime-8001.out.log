@@ -1,0 +1,976 @@
+WARNING: CREW_JWT_SECRET is not set. Using a temporary runtime secret.
+Scheduler enabled: starting background jobs
+PIPELINE CONFIGS = [{'config_type': 'SCHEDULE', 'schedule_url': 'https://gateway.grid-india.in/POSOCO/reports/1.0/WebAccessAPI/GetUtilityExternalSharedData', 'schedule_api_key': '6dc32d47-f46a-45c9-afaf-c6ce73c4ca71', 'schedule_username': 'erldc_internal_prod', 'schedule_password': 'ErldcPr0d@052024', 'rtg_post_url': 'https://rtgapi.grid-india.in/sendData/wbes-data/saveupdatemulti/', 'enabled': True, 'interval_minutes': 5}, {'config_type': 'OUTAGE', 'outage_fetch_url': 'http://10.3.230.130:8001/Codebook/getCurrentTrElementOutagesData', 'rtg_outage_push_url': 'https://rtgapi.grid-india.in/sendData/outage-data/save/', 'enabled': True, 'interval_minutes': 15, 'generation_outage_history_url': 'https://crms.erldc.in/Codebook/GenOutagesHistoryData'}, {'config_type': 'RTG', 'rtg_username': 'ERLDC', 'rtg_password': 'Er1dc@#$700033', 'rtg_token_url': 'https://rtgapi.grid-india.in/sendData/api-token-auth/', 'rtg_schedule_url': 'https://rtgapi.grid-india.in/sendData/wbes-data/', 'rtg_scada_url': 'https://rtgapi.grid-india.in/sendData/scada-data/', 'rtg_cap_on_bar_url': 'https://rtgapi.grid-india.in/sendData/cap-on-bar/'}, {'rtg_data_url': 'https://rtgapi.grid-india.in/sendData/combined-data-view/?in_region_name=ERLDC&in_fuel_type=THERMAL', 'refresh_interval_min': 15, 'config_type': 'RTG_DASHBOARD'}, {'config_type': 'PSP', 'psp_login_url': 'https://report.erldc.in/POSOCO/Account/Login', 'psp_data_url': 'https://report.erldc.in/POSOCO/PSP/GetPSPData', 'psp_username': 'erldc', 'psp_password': 'erldc1', 'curve_er_column': 'T', 'curve_file_dir': '\\\\10.3.95.200\\HTTP-Access\\Control_Room_Report\\curve', 'curve_off_peak_hour': '03:00', 'curve_peak_hour_by_month': '1:19:00,2:19:00,3:20:00,4:20:00,5:20:00,6:20:00,7:20:00,8:20:00,9:20:00,10:19:00,11:19:00,12:19:00', 'curve_sheet_name': '30SEC', 'curve_state_columns': 'V:AA', 'curve_time_column': 'C', 'loadshed_api_url': 'https://report.erldc.in/posoco_api/api/StgHourlyStateData/GetStgHourlyStateDataNRByMonthNLDC/{date_from}/{date_to}/1', 'outage_api_url': 'https://report.erldc.in/POSOCO_API/api/Outage/GetQueryNpmcReportData/{date}', 'wbes_api_key': '6dc32d47-f46a-45c9-afaf-c6ce73c4ca71', 'wbes_password': 'ErldcPr0d@052024', 'wbes_url': 'https://gateway.grid-india.in/POSOCO/reports/1.0/WebAccessAPI/GetUtilityExternalSharedData', 'wbes_username': 'erldc_internal_prod', 'india_15_min_demand_api_url': 'https://reporting.nldc.in/Reporting_API/API/PSP/GetTimeSeriesDataByDate//{date_from}', 'nldc_demand_api_url': 'https://reporting.nldc.in/Reporting_API/API/NLDCReport/GetMaxDemandMetTimeDataByDate/{date_text}', 'all_state_demand_api_url': 'https://reporting.nldc.in/Reporting_API/API/NLDCReport/GetPowerSupplyPositionStatesDataByDate/{date_text}'}, {'config_type': 'DSO_TTC_ATC', 'limits': {'BIHAR': {'ttc': 8445.0, 'atc': 8276.0}, 'JHARKHAND': {'ttc': 2090.0, 'atc': 2044.0}, 'DVC': {'ttc': -3517.0, 'atc': -3466.0}, 'ODISHA': {'ttc': 4564.0, 'atc': 4473.0}, 'WB': {'ttc': 8437.0, 'atc': 8157.0}, 'SIKKIM': {'ttc': 165.0, 'atc': 162.0}}, 'updated_at': '2026-08-03T12:51:57.644827'}]
+RTG CONFIG = {'config_type': 'RTG', 'rtg_username': 'ERLDC', 'rtg_password': '***', 'rtg_token_url': 'https://rtgapi.grid-india.in/sendData/api-token-auth/', 'rtg_schedule_url': 'https://rtgapi.grid-india.in/sendData/wbes-data/', 'rtg_scada_url': 'https://rtgapi.grid-india.in/sendData/scada-data/', 'rtg_cap_on_bar_url': 'https://rtgapi.grid-india.in/sendData/cap-on-bar/'}
+RTG DASHBOARD CONFIG = {'rtg_data_url': 'https://rtgapi.grid-india.in/sendData/combined-data-view/?in_region_name=ERLDC&in_fuel_type=THERMAL', 'refresh_interval_min': 15, 'config_type': 'RTG_DASHBOARD'}
+RTG DASHBOARD FETCH URL = https://rtgapi.grid-india.in/sendData/combined-data-view/?in_date=2026-08-13&in_region_name=ERLDC&in_fuel_type=THERMAL
+RTG RESPONSE STATUS = 200
+{
+  "plant_id": "RTG_ER00001",
+  "plant_name": "BARAUNI TPS",
+  "fuel_type": "THERMAL",
+  "region_name": "ERLDC",
+  "state_name": "Bihar",
+  "utility_type": "State",
+  "wbes_acronym": "Not Available",
+  "owner_name": "NTPC",
+  "installed_capacity": 500.0,
+  "effective_capacity": 500.0,
+  "scada_point": "NA",
+  "actual_gen": 460.0,
+  "actual_gen_derived": 0,
+  "schedule": 451.0,
+  "schedule_gen_derived": 0,
+  "dc": 451.0,
+  "dc_derived": 0,
+  "qsold": 0.0,
+  "planned_outage": 0.0,
+  "forced_outage": 0.0,
+  "rsd": 0.0,
+  "fuel_shortage": 0.0,
+  "commercial_issues": 0.0,
+  "partial_outage": 0.0,
+  "variable_cost": 0.0,
+  "reason_partial_outage": "--",
+  "reason_nofull_generation": "--",
+  "actual_last_updated": "2026-08-13 10:18",
+  "schedule_last_updated": "2026-08-13 10:20",
+  "percentage_of_dc": 100,
+  "cap_on_bar": 500.0,
+  "unreq_margin": 0.0,
+  "proxy_unreq_margin": 0.0
+}
+CHANDAN RTG RECORD COUNT = 43
+API HIT GET /api/rtg-dashboard/current-crms-transmission-outages -> 200 (2404.2 ms)
+INFO:     127.0.0.1:60374 - "GET /api/rtg-dashboard/current-crms-transmission-outages HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (6.4 ms)
+INFO:     127.0.0.1:60380 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (9.1 ms)
+INFO:     127.0.0.1:60381 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (5.2 ms)
+INFO:     127.0.0.1:60390 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (9.2 ms)
+INFO:     127.0.0.1:60389 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (5.1 ms)
+INFO:     127.0.0.1:60397 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (9.4 ms)
+INFO:     127.0.0.1:60396 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/auth/me -> 401 (1.3 ms)
+INFO:     127.0.0.1:60402 - "GET /api/crew/auth/me HTTP/1.1" 401 Unauthorized
+API HIT POST /api/crew/auth/login -> 200 (97.0 ms)
+INFO:     127.0.0.1:60402 - "POST /api/crew/auth/login HTTP/1.1" 200 OK
+RTG LIVE FETCH URL = https://rtgapi.grid-india.in/sendData/combined-data-view/?in_date=2026-08-13&in_region_name=ERLDC&in_fuel_type=THERMAL
+API HIT GET /api/rtg-dashboard/live -> 200 (2380.0 ms)
+INFO:     127.0.0.1:60404 - "GET /api/rtg-dashboard/live HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (3066.1 ms)
+INFO:     127.0.0.1:60402 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/psp/report-checking -> 200 (685.7 ms)
+INFO:     127.0.0.1:60406 - "GET /api/psp/report-checking HTTP/1.1" 200 OK
+API HIT GET /api/psp/power-position -> 200 (109.5 ms)
+INFO:     127.0.0.1:60407 - "GET /api/psp/power-position HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (3072.8 ms)
+INFO:     127.0.0.1:60403 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/dashboard/duty-today-tomorrow -> 200 (705.4 ms)
+INFO:     127.0.0.1:60405 - "GET /api/crew/dashboard/duty-today-tomorrow HTTP/1.1" 200 OK
+API HIT GET /api/psp/nldc-demand/trend?start_date=2026-07-13&end_date=2026-08-12 -> 200 (16.5 ms)
+INFO:     127.0.0.1:60404 - "GET /api/psp/nldc-demand/trend?start_date=2026-07-13&end_date=2026-08-12 HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (4.3 ms)
+INFO:     127.0.0.1:60403 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (10.0 ms)
+INFO:     127.0.0.1:60406 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+RTG LIVE FETCH URL = https://rtgapi.grid-india.in/sendData/combined-data-view/?in_date=2026-08-13&in_region_name=ERLDC&in_fuel_type=THERMAL
+RTG snapshot trend API date_str='2026-08-12'
+fetch_snapshot_trend input date_str='2026-08-12'
+API HIT GET /api/rtg-dashboard/live -> 200 (4781.5 ms)
+INFO:     127.0.0.1:60404 - "GET /api/rtg-dashboard/live HTTP/1.1" 200 OK
+API HIT GET /api/rtg-dashboard/trend/today -> 200 (2478.0 ms)
+INFO:     127.0.0.1:60405 - "GET /api/rtg-dashboard/trend/today HTTP/1.1" 200 OK
+API HIT GET /api/rtg-dashboard/trend/snapshot?date_str=2026-08-12 -> 200 (2480.0 ms)
+INFO:     127.0.0.1:60407 - "GET /api/rtg-dashboard/trend/snapshot?date_str=2026-08-12 HTTP/1.1" 200 OK
+API HIT GET /api/pipeline/status -> 200 (644.2 ms)
+INFO:     127.0.0.1:60402 - "GET /api/pipeline/status HTTP/1.1" 200 OK
+API HIT GET /api/rtg-dashboard/current-crms-outages?refresh=false -> 200 (813.5 ms)
+INFO:     127.0.0.1:60404 - "GET /api/rtg-dashboard/current-crms-outages?refresh=false HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (6247.9 ms)
+INFO:     127.0.0.1:60403 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (6250.6 ms)
+INFO:     127.0.0.1:60406 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/rtg-dashboard/current-crms-transmission-outages?refresh=false -> 200 (2564.9 ms)
+INFO:     127.0.0.1:60402 - "GET /api/rtg-dashboard/current-crms-transmission-outages?refresh=false HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (5.6 ms)
+INFO:     127.0.0.1:60513 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (7.1 ms)
+INFO:     127.0.0.1:60514 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (5.4 ms)
+INFO:     127.0.0.1:60541 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (8.4 ms)
+INFO:     127.0.0.1:60540 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (6.8 ms)
+INFO:     127.0.0.1:60565 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (9.7 ms)
+INFO:     127.0.0.1:60564 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (4.5 ms)
+INFO:     127.0.0.1:60575 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (7.9 ms)
+INFO:     127.0.0.1:60574 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (7.2 ms)
+INFO:     127.0.0.1:60580 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (9.2 ms)
+INFO:     127.0.0.1:60581 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+PIPELINE CONFIGS = [{'config_type': 'SCHEDULE', 'schedule_url': 'https://gateway.grid-india.in/POSOCO/reports/1.0/WebAccessAPI/GetUtilityExternalSharedData', 'schedule_api_key': '6dc32d47-f46a-45c9-afaf-c6ce73c4ca71', 'schedule_username': 'erldc_internal_prod', 'schedule_password': 'ErldcPr0d@052024', 'rtg_post_url': 'https://rtgapi.grid-india.in/sendData/wbes-data/saveupdatemulti/', 'enabled': True, 'interval_minutes': 5}, {'config_type': 'OUTAGE', 'outage_fetch_url': 'http://10.3.230.130:8001/Codebook/getCurrentTrElementOutagesData', 'rtg_outage_push_url': 'https://rtgapi.grid-india.in/sendData/outage-data/save/', 'enabled': True, 'interval_minutes': 15, 'generation_outage_history_url': 'https://crms.erldc.in/Codebook/GenOutagesHistoryData'}, {'config_type': 'RTG', 'rtg_username': 'ERLDC', 'rtg_password': 'Er1dc@#$700033', 'rtg_token_url': 'https://rtgapi.grid-india.in/sendData/api-token-auth/', 'rtg_schedule_url': 'https://rtgapi.grid-india.in/sendData/wbes-data/', 'rtg_scada_url': 'https://rtgapi.grid-india.in/sendData/scada-data/', 'rtg_cap_on_bar_url': 'https://rtgapi.grid-india.in/sendData/cap-on-bar/'}, {'rtg_data_url': 'https://rtgapi.grid-india.in/sendData/combined-data-view/?in_region_name=ERLDC&in_fuel_type=THERMAL', 'refresh_interval_min': 15, 'config_type': 'RTG_DASHBOARD'}, {'config_type': 'PSP', 'psp_login_url': 'https://report.erldc.in/POSOCO/Account/Login', 'psp_data_url': 'https://report.erldc.in/POSOCO/PSP/GetPSPData', 'psp_username': 'erldc', 'psp_password': 'erldc1', 'curve_er_column': 'T', 'curve_file_dir': '\\\\10.3.95.200\\HTTP-Access\\Control_Room_Report\\curve', 'curve_off_peak_hour': '03:00', 'curve_peak_hour_by_month': '1:19:00,2:19:00,3:20:00,4:20:00,5:20:00,6:20:00,7:20:00,8:20:00,9:20:00,10:19:00,11:19:00,12:19:00', 'curve_sheet_name': '30SEC', 'curve_state_columns': 'V:AA', 'curve_time_column': 'C', 'loadshed_api_url': 'https://report.erldc.in/posoco_api/api/StgHourlyStateData/GetStgHourlyStateDataNRByMonthNLDC/{date_from}/{date_to}/1', 'outage_api_url': 'https://report.erldc.in/POSOCO_API/api/Outage/GetQueryNpmcReportData/{date}', 'wbes_api_key': '6dc32d47-f46a-45c9-afaf-c6ce73c4ca71', 'wbes_password': 'ErldcPr0d@052024', 'wbes_url': 'https://gateway.grid-india.in/POSOCO/reports/1.0/WebAccessAPI/GetUtilityExternalSharedData', 'wbes_username': 'erldc_internal_prod', 'india_15_min_demand_api_url': 'https://reporting.nldc.in/Reporting_API/API/PSP/GetTimeSeriesDataByDate//{date_from}', 'nldc_demand_api_url': 'https://reporting.nldc.in/Reporting_API/API/NLDCReport/GetMaxDemandMetTimeDataByDate/{date_text}', 'all_state_demand_api_url': 'https://reporting.nldc.in/Reporting_API/API/NLDCReport/GetPowerSupplyPositionStatesDataByDate/{date_text}'}, {'config_type': 'DSO_TTC_ATC', 'limits': {'BIHAR': {'ttc': 8445.0, 'atc': 8276.0}, 'JHARKHAND': {'ttc': 2090.0, 'atc': 2044.0}, 'DVC': {'ttc': -3517.0, 'atc': -3466.0}, 'ODISHA': {'ttc': 4564.0, 'atc': 4473.0}, 'WB': {'ttc': 8437.0, 'atc': 8157.0}, 'SIKKIM': {'ttc': 165.0, 'atc': 162.0}}, 'updated_at': '2026-08-03T12:51:57.644827'}]
+RTG CONFIG = {'config_type': 'RTG', 'rtg_username': 'ERLDC', 'rtg_password': '***', 'rtg_token_url': 'https://rtgapi.grid-india.in/sendData/api-token-auth/', 'rtg_schedule_url': 'https://rtgapi.grid-india.in/sendData/wbes-data/', 'rtg_scada_url': 'https://rtgapi.grid-india.in/sendData/scada-data/', 'rtg_cap_on_bar_url': 'https://rtgapi.grid-india.in/sendData/cap-on-bar/'}
+RTG DASHBOARD CONFIG = {'rtg_data_url': 'https://rtgapi.grid-india.in/sendData/combined-data-view/?in_region_name=ERLDC&in_fuel_type=THERMAL', 'refresh_interval_min': 15, 'config_type': 'RTG_DASHBOARD'}
+RTG DASHBOARD FETCH URL = https://rtgapi.grid-india.in/sendData/combined-data-view/?in_date=2026-08-13&in_region_name=ERLDC&in_fuel_type=THERMAL
+RTG RESPONSE STATUS = 200
+{
+  "plant_id": "RTG_ER00001",
+  "plant_name": "BARAUNI TPS",
+  "fuel_type": "THERMAL",
+  "region_name": "ERLDC",
+  "state_name": "Bihar",
+  "utility_type": "State",
+  "wbes_acronym": "Not Available",
+  "owner_name": "NTPC",
+  "installed_capacity": 500.0,
+  "effective_capacity": 500.0,
+  "scada_point": "NA",
+  "actual_gen": 463.0,
+  "actual_gen_derived": 0,
+  "schedule": 451.0,
+  "schedule_gen_derived": 0,
+  "dc": 451.0,
+  "dc_derived": 0,
+  "qsold": 0.0,
+  "planned_outage": 0.0,
+  "forced_outage": 0.0,
+  "rsd": 0.0,
+  "fuel_shortage": 0.0,
+  "commercial_issues": 0.0,
+  "partial_outage": 0.0,
+  "variable_cost": 0.0,
+  "reason_partial_outage": "--",
+  "reason_nofull_generation": "--",
+  "actual_last_updated": "2026-08-13 10:33",
+  "schedule_last_updated": "2026-08-13 10:35",
+  "percentage_of_dc": 100,
+  "cap_on_bar": 500.0,
+  "unreq_margin": 0.0,
+  "proxy_unreq_margin": 0
+}
+CHANDAN RTG RECORD COUNT = 43
+PIPELINE CONFIGS = [{'config_type': 'SCHEDULE', 'schedule_url': 'https://gateway.grid-india.in/POSOCO/reports/1.0/WebAccessAPI/GetUtilityExternalSharedData', 'schedule_api_key': '6dc32d47-f46a-45c9-afaf-c6ce73c4ca71', 'schedule_username': 'erldc_internal_prod', 'schedule_password': 'ErldcPr0d@052024', 'rtg_post_url': 'https://rtgapi.grid-india.in/sendData/wbes-data/saveupdatemulti/', 'enabled': True, 'interval_minutes': 5}, {'config_type': 'OUTAGE', 'outage_fetch_url': 'http://10.3.230.130:8001/Codebook/getCurrentTrElementOutagesData', 'rtg_outage_push_url': 'https://rtgapi.grid-india.in/sendData/outage-data/save/', 'enabled': True, 'interval_minutes': 15, 'generation_outage_history_url': 'https://crms.erldc.in/Codebook/GenOutagesHistoryData'}, {'config_type': 'RTG', 'rtg_username': 'ERLDC', 'rtg_password': 'Er1dc@#$700033', 'rtg_token_url': 'https://rtgapi.grid-india.in/sendData/api-token-auth/', 'rtg_schedule_url': 'https://rtgapi.grid-india.in/sendData/wbes-data/', 'rtg_scada_url': 'https://rtgapi.grid-india.in/sendData/scada-data/', 'rtg_cap_on_bar_url': 'https://rtgapi.grid-india.in/sendData/cap-on-bar/'}, {'rtg_data_url': 'https://rtgapi.grid-india.in/sendData/combined-data-view/?in_region_name=ERLDC&in_fuel_type=THERMAL', 'refresh_interval_min': 15, 'config_type': 'RTG_DASHBOARD'}, {'config_type': 'PSP', 'psp_login_url': 'https://report.erldc.in/POSOCO/Account/Login', 'psp_data_url': 'https://report.erldc.in/POSOCO/PSP/GetPSPData', 'psp_username': 'erldc', 'psp_password': 'erldc1', 'curve_er_column': 'T', 'curve_file_dir': '\\\\10.3.95.200\\HTTP-Access\\Control_Room_Report\\curve', 'curve_off_peak_hour': '03:00', 'curve_peak_hour_by_month': '1:19:00,2:19:00,3:20:00,4:20:00,5:20:00,6:20:00,7:20:00,8:20:00,9:20:00,10:19:00,11:19:00,12:19:00', 'curve_sheet_name': '30SEC', 'curve_state_columns': 'V:AA', 'curve_time_column': 'C', 'loadshed_api_url': 'https://report.erldc.in/posoco_api/api/StgHourlyStateData/GetStgHourlyStateDataNRByMonthNLDC/{date_from}/{date_to}/1', 'outage_api_url': 'https://report.erldc.in/POSOCO_API/api/Outage/GetQueryNpmcReportData/{date}', 'wbes_api_key': '6dc32d47-f46a-45c9-afaf-c6ce73c4ca71', 'wbes_password': 'ErldcPr0d@052024', 'wbes_url': 'https://gateway.grid-india.in/POSOCO/reports/1.0/WebAccessAPI/GetUtilityExternalSharedData', 'wbes_username': 'erldc_internal_prod', 'india_15_min_demand_api_url': 'https://reporting.nldc.in/Reporting_API/API/PSP/GetTimeSeriesDataByDate//{date_from}', 'nldc_demand_api_url': 'https://reporting.nldc.in/Reporting_API/API/NLDCReport/GetMaxDemandMetTimeDataByDate/{date_text}', 'all_state_demand_api_url': 'https://reporting.nldc.in/Reporting_API/API/NLDCReport/GetPowerSupplyPositionStatesDataByDate/{date_text}'}, {'config_type': 'DSO_TTC_ATC', 'limits': {'BIHAR': {'ttc': 8445.0, 'atc': 8276.0}, 'JHARKHAND': {'ttc': 2090.0, 'atc': 2044.0}, 'DVC': {'ttc': -3517.0, 'atc': -3466.0}, 'ODISHA': {'ttc': 4564.0, 'atc': 4473.0}, 'WB': {'ttc': 8437.0, 'atc': 8157.0}, 'SIKKIM': {'ttc': 165.0, 'atc': 162.0}}, 'updated_at': '2026-08-03T12:51:57.644827'}]
+RTG CONFIG = {'config_type': 'RTG', 'rtg_username': 'ERLDC', 'rtg_password': '***', 'rtg_token_url': 'https://rtgapi.grid-india.in/sendData/api-token-auth/', 'rtg_schedule_url': 'https://rtgapi.grid-india.in/sendData/wbes-data/', 'rtg_scada_url': 'https://rtgapi.grid-india.in/sendData/scada-data/', 'rtg_cap_on_bar_url': 'https://rtgapi.grid-india.in/sendData/cap-on-bar/'}
+RTG DASHBOARD CONFIG = {'rtg_data_url': 'https://rtgapi.grid-india.in/sendData/combined-data-view/?in_region_name=ERLDC&in_fuel_type=THERMAL', 'refresh_interval_min': 15, 'config_type': 'RTG_DASHBOARD'}
+RTG DASHBOARD FETCH URL = https://rtgapi.grid-india.in/sendData/combined-data-view/?in_date=2026-08-13&in_region_name=ERLDC&in_fuel_type=THERMAL
+RTG RESPONSE STATUS = 200
+{
+  "plant_id": "RTG_ER00001",
+  "plant_name": "BARAUNI TPS",
+  "fuel_type": "THERMAL",
+  "region_name": "ERLDC",
+  "state_name": "Bihar",
+  "utility_type": "State",
+  "wbes_acronym": "Not Available",
+  "owner_name": "NTPC",
+  "installed_capacity": 500.0,
+  "effective_capacity": 500.0,
+  "scada_point": "NA",
+  "actual_gen": 465.0,
+  "actual_gen_derived": 0,
+  "schedule": 451.0,
+  "schedule_gen_derived": 0,
+  "dc": 451.0,
+  "dc_derived": 0,
+  "qsold": 0.0,
+  "planned_outage": 0.0,
+  "forced_outage": 0.0,
+  "rsd": 0.0,
+  "fuel_shortage": 0.0,
+  "commercial_issues": 0.0,
+  "partial_outage": 0.0,
+  "variable_cost": 0.0,
+  "reason_partial_outage": "--",
+  "reason_nofull_generation": "--",
+  "actual_last_updated": "2026-08-13 10:48",
+  "schedule_last_updated": "2026-08-13 10:50",
+  "percentage_of_dc": 100,
+  "cap_on_bar": 500.0,
+  "unreq_margin": 0.0,
+  "proxy_unreq_margin": 0
+}
+CHANDAN RTG RECORD COUNT = 43
+PIPELINE CONFIGS = [{'config_type': 'SCHEDULE', 'schedule_url': 'https://gateway.grid-india.in/POSOCO/reports/1.0/WebAccessAPI/GetUtilityExternalSharedData', 'schedule_api_key': '6dc32d47-f46a-45c9-afaf-c6ce73c4ca71', 'schedule_username': 'erldc_internal_prod', 'schedule_password': 'ErldcPr0d@052024', 'rtg_post_url': 'https://rtgapi.grid-india.in/sendData/wbes-data/saveupdatemulti/', 'enabled': True, 'interval_minutes': 5}, {'config_type': 'OUTAGE', 'outage_fetch_url': 'http://10.3.230.130:8001/Codebook/getCurrentTrElementOutagesData', 'rtg_outage_push_url': 'https://rtgapi.grid-india.in/sendData/outage-data/save/', 'enabled': True, 'interval_minutes': 15, 'generation_outage_history_url': 'https://crms.erldc.in/Codebook/GenOutagesHistoryData'}, {'config_type': 'RTG', 'rtg_username': 'ERLDC', 'rtg_password': 'Er1dc@#$700033', 'rtg_token_url': 'https://rtgapi.grid-india.in/sendData/api-token-auth/', 'rtg_schedule_url': 'https://rtgapi.grid-india.in/sendData/wbes-data/', 'rtg_scada_url': 'https://rtgapi.grid-india.in/sendData/scada-data/', 'rtg_cap_on_bar_url': 'https://rtgapi.grid-india.in/sendData/cap-on-bar/'}, {'rtg_data_url': 'https://rtgapi.grid-india.in/sendData/combined-data-view/?in_region_name=ERLDC&in_fuel_type=THERMAL', 'refresh_interval_min': 15, 'config_type': 'RTG_DASHBOARD'}, {'config_type': 'PSP', 'psp_login_url': 'https://report.erldc.in/POSOCO/Account/Login', 'psp_data_url': 'https://report.erldc.in/POSOCO/PSP/GetPSPData', 'psp_username': 'erldc', 'psp_password': 'erldc1', 'curve_er_column': 'T', 'curve_file_dir': '\\\\10.3.95.200\\HTTP-Access\\Control_Room_Report\\curve', 'curve_off_peak_hour': '03:00', 'curve_peak_hour_by_month': '1:19:00,2:19:00,3:20:00,4:20:00,5:20:00,6:20:00,7:20:00,8:20:00,9:20:00,10:19:00,11:19:00,12:19:00', 'curve_sheet_name': '30SEC', 'curve_state_columns': 'V:AA', 'curve_time_column': 'C', 'loadshed_api_url': 'https://report.erldc.in/posoco_api/api/StgHourlyStateData/GetStgHourlyStateDataNRByMonthNLDC/{date_from}/{date_to}/1', 'outage_api_url': 'https://report.erldc.in/POSOCO_API/api/Outage/GetQueryNpmcReportData/{date}', 'wbes_api_key': '6dc32d47-f46a-45c9-afaf-c6ce73c4ca71', 'wbes_password': 'ErldcPr0d@052024', 'wbes_url': 'https://gateway.grid-india.in/POSOCO/reports/1.0/WebAccessAPI/GetUtilityExternalSharedData', 'wbes_username': 'erldc_internal_prod', 'india_15_min_demand_api_url': 'https://reporting.nldc.in/Reporting_API/API/PSP/GetTimeSeriesDataByDate//{date_from}', 'nldc_demand_api_url': 'https://reporting.nldc.in/Reporting_API/API/NLDCReport/GetMaxDemandMetTimeDataByDate/{date_text}', 'all_state_demand_api_url': 'https://reporting.nldc.in/Reporting_API/API/NLDCReport/GetPowerSupplyPositionStatesDataByDate/{date_text}'}, {'config_type': 'DSO_TTC_ATC', 'limits': {'BIHAR': {'ttc': 8445.0, 'atc': 8276.0}, 'JHARKHAND': {'ttc': 2090.0, 'atc': 2044.0}, 'DVC': {'ttc': -3517.0, 'atc': -3466.0}, 'ODISHA': {'ttc': 4564.0, 'atc': 4473.0}, 'WB': {'ttc': 8437.0, 'atc': 8157.0}, 'SIKKIM': {'ttc': 165.0, 'atc': 162.0}}, 'updated_at': '2026-08-03T12:51:57.644827'}]
+RTG CONFIG = {'config_type': 'RTG', 'rtg_username': 'ERLDC', 'rtg_password': '***', 'rtg_token_url': 'https://rtgapi.grid-india.in/sendData/api-token-auth/', 'rtg_schedule_url': 'https://rtgapi.grid-india.in/sendData/wbes-data/', 'rtg_scada_url': 'https://rtgapi.grid-india.in/sendData/scada-data/', 'rtg_cap_on_bar_url': 'https://rtgapi.grid-india.in/sendData/cap-on-bar/'}
+RTG DASHBOARD CONFIG = {'rtg_data_url': 'https://rtgapi.grid-india.in/sendData/combined-data-view/?in_region_name=ERLDC&in_fuel_type=THERMAL', 'refresh_interval_min': 15, 'config_type': 'RTG_DASHBOARD'}
+RTG DASHBOARD FETCH URL = https://rtgapi.grid-india.in/sendData/combined-data-view/?in_date=2026-08-13&in_region_name=ERLDC&in_fuel_type=THERMAL
+RTG RESPONSE STATUS = 200
+{
+  "plant_id": "RTG_ER00001",
+  "plant_name": "BARAUNI TPS",
+  "fuel_type": "THERMAL",
+  "region_name": "ERLDC",
+  "state_name": "Bihar",
+  "utility_type": "State",
+  "wbes_acronym": "Not Available",
+  "owner_name": "NTPC",
+  "installed_capacity": 500.0,
+  "effective_capacity": 500.0,
+  "scada_point": "NA",
+  "actual_gen": 456.0,
+  "actual_gen_derived": 0,
+  "schedule": 451.0,
+  "schedule_gen_derived": 0,
+  "dc": 451.0,
+  "dc_derived": 0,
+  "qsold": 0.0,
+  "planned_outage": 0.0,
+  "forced_outage": 0.0,
+  "rsd": 0.0,
+  "fuel_shortage": 0.0,
+  "commercial_issues": 0.0,
+  "partial_outage": 0.0,
+  "variable_cost": 0.0,
+  "reason_partial_outage": "--",
+  "reason_nofull_generation": "--",
+  "actual_last_updated": "2026-08-13 11:03",
+  "schedule_last_updated": "2026-08-13 11:05",
+  "percentage_of_dc": 100,
+  "cap_on_bar": 500.0,
+  "unreq_margin": 0.0,
+  "proxy_unreq_margin": 4.0
+}
+CHANDAN RTG RECORD COUNT = 43
+API HIT POST /api/crew/auth/login -> 200 (102.4 ms)
+INFO:     127.0.0.1:61053 - "POST /api/crew/auth/login HTTP/1.1" 200 OK
+RTG LIVE FETCH URL = https://rtgapi.grid-india.in/sendData/combined-data-view/?in_date=2026-08-13&in_region_name=ERLDC&in_fuel_type=THERMAL
+API HIT GET /api/rtg-dashboard/live -> 200 (2984.5 ms)
+INFO:     127.0.0.1:61055 - "GET /api/rtg-dashboard/live HTTP/1.1" 200 OK
+API HIT GET /api/psp/report-checking -> 200 (659.1 ms)
+INFO:     127.0.0.1:61056 - "GET /api/psp/report-checking HTTP/1.1" 200 OK
+API HIT GET /api/psp/nldc-demand/trend?start_date=2026-07-13&end_date=2026-08-12 -> 200 (30.8 ms)
+INFO:     127.0.0.1:61057 - "GET /api/psp/nldc-demand/trend?start_date=2026-07-13&end_date=2026-08-12 HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (3020.9 ms)
+INFO:     127.0.0.1:61053 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (3021.8 ms)
+INFO:     127.0.0.1:61054 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/dashboard/duty-today-tomorrow -> 200 (14.1 ms)
+INFO:     127.0.0.1:61058 - "GET /api/crew/dashboard/duty-today-tomorrow HTTP/1.1" 200 OK
+API HIT GET /api/psp/power-position -> 200 (103.8 ms)
+INFO:     127.0.0.1:61058 - "GET /api/psp/power-position HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (4.6 ms)
+INFO:     127.0.0.1:61053 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (7.9 ms)
+INFO:     127.0.0.1:61054 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+RTG LIVE FETCH URL = https://rtgapi.grid-india.in/sendData/combined-data-view/?in_date=2026-08-13&in_region_name=ERLDC&in_fuel_type=THERMAL
+RTG snapshot trend API date_str='2026-08-12'
+fetch_snapshot_trend input date_str='2026-08-12'
+API HIT GET /api/rtg-dashboard/live -> 200 (5364.1 ms)
+INFO:     127.0.0.1:61077 - "GET /api/rtg-dashboard/live HTTP/1.1" 200 OK
+API HIT GET /api/rtg-dashboard/trend/today -> 200 (3011.6 ms)
+INFO:     127.0.0.1:61079 - "GET /api/rtg-dashboard/trend/today HTTP/1.1" 200 OK
+API HIT GET /api/rtg-dashboard/trend/snapshot?date_str=2026-08-12 -> 200 (3013.8 ms)
+INFO:     127.0.0.1:61080 - "GET /api/rtg-dashboard/trend/snapshot?date_str=2026-08-12 HTTP/1.1" 200 OK
+API HIT GET /api/pipeline/status -> 200 (3015.5 ms)
+INFO:     127.0.0.1:61081 - "GET /api/pipeline/status HTTP/1.1" 200 OK
+API HIT GET /api/rtg-dashboard/current-crms-outages?refresh=false -> 200 (827.0 ms)
+INFO:     127.0.0.1:61077 - "GET /api/rtg-dashboard/current-crms-outages?refresh=false HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (8794.9 ms)
+INFO:     127.0.0.1:61076 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/rtg-dashboard/current-crms-transmission-outages?refresh=false -> 200 (2592.8 ms)
+INFO:     127.0.0.1:61081 - "GET /api/rtg-dashboard/current-crms-transmission-outages?refresh=false HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (8799.7 ms)
+INFO:     127.0.0.1:61078 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (4.5 ms)
+INFO:     127.0.0.1:61163 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (8.3 ms)
+INFO:     127.0.0.1:61162 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (5.2 ms)
+INFO:     127.0.0.1:61166 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (8.9 ms)
+INFO:     127.0.0.1:61165 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (4.4 ms)
+INFO:     127.0.0.1:61191 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (8.2 ms)
+INFO:     127.0.0.1:61190 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (4.4 ms)
+INFO:     127.0.0.1:61196 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (8.0 ms)
+INFO:     127.0.0.1:61195 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (4.5 ms)
+INFO:     127.0.0.1:61198 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (12.2 ms)
+INFO:     127.0.0.1:61197 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (4.4 ms)
+INFO:     127.0.0.1:61217 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (8.3 ms)
+INFO:     127.0.0.1:61216 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (4.8 ms)
+INFO:     127.0.0.1:61225 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (8.0 ms)
+INFO:     127.0.0.1:61224 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (4.9 ms)
+INFO:     127.0.0.1:61250 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (8.2 ms)
+INFO:     127.0.0.1:61249 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (4.6 ms)
+INFO:     127.0.0.1:61260 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (8.4 ms)
+INFO:     127.0.0.1:61259 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (5.0 ms)
+INFO:     127.0.0.1:61270 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (8.3 ms)
+INFO:     127.0.0.1:61269 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (5.8 ms)
+INFO:     127.0.0.1:61288 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (11.2 ms)
+INFO:     127.0.0.1:61289 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (5.2 ms)
+INFO:     127.0.0.1:61290 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (6.5 ms)
+INFO:     127.0.0.1:61291 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/auth/me -> 200 (3.9 ms)
+INFO:     127.0.0.1:61291 - "GET /api/crew/auth/me HTTP/1.1" 200 OK
+RTG LIVE FETCH URL = https://rtgapi.grid-india.in/sendData/combined-data-view/?in_date=2026-08-13&in_region_name=ERLDC&in_fuel_type=THERMAL
+API HIT GET /api/rtg-dashboard/live -> 200 (2451.6 ms)
+INFO:     127.0.0.1:61293 - "GET /api/rtg-dashboard/live HTTP/1.1" 200 OK
+RTG snapshot trend API date_str='2026-08-12'
+fetch_snapshot_trend input date_str='2026-08-12'
+API HIT GET /api/rtg-dashboard/trend/today -> 200 (31.3 ms)
+INFO:     127.0.0.1:61294 - "GET /api/rtg-dashboard/trend/today HTTP/1.1" 200 OK
+API HIT GET /api/rtg-dashboard/trend/snapshot?date_str=2026-08-12 -> 200 (631.3 ms)
+INFO:     127.0.0.1:61295 - "GET /api/rtg-dashboard/trend/snapshot?date_str=2026-08-12 HTTP/1.1" 200 OK
+API HIT GET /api/pipeline/status -> 200 (621.9 ms)
+INFO:     127.0.0.1:61296 - "GET /api/pipeline/status HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (3871.3 ms)
+INFO:     127.0.0.1:61291 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/rtg-dashboard/current-crms-outages?refresh=false -> 200 (783.7 ms)
+INFO:     127.0.0.1:61293 - "GET /api/rtg-dashboard/current-crms-outages?refresh=false HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (3874.9 ms)
+INFO:     127.0.0.1:61292 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/rtg-dashboard/current-crms-transmission-outages?refresh=false -> 200 (2568.5 ms)
+INFO:     127.0.0.1:61296 - "GET /api/rtg-dashboard/current-crms-transmission-outages?refresh=false HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (4.5 ms)
+INFO:     127.0.0.1:61326 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (10.4 ms)
+INFO:     127.0.0.1:61325 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+PIPELINE CONFIGS = [{'config_type': 'SCHEDULE', 'schedule_url': 'https://gateway.grid-india.in/POSOCO/reports/1.0/WebAccessAPI/GetUtilityExternalSharedData', 'schedule_api_key': '6dc32d47-f46a-45c9-afaf-c6ce73c4ca71', 'schedule_username': 'erldc_internal_prod', 'schedule_password': 'ErldcPr0d@052024', 'rtg_post_url': 'https://rtgapi.grid-india.in/sendData/wbes-data/saveupdatemulti/', 'enabled': True, 'interval_minutes': 5}, {'config_type': 'OUTAGE', 'outage_fetch_url': 'http://10.3.230.130:8001/Codebook/getCurrentTrElementOutagesData', 'rtg_outage_push_url': 'https://rtgapi.grid-india.in/sendData/outage-data/save/', 'enabled': True, 'interval_minutes': 15, 'generation_outage_history_url': 'https://crms.erldc.in/Codebook/GenOutagesHistoryData'}, {'config_type': 'RTG', 'rtg_username': 'ERLDC', 'rtg_password': 'Er1dc@#$700033', 'rtg_token_url': 'https://rtgapi.grid-india.in/sendData/api-token-auth/', 'rtg_schedule_url': 'https://rtgapi.grid-india.in/sendData/wbes-data/', 'rtg_scada_url': 'https://rtgapi.grid-india.in/sendData/scada-data/', 'rtg_cap_on_bar_url': 'https://rtgapi.grid-india.in/sendData/cap-on-bar/'}, {'rtg_data_url': 'https://rtgapi.grid-india.in/sendData/combined-data-view/?in_region_name=ERLDC&in_fuel_type=THERMAL', 'refresh_interval_min': 15, 'config_type': 'RTG_DASHBOARD'}, {'config_type': 'PSP', 'psp_login_url': 'https://report.erldc.in/POSOCO/Account/Login', 'psp_data_url': 'https://report.erldc.in/POSOCO/PSP/GetPSPData', 'psp_username': 'erldc', 'psp_password': 'erldc1', 'curve_er_column': 'T', 'curve_file_dir': '\\\\10.3.95.200\\HTTP-Access\\Control_Room_Report\\curve', 'curve_off_peak_hour': '03:00', 'curve_peak_hour_by_month': '1:19:00,2:19:00,3:20:00,4:20:00,5:20:00,6:20:00,7:20:00,8:20:00,9:20:00,10:19:00,11:19:00,12:19:00', 'curve_sheet_name': '30SEC', 'curve_state_columns': 'V:AA', 'curve_time_column': 'C', 'loadshed_api_url': 'https://report.erldc.in/posoco_api/api/StgHourlyStateData/GetStgHourlyStateDataNRByMonthNLDC/{date_from}/{date_to}/1', 'outage_api_url': 'https://report.erldc.in/POSOCO_API/api/Outage/GetQueryNpmcReportData/{date}', 'wbes_api_key': '6dc32d47-f46a-45c9-afaf-c6ce73c4ca71', 'wbes_password': 'ErldcPr0d@052024', 'wbes_url': 'https://gateway.grid-india.in/POSOCO/reports/1.0/WebAccessAPI/GetUtilityExternalSharedData', 'wbes_username': 'erldc_internal_prod', 'india_15_min_demand_api_url': 'https://reporting.nldc.in/Reporting_API/API/PSP/GetTimeSeriesDataByDate//{date_from}', 'nldc_demand_api_url': 'https://reporting.nldc.in/Reporting_API/API/NLDCReport/GetMaxDemandMetTimeDataByDate/{date_text}', 'all_state_demand_api_url': 'https://reporting.nldc.in/Reporting_API/API/NLDCReport/GetPowerSupplyPositionStatesDataByDate/{date_text}'}, {'config_type': 'DSO_TTC_ATC', 'limits': {'BIHAR': {'ttc': 8445.0, 'atc': 8276.0}, 'JHARKHAND': {'ttc': 2090.0, 'atc': 2044.0}, 'DVC': {'ttc': -3517.0, 'atc': -3466.0}, 'ODISHA': {'ttc': 4564.0, 'atc': 4473.0}, 'WB': {'ttc': 8437.0, 'atc': 8157.0}, 'SIKKIM': {'ttc': 165.0, 'atc': 162.0}}, 'updated_at': '2026-08-03T12:51:57.644827'}]
+RTG CONFIG = {'config_type': 'RTG', 'rtg_username': 'ERLDC', 'rtg_password': '***', 'rtg_token_url': 'https://rtgapi.grid-india.in/sendData/api-token-auth/', 'rtg_schedule_url': 'https://rtgapi.grid-india.in/sendData/wbes-data/', 'rtg_scada_url': 'https://rtgapi.grid-india.in/sendData/scada-data/', 'rtg_cap_on_bar_url': 'https://rtgapi.grid-india.in/sendData/cap-on-bar/'}
+RTG DASHBOARD CONFIG = {'rtg_data_url': 'https://rtgapi.grid-india.in/sendData/combined-data-view/?in_region_name=ERLDC&in_fuel_type=THERMAL', 'refresh_interval_min': 15, 'config_type': 'RTG_DASHBOARD'}
+RTG DASHBOARD FETCH URL = https://rtgapi.grid-india.in/sendData/combined-data-view/?in_date=2026-08-13&in_region_name=ERLDC&in_fuel_type=THERMAL
+RTG RESPONSE STATUS = 200
+{
+  "plant_id": "RTG_ER00001",
+  "plant_name": "BARAUNI TPS",
+  "fuel_type": "THERMAL",
+  "region_name": "ERLDC",
+  "state_name": "Bihar",
+  "utility_type": "State",
+  "wbes_acronym": "Not Available",
+  "owner_name": "NTPC",
+  "installed_capacity": 500.0,
+  "effective_capacity": 500.0,
+  "scada_point": "NA",
+  "actual_gen": 462.0,
+  "actual_gen_derived": 0,
+  "schedule": 451.0,
+  "schedule_gen_derived": 0,
+  "dc": 451.0,
+  "dc_derived": 0,
+  "qsold": 0.0,
+  "planned_outage": 0.0,
+  "forced_outage": 0.0,
+  "rsd": 0.0,
+  "fuel_shortage": 0.0,
+  "commercial_issues": 0.0,
+  "partial_outage": 0.0,
+  "variable_cost": 0.0,
+  "reason_partial_outage": "--",
+  "reason_nofull_generation": "--",
+  "actual_last_updated": "2026-08-13 11:18",
+  "schedule_last_updated": "2026-08-13 11:20",
+  "percentage_of_dc": 100,
+  "cap_on_bar": 500.0,
+  "unreq_margin": 0.0,
+  "proxy_unreq_margin": 0
+}
+CHANDAN RTG RECORD COUNT = 43
+API HIT GET /api/crew/notifications/ -> 200 (4.6 ms)
+INFO:     127.0.0.1:61373 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (8.3 ms)
+INFO:     127.0.0.1:61372 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (4.6 ms)
+INFO:     127.0.0.1:61400 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (8.5 ms)
+INFO:     127.0.0.1:61399 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (4.8 ms)
+INFO:     127.0.0.1:61416 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (3.0 ms)
+INFO:     127.0.0.1:61417 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/auth/me -> 200 (4.0 ms)
+INFO:     127.0.0.1:61420 - "GET /api/crew/auth/me HTTP/1.1" 200 OK
+RTG LIVE FETCH URL = https://rtgapi.grid-india.in/sendData/combined-data-view/?in_date=2026-08-13&in_region_name=ERLDC&in_fuel_type=THERMAL
+API HIT GET /api/rtg-dashboard/live -> 200 (2317.8 ms)
+INFO:     127.0.0.1:61422 - "GET /api/rtg-dashboard/live HTTP/1.1" 200 OK
+RTG snapshot trend API date_str='2026-08-12'
+fetch_snapshot_trend input date_str='2026-08-12'
+API HIT GET /api/rtg-dashboard/trend/today -> 200 (47.4 ms)
+INFO:     127.0.0.1:61423 - "GET /api/rtg-dashboard/trend/today HTTP/1.1" 200 OK
+API HIT GET /api/rtg-dashboard/trend/snapshot?date_str=2026-08-12 -> 200 (665.9 ms)
+INFO:     127.0.0.1:61424 - "GET /api/rtg-dashboard/trend/snapshot?date_str=2026-08-12 HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (3014.5 ms)
+INFO:     127.0.0.1:61420 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/pipeline/status -> 200 (648.1 ms)
+INFO:     127.0.0.1:61425 - "GET /api/pipeline/status HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (3017.6 ms)
+INFO:     127.0.0.1:61421 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/rtg-dashboard/current-crms-outages?refresh=false -> 200 (805.6 ms)
+INFO:     127.0.0.1:61422 - "GET /api/rtg-dashboard/current-crms-outages?refresh=false HTTP/1.1" 200 OK
+API HIT GET /api/rtg-dashboard/current-crms-transmission-outages?refresh=false -> 200 (2557.6 ms)
+INFO:     127.0.0.1:61425 - "GET /api/rtg-dashboard/current-crms-transmission-outages?refresh=false HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (4.7 ms)
+INFO:     127.0.0.1:61453 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (8.6 ms)
+INFO:     127.0.0.1:61452 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (4.9 ms)
+INFO:     127.0.0.1:61458 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (8.8 ms)
+INFO:     127.0.0.1:61457 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (5.4 ms)
+INFO:     127.0.0.1:61462 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (10.6 ms)
+INFO:     127.0.0.1:61461 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (4.3 ms)
+INFO:     127.0.0.1:61468 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (8.1 ms)
+INFO:     127.0.0.1:61467 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (5.2 ms)
+INFO:     127.0.0.1:61470 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (9.2 ms)
+INFO:     127.0.0.1:61469 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (5.2 ms)
+INFO:     127.0.0.1:61499 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (8.2 ms)
+INFO:     127.0.0.1:61498 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (4.7 ms)
+INFO:     127.0.0.1:61501 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (8.2 ms)
+INFO:     127.0.0.1:61500 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (4.7 ms)
+INFO:     127.0.0.1:61529 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (8.5 ms)
+INFO:     127.0.0.1:61528 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (4.8 ms)
+INFO:     127.0.0.1:61531 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (8.6 ms)
+INFO:     127.0.0.1:61530 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (5.4 ms)
+INFO:     127.0.0.1:61541 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (7.5 ms)
+INFO:     127.0.0.1:61542 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (4.6 ms)
+INFO:     127.0.0.1:61544 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (8.5 ms)
+INFO:     127.0.0.1:61543 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (5.2 ms)
+INFO:     127.0.0.1:61546 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (7.9 ms)
+INFO:     127.0.0.1:61547 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (4.6 ms)
+INFO:     127.0.0.1:61555 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (8.5 ms)
+INFO:     127.0.0.1:61554 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (5.0 ms)
+INFO:     127.0.0.1:61557 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (3.1 ms)
+INFO:     127.0.0.1:61557 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (4.5 ms)
+INFO:     127.0.0.1:61573 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (9.0 ms)
+INFO:     127.0.0.1:61572 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (4.6 ms)
+INFO:     127.0.0.1:61578 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (8.6 ms)
+INFO:     127.0.0.1:61577 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (4.5 ms)
+INFO:     127.0.0.1:61622 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (8.6 ms)
+INFO:     127.0.0.1:61621 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (4.7 ms)
+INFO:     127.0.0.1:61629 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (8.4 ms)
+INFO:     127.0.0.1:61628 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (4.3 ms)
+INFO:     127.0.0.1:61633 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (8.5 ms)
+INFO:     127.0.0.1:61632 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (4.6 ms)
+INFO:     127.0.0.1:61636 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (8.8 ms)
+INFO:     127.0.0.1:61635 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (4.8 ms)
+INFO:     127.0.0.1:61642 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (9.5 ms)
+INFO:     127.0.0.1:61641 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (5.5 ms)
+INFO:     127.0.0.1:61647 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (8.5 ms)
+INFO:     127.0.0.1:61646 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (5.5 ms)
+INFO:     127.0.0.1:61650 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (10.5 ms)
+INFO:     127.0.0.1:61649 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (4.9 ms)
+INFO:     127.0.0.1:61654 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (9.0 ms)
+INFO:     127.0.0.1:61653 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+PIPELINE CONFIGS = [{'config_type': 'SCHEDULE', 'schedule_url': 'https://gateway.grid-india.in/POSOCO/reports/1.0/WebAccessAPI/GetUtilityExternalSharedData', 'schedule_api_key': '6dc32d47-f46a-45c9-afaf-c6ce73c4ca71', 'schedule_username': 'erldc_internal_prod', 'schedule_password': 'ErldcPr0d@052024', 'rtg_post_url': 'https://rtgapi.grid-india.in/sendData/wbes-data/saveupdatemulti/', 'enabled': True, 'interval_minutes': 5}, {'config_type': 'OUTAGE', 'outage_fetch_url': 'http://10.3.230.130:8001/Codebook/getCurrentTrElementOutagesData', 'rtg_outage_push_url': 'https://rtgapi.grid-india.in/sendData/outage-data/save/', 'enabled': True, 'interval_minutes': 15, 'generation_outage_history_url': 'https://crms.erldc.in/Codebook/GenOutagesHistoryData'}, {'config_type': 'RTG', 'rtg_username': 'ERLDC', 'rtg_password': 'Er1dc@#$700033', 'rtg_token_url': 'https://rtgapi.grid-india.in/sendData/api-token-auth/', 'rtg_schedule_url': 'https://rtgapi.grid-india.in/sendData/wbes-data/', 'rtg_scada_url': 'https://rtgapi.grid-india.in/sendData/scada-data/', 'rtg_cap_on_bar_url': 'https://rtgapi.grid-india.in/sendData/cap-on-bar/'}, {'rtg_data_url': 'https://rtgapi.grid-india.in/sendData/combined-data-view/?in_region_name=ERLDC&in_fuel_type=THERMAL', 'refresh_interval_min': 15, 'config_type': 'RTG_DASHBOARD'}, {'config_type': 'PSP', 'psp_login_url': 'https://report.erldc.in/POSOCO/Account/Login', 'psp_data_url': 'https://report.erldc.in/POSOCO/PSP/GetPSPData', 'psp_username': 'erldc', 'psp_password': 'erldc1', 'curve_er_column': 'T', 'curve_file_dir': '\\\\10.3.95.200\\HTTP-Access\\Control_Room_Report\\curve', 'curve_off_peak_hour': '03:00', 'curve_peak_hour_by_month': '1:19:00,2:19:00,3:20:00,4:20:00,5:20:00,6:20:00,7:20:00,8:20:00,9:20:00,10:19:00,11:19:00,12:19:00', 'curve_sheet_name': '30SEC', 'curve_state_columns': 'V:AA', 'curve_time_column': 'C', 'loadshed_api_url': 'https://report.erldc.in/posoco_api/api/StgHourlyStateData/GetStgHourlyStateDataNRByMonthNLDC/{date_from}/{date_to}/1', 'outage_api_url': 'https://report.erldc.in/POSOCO_API/api/Outage/GetQueryNpmcReportData/{date}', 'wbes_api_key': '6dc32d47-f46a-45c9-afaf-c6ce73c4ca71', 'wbes_password': 'ErldcPr0d@052024', 'wbes_url': 'https://gateway.grid-india.in/POSOCO/reports/1.0/WebAccessAPI/GetUtilityExternalSharedData', 'wbes_username': 'erldc_internal_prod', 'india_15_min_demand_api_url': 'https://reporting.nldc.in/Reporting_API/API/PSP/GetTimeSeriesDataByDate//{date_from}', 'nldc_demand_api_url': 'https://reporting.nldc.in/Reporting_API/API/NLDCReport/GetMaxDemandMetTimeDataByDate/{date_text}', 'all_state_demand_api_url': 'https://reporting.nldc.in/Reporting_API/API/NLDCReport/GetPowerSupplyPositionStatesDataByDate/{date_text}'}, {'config_type': 'DSO_TTC_ATC', 'limits': {'BIHAR': {'ttc': 8445.0, 'atc': 8276.0}, 'JHARKHAND': {'ttc': 2090.0, 'atc': 2044.0}, 'DVC': {'ttc': -3517.0, 'atc': -3466.0}, 'ODISHA': {'ttc': 4564.0, 'atc': 4473.0}, 'WB': {'ttc': 8437.0, 'atc': 8157.0}, 'SIKKIM': {'ttc': 165.0, 'atc': 162.0}}, 'updated_at': '2026-08-03T12:51:57.644827'}]
+RTG CONFIG = {'config_type': 'RTG', 'rtg_username': 'ERLDC', 'rtg_password': '***', 'rtg_token_url': 'https://rtgapi.grid-india.in/sendData/api-token-auth/', 'rtg_schedule_url': 'https://rtgapi.grid-india.in/sendData/wbes-data/', 'rtg_scada_url': 'https://rtgapi.grid-india.in/sendData/scada-data/', 'rtg_cap_on_bar_url': 'https://rtgapi.grid-india.in/sendData/cap-on-bar/'}
+RTG DASHBOARD CONFIG = {'rtg_data_url': 'https://rtgapi.grid-india.in/sendData/combined-data-view/?in_region_name=ERLDC&in_fuel_type=THERMAL', 'refresh_interval_min': 15, 'config_type': 'RTG_DASHBOARD'}
+RTG DASHBOARD FETCH URL = https://rtgapi.grid-india.in/sendData/combined-data-view/?in_date=2026-08-13&in_region_name=ERLDC&in_fuel_type=THERMAL
+RTG RESPONSE STATUS = 200
+{
+  "plant_id": "RTG_ER00001",
+  "plant_name": "BARAUNI TPS",
+  "fuel_type": "THERMAL",
+  "region_name": "ERLDC",
+  "state_name": "Bihar",
+  "utility_type": "State",
+  "wbes_acronym": "Not Available",
+  "owner_name": "NTPC",
+  "installed_capacity": 500.0,
+  "effective_capacity": 500.0,
+  "scada_point": "NA",
+  "actual_gen": 461.0,
+  "actual_gen_derived": 0,
+  "schedule": 451.0,
+  "schedule_gen_derived": 0,
+  "dc": 451.0,
+  "dc_derived": 0,
+  "qsold": 0.0,
+  "planned_outage": 0.0,
+  "forced_outage": 0.0,
+  "rsd": 0.0,
+  "fuel_shortage": 0.0,
+  "commercial_issues": 0.0,
+  "partial_outage": 0.0,
+  "variable_cost": 0.0,
+  "reason_partial_outage": "--",
+  "reason_nofull_generation": "--",
+  "actual_last_updated": "2026-08-13 11:33",
+  "schedule_last_updated": "2026-08-13 11:35",
+  "percentage_of_dc": 100,
+  "cap_on_bar": 500.0,
+  "unreq_margin": 0.0,
+  "proxy_unreq_margin": 0
+}
+CHANDAN RTG RECORD COUNT = 43
+API HIT GET /api/crew/notifications/ -> 200 (4.8 ms)
+INFO:     127.0.0.1:61723 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (8.5 ms)
+INFO:     127.0.0.1:61722 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (5.2 ms)
+INFO:     127.0.0.1:61728 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (9.4 ms)
+INFO:     127.0.0.1:61727 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (4.6 ms)
+INFO:     127.0.0.1:61734 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (9.2 ms)
+INFO:     127.0.0.1:61733 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (4.5 ms)
+INFO:     127.0.0.1:61740 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (8.6 ms)
+INFO:     127.0.0.1:61739 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (4.3 ms)
+INFO:     127.0.0.1:61750 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (8.5 ms)
+INFO:     127.0.0.1:61749 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (4.2 ms)
+INFO:     127.0.0.1:61780 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (8.9 ms)
+INFO:     127.0.0.1:61779 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (5.5 ms)
+INFO:     127.0.0.1:61795 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (9.0 ms)
+INFO:     127.0.0.1:61794 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (6.9 ms)
+INFO:     127.0.0.1:61800 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (8.9 ms)
+INFO:     127.0.0.1:61801 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (5.0 ms)
+INFO:     127.0.0.1:61807 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (9.6 ms)
+INFO:     127.0.0.1:61806 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (4.8 ms)
+INFO:     127.0.0.1:61816 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (8.9 ms)
+INFO:     127.0.0.1:61815 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (5.1 ms)
+INFO:     127.0.0.1:61843 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (9.5 ms)
+INFO:     127.0.0.1:61842 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (5.7 ms)
+INFO:     127.0.0.1:61859 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (9.1 ms)
+INFO:     127.0.0.1:61858 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (5.7 ms)
+INFO:     127.0.0.1:61866 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (8.9 ms)
+INFO:     127.0.0.1:61867 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (5.8 ms)
+INFO:     127.0.0.1:61875 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (10.0 ms)
+INFO:     127.0.0.1:61874 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (5.6 ms)
+INFO:     127.0.0.1:61881 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (9.0 ms)
+INFO:     127.0.0.1:61880 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+PIPELINE CONFIGS = [{'config_type': 'SCHEDULE', 'schedule_url': 'https://gateway.grid-india.in/POSOCO/reports/1.0/WebAccessAPI/GetUtilityExternalSharedData', 'schedule_api_key': '6dc32d47-f46a-45c9-afaf-c6ce73c4ca71', 'schedule_username': 'erldc_internal_prod', 'schedule_password': 'ErldcPr0d@052024', 'rtg_post_url': 'https://rtgapi.grid-india.in/sendData/wbes-data/saveupdatemulti/', 'enabled': True, 'interval_minutes': 5}, {'config_type': 'OUTAGE', 'outage_fetch_url': 'http://10.3.230.130:8001/Codebook/getCurrentTrElementOutagesData', 'rtg_outage_push_url': 'https://rtgapi.grid-india.in/sendData/outage-data/save/', 'enabled': True, 'interval_minutes': 15, 'generation_outage_history_url': 'https://crms.erldc.in/Codebook/GenOutagesHistoryData'}, {'config_type': 'RTG', 'rtg_username': 'ERLDC', 'rtg_password': 'Er1dc@#$700033', 'rtg_token_url': 'https://rtgapi.grid-india.in/sendData/api-token-auth/', 'rtg_schedule_url': 'https://rtgapi.grid-india.in/sendData/wbes-data/', 'rtg_scada_url': 'https://rtgapi.grid-india.in/sendData/scada-data/', 'rtg_cap_on_bar_url': 'https://rtgapi.grid-india.in/sendData/cap-on-bar/'}, {'rtg_data_url': 'https://rtgapi.grid-india.in/sendData/combined-data-view/?in_region_name=ERLDC&in_fuel_type=THERMAL', 'refresh_interval_min': 15, 'config_type': 'RTG_DASHBOARD'}, {'config_type': 'PSP', 'psp_login_url': 'https://report.erldc.in/POSOCO/Account/Login', 'psp_data_url': 'https://report.erldc.in/POSOCO/PSP/GetPSPData', 'psp_username': 'erldc', 'psp_password': 'erldc1', 'curve_er_column': 'T', 'curve_file_dir': '\\\\10.3.95.200\\HTTP-Access\\Control_Room_Report\\curve', 'curve_off_peak_hour': '03:00', 'curve_peak_hour_by_month': '1:19:00,2:19:00,3:20:00,4:20:00,5:20:00,6:20:00,7:20:00,8:20:00,9:20:00,10:19:00,11:19:00,12:19:00', 'curve_sheet_name': '30SEC', 'curve_state_columns': 'V:AA', 'curve_time_column': 'C', 'loadshed_api_url': 'https://report.erldc.in/posoco_api/api/StgHourlyStateData/GetStgHourlyStateDataNRByMonthNLDC/{date_from}/{date_to}/1', 'outage_api_url': 'https://report.erldc.in/POSOCO_API/api/Outage/GetQueryNpmcReportData/{date}', 'wbes_api_key': '6dc32d47-f46a-45c9-afaf-c6ce73c4ca71', 'wbes_password': 'ErldcPr0d@052024', 'wbes_url': 'https://gateway.grid-india.in/POSOCO/reports/1.0/WebAccessAPI/GetUtilityExternalSharedData', 'wbes_username': 'erldc_internal_prod', 'india_15_min_demand_api_url': 'https://reporting.nldc.in/Reporting_API/API/PSP/GetTimeSeriesDataByDate//{date_from}', 'nldc_demand_api_url': 'https://reporting.nldc.in/Reporting_API/API/NLDCReport/GetMaxDemandMetTimeDataByDate/{date_text}', 'all_state_demand_api_url': 'https://reporting.nldc.in/Reporting_API/API/NLDCReport/GetPowerSupplyPositionStatesDataByDate/{date_text}'}, {'config_type': 'DSO_TTC_ATC', 'limits': {'BIHAR': {'ttc': 8445.0, 'atc': 8276.0}, 'JHARKHAND': {'ttc': 2090.0, 'atc': 2044.0}, 'DVC': {'ttc': -3517.0, 'atc': -3466.0}, 'ODISHA': {'ttc': 4564.0, 'atc': 4473.0}, 'WB': {'ttc': 8437.0, 'atc': 8157.0}, 'SIKKIM': {'ttc': 165.0, 'atc': 162.0}}, 'updated_at': '2026-08-03T12:51:57.644827'}]
+RTG CONFIG = {'config_type': 'RTG', 'rtg_username': 'ERLDC', 'rtg_password': '***', 'rtg_token_url': 'https://rtgapi.grid-india.in/sendData/api-token-auth/', 'rtg_schedule_url': 'https://rtgapi.grid-india.in/sendData/wbes-data/', 'rtg_scada_url': 'https://rtgapi.grid-india.in/sendData/scada-data/', 'rtg_cap_on_bar_url': 'https://rtgapi.grid-india.in/sendData/cap-on-bar/'}
+RTG DASHBOARD CONFIG = {'rtg_data_url': 'https://rtgapi.grid-india.in/sendData/combined-data-view/?in_region_name=ERLDC&in_fuel_type=THERMAL', 'refresh_interval_min': 15, 'config_type': 'RTG_DASHBOARD'}
+RTG DASHBOARD FETCH URL = https://rtgapi.grid-india.in/sendData/combined-data-view/?in_date=2026-08-13&in_region_name=ERLDC&in_fuel_type=THERMAL
+RTG RESPONSE STATUS = 200
+{
+  "plant_id": "RTG_ER00001",
+  "plant_name": "BARAUNI TPS",
+  "fuel_type": "THERMAL",
+  "region_name": "ERLDC",
+  "state_name": "Bihar",
+  "utility_type": "State",
+  "wbes_acronym": "Not Available",
+  "owner_name": "NTPC",
+  "installed_capacity": 500.0,
+  "effective_capacity": 500.0,
+  "scada_point": "NA",
+  "actual_gen": 460.0,
+  "actual_gen_derived": 0,
+  "schedule": 451.0,
+  "schedule_gen_derived": 0,
+  "dc": 451.0,
+  "dc_derived": 0,
+  "qsold": 0.0,
+  "planned_outage": 0.0,
+  "forced_outage": 0.0,
+  "rsd": 0.0,
+  "fuel_shortage": 0.0,
+  "commercial_issues": 0.0,
+  "partial_outage": 0.0,
+  "variable_cost": 0.0,
+  "reason_partial_outage": "--",
+  "reason_nofull_generation": "--",
+  "actual_last_updated": "2026-08-13 11:48",
+  "schedule_last_updated": "2026-08-13 11:50",
+  "percentage_of_dc": 100,
+  "cap_on_bar": 500.0,
+  "unreq_margin": 0.0,
+  "proxy_unreq_margin": 0.0
+}
+CHANDAN RTG RECORD COUNT = 43
+API HIT GET /api/crew/notifications/ -> 200 (5.0 ms)
+INFO:     127.0.0.1:61950 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (9.4 ms)
+INFO:     127.0.0.1:61949 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (5.1 ms)
+INFO:     127.0.0.1:61960 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (11.3 ms)
+INFO:     127.0.0.1:61959 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (4.8 ms)
+INFO:     127.0.0.1:61966 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (9.6 ms)
+INFO:     127.0.0.1:61965 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (5.1 ms)
+INFO:     127.0.0.1:61971 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (8.7 ms)
+INFO:     127.0.0.1:61970 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (4.8 ms)
+INFO:     127.0.0.1:61986 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (9.5 ms)
+INFO:     127.0.0.1:61985 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (4.5 ms)
+INFO:     127.0.0.1:62010 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (9.1 ms)
+INFO:     127.0.0.1:62009 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (5.3 ms)
+INFO:     127.0.0.1:62017 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (9.4 ms)
+INFO:     127.0.0.1:62016 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (4.5 ms)
+INFO:     127.0.0.1:62020 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (8.9 ms)
+INFO:     127.0.0.1:62019 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (5.3 ms)
+INFO:     127.0.0.1:62027 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (9.8 ms)
+INFO:     127.0.0.1:62026 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (4.5 ms)
+INFO:     127.0.0.1:62032 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (3.0 ms)
+INFO:     127.0.0.1:62032 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/auth/me -> 200 (4.0 ms)
+INFO:     127.0.0.1:62032 - "GET /api/crew/auth/me HTTP/1.1" 200 OK
+RTG LIVE FETCH URL = https://rtgapi.grid-india.in/sendData/combined-data-view/?in_date=2026-08-13&in_region_name=ERLDC&in_fuel_type=THERMAL
+API HIT GET /api/rtg-dashboard/live -> 200 (2491.8 ms)
+INFO:     127.0.0.1:62034 - "GET /api/rtg-dashboard/live HTTP/1.1" 200 OK
+RTG snapshot trend API date_str='2026-08-12'
+fetch_snapshot_trend input date_str='2026-08-12'
+API HIT GET /api/rtg-dashboard/trend/today -> 200 (2502.0 ms)
+INFO:     127.0.0.1:62035 - "GET /api/rtg-dashboard/trend/today HTTP/1.1" 200 OK
+API HIT GET /api/rtg-dashboard/trend/snapshot?date_str=2026-08-12 -> 200 (3093.0 ms)
+INFO:     127.0.0.1:62036 - "GET /api/rtg-dashboard/trend/snapshot?date_str=2026-08-12 HTTP/1.1" 200 OK
+API HIT GET /api/pipeline/status -> 200 (621.6 ms)
+INFO:     127.0.0.1:62037 - "GET /api/pipeline/status HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (6475.1 ms)
+INFO:     127.0.0.1:62032 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/rtg-dashboard/current-crms-outages?refresh=false -> 200 (885.5 ms)
+INFO:     127.0.0.1:62034 - "GET /api/rtg-dashboard/current-crms-outages?refresh=false HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (6479.1 ms)
+INFO:     127.0.0.1:62033 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/rtg-dashboard/current-crms-transmission-outages?refresh=false -> 200 (2763.7 ms)
+INFO:     127.0.0.1:62037 - "GET /api/rtg-dashboard/current-crms-transmission-outages?refresh=false HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (4.7 ms)
+INFO:     127.0.0.1:62117 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (8.5 ms)
+INFO:     127.0.0.1:62116 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/frequency/schedule-data/generators -> 200 (10.8 ms)
+INFO:     127.0.0.1:62118 - "GET /api/frequency/schedule-data/generators HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (17.3 ms)
+INFO:     127.0.0.1:62116 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (18.8 ms)
+INFO:     127.0.0.1:62117 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/frequency/schedule-data?start_date=2026-08-12&end_date=2026-08-12&generators=BARH&kind=generator&frequency=15 -> 200 (2334.9 ms)
+INFO:     127.0.0.1:62122 - "GET /api/frequency/schedule-data?start_date=2026-08-12&end_date=2026-08-12&generators=BARH&kind=generator&frequency=15 HTTP/1.1" 200 OK
+API HIT GET /api/frequency/schedule-data/actual?start_date=2026-08-12&end_date=2026-08-12&station_names=BARH+ST-1+MW&frequency=1&kind=generator -> 200 (42.6 ms)
+INFO:     127.0.0.1:62122 - "GET /api/frequency/schedule-data/actual?start_date=2026-08-12&end_date=2026-08-12&station_names=BARH+ST-1+MW&frequency=1&kind=generator HTTP/1.1" 200 OK
+API HIT GET /api/frequency/schedule-data?start_date=2026-08-11&end_date=2026-08-12&generators=BARH&kind=generator&frequency=15 -> 200 (1447.0 ms)
+INFO:     127.0.0.1:62146 - "GET /api/frequency/schedule-data?start_date=2026-08-11&end_date=2026-08-12&generators=BARH&kind=generator&frequency=15 HTTP/1.1" 200 OK
+API HIT GET /api/frequency/schedule-data/actual?start_date=2026-08-11&end_date=2026-08-12&station_names=BARH+ST-1+MW&frequency=1&kind=generator -> 200 (69.0 ms)
+INFO:     127.0.0.1:62146 - "GET /api/frequency/schedule-data/actual?start_date=2026-08-11&end_date=2026-08-12&station_names=BARH+ST-1+MW&frequency=1&kind=generator HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (4.5 ms)
+INFO:     127.0.0.1:62181 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (8.2 ms)
+INFO:     127.0.0.1:62180 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (5.8 ms)
+INFO:     127.0.0.1:62180 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (8.4 ms)
+INFO:     127.0.0.1:62181 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (5.1 ms)
+INFO:     127.0.0.1:62189 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (9.8 ms)
+INFO:     127.0.0.1:62188 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (4.3 ms)
+INFO:     127.0.0.1:62189 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (7.9 ms)
+INFO:     127.0.0.1:62188 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (4.8 ms)
+INFO:     127.0.0.1:62197 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (8.8 ms)
+INFO:     127.0.0.1:62196 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (5.1 ms)
+INFO:     127.0.0.1:62196 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (7.8 ms)
+INFO:     127.0.0.1:62197 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (4.5 ms)
+INFO:     127.0.0.1:62203 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (8.4 ms)
+INFO:     127.0.0.1:62202 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (4.4 ms)
+INFO:     127.0.0.1:62202 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (3.4 ms)
+INFO:     127.0.0.1:62202 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (5.4 ms)
+INFO:     127.0.0.1:62214 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (10.2 ms)
+INFO:     127.0.0.1:62213 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (5.7 ms)
+INFO:     127.0.0.1:62214 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (10.8 ms)
+INFO:     127.0.0.1:62213 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+PIPELINE CONFIGS = [{'config_type': 'SCHEDULE', 'schedule_url': 'https://gateway.grid-india.in/POSOCO/reports/1.0/WebAccessAPI/GetUtilityExternalSharedData', 'schedule_api_key': '6dc32d47-f46a-45c9-afaf-c6ce73c4ca71', 'schedule_username': 'erldc_internal_prod', 'schedule_password': 'ErldcPr0d@052024', 'rtg_post_url': 'https://rtgapi.grid-india.in/sendData/wbes-data/saveupdatemulti/', 'enabled': True, 'interval_minutes': 5}, {'config_type': 'OUTAGE', 'outage_fetch_url': 'http://10.3.230.130:8001/Codebook/getCurrentTrElementOutagesData', 'rtg_outage_push_url': 'https://rtgapi.grid-india.in/sendData/outage-data/save/', 'enabled': True, 'interval_minutes': 15, 'generation_outage_history_url': 'https://crms.erldc.in/Codebook/GenOutagesHistoryData'}, {'config_type': 'RTG', 'rtg_username': 'ERLDC', 'rtg_password': 'Er1dc@#$700033', 'rtg_token_url': 'https://rtgapi.grid-india.in/sendData/api-token-auth/', 'rtg_schedule_url': 'https://rtgapi.grid-india.in/sendData/wbes-data/', 'rtg_scada_url': 'https://rtgapi.grid-india.in/sendData/scada-data/', 'rtg_cap_on_bar_url': 'https://rtgapi.grid-india.in/sendData/cap-on-bar/'}, {'rtg_data_url': 'https://rtgapi.grid-india.in/sendData/combined-data-view/?in_region_name=ERLDC&in_fuel_type=THERMAL', 'refresh_interval_min': 15, 'config_type': 'RTG_DASHBOARD'}, {'config_type': 'PSP', 'psp_login_url': 'https://report.erldc.in/POSOCO/Account/Login', 'psp_data_url': 'https://report.erldc.in/POSOCO/PSP/GetPSPData', 'psp_username': 'erldc', 'psp_password': 'erldc1', 'curve_er_column': 'T', 'curve_file_dir': '\\\\10.3.95.200\\HTTP-Access\\Control_Room_Report\\curve', 'curve_off_peak_hour': '03:00', 'curve_peak_hour_by_month': '1:19:00,2:19:00,3:20:00,4:20:00,5:20:00,6:20:00,7:20:00,8:20:00,9:20:00,10:19:00,11:19:00,12:19:00', 'curve_sheet_name': '30SEC', 'curve_state_columns': 'V:AA', 'curve_time_column': 'C', 'loadshed_api_url': 'https://report.erldc.in/posoco_api/api/StgHourlyStateData/GetStgHourlyStateDataNRByMonthNLDC/{date_from}/{date_to}/1', 'outage_api_url': 'https://report.erldc.in/POSOCO_API/api/Outage/GetQueryNpmcReportData/{date}', 'wbes_api_key': '6dc32d47-f46a-45c9-afaf-c6ce73c4ca71', 'wbes_password': 'ErldcPr0d@052024', 'wbes_url': 'https://gateway.grid-india.in/POSOCO/reports/1.0/WebAccessAPI/GetUtilityExternalSharedData', 'wbes_username': 'erldc_internal_prod', 'india_15_min_demand_api_url': 'https://reporting.nldc.in/Reporting_API/API/PSP/GetTimeSeriesDataByDate//{date_from}', 'nldc_demand_api_url': 'https://reporting.nldc.in/Reporting_API/API/NLDCReport/GetMaxDemandMetTimeDataByDate/{date_text}', 'all_state_demand_api_url': 'https://reporting.nldc.in/Reporting_API/API/NLDCReport/GetPowerSupplyPositionStatesDataByDate/{date_text}'}, {'config_type': 'DSO_TTC_ATC', 'limits': {'BIHAR': {'ttc': 8445.0, 'atc': 8276.0}, 'JHARKHAND': {'ttc': 2090.0, 'atc': 2044.0}, 'DVC': {'ttc': -3517.0, 'atc': -3466.0}, 'ODISHA': {'ttc': 4564.0, 'atc': 4473.0}, 'WB': {'ttc': 8437.0, 'atc': 8157.0}, 'SIKKIM': {'ttc': 165.0, 'atc': 162.0}}, 'updated_at': '2026-08-03T12:51:57.644827'}]
+RTG CONFIG = {'config_type': 'RTG', 'rtg_username': 'ERLDC', 'rtg_password': '***', 'rtg_token_url': 'https://rtgapi.grid-india.in/sendData/api-token-auth/', 'rtg_schedule_url': 'https://rtgapi.grid-india.in/sendData/wbes-data/', 'rtg_scada_url': 'https://rtgapi.grid-india.in/sendData/scada-data/', 'rtg_cap_on_bar_url': 'https://rtgapi.grid-india.in/sendData/cap-on-bar/'}
+RTG DASHBOARD CONFIG = {'rtg_data_url': 'https://rtgapi.grid-india.in/sendData/combined-data-view/?in_region_name=ERLDC&in_fuel_type=THERMAL', 'refresh_interval_min': 15, 'config_type': 'RTG_DASHBOARD'}
+RTG DASHBOARD FETCH URL = https://rtgapi.grid-india.in/sendData/combined-data-view/?in_date=2026-08-13&in_region_name=ERLDC&in_fuel_type=THERMAL
+RTG RESPONSE STATUS = 200
+{
+  "plant_id": "RTG_ER00001",
+  "plant_name": "BARAUNI TPS",
+  "fuel_type": "THERMAL",
+  "region_name": "ERLDC",
+  "state_name": "Bihar",
+  "utility_type": "State",
+  "wbes_acronym": "Not Available",
+  "owner_name": "NTPC",
+  "installed_capacity": 500.0,
+  "effective_capacity": 500.0,
+  "scada_point": "NA",
+  "actual_gen": 439.0,
+  "actual_gen_derived": 0,
+  "schedule": 451.0,
+  "schedule_gen_derived": 0,
+  "dc": 451.0,
+  "dc_derived": 0,
+  "qsold": 0.0,
+  "planned_outage": 0.0,
+  "forced_outage": 0.0,
+  "rsd": 0.0,
+  "fuel_shortage": 0.0,
+  "commercial_issues": 0.0,
+  "partial_outage": 0.0,
+  "variable_cost": 0.0,
+  "reason_partial_outage": "--",
+  "reason_nofull_generation": "--",
+  "actual_last_updated": "2026-08-13 12:03",
+  "schedule_last_updated": "2026-08-13 12:05",
+  "percentage_of_dc": 97.34,
+  "cap_on_bar": 500.0,
+  "unreq_margin": 0.0,
+  "proxy_unreq_margin": 21.0
+}
+CHANDAN RTG RECORD COUNT = 43
+API HIT GET /api/crew/replacement/notifications -> 200 (5.6 ms)
+INFO:     127.0.0.1:62288 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (9.0 ms)
+INFO:     127.0.0.1:62289 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (5.0 ms)
+INFO:     127.0.0.1:62300 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (9.6 ms)
+INFO:     127.0.0.1:62299 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (5.0 ms)
+INFO:     127.0.0.1:62305 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (9.0 ms)
+INFO:     127.0.0.1:62304 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (4.8 ms)
+INFO:     127.0.0.1:62311 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (7.6 ms)
+INFO:     127.0.0.1:62310 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (4.9 ms)
+INFO:     127.0.0.1:62317 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (8.9 ms)
+INFO:     127.0.0.1:62316 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (4.6 ms)
+INFO:     127.0.0.1:62340 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (9.2 ms)
+INFO:     127.0.0.1:62339 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (4.4 ms)
+INFO:     127.0.0.1:62346 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (8.4 ms)
+INFO:     127.0.0.1:62345 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (5.0 ms)
+INFO:     127.0.0.1:62350 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (9.4 ms)
+INFO:     127.0.0.1:62349 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (4.3 ms)
+INFO:     127.0.0.1:62357 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (8.1 ms)
+INFO:     127.0.0.1:62356 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (4.8 ms)
+INFO:     127.0.0.1:62363 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (9.1 ms)
+INFO:     127.0.0.1:62362 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (5.2 ms)
+INFO:     127.0.0.1:62383 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (8.9 ms)
+INFO:     127.0.0.1:62382 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (5.5 ms)
+INFO:     127.0.0.1:62385 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (3.4 ms)
+INFO:     127.0.0.1:62386 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (4.4 ms)
+INFO:     127.0.0.1:62385 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (8.1 ms)
+INFO:     127.0.0.1:62386 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/frequency/schedule-data?start_date=2026-08-01&end_date=2026-08-11&generators=BARH&kind=generator&frequency=15 -> 200 (57401.3 ms)
+INFO:     127.0.0.1:62390 - "GET /api/frequency/schedule-data?start_date=2026-08-01&end_date=2026-08-11&generators=BARH&kind=generator&frequency=15 HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (5.8 ms)
+INFO:     127.0.0.1:62460 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (10.4 ms)
+INFO:     127.0.0.1:62436 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (13.2 ms)
+INFO:     127.0.0.1:62435 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (14.9 ms)
+INFO:     127.0.0.1:62459 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/frequency/schedule-data/actual?start_date=2026-08-01&end_date=2026-08-11&station_names=BARH+ST-1+MW&frequency=1&kind=generator -> 200 (318.8 ms)
+INFO:     127.0.0.1:62459 - "GET /api/frequency/schedule-data/actual?start_date=2026-08-01&end_date=2026-08-11&station_names=BARH+ST-1+MW&frequency=1&kind=generator HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (5.9 ms)
+INFO:     127.0.0.1:62498 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (9.5 ms)
+INFO:     127.0.0.1:62497 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (4.6 ms)
+INFO:     127.0.0.1:62500 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (8.1 ms)
+INFO:     127.0.0.1:62499 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (5.1 ms)
+INFO:     127.0.0.1:62509 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (9.8 ms)
+INFO:     127.0.0.1:62508 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+PIPELINE CONFIGS = [{'config_type': 'SCHEDULE', 'schedule_url': 'https://gateway.grid-india.in/POSOCO/reports/1.0/WebAccessAPI/GetUtilityExternalSharedData', 'schedule_api_key': '6dc32d47-f46a-45c9-afaf-c6ce73c4ca71', 'schedule_username': 'erldc_internal_prod', 'schedule_password': 'ErldcPr0d@052024', 'rtg_post_url': 'https://rtgapi.grid-india.in/sendData/wbes-data/saveupdatemulti/', 'enabled': True, 'interval_minutes': 5}, {'config_type': 'OUTAGE', 'outage_fetch_url': 'http://10.3.230.130:8001/Codebook/getCurrentTrElementOutagesData', 'rtg_outage_push_url': 'https://rtgapi.grid-india.in/sendData/outage-data/save/', 'enabled': True, 'interval_minutes': 15, 'generation_outage_history_url': 'https://crms.erldc.in/Codebook/GenOutagesHistoryData'}, {'config_type': 'RTG', 'rtg_username': 'ERLDC', 'rtg_password': 'Er1dc@#$700033', 'rtg_token_url': 'https://rtgapi.grid-india.in/sendData/api-token-auth/', 'rtg_schedule_url': 'https://rtgapi.grid-india.in/sendData/wbes-data/', 'rtg_scada_url': 'https://rtgapi.grid-india.in/sendData/scada-data/', 'rtg_cap_on_bar_url': 'https://rtgapi.grid-india.in/sendData/cap-on-bar/'}, {'rtg_data_url': 'https://rtgapi.grid-india.in/sendData/combined-data-view/?in_region_name=ERLDC&in_fuel_type=THERMAL', 'refresh_interval_min': 15, 'config_type': 'RTG_DASHBOARD'}, {'config_type': 'PSP', 'psp_login_url': 'https://report.erldc.in/POSOCO/Account/Login', 'psp_data_url': 'https://report.erldc.in/POSOCO/PSP/GetPSPData', 'psp_username': 'erldc', 'psp_password': 'erldc1', 'curve_er_column': 'T', 'curve_file_dir': '\\\\10.3.95.200\\HTTP-Access\\Control_Room_Report\\curve', 'curve_off_peak_hour': '03:00', 'curve_peak_hour_by_month': '1:19:00,2:19:00,3:20:00,4:20:00,5:20:00,6:20:00,7:20:00,8:20:00,9:20:00,10:19:00,11:19:00,12:19:00', 'curve_sheet_name': '30SEC', 'curve_state_columns': 'V:AA', 'curve_time_column': 'C', 'loadshed_api_url': 'https://report.erldc.in/posoco_api/api/StgHourlyStateData/GetStgHourlyStateDataNRByMonthNLDC/{date_from}/{date_to}/1', 'outage_api_url': 'https://report.erldc.in/POSOCO_API/api/Outage/GetQueryNpmcReportData/{date}', 'wbes_api_key': '6dc32d47-f46a-45c9-afaf-c6ce73c4ca71', 'wbes_password': 'ErldcPr0d@052024', 'wbes_url': 'https://gateway.grid-india.in/POSOCO/reports/1.0/WebAccessAPI/GetUtilityExternalSharedData', 'wbes_username': 'erldc_internal_prod', 'india_15_min_demand_api_url': 'https://reporting.nldc.in/Reporting_API/API/PSP/GetTimeSeriesDataByDate//{date_from}', 'nldc_demand_api_url': 'https://reporting.nldc.in/Reporting_API/API/NLDCReport/GetMaxDemandMetTimeDataByDate/{date_text}', 'all_state_demand_api_url': 'https://reporting.nldc.in/Reporting_API/API/NLDCReport/GetPowerSupplyPositionStatesDataByDate/{date_text}'}, {'config_type': 'DSO_TTC_ATC', 'limits': {'BIHAR': {'ttc': 8445.0, 'atc': 8276.0}, 'JHARKHAND': {'ttc': 2090.0, 'atc': 2044.0}, 'DVC': {'ttc': -3517.0, 'atc': -3466.0}, 'ODISHA': {'ttc': 4564.0, 'atc': 4473.0}, 'WB': {'ttc': 8437.0, 'atc': 8157.0}, 'SIKKIM': {'ttc': 165.0, 'atc': 162.0}}, 'updated_at': '2026-08-03T12:51:57.644827'}]
+RTG CONFIG = {'config_type': 'RTG', 'rtg_username': 'ERLDC', 'rtg_password': '***', 'rtg_token_url': 'https://rtgapi.grid-india.in/sendData/api-token-auth/', 'rtg_schedule_url': 'https://rtgapi.grid-india.in/sendData/wbes-data/', 'rtg_scada_url': 'https://rtgapi.grid-india.in/sendData/scada-data/', 'rtg_cap_on_bar_url': 'https://rtgapi.grid-india.in/sendData/cap-on-bar/'}
+RTG DASHBOARD CONFIG = {'rtg_data_url': 'https://rtgapi.grid-india.in/sendData/combined-data-view/?in_region_name=ERLDC&in_fuel_type=THERMAL', 'refresh_interval_min': 15, 'config_type': 'RTG_DASHBOARD'}
+RTG DASHBOARD FETCH URL = https://rtgapi.grid-india.in/sendData/combined-data-view/?in_date=2026-08-13&in_region_name=ERLDC&in_fuel_type=THERMAL
+RTG RESPONSE STATUS = 200
+{
+  "plant_id": "RTG_ER00001",
+  "plant_name": "BARAUNI TPS",
+  "fuel_type": "THERMAL",
+  "region_name": "ERLDC",
+  "state_name": "Bihar",
+  "utility_type": "State",
+  "wbes_acronym": "Not Available",
+  "owner_name": "NTPC",
+  "installed_capacity": 500.0,
+  "effective_capacity": 500.0,
+  "scada_point": "NA",
+  "actual_gen": 390.0,
+  "actual_gen_derived": 0,
+  "schedule": 451.0,
+  "schedule_gen_derived": 0,
+  "dc": 451.0,
+  "dc_derived": 0,
+  "qsold": 0.0,
+  "planned_outage": 0.0,
+  "forced_outage": 0.0,
+  "rsd": 0.0,
+  "fuel_shortage": 0.0,
+  "commercial_issues": 0.0,
+  "partial_outage": 0.0,
+  "variable_cost": 0.0,
+  "reason_partial_outage": "--",
+  "reason_nofull_generation": "--",
+  "actual_last_updated": "2026-08-13 12:18",
+  "schedule_last_updated": "2026-08-13 12:20",
+  "percentage_of_dc": 86.47,
+  "cap_on_bar": 500.0,
+  "unreq_margin": 0.0,
+  "proxy_unreq_margin": 70.0
+}
+CHANDAN RTG RECORD COUNT = 43
+API HIT GET /api/crew/notifications/ -> 200 (4.9 ms)
+INFO:     127.0.0.1:62575 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (8.7 ms)
+INFO:     127.0.0.1:62574 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (5.1 ms)
+INFO:     127.0.0.1:62586 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (8.8 ms)
+INFO:     127.0.0.1:62585 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (3.6 ms)
+INFO:     127.0.0.1:62590 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (8.9 ms)
+INFO:     127.0.0.1:62589 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (4.7 ms)
+INFO:     127.0.0.1:62599 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (7.8 ms)
+INFO:     127.0.0.1:62598 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (5.8 ms)
+INFO:     127.0.0.1:62603 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (10.1 ms)
+INFO:     127.0.0.1:62602 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (4.6 ms)
+INFO:     127.0.0.1:62615 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (8.7 ms)
+INFO:     127.0.0.1:62614 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (5.0 ms)
+INFO:     127.0.0.1:62618 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (8.4 ms)
+INFO:     127.0.0.1:62617 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (4.8 ms)
+INFO:     127.0.0.1:62628 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (9.1 ms)
+INFO:     127.0.0.1:62627 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK

@@ -17,6 +17,7 @@ export const ROUTE_PAGE_KEYS = {
   "/psp-admin": "psp_admin",
   "/admin/user-access": "user_access",
   "/admin/mail-settings": "mail_settings",
+  "/admin/audit-trail": "audit_trail",
   "/crew/dashboard": "crew_dashboard",
   "/crew/calendar": "crew_calendar",
   "/crew/roster": "crew_roster",
