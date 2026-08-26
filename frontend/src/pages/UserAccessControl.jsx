@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import axios from "axios";
 import { Alert, Autocomplete, Box, Button, Checkbox, Chip, CircularProgress, FormControlLabel, InputAdornment, Paper, Stack, TextField, Typography } from "@mui/material";
-import { Copy, Save, Search, ShieldCheck, Users } from "lucide-react";
+import { Copy, Database, Save, Search, ShieldCheck, Users } from "lucide-react";
 import AppShell from "../components/layout/AppShell";
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL || "/api";
@@ -15,10 +15,12 @@ export default function UserAccessControl() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
+  const [errorMessage, setErrorMessage] = useState("");
   const [copySourceId, setCopySourceId] = useState("");
   const [copiedFrom, setCopiedFrom] = useState(null);
   const [profileFields, setProfileFields] = useState({ availableFields: [], enabledFields: [] });
   const [savingProfileFields, setSavingProfileFields] = useState(false);
+  const [grantingScheduleData, setGrantingScheduleData] = useState(false);
 
   const profileFieldLabels = {
     name: "Name", nameHindi: "Name (Hindi)", designation: "Designation",
@@ -72,7 +74,8 @@ export default function UserAccessControl() {
       data.pages.map((page) => {
         const sourceAccess = copySource.permissions?.[page.key] || {};
         const write = Boolean(sourceAccess.write);
-        return [page.key, { view: Boolean(sourceAccess.view) || write, write }];
+        const approve = page.key === "crew_threads" && Boolean(sourceAccess.approve);
+        return [page.key, { view: Boolean(sourceAccess.view) || write || approve, write, ...(page.key === "crew_threads" ? { approve } : {}) }];
       }),
     );
     setDraft(permissions);
@@ -86,7 +89,9 @@ export default function UserAccessControl() {
       const next = { ...(current[key] || { view: false, write: false }) };
       next[field] = !next[field];
       if (field === "write" && next.write) next.view = true;
+      if (field === "approve" && next.approve) next.view = true;
       if (field === "view" && !next.view) next.write = false;
+      if (field === "view" && !next.view) next.approve = false;
       return { ...current, [key]: next };
     });
   };
@@ -121,6 +126,45 @@ export default function UserAccessControl() {
     }
   };
 
+  const grantScheduleDataToAll = async () => {
+    if (!window.confirm("Grant Schedule Data and RTG Data view/download access to every active employee? Existing permissions will remain unchanged.")) return;
+    setGrantingScheduleData(true);
+    setMessage("");
+    setErrorMessage("");
+    try {
+      const { data: result } = await axios.put(
+        `${BASE_URL}/crew/auth/admin/access/page/schedule_data/all`,
+        { view: true },
+        { headers: authHeaders() },
+      );
+      setData((current) => ({
+        ...current,
+        users: current.users.map((item) => ({
+          ...item,
+          permissions: {
+            ...(item.permissions || {}),
+            schedule_data: {
+              view: true,
+              write: Boolean(item.permissions?.schedule_data?.write) || item.userId === "50041",
+            },
+          },
+        })),
+      }));
+      setDraft((current) => ({
+        ...current,
+        schedule_data: {
+          view: true,
+          write: Boolean(current.schedule_data?.write) || selectedId === "50041",
+        },
+      }));
+      setMessage(`Schedule Data access granted to ${result.updatedUsers || 0} active users.`);
+    } catch (error) {
+      setErrorMessage(error.response?.data?.detail || "Schedule Data access could not be granted.");
+    } finally {
+      setGrantingScheduleData(false);
+    }
+  };
+
   return (
     <AppShell>
       <Box className="ui-kit-page" sx={{ display: "grid", gap: 2.5 }}>
@@ -130,12 +174,30 @@ export default function UserAccessControl() {
           </Box>
           <Box sx={{ flex: 1 }}>
             <Typography variant="h5" sx={{ fontWeight: 800 }}>User Access Control</Typography>
-            <Typography sx={{ color: "#64748B", fontSize: 13 }}>Assign page-level View and Write permissions, or copy one user's rights into another user's draft to move faster.</Typography>
+            <Typography sx={{ color: "#64748B", fontSize: 13 }}>Assign page-level access. Crew Notices has separate Read, Upload and Approve document rights.</Typography>
           </Box>
           <Chip label="50041 - Full administrator" color="success" variant="outlined" />
         </Paper>
 
         {message && <Alert severity="success">{message}</Alert>}
+        {errorMessage && <Alert severity="error" onClose={() => setErrorMessage("")}>{errorMessage}</Alert>}
+
+        <Paper sx={{ p: 2.3, border: "1px solid #CFE0F5" }}>
+          <Stack direction={{ xs: "column", md: "row" }} alignItems={{ md: "center" }} justifyContent="space-between" spacing={1.5}>
+            <Stack direction="row" spacing={1.2} alignItems="center">
+              <Box sx={{ width: 38, height: 38, borderRadius: 2, display: "grid", placeItems: "center", color: "#0057B7", bgcolor: "#EAF2FF" }}>
+                <Database size={19} />
+              </Box>
+              <Box>
+                <Typography sx={{ fontWeight: 900 }}>Data section · Schedule Data / RTG Data</Typography>
+                <Typography sx={{ color: "#64748B", fontSize: 12 }}>Grant every active employee permission to open the page, preview data and download files. Other access rights are not changed.</Typography>
+              </Box>
+            </Stack>
+            <Button variant="contained" startIcon={grantingScheduleData ? <CircularProgress size={15} color="inherit" /> : <Users size={16} />} onClick={grantScheduleDataToAll} disabled={grantingScheduleData} sx={{ whiteSpace: "nowrap" }}>
+              {grantingScheduleData ? "Granting…" : "Grant to all users"}
+            </Button>
+          </Stack>
+        </Paper>
 
         <Paper sx={{ p: 2.3 }}>
           <Stack direction={{ xs: "column", md: "row" }} alignItems={{ xs: "stretch", md: "center" }} gap={1.5}>
@@ -285,8 +347,9 @@ export default function UserAccessControl() {
                   <thead>
                     <tr>
                       <th>Page / Module</th>
-                      <th style={{ width: 110, textAlign: "center" }}>View</th>
-                      <th style={{ width: 110, textAlign: "center" }}>Write</th>
+                      <th style={{ width: 110, textAlign: "center" }}>Read / View</th>
+                      <th style={{ width: 110, textAlign: "center" }}>Write / Upload</th>
+                      <th style={{ width: 110, textAlign: "center" }}>Approve</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -304,6 +367,9 @@ export default function UserAccessControl() {
                           </td>
                           <td style={{ textAlign: "center" }}>
                             <Checkbox checked={Boolean(access.write)} disabled={selectedId === "50041"} onChange={() => toggle(page.key, "write")} color="success" />
+                          </td>
+                          <td style={{ textAlign: "center" }}>
+                            {page.key === "crew_threads" ? <Checkbox checked={Boolean(access.approve)} disabled={selectedId === "50041"} onChange={() => toggle(page.key, "approve")} color="warning" /> : <Typography sx={{ color: "#CBD5E1" }}>—</Typography>}
                           </td>
                         </tr>
                       );

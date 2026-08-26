@@ -124,7 +124,6 @@ export default function RTGDashboard() {
 
   useEffect(() => {
     loadData();
-    loadTrendData(getCurrentDateString());
     loadSnapshotTrend();
     loadPipelineStatus();
     loadCurrentCrmsOutages();
@@ -408,7 +407,8 @@ export default function RTGDashboard() {
 
       const res =
         await API.getRTGSnapshotTrend(
-          dateStr
+          dateStr,
+          true
         );
 
       if (res.success) {
@@ -447,7 +447,6 @@ export default function RTGDashboard() {
 
     setSnapshotTrendDate(dateStr);
     loadSnapshotTrend(dateStr);
-    loadTrendData(dateStr);
   };
 
   const loadPipelineStatus = async () => {
@@ -603,11 +602,9 @@ export default function RTGDashboard() {
 
                 await loadData();
 
-                await loadTrendData(snapshotTrendDate);
-
                 await loadTodayStateSchedules();
 
-                await loadSnapshotTrend();
+                await loadSnapshotTrend(snapshotTrendDate);
 
                 await loadPipelineStatus();
 
@@ -925,7 +922,11 @@ export default function RTGDashboard() {
 
     const getRowsForFilter = (filter) =>
       data.filter((row) => {
-        if (filter === "ISGS") return row.utility_type === "ISGS";
+        if (filter === "ISGS") {
+          return ["ISGS", "IPP", "REGIONAL_IPP", "REGIONAL IPP"].includes(
+            String(row.utility_type || "").toUpperCase()
+          );
+        }
         if (filter === "IPP") return row.utility_type === "IPP";
         const isStateUtility = ["STATE", "STATE_IPP"].includes(
           String(row.utility_type || "").toUpperCase()
@@ -940,11 +941,13 @@ export default function RTGDashboard() {
         return isStateUtility && row.state_name?.trim() === stateMap[filter];
       });
 
-    const scheduleUpdateRows = FILTER_OPTIONS.map((option) => {
+    const scheduleUpdateRows = FILTER_OPTIONS
+      .filter((option) => option.value !== "IPP")
+      .map((option) => {
       const rows = getRowsForFilter(option.value);
       const updatedAt = getLatestUpdateTime(rows, "schedule_last_updated");
       return {
-        label: option.label,
+        label: option.value === "ISGS" ? "ISGS / IPP" : option.label,
         count: rows.length,
         updatedAt,
         stale: isStaleUpdate(updatedAt),
@@ -953,14 +956,19 @@ export default function RTGDashboard() {
 
     const snapshotMetricOptions = [
       { key: "unreqPower", label: "UnRequisition Power", color: "#0E6686" },
-      { key: "installed_capacity", label: "Installed Capacity", color: "#475569" },
       { key: "cap_on_bar", label: "Capacity On Bar", color: "#0891B2" },
       { key: "dc", label: "DC", color: "#2563EB" },
       { key: "schedule", label: "Schedule", color: "#7C3AED" },
       { key: "actual_gen", label: "Actual Generation", color: "#059669" },
-      { key: "outage", label: "Outage Capacity", color: "#DC2626" },
+      { key: "dc_schedule_difference", label: "DC - Schedule", color: "#F97316" },
     ];
     const selectedSnapshotMetric = snapshotMetricOptions.find((item) => item.key === snapshotMetric) || snapshotMetricOptions[0];
+    const snapshotChartData = snapshotTrendData.filter((row) => {
+      if (snapshotTrendDate !== getCurrentDateString(scheduleNow)) return true;
+      const [hour, minute] = String(row.time || "").split(":").map(Number);
+      if (!Number.isFinite(hour) || !Number.isFinite(minute)) return false;
+      return hour * 60 + minute <= scheduleNow.getHours() * 60 + scheduleNow.getMinutes();
+    });
 
     const currentScheduleBlock = Math.min(95, Math.floor((scheduleNow.getHours() * 60 + scheduleNow.getMinutes()) / 15));
     const scheduleWindowStart = Math.min(currentScheduleBlock, 92);
@@ -1338,7 +1346,7 @@ export default function RTGDashboard() {
               <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: { xs: "stretch", sm: "center" }, flexDirection: { xs: "column", sm: "row" }, gap: .8, mb: .7 }}>
                 <Box>
                   <Typography sx={{ color: "#083247", fontSize: 16, fontWeight: 950 }}>Current Day Snapshot</Typography>
-                  <Typography sx={{ color: "#718096", fontSize: 9 }}>Select any RTG metric · defaults to today</Typography>
+                  <Typography sx={{ color: "#718096", fontSize: 9 }}>RTG historical APIs · midnight to current time</Typography>
                 </Box>
                 <Box sx={{ display: "flex", gap: .55, alignItems: "center" }}>
                   <Box component="select" value={snapshotMetric} onChange={(event) => setSnapshotMetric(event.target.value)} sx={{ height: 32, maxWidth: 170, px: .8, borderRadius: "9px", border: "1px solid #CBD5E1", bgcolor: "#F8FAFC", color: "#334155", fontSize: 9.5, fontWeight: 850, outline: "none" }}>
@@ -1350,9 +1358,9 @@ export default function RTGDashboard() {
                 </Box>
               </Box>
               <Box sx={{ height: 240, borderRadius: "16px", bgcolor: "#F8FCFD", border: "1px solid #E2EDF1", overflow: "hidden", p: .6 }}>
-                {trendData.length ? (
+                {snapshotChartData.length ? (
                   <ResponsiveContainer width="100%" height="100%">
-                    <AreaChart data={trendData} margin={{ top: 12, right: 12, bottom: 4, left: 12 }}>
+                    <AreaChart data={snapshotChartData} margin={{ top: 12, right: 12, bottom: 4, left: 12 }}>
                       <defs><linearGradient id="crAssistantSnapshotMetric" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor={selectedSnapshotMetric.color} stopOpacity={.3} /><stop offset="95%" stopColor={selectedSnapshotMetric.color} stopOpacity={0} /></linearGradient></defs>
                       <XAxis dataKey="time" tick={{ fontSize: 9, fill: "#64748B" }} axisLine={false} tickLine={false} minTickGap={28} />
                       <Tooltip formatter={(value) => [`${formatMW(value)} MW`, selectedSnapshotMetric.label]} contentStyle={{ borderRadius: 10, border: "1px solid #D9E5EC", fontSize: 10 }} />

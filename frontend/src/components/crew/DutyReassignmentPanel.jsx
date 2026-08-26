@@ -19,7 +19,7 @@ import {
   TableRow,
   Typography,
 } from "@mui/material";
-import { ArrowLeftRight, CalendarRange, RefreshCw, UserCheck } from "lucide-react";
+import { ArrowLeftRight, CalendarRange, RefreshCw, Scale, UserCheck } from "lucide-react";
 import api from "../../crewLegacy/api";
 
 const Field = ({ label, children, helper }) => (
@@ -40,6 +40,7 @@ export default function DutyReassignmentPanel({
   initialDate,
   initialMode = "exchange",
   initialLeave = null,
+  initialRequestId = "",
   onChanged,
   defaultExpanded = true,
 }) {
@@ -55,6 +56,9 @@ export default function DutyReassignmentPanel({
   const [destinationDate, setDestinationDate] = useState(dayjs(initialDate || undefined).add(1, "day").format("YYYY-MM-DD"));
   const [destinationDuty, setDestinationDuty] = useState("");
   const [destinationEmployees, setDestinationEmployees] = useState([]);
+  const [dutyDebits, setDutyDebits] = useState([]);
+  const [balanceAction, setBalanceAction] = useState("defer");
+  const [debitId, setDebitId] = useState("");
   const [leaveId, setLeaveId] = useState(initialLeave?.id || "");
   const [reason, setReason] = useState("");
   const [notice, setNotice] = useState(null);
@@ -81,8 +85,9 @@ export default function DutyReassignmentPanel({
             endDate: dayjs(date).add(90, "day").format("YYYY-MM-DD"),
           },
         }));
+        requests.push(api.get("/replacement/duty-switch/debits", { params: { authorityDate: date } }));
       }
-      const [optionResult, exchangeResult, leaveResult, historyResult] = await Promise.all(requests);
+      const [optionResult, exchangeResult, leaveResult, historyResult, debitResult] = await Promise.all(requests);
       setRole(nextRole);
       setEmployees(optionResult.data || []);
       setExchangeRequests(exchangeResult.data || []);
@@ -93,6 +98,7 @@ export default function DutyReassignmentPanel({
           : fetchedLeaves
       );
       setHistory(historyResult?.data || []);
+      setDutyDebits(debitResult?.data || []);
       setFirstId((current) => manager ? current : String(nextRole.employeeId || ""));
       setMode((current) => manager ? current : "exchange");
     } catch (error) {
@@ -103,6 +109,11 @@ export default function DutyReassignmentPanel({
   };
 
   useEffect(() => { load(); }, [date]);
+
+  useEffect(() => {
+    if (!initialRequestId || !exchangeRequests.some((item) => String(item.id) === String(initialRequestId))) return;
+    window.setTimeout(() => document.getElementById(`duty-exchange-request-${initialRequestId}`)?.scrollIntoView({ behavior: "smooth", block: "center" }), 180);
+  }, [exchangeRequests, initialRequestId]);
 
   useEffect(() => {
     if (!canManage || mode !== "cross_date" || !destinationDate) {
@@ -126,6 +137,11 @@ export default function DutyReassignmentPanel({
     () => employees.filter((item) => item.employeeId !== firstId && !item.onLeave),
     [employees, firstId],
   );
+  const employeeDebits = useMemo(
+    () => dutyDebits.filter((item) => String(item.employeeId) === String(firstId)),
+    [dutyDebits, firstId],
+  );
+  const selectedDebit = employeeDebits.find((item) => item.id === debitId);
 
   const save = async () => {
     if (!reason.trim()) {
@@ -157,6 +173,24 @@ export default function DutyReassignmentPanel({
             ? "Duty exchange requested. It now requires the other employee, both SICs, and final DIC approval."
             : "Both employees’ duties and groups were exchanged.",
         });
+      } else if (mode === "balance") {
+        if (!canManage || !firstId) throw new Error("Select an employee.");
+        if (balanceAction === "defer") {
+          const result = await api.put("/replacement/duty-switch/defer", {
+            employeeId: firstId,
+            date,
+            reason: reason.trim(),
+          });
+          setNotice({ severity: "success", text: result.data?.message || "Duty changed to OFF and debit recorded." });
+        } else {
+          if (!debitId || !destinationDuty) throw new Error("Select an outstanding debit and settlement shift.");
+          const result = await api.put(`/replacement/duty-switch/debits/${debitId}/settle`, {
+            destinationDate: date,
+            assignedDuty: destinationDuty,
+            reason: reason.trim(),
+          });
+          setNotice({ severity: "success", text: result.data?.message || "Outstanding duty debit settled." });
+        }
       } else {
         if (!canManage || !firstId || !destinationDate) throw new Error("Select an employee and destination date.");
         if (!destinationAssignment) throw new Error("The employee has no roster duty on the destination date.");
@@ -179,8 +213,13 @@ export default function DutyReassignmentPanel({
       }
       setSecondId("");
       setLeaveId("");
+      setDebitId("");
       setReason("");
       await load();
+      if (mode === "cross_date" && destinationDate) {
+        const refreshedDestination = await api.get("/replacement/duty-switch/options", { params: { date: destinationDate } });
+        setDestinationEmployees(refreshedDestination.data || []);
+      }
       onChanged?.();
     } catch (error) {
       setNotice({ severity: "error", text: error.response?.data?.detail || error.message || "The duty change could not be saved." });
@@ -260,24 +299,33 @@ export default function DutyReassignmentPanel({
             >
               Move duty to another shift/date
             </Button>
+            <Button
+              variant={mode === "balance" ? "contained" : "outlined"}
+              startIcon={<Scale size={16} />}
+              onClick={() => { setMode("balance"); setLeaveId(""); setSecondId(""); setDebitId(""); }}
+              sx={{ fontWeight: 850 }}
+            >
+              Deferred duty credit/debit
+            </Button>
           </Stack>
         )}
 
         <Grid container spacing={2}>
           <Grid item xs={12} md={2.2}>
-            <Field label={mode === "cross_date" ? "Source duty date" : "Duty date"}>
+            <Field label={mode === "cross_date" ? "Source duty date" : mode === "balance" ? (balanceAction === "defer" ? "Duty date to give OFF" : "Settlement duty date") : "Duty date"}>
               <input type="date" value={date} onChange={(event) => { setDate(event.target.value); setDestinationDate(dayjs(event.target.value).add(1, "day").format("YYYY-MM-DD")); setFirstId(canManage ? "" : actorId); setSecondId(""); setLeaveId(""); }} style={{ width: "100%", height: 40, padding: "0 11px", border: "1px solid #CBD5E1", borderRadius: 8, color: "#0F172A", background: "#FFFFFF", fontWeight: 750, boxSizing: "border-box" }} />
             </Field>
           </Grid>
 
-          <Grid item xs={12} md={mode === "single" ? 4.1 : mode === "cross_date" ? 4.6 : 3.5}>
-            <Field label={mode === "single" ? "Replacement employee" : mode === "cross_date" ? "Employee whose duty will move" : "First employee"} helper={!canManage ? "Your logged-in employee account" : undefined}>
+          <Grid item xs={12} md={mode === "single" ? 4.1 : mode === "cross_date" || mode === "balance" ? 4.6 : 3.5}>
+            <Field label={mode === "single" ? "Replacement employee" : mode === "cross_date" ? "Employee whose duty will move" : mode === "balance" ? "Employee duty balance" : "First employee"} helper={!canManage ? "Your logged-in employee account" : undefined}>
               <FormControl fullWidth size="small">
                 <Select value={firstId} disabled={!canManage} displayEmpty onChange={(event) => {
                   const employee = employees.find((item) => item.employeeId === event.target.value);
                   setFirstId(event.target.value);
                   setDestinationDuty(employee?.assignedDuty || "");
                   setSecondId("");
+                  setDebitId("");
                 }}>
                   <MenuItem value="" disabled>Select employee</MenuItem>
                   {employees.filter((item) => !item.onLeave).map((item) => <MenuItem key={item.employeeId} value={item.employeeId}>{employeeLabel(item)}</MenuItem>)}
@@ -310,6 +358,39 @@ export default function DutyReassignmentPanel({
                     {exchangeEmployees.map((item) => <MenuItem key={item.employeeId} value={item.employeeId}>{employeeLabel(item)}</MenuItem>)}
                   </Select>
                 </FormControl>
+              </Field>
+            </Grid>
+          ) : mode === "balance" ? (
+            <Grid item xs={12} md={5.2}>
+              <Field label="Balance transaction" helper={balanceAction === "defer" ? "The selected working duty becomes OFF and duty balance increases by 1." : "Assign duty on this OFF date and reduce the selected outstanding balance by 1; no C-OFF is created."}>
+                <Stack direction={{ xs: "column", md: "row" }} spacing={1}>
+                  <FormControl fullWidth size="small">
+                    <Select value={balanceAction} onChange={(event) => { setBalanceAction(event.target.value); setDebitId(""); setDestinationDuty(""); }}>
+                      <MenuItem value="defer">Give OFF now (+1 duty debit)</MenuItem>
+                      <MenuItem value="settle">Assign later duty (-1 duty debit)</MenuItem>
+                    </Select>
+                  </FormControl>
+                  {balanceAction === "settle" && (
+                    <>
+                      <FormControl fullWidth size="small">
+                        <Select value={debitId} displayEmpty onChange={(event) => {
+                          const next = employeeDebits.find((item) => item.id === event.target.value);
+                          setDebitId(event.target.value);
+                          setDestinationDuty(next?.owedDuty || "");
+                        }}>
+                          <MenuItem value="" disabled>Select outstanding debit</MenuItem>
+                          {employeeDebits.map((item) => <MenuItem key={item.id} value={item.id}>{dayjs(item.sourceDate).format("DD MMM YYYY")} · {item.owedDuty} · {item.reason}</MenuItem>)}
+                        </Select>
+                      </FormControl>
+                      <FormControl sx={{ minWidth: 135 }} size="small">
+                        <Select value={destinationDuty} displayEmpty onChange={(event) => setDestinationDuty(event.target.value)}>
+                          <MenuItem value="" disabled>Shift</MenuItem>
+                          {SHIFT_OPTIONS.map((duty) => <MenuItem key={duty} value={duty}>{duty}</MenuItem>)}
+                        </Select>
+                      </FormControl>
+                    </>
+                  )}
+                </Stack>
               </Field>
             </Grid>
           ) : (
@@ -366,13 +447,13 @@ export default function DutyReassignmentPanel({
           )}
 
           <Grid item xs={12} md={9.5}>
-            <Field label={mode === "single" ? "Reason for leave replacement reassignment" : mode === "cross_date" ? "Reason for moving duty across dates" : "Reason for manpower exchange"}>
+            <Field label={mode === "single" ? "Reason for leave replacement reassignment" : mode === "cross_date" ? "Reason for moving duty across dates" : mode === "balance" ? (balanceAction === "defer" ? "Reason for giving OFF / deferring duty" : "Reason for settling deferred duty") : "Reason for manpower exchange"}>
               <input value={reason} onChange={(event) => setReason(event.target.value)} placeholder="Enter the operational reason" style={{ width: "100%", height: 40, padding: "0 12px", border: "1px solid #CBD5E1", borderRadius: 8, color: "#0F172A", background: "#FFFFFF", fontWeight: 650, boxSizing: "border-box" }} />
             </Field>
           </Grid>
           <Grid item xs={12} md={2.5} sx={{ display: "flex", alignItems: "flex-end" }}>
-            <Button fullWidth variant="contained" disabled={loading || !firstId || (mode === "single" ? !leaveId : mode === "exchange" ? !secondId : !destinationAssignment || !destinationDuty)} onClick={save} sx={{ minHeight: 40, background: "#0057B7", fontWeight: 900 }}>
-              {mode === "single" ? "Assign replacement" : mode === "cross_date" ? (destinationDate === date ? "Assign duty" : "Move duty") : "Exchange duties"}
+            <Button fullWidth variant="contained" disabled={loading || !firstId || (mode === "single" ? !leaveId : mode === "exchange" ? !secondId : mode === "balance" ? (balanceAction === "settle" && (!debitId || !destinationDuty)) : !destinationAssignment || !destinationDuty)} onClick={save} sx={{ minHeight: 40, background: "#0057B7", fontWeight: 900 }}>
+              {mode === "single" ? "Assign replacement" : mode === "cross_date" ? (destinationDate === date ? "Assign duty" : "Move duty") : mode === "balance" ? (balanceAction === "defer" ? "Give OFF + debit" : "Assign + settle") : "Exchange duties"}
             </Button>
           </Grid>
         </Grid>
@@ -382,6 +463,20 @@ export default function DutyReassignmentPanel({
             {first && <Typography sx={{ fontSize: 12, fontWeight: 800 }}>First: {employeeLabel(first)}</Typography>}
             {second && <Typography sx={{ fontSize: 12, fontWeight: 800 }}>Exchange with: {employeeLabel(second)}</Typography>}
             {selectedLeave && <Typography sx={{ fontSize: 12, fontWeight: 800 }}>Leave duty: {selectedLeave.name} · {selectedLeave.assignedDuty || "-"} · {selectedLeave.groupName}</Typography>}
+            {mode === "balance" && first && (
+              <>
+                <Typography sx={{ mt: .4, fontSize: 12, fontWeight: 800 }}>
+                  Outstanding duty balance: {employeeDebits.length}
+                </Typography>
+                {balanceAction === "defer" ? (
+                  <Chip sx={{ mt: 1, background: "#FEF3C7", color: "#92400E", fontWeight: 900 }} size="small" label={`${first.assignedDuty || "Duty"} will become OFF; outstanding balance +1`} />
+                ) : selectedDebit ? (
+                  <Chip sx={{ mt: 1, background: "#DCFCE7", color: "#166534", fontWeight: 900 }} size="small" label={`${selectedDebit.owedDuty} debit from ${dayjs(selectedDebit.sourceDate).format("DD MMM YYYY")} will be settled; no C-OFF`} />
+                ) : (
+                  <Chip sx={{ mt: 1, background: "#E2E8F0", color: "#475569", fontWeight: 900 }} size="small" label={employeeDebits.length ? "Select a debit to settle" : "No outstanding debit for this employee"} />
+                )}
+              </>
+            )}
             {mode === "cross_date" && destinationAssignment && (
               <>
                 <Typography sx={{ mt: .4, fontSize: 12, fontWeight: 800 }}>
@@ -399,6 +494,27 @@ export default function DutyReassignmentPanel({
           </Box>
         )}
 
+        {canManage && mode === "balance" && (
+          <>
+            <Typography sx={{ mt: 2.5, mb: 1, color: "#0F172A", fontWeight: 900 }}>Outstanding deferred duties ({dutyDebits.length})</Typography>
+            <TableContainer sx={{ maxHeight: 240, border: "1px solid #F1D38A", borderRadius: 2 }}>
+              <Table size="small" stickyHeader>
+                <TableHead><TableRow><TableCell>Employee</TableCell><TableCell>Original date</TableCell><TableCell>Duty owed</TableCell><TableCell>Group</TableCell><TableCell>Reason</TableCell></TableRow></TableHead>
+                <TableBody>
+                  {dutyDebits.map((item) => <TableRow key={item.id} hover selected={item.id === debitId}>
+                    <TableCell><strong>{item.employeeName || item.employeeId}</strong><br /><Typography variant="caption">{item.employeeId}</Typography></TableCell>
+                    <TableCell>{dayjs(item.sourceDate).format("DD MMM YYYY")}</TableCell>
+                    <TableCell><Chip size="small" color="warning" variant="outlined" label={item.owedDuty || "Duty"} sx={{ fontWeight: 850 }} /></TableCell>
+                    <TableCell>{item.groupName || "-"}</TableCell>
+                    <TableCell>{item.reason || "-"}</TableCell>
+                  </TableRow>)}
+                  {!dutyDebits.length && <TableRow><TableCell colSpan={5} align="center">No outstanding duty debit.</TableCell></TableRow>}
+                </TableBody>
+              </Table>
+            </TableContainer>
+          </>
+        )}
+
         {exchangeRequests.length > 0 && (
           <>
             <Typography sx={{ mt: 2.5, mb: 1, color: "#0F172A", fontWeight: 900 }}>Duty exchange approvals</Typography>
@@ -414,7 +530,7 @@ export default function DutyReassignmentPanel({
                     const sicDone = (request.sicApprovals || []).filter((item) => item.status === "Approved").length;
                     const sicTotal = (request.sicApprovals || []).length;
                     return (
-                      <TableRow key={request.id} hover>
+                      <TableRow id={`duty-exchange-request-${request.id}`} key={request.id} hover sx={String(request.id) === String(initialRequestId) ? { background: "#FFF7D6", outline: "2px solid #F59E0B", outlineOffset: -2 } : undefined}>
                         <TableCell>{dayjs(request.date).format("DD MMM YYYY")}</TableCell>
                         <TableCell>
                           <strong>{firstPerson.name || firstPerson.employeeId}</strong> ({firstPerson.assignedDuty || "-"}, {firstPerson.groupName || "-"})
@@ -454,10 +570,12 @@ export default function DutyReassignmentPanel({
                   {history.map((item) => {
                     const isSIC = Boolean(item.updated?.isActingSIC) || String(item.source || "").toLowerCase().includes("sic");
                     const isReplacement = Boolean(item.updated?.replacementDuty) || String(item.source || "").toLowerCase().includes("replacement");
+                    const isDutyDebit = Boolean(item.dutyDebitCreated);
+                    const isDutySettlement = Boolean(item.dutyDebitSettled);
                     return (
                       <TableRow key={item._id} hover>
                         <TableCell>{dayjs(item.date).format("DD MMM YYYY")}</TableCell>
-                        <TableCell><Chip size="small" variant="outlined" color={isSIC ? "warning" : isReplacement ? "info" : "default"} label={isSIC ? "Acting SIC" : isReplacement ? "Replacement duty" : "Duty change"} sx={{ fontWeight: 850 }} /></TableCell>
+                        <TableCell><Chip size="small" variant="outlined" color={isDutyDebit ? "warning" : isDutySettlement ? "success" : isSIC ? "warning" : isReplacement ? "info" : "default"} label={isDutyDebit ? "Duty debit +1" : isDutySettlement ? "Duty debit -1" : isSIC ? "Acting SIC" : isReplacement ? "Replacement duty" : "Duty change"} sx={{ fontWeight: 850 }} /></TableCell>
                         <TableCell><strong>{item.employeeName || item.employeeId}</strong><br /><Typography variant="caption">{item.employeeId}</Typography></TableCell>
                         <TableCell>{item.previous?.assignedDuty || "-"} · {item.previous?.groupName || "-"}</TableCell>
                         <TableCell>{item.updated?.assignedDuty || "-"} · {item.updated?.groupName || "-"}{isSIC && <><br /><Typography variant="caption" fontWeight={850} color="warning.main">Acting SIC allocated</Typography></>}{isReplacement && <><br /><Typography variant="caption" fontWeight={850} color="info.main">Replacement allocated{item.replacedEmployeeName ? ` for ${item.replacedEmployeeName}` : ""}</Typography></>}{item.compOffAwarded && <><br /><Chip size="small" label="C-OFF awarded" sx={{ mt: .5, height: 20, background: "#DCFCE7", color: "#166534", fontWeight: 850 }} /></>}</TableCell>

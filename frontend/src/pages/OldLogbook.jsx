@@ -4,6 +4,7 @@ import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Database, Download, 
 import AppShell from "../components/layout/AppShell";
 import CalendarInput from "../components/ui/CalendarInput";
 import API from "../services/api";
+import ViolationMessageHistory from "./ViolationMessageHistory";
 
 const OUTAGE_TYPES = [
   { id: "shutdown", label: "Shutdown" },
@@ -147,7 +148,7 @@ function auditSummary(value) {
 }
 
 export default function OldLogbook() {
-  const [activeSubtab] = useState("historical");
+  const [activeSubtab, setActiveSubtab] = useState("historical");
   const [activeKind, setActiveKind] = useState("shutdown");
   const [sections, setSections] = useState(emptySections);
   const [startDate, setStartDate] = useState(addDays(todayIso(), -30));
@@ -275,11 +276,15 @@ export default function OldLogbook() {
         </div>
 
         <div style={styles.subtabs}>
-          <button type="button" style={{ ...styles.subtab, ...(activeSubtab === "historical" ? styles.subtabActive : {}) }}>
+          <button type="button" onClick={() => setActiveSubtab("historical")} style={{ ...styles.subtab, ...(activeSubtab === "historical" ? styles.subtabActive : {}) }}>
             Historical Outage Data
+          </button>
+          <button type="button" onClick={() => setActiveSubtab("violations")} style={{ ...styles.subtab, ...(activeSubtab === "violations" ? styles.subtabActive : {}) }}>
+            Violation Message History
           </button>
         </div>
 
+        {activeSubtab === "violations" ? <ViolationMessageHistory /> : <>
         <div style={styles.metrics}>
           {totals.map((item) => (
             <MetricCard key={item.id} label={item.label} value={item.count.toLocaleString("en-IN")} subtext={`${item.returned.toLocaleString("en-IN")} rows on page ${item.page}`} />
@@ -493,6 +498,7 @@ export default function OldLogbook() {
             </div>
           )}
         </div>
+        </>}
       </div>
     </AppShell>
   );

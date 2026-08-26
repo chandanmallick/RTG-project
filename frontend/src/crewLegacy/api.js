@@ -34,7 +34,14 @@ api.interceptors.request.use((config) => {
     requestUrl.includes("/training-assign/approve") ||
     requestUrl.includes("/training-assign/request-adjacent-off/")
   );
-  if (!["GET", "HEAD", "OPTIONS"].includes(method) && permissions[pageKeyForPath()]?.write === false && !isMasterDelete && !isDutyDecision && !isTrainingApproval) {
+  // Leave approval is likewise controlled by the live SIC/DIC/reporting hierarchy.
+  const isLeaveApproval = method === "PUT" && (
+    requestUrl.includes("/leave/sic-forward-bulk") ||
+    requestUrl.includes("/leave/sic-reject-bulk") ||
+    requestUrl.includes("/leave/approve-bulk") ||
+    requestUrl.includes("/leave/reject-bulk")
+  );
+  if (!["GET", "HEAD", "OPTIONS"].includes(method) && permissions[pageKeyForPath()]?.write === false && !isMasterDelete && !isDutyDecision && !isTrainingApproval && !isLeaveApproval) {
     return Promise.reject(new Error("This page is read-only for your account."));
   }
   return config;

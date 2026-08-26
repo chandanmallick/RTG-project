@@ -265,7 +265,9 @@ class RTGDashboardService:
 
         cache_key = (date_value, tuple(plant_ids))
         cached = RTGDashboardService._actual_history_cache.get(cache_key)
-        if cached and datetime.utcnow() - cached["fetched_at"] < timedelta(minutes=30):
+        current_date = RTGDashboardService._current_rtg_date()
+        cache_minutes = 5 if date_value == current_date else 30
+        if cached and datetime.utcnow() - cached["fetched_at"] < timedelta(minutes=cache_minutes):
             return cached["result"]
 
         config = PipelineConfigService().get_config("RTG") or {}
@@ -380,6 +382,7 @@ class RTGDashboardService:
                 "schedule": totals["schedule"],
                 "actual_gen": totals["actual_gen"],
                 "dc_schedule_difference": round(totals["dc"] - totals["schedule"], 2),
+                "unreqPower": round(max(totals["dc"] - totals["schedule"], 0), 2),
                 "source": "RTG historical APIs",
             })
 
@@ -985,7 +988,7 @@ class RTGDashboardService:
         return trend
 
     @staticmethod
-    def fetch_snapshot_trend(date_str=None):
+    def fetch_snapshot_trend(date_str=None, historical_only=False):
 
         db = MongoService()
 
@@ -1018,6 +1021,10 @@ class RTGDashboardService:
         try:
             return RTGDashboardService._fetch_api_snapshot_trend(target_date)
         except Exception as exc:
+            if historical_only:
+                raise RuntimeError(
+                    f"RTG historical APIs failed for {target_date}: {exc}"
+                ) from exc
             print(
                 f"RTG historical snapshot APIs failed for {target_date}; "
                 f"using stored snapshot fallback: {exc}",

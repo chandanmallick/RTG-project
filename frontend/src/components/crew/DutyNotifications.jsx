@@ -53,6 +53,44 @@ const dutyDate = (value) => {
   return new Intl.DateTimeFormat("en-IN", { day: "2-digit", month: "short", year: "numeric" }).format(new Date(year, month - 1, day));
 };
 
+const notificationDestination = (notification) => {
+  const kind = String(notification.notificationKind || notification.type || "general").toLowerCase();
+  const title = String(notification.title || "").toLowerCase();
+  const refId = String(notification.refId || notification._id || "");
+  const withParams = (path, values = {}) => {
+    const params = new URLSearchParams(Object.entries(values).filter(([, value]) => value));
+    const query = params.toString();
+    return query ? `${path}?${query}` : path;
+  };
+
+  if (kind === "replacement") {
+    return withParams("/crew/replacement", { section: "board", notificationId: refId });
+  }
+  if (kind === "training") {
+    const section = title.includes("approved") ? "mytraining" : "pending";
+    return withParams("/crew/training", { section, notificationId: refId });
+  }
+  if (kind === "duty" || notification.action === "VIEW_CALENDAR") {
+    const isExchangeApproval = title.includes("duty exchange")
+      && (title.includes("approval") || title.includes("requires") || title.includes("review"));
+    if (isExchangeApproval) {
+      return withParams("/crew/leave", { section: "exchange", requestId: refId });
+    }
+    return withParams("/crew/calendar", { notificationId: refId });
+  }
+  if (kind === "leave" || notification.action === "VIEW_LEAVE") {
+    const isPendingApproval = title.includes("review")
+      || title.includes("forwarded")
+      || (title.includes("application") && !title.includes("approved") && !title.includes("rejected"))
+      || (title.includes("approval") && !title.includes("approved"));
+    return withParams("/crew/leave", {
+      section: isPendingApproval ? "pending" : "completed",
+      leaveRef: refId,
+    });
+  }
+  return "/crew/leave";
+};
+
 function useDutyNotifications(pollMilliseconds = 60000) {
   const [notifications, setNotifications] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -118,11 +156,11 @@ function DutyNotificationItems({ notifications, loading, error, refresh, limit =
     try {
       await axios.put(`${BASE_URL}/crew/notifications/read/${notification._id}`, {}, authConfig());
       await refresh(true);
-      if (navigatePath) window.location.assign(navigatePath);
     } catch (requestError) {
       setActionError(requestError.response?.data?.detail || "Notification could not be marked as read.");
     } finally {
       setWorkingId("");
+      if (navigatePath) window.location.assign(navigatePath);
     }
   };
 
@@ -157,7 +195,7 @@ function DutyNotificationItems({ notifications, loading, error, refresh, limit =
         {ordered.map((notification) => {
           if (notification.notificationKind !== "replacement") {
             return (
-              <Box key={notification._id} sx={{ p: dense ? 1.1 : 1.4, borderRadius: 2.5, border: notification.unread ? "1px solid #F3A8B3" : "1px solid #D7E4F6", borderLeft: notification.unread ? "4px solid #DC2626" : "1px solid #D7E4F6", background: notification.unread ? "#FFF7F8" : "#FFFFFF" }}>
+              <Box key={notification._id} role="link" tabIndex={0} onClick={() => markRead(notification, notificationDestination(notification))} onKeyDown={(event) => { if (event.key === "Enter") markRead(notification, notificationDestination(notification)); }} sx={{ p: dense ? 1.1 : 1.4, borderRadius: 2.5, border: notification.unread ? "1px solid #F3A8B3" : "1px solid #D7E4F6", borderLeft: notification.unread ? "4px solid #DC2626" : "1px solid #D7E4F6", background: notification.unread ? "#FFF7F8" : "#FFFFFF", cursor: "pointer", "&:hover": { background: "#F8FAFC", borderColor: "#93C5FD" } }}>
                 <Stack direction="row" justifyContent="space-between" alignItems="flex-start" spacing={1}>
                   <Box sx={{ minWidth: 0 }}>
                     <Typography sx={{ color: "#08103A", fontSize: dense ? 13.5 : 14, lineHeight: 1.3, fontWeight: 900 }}>{notification.title || "Leave notification"}</Typography>
@@ -167,16 +205,15 @@ function DutyNotificationItems({ notifications, loading, error, refresh, limit =
                   <Chip label={String(notification.type || "GENERAL").toUpperCase()} size="small" color={notification.type === "LEAVE" ? "error" : "default"} sx={{ height: 22, fontSize: 9.5, fontWeight: 900 }} />
                 </Stack>
                 <Stack direction="row" spacing={.8} sx={{ mt: 1 }}>
-                  {notification.action === "VIEW_LEAVE" && <Button size="small" variant="outlined" onClick={() => markRead(notification, "/crew/leave")} disabled={workingId === notification._id} sx={{ fontWeight: 900, fontSize: 11.5 }}>View leave</Button>}
-                  {notification.action === "VIEW_CALENDAR" && <Button size="small" variant="outlined" onClick={() => markRead(notification, "/crew/calendar")} disabled={workingId === notification._id} sx={{ fontWeight: 900, fontSize: 11.5 }}>View calendar</Button>}
-                  {notification.unread && <Button size="small" onClick={() => markRead(notification)} disabled={workingId === notification._id} sx={{ fontWeight: 850, fontSize: 11.5 }}>Mark read</Button>}
+                  {(notification.action === "VIEW_LEAVE" || notification.action === "VIEW_CALENDAR") && <Button size="small" variant="outlined" onClick={(event) => { event.stopPropagation(); markRead(notification, notificationDestination(notification)); }} disabled={workingId === notification._id} sx={{ fontWeight: 900, fontSize: 11.5 }}>Open relevant section</Button>}
+                  {notification.unread && <Button size="small" onClick={(event) => { event.stopPropagation(); markRead(notification); }} disabled={workingId === notification._id} sx={{ fontWeight: 850, fontSize: 11.5 }}>Mark read</Button>}
                 </Stack>
               </Box>
             );
           }
           const palette = statusPalette(notification.status);
           return (
-            <Box key={notification._id} sx={{ p: dense ? 1.1 : 1.4, borderRadius: 2.5, border: "1px solid #D7E4F6", background: "#FFFFFF" }}>
+            <Box key={notification._id} role="link" tabIndex={0} onClick={() => markRead(notification, notificationDestination(notification))} onKeyDown={(event) => { if (event.key === "Enter") markRead(notification, notificationDestination(notification)); }} sx={{ p: dense ? 1.1 : 1.4, borderRadius: 2.5, border: "1px solid #D7E4F6", background: "#FFFFFF", cursor: "pointer", "&:hover": { background: "#F8FAFC", borderColor: "#93C5FD" } }}>
               <Stack direction="row" justifyContent="space-between" alignItems="flex-start" spacing={1}>
                 <Box sx={{ minWidth: 0 }}>
                   <Typography sx={{ color: "#08103A", fontSize: dense ? 13.5 : 14, lineHeight: 1.3, fontWeight: 900 }}>
@@ -204,17 +241,17 @@ function DutyNotificationItems({ notifications, loading, error, refresh, limit =
               {(notification.canAccept || notification.canDeny || notification.unread) && (
                 <Stack direction="row" spacing={0.8} sx={{ mt: 1 }}>
                   {notification.canAccept && (
-                    <Button size="small" variant="contained" startIcon={<Check size={13} />} disabled={workingId === notification._id} onClick={() => accept(notification)} sx={{ bgcolor: "#008645", fontWeight: 900, fontSize: 10.5 }}>
+                    <Button size="small" variant="contained" startIcon={<Check size={13} />} disabled={workingId === notification._id} onClick={(event) => { event.stopPropagation(); accept(notification); }} sx={{ bgcolor: "#008645", fontWeight: 900, fontSize: 10.5 }}>
                       Accept
                     </Button>
                   )}
                   {notification.canDeny && (
-                    <Button size="small" variant="outlined" color="error" startIcon={<X size={13} />} disabled={workingId === notification._id} onClick={() => { setSelected(notification); setReason(""); }} sx={{ fontWeight: 900, fontSize: 10.5 }}>
+                    <Button size="small" variant="outlined" color="error" startIcon={<X size={13} />} disabled={workingId === notification._id} onClick={(event) => { event.stopPropagation(); setSelected(notification); setReason(""); }} sx={{ fontWeight: 900, fontSize: 10.5 }}>
                       Decline
                     </Button>
                   )}
                   {notification.unread && (
-                    <Button size="small" onClick={() => markRead(notification)} disabled={workingId === notification._id} sx={{ fontWeight: 800, fontSize: 10.5 }}>Mark read</Button>
+                    <Button size="small" onClick={(event) => { event.stopPropagation(); markRead(notification); }} disabled={workingId === notification._id} sx={{ fontWeight: 800, fontSize: 10.5 }}>Mark read</Button>
                   )}
                 </Stack>
               )}
@@ -287,12 +324,6 @@ export function DutyNotificationBoard({ limit = 2 }) {
   const visible = ordered.slice(0, Math.min(limit, 2));
   const remaining = Math.max(0, ordered.length - visible.length);
 
-  const destination = (notification) => {
-    if (notification.notificationKind === "replacement") return "/crew/replacement";
-    if (notification.action === "VIEW_CALENDAR") return "/crew/calendar";
-    return "/crew/leave";
-  };
-
   return (
     <Box sx={{ mt: 1, pt: .75, width: "100%", minWidth: 0, maxWidth: "100%", overflow: "hidden", borderTop: "1px solid #E2E8F0" }}>
       <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: .55 }}>
@@ -316,8 +347,8 @@ export function DutyNotificationBoard({ limit = 2 }) {
                 key={notification._id}
                 role="link"
                 tabIndex={0}
-                onClick={() => window.location.assign(destination(notification))}
-                onKeyDown={(event) => { if (event.key === "Enter") window.location.assign(destination(notification)); }}
+                onClick={() => window.location.assign(notificationDestination(notification))}
+                onKeyDown={(event) => { if (event.key === "Enter") window.location.assign(notificationDestination(notification)); }}
                 sx={{
                   width: "100%",
                   minWidth: 0,

@@ -34,7 +34,7 @@ PAGE_CATALOG = [
     ("outage_analysis", "S/D Analysis", "/outage-analysis"),
     ("mis_report", "Generic Reports", "/mis-report"),
     ("nldc_plots", "MIS — NLDC Plots", "/mis/nldc-plots"),
-    ("schedule_data", "MIS — Schedule Data", "/mis/schedule-data"),
+    ("schedule_data", "Data — Schedule Data / RTG Data", "/mis/schedule-data"),
     ("dso_evening_report", "DSO Evening Report", "/report-preparation/dso-evening"),
     ("dso_morning_report", "DSO Morning Report", "/report-preparation/dso-morning"),
     ("psp_highlights_report", "PSP Highlights Report", "/report-preparation/psp-highlights"),
@@ -69,6 +69,7 @@ def _default_access(user_id: str) -> dict:
         key: {
             "view": full_access or key in {"profile", "crew_threads"},
             "write": full_access or key == "crew_threads",
+            **({"approve": full_access} if key == "crew_threads" else {}),
         }
         for key, _, _ in PAGE_CATALOG
     }
@@ -86,9 +87,17 @@ def _ensure_access(user_id: str) -> dict:
         pages = dict(pages)
         pages.setdefault("dso_evening_report", legacy_dso_access)
         pages.setdefault("dso_morning_report", legacy_dso_access)
-    merged = {key: {"view": bool((pages.get(key) or defaults[key]).get("view")), "write": bool((pages.get(key) or defaults[key]).get("write"))} for key, _, _ in PAGE_CATALOG}
+    merged = {}
+    for key, _, _ in PAGE_CATALOG:
+        source = pages.get(key) or defaults[key]
+        access = {"view": bool(source.get("view")), "write": bool(source.get("write"))}
+        if key == "crew_threads":
+            access["approve"] = bool(source.get("approve"))
+            if access["approve"]:
+                access["view"] = True
+        merged[key] = access
     if user_id == "50041":
-        merged = {key: {"view": True, "write": True} for key, _, _ in PAGE_CATALOG}
+        merged = {key: {"view": True, "write": True, **({"approve": True} if key == "crew_threads" else {})} for key, _, _ in PAGE_CATALOG}
     if merged != pages:
         page_access_collection.update_one({"_id": existing["_id"]}, {"$set": {"pages": merged, "updatedOn": datetime.utcnow()}})
     return merged
@@ -277,23 +286,81 @@ class AccessUpdateRequest(BaseModel):
     permissions: dict[str, dict[str, bool]]
 
 
+class BulkPageAccessRequest(BaseModel):
+    view: bool = True
+    write: bool | None = None
+
+
 @router.put("/admin/access/{user_id}")
 def update_user_access(user_id: str, data: AccessUpdateRequest, user=Depends(get_authenticated_user)):
     _require_access_admin(user)
     if user_id == "50041":
-        pages = {key: {"view": True, "write": True} for key, _, _ in PAGE_CATALOG}
+        pages = {key: {"view": True, "write": True, **({"approve": True} if key == "crew_threads" else {})} for key, _, _ in PAGE_CATALOG}
     else:
         pages = {}
         for key, _, _ in PAGE_CATALOG:
             requested = data.permissions.get(key) or {}
             write = bool(requested.get("write"))
-            pages[key] = {"view": bool(requested.get("view")) or write, "write": write}
+            approve = key == "crew_threads" and bool(requested.get("approve"))
+            pages[key] = {"view": bool(requested.get("view")) or write or approve, "write": write}
+            if key == "crew_threads":
+                pages[key]["approve"] = approve
     page_access_collection.update_one(
         {"userId": user_id},
         {"$set": {"pages": pages, "updatedBy": user["employeeId"], "updatedOn": datetime.utcnow()}},
         upsert=True,
     )
     return {"userId": user_id, "permissions": pages}
+
+
+@router.put("/admin/access/page/{page_key}/all")
+def update_page_access_for_all(
+    page_key: str,
+    data: BulkPageAccessRequest,
+    user=Depends(get_authenticated_user),
+):
+    """Grant or revoke one page for every active portal employee."""
+    _require_access_admin(user)
+    valid_keys = {key for key, _, _ in PAGE_CATALOG}
+    if page_key not in valid_keys:
+        raise HTTPException(status_code=404, detail="Page permission not found")
+
+    requested_write = data.write
+    employee_ids = [
+        str(employee.get("userId") or employee.get("employeeId") or "").strip()
+        for employee in employee_collection.find(
+            {"isActive": {"$ne": False}},
+            {"userId": 1, "employeeId": 1},
+        )
+    ]
+    employee_ids = [value for value in dict.fromkeys(employee_ids) if value]
+    now = datetime.utcnow()
+    for employee_id in employee_ids:
+        existing_pages = _ensure_access(employee_id)
+        existing_write = bool((existing_pages.get(page_key) or {}).get("write"))
+        employee_write = existing_write if requested_write is None else bool(requested_write)
+        employee_view = bool(data.view) or employee_write
+        if employee_id == "50041":
+            employee_view = True
+            employee_write = True
+        page_access_collection.update_one(
+            {"userId": employee_id},
+            {
+                "$set": {
+                    f"pages.{page_key}.view": employee_view,
+                    f"pages.{page_key}.write": employee_write,
+                    "updatedBy": user["employeeId"],
+                    "updatedOn": now,
+                }
+            },
+            upsert=True,
+        )
+    return {
+        "pageKey": page_key,
+        "view": bool(data.view),
+        "write": requested_write,
+        "updatedUsers": len(employee_ids),
+    }
 
 
 @router.get("/login-history/{employeeId}")

@@ -1,12 +1,21 @@
 import io
 import json
+import re
+from collections import Counter
 from datetime import date, datetime
-from typing import Any, Dict, List
+from pathlib import Path
+from typing import Any, Dict, List, Optional
 
 from bson import ObjectId
 from fastapi import APIRouter, Query
 from fastapi.responses import StreamingResponse
 from openpyxl import Workbook
+from reportlab.lib import colors
+from reportlab.lib.pagesizes import A3, landscape
+from reportlab.lib.styles import ParagraphStyle
+from reportlab.lib.units import mm
+from reportlab.pdfgen import canvas
+from reportlab.platypus import Paragraph, Table, TableStyle
 
 from services.db_handler import MongoService
 
@@ -14,6 +23,7 @@ from services.db_handler import MongoService
 router = APIRouter(prefix="/api/old-logbook", tags=["Old Logbook"])
 
 OLD_LOGBOOK_DB = "Old_logbook"
+VIOLATION_COLLECTION = "Violation_Message"
 
 COLLECTION_CONFIG: Dict[str, Dict[str, Any]] = {
     "shutdown": {
@@ -158,6 +168,177 @@ def parse_logbook_date(value: Any):
         except ValueError:
             continue
     return None
+
+
+def violation_datetime(doc: dict) -> datetime:
+    parsed_date = parse_logbook_date(doc.get("CreatedDate")) or date.min
+    time_text = clean_text(doc.get("CreatedTime"))
+    for fmt in ("%H:%M:%S", "%H:%M"):
+        try:
+            parsed_time = datetime.strptime(time_text, fmt).time()
+            return datetime.combine(parsed_date, parsed_time)
+        except ValueError:
+            continue
+    return datetime.combine(parsed_date, datetime.min.time())
+
+
+def normalize_violation(doc: dict) -> dict:
+    raw = to_jsonable(doc)
+    timestamp = violation_datetime(doc)
+    return {
+        "id": clean_text(raw.get("_id")),
+        "request_id": clean_text(raw.get("RequestId")),
+        "logbook_id": clean_text(raw.get("LogbookId")),
+        "message_id": raw.get("Id", ""),
+        "date": timestamp.date().isoformat() if timestamp.date() != date.min else "",
+        "display_date": clean_text(raw.get("CreatedDate")),
+        "time": clean_text(raw.get("CreatedTime")),
+        "constituent": clean_text(raw.get("Constituent")),
+        "violation_type": clean_text(raw.get("ViolationType")),
+        "sub_violation_type": clean_text(raw.get("SubViolationType")),
+        "message": clean_text(raw.get("Message")),
+        "frequency": raw.get("Frequency", ""),
+        "schedule_mw": raw.get("ScheduleMW", ""),
+        "actual_mw": raw.get("ActualMW", ""),
+        "deviation_mw": raw.get("ActualDeviationMW", ""),
+        "ace_mw": raw.get("AreaControlErrorMW", ""),
+        "desired": clean_text(raw.get("Desired")),
+        "raw": raw,
+    }
+
+
+def violation_search_query(search: str, constituent: str) -> dict:
+    clauses = []
+    if constituent:
+        clauses.append({"Constituent": constituent})
+    if search:
+        pattern = re.escape(search.strip())
+        clauses.append({
+            "$or": [
+                {field: {"$regex": pattern, "$options": "i"}}
+                for field in (
+                    "Message", "Constituent", "ViolationType", "SubViolationType",
+                    "CreatedDate", "CreatedTime", "RequestId", "LogbookId", "Desired",
+                )
+            ]
+        })
+    return {"$and": clauses} if clauses else {}
+
+
+def violation_bucket_key(day: date, grouping: str) -> tuple:
+    if grouping == "monthly":
+        return day.strftime("%Y-%m"), day.strftime("%b %Y")
+    if grouping == "weekly":
+        week_start = day.fromordinal(day.toordinal() - day.weekday())
+        week_end = week_start.fromordinal(week_start.toordinal() + 6)
+        return week_start.isoformat(), f"{week_start.strftime('%d %b')} - {week_end.strftime('%d %b %Y')}"
+    return day.isoformat(), day.strftime("%d %b %Y")
+
+
+def violation_summary(docs: List[dict], grouping: str) -> List[dict]:
+    buckets: Dict[str, dict] = {}
+    for doc in docs:
+        day = parse_logbook_date(doc.get("CreatedDate"))
+        if not day:
+            continue
+        key, label = violation_bucket_key(day, grouping)
+        bucket = buckets.setdefault(key, {
+            "key": key,
+            "label": label,
+            "count": 0,
+            "constituents": set(),
+            "types": Counter(),
+        })
+        bucket["count"] += 1
+        constituent = clean_text(doc.get("Constituent"))
+        if constituent:
+            bucket["constituents"].add(constituent)
+        violation_type = clean_text(doc.get("ViolationType")) or "Unspecified"
+        bucket["types"][violation_type] += 1
+    return [
+        {
+            "key": item["key"],
+            "label": item["label"],
+            "count": item["count"],
+            "constituent_count": len(item["constituents"]),
+            "types": dict(item["types"].most_common()),
+        }
+        for item in sorted(buckets.values(), key=lambda row: row["key"], reverse=True)
+    ]
+
+
+def violation_matrix(docs: List[dict], grouping: str) -> dict:
+    column_totals = Counter()
+    buckets: Dict[str, dict] = {}
+    for doc in docs:
+        day = parse_logbook_date(doc.get("CreatedDate"))
+        if not day:
+            continue
+        key, label = violation_bucket_key(day, grouping)
+        constituent = clean_text(doc.get("Constituent")) or "Unspecified"
+        bucket = buckets.setdefault(key, {"key": key, "label": label, "values": Counter(), "total": 0})
+        bucket["values"][constituent] += 1
+        bucket["total"] += 1
+        column_totals[constituent] += 1
+    columns = [
+        {"key": name, "label": name, "total": total}
+        for name, total in sorted(column_totals.items(), key=lambda item: item[0].lower())
+    ]
+    rows = [
+        {
+            "key": item["key"],
+            "label": item["label"],
+            "values": dict(item["values"]),
+            "total": item["total"],
+        }
+        for item in sorted(buckets.values(), key=lambda row: row["key"], reverse=True)
+    ]
+    return {"grouping": grouping, "columns": columns, "rows": rows, "grand_total": sum(column_totals.values())}
+
+
+def filtered_violations(
+    collection,
+    start_date: date,
+    end_date: date,
+    search: str,
+    constituent: str,
+    violation_types: Optional[List[str]] = None,
+    sub_violation_types: Optional[List[str]] = None,
+) -> List[dict]:
+    selected_types = {clean_text(value) for value in (violation_types or []) if clean_text(value)}
+    selected_subtypes = {clean_text(value) for value in (sub_violation_types or []) if clean_text(value)}
+    docs = []
+    for doc in collection.find(violation_search_query(search, constituent)):
+        created = parse_logbook_date(doc.get("CreatedDate"))
+        if not created or not start_date <= created <= end_date:
+            continue
+        violation_type = clean_text(doc.get("ViolationType")) or "Unspecified"
+        subtype = clean_text(doc.get("SubViolationType")) or "__NONE__"
+        if selected_types and violation_type not in selected_types:
+            continue
+        if selected_subtypes and subtype not in selected_subtypes:
+            continue
+        docs.append(doc)
+    docs.sort(key=violation_datetime, reverse=True)
+    return docs
+
+
+def segregated_violation_matrices(docs: List[dict], grouping: str) -> List[dict]:
+    groups: Dict[tuple, List[dict]] = {}
+    for doc in docs:
+        violation_type = clean_text(doc.get("ViolationType")) or "Unspecified"
+        subtype = clean_text(doc.get("SubViolationType")) or "No subtype"
+        groups.setdefault((violation_type, subtype), []).append(doc)
+    result = []
+    for (violation_type, subtype), group_docs in sorted(groups.items()):
+        result.append({
+            "key": f"{violation_type}|{subtype}",
+            "label": f"{violation_type} · {subtype}",
+            "violation_type": violation_type,
+            "sub_violation_type": subtype,
+            "matrix": violation_matrix(group_docs, grouping),
+        })
+    return result
 
 
 def in_date_range(doc: dict, date_key: str, start_date: date, end_date: date) -> bool:
@@ -388,6 +569,293 @@ async def export_historical_outages(
     workbook.save(output)
     output.seek(0)
     filename = f"old_logbook_{kind}_{start_date.isoformat()}_to_{end_date.isoformat()}.xlsx"
+    return StreamingResponse(
+        output,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
+
+
+@router.get("/violation-messages/export-pdf")
+async def export_violation_matrices_pdf(
+    start_date: date = Query(...),
+    end_date: date = Query(...),
+    search: str = "",
+    constituent: str = "",
+    violation_type: Optional[List[str]] = Query(default=None),
+    sub_violation_type: Optional[List[str]] = Query(default=None),
+    matrix_grouping: str = Query("daily", pattern="^(daily|monthly)$"),
+):
+    if end_date < start_date:
+        start_date, end_date = end_date, start_date
+    service = MongoService()
+    collection = service.client[OLD_LOGBOOK_DB][VIOLATION_COLLECTION]
+    docs = filtered_violations(
+        collection, start_date, end_date, search, constituent,
+        violation_type, sub_violation_type,
+    )
+    sections = segregated_violation_matrices(docs, matrix_grouping)
+
+    output = io.BytesIO()
+    page_width, page_height = landscape(A3)
+    pdf = canvas.Canvas(output, pagesize=(page_width, page_height))
+    pdf.setTitle("Violation Message Matrices")
+    margin = 10 * mm
+    logo_path = Path(__file__).resolve().parents[2] / "frontend" / "public" / "logo.png"
+    header_line_1 = "Grid Controller of India Limited (GRID-INDIA)"
+    header_line_2 = "EASTERN REGIONAL LOAD DESPATCH CENTRE, KOLKATA"
+
+    def draw_page_header(section: dict):
+        header_top = page_height - margin
+        if logo_path.exists():
+            pdf.drawImage(
+                str(logo_path), margin, header_top - 22 * mm,
+                width=34 * mm, height=18 * mm,
+                preserveAspectRatio=True, anchor="c", mask="auto",
+            )
+        pdf.setFillColor(colors.HexColor("#003366"))
+        pdf.setFont("Helvetica-Bold", 13)
+        pdf.drawCentredString(page_width / 2, header_top - 6 * mm, header_line_1)
+        pdf.setFont("Helvetica-Bold", 10)
+        pdf.drawCentredString(page_width / 2, header_top - 12 * mm, header_line_2)
+        pdf.setStrokeColor(colors.HexColor("#334155"))
+        pdf.setLineWidth(0.7)
+        pdf.line(margin, header_top - 23 * mm, page_width - margin, header_top - 23 * mm)
+
+        pdf.setFillColor(colors.HexColor("#0B55B8"))
+        pdf.setFont("Helvetica-Bold", 12)
+        pdf.drawCentredString(page_width / 2, header_top - 31 * mm, section["label"])
+        pdf.setFillColor(colors.HexColor("#475569"))
+        pdf.setFont("Helvetica", 7.5)
+        matrix = section["matrix"]
+        subtitle = (
+            f"{start_date.isoformat()} to {end_date.isoformat()} · "
+            f"{matrix_grouping.title()} grouping · {matrix['grand_total']:,} messages"
+        )
+        pdf.drawCentredString(page_width / 2, header_top - 36 * mm, subtitle)
+        return header_top - 42 * mm
+
+    for section_index, section in enumerate(sections):
+        table_top = draw_page_header(section)
+        matrix = section["matrix"]
+        columns = matrix["columns"]
+        table_data = [["Period", *[column["label"] for column in columns], "Total"]]
+        for row in matrix["rows"]:
+            table_data.append([
+                row["label"],
+                *[row["values"].get(column["key"], 0) for column in columns],
+                row["total"],
+            ])
+        table_data.append(["Total", *[column["total"] for column in columns], matrix["grand_total"]])
+
+        table_width = page_width - (2 * margin)
+        table_height_limit = table_top - margin
+        period_width = min(36 * mm, table_width * 0.14)
+        total_width = min(18 * mm, table_width * 0.07)
+        data_width = (table_width - period_width - total_width) / max(1, len(columns))
+        header_height = min(15 * mm, max(7 * mm, table_height_limit * 0.08))
+        data_row_height = min(6.5 * mm, (table_height_limit - header_height) / max(1, len(table_data) - 1))
+        font_size = max(3.0, min(7.0, data_row_height * 0.42, data_width * 0.18))
+        header_font_size = max(3.0, min(6.5, font_size))
+        header_style = ParagraphStyle(
+            "matrix_header",
+            fontName="Helvetica-Bold",
+            fontSize=header_font_size,
+            leading=max(3.2, header_font_size + 0.4),
+            textColor=colors.white,
+            alignment=1,
+            wordWrap="CJK",
+        )
+        table_data[0] = [Paragraph(str(value), header_style) for value in table_data[0]]
+        row_heights = [header_height, *([data_row_height] * (len(table_data) - 1))]
+        table = Table(
+            table_data,
+            colWidths=[period_width, *([data_width] * len(columns)), total_width],
+            rowHeights=row_heights,
+        )
+        table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0B55B8")),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("BACKGROUND", (0, -1), (-1, -1), colors.HexColor("#DDF1EA")),
+            ("BACKGROUND", (-1, 1), (-1, -1), colors.HexColor("#DDF1EA")),
+            ("ROWBACKGROUNDS", (0, 1), (-2, -2), [colors.white, colors.HexColor("#F6F9FD")]),
+            ("GRID", (0, 0), (-1, -1), 0.35, colors.HexColor("#9DB7D5")),
+            ("FONTNAME", (0, 1), (0, -1), "Helvetica-Bold"),
+            ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"),
+            ("FONTNAME", (-1, 0), (-1, -1), "Helvetica-Bold"),
+            ("FONTSIZE", (0, 1), (-1, -1), font_size),
+            ("ALIGN", (1, 0), (-1, -1), "CENTER"),
+            ("ALIGN", (0, 0), (0, -1), "LEFT"),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("LEFTPADDING", (0, 0), (-1, -1), 1.5),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 1.5),
+            ("TOPPADDING", (0, 0), (-1, -1), 0.5),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 0.5),
+        ]))
+        rendered_width, rendered_height = table.wrap(table_width, table_height_limit)
+        table.drawOn(pdf, margin, table_top - rendered_height)
+        if section_index < len(sections) - 1:
+            pdf.showPage()
+    if not sections:
+        empty_section = {"label": "VIOLATION MESSAGE MATRIX", "matrix": {"grand_total": 0}}
+        table_top = draw_page_header(empty_section)
+        pdf.setFillColor(colors.HexColor("#64748B"))
+        pdf.setFont("Helvetica", 10)
+        pdf.drawCentredString(page_width / 2, table_top - 15 * mm, "No violation messages match the selected filters.")
+    pdf.save()
+    output.seek(0)
+    filename = f"violation_matrices_{start_date.isoformat()}_to_{end_date.isoformat()}.pdf"
+    return StreamingResponse(
+        output,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
+
+
+@router.get("/violation-messages/meta")
+async def get_violation_message_meta():
+    service = MongoService()
+    collection = service.client[OLD_LOGBOOK_DB][VIOLATION_COLLECTION]
+    constituents = sorted(value for value in collection.distinct("Constituent") if clean_text(value))
+    violation_types = sorted(clean_text(value) for value in collection.distinct("ViolationType") if clean_text(value))
+    raw_subtypes = {clean_text(value) for value in collection.distinct("SubViolationType")}
+    sub_violation_types = sorted(value for value in raw_subtypes if value)
+    if "" in raw_subtypes:
+        sub_violation_types.append("__NONE__")
+    available_dates = [
+        parsed
+        for value in collection.distinct("CreatedDate")
+        if (parsed := parse_logbook_date(value)) is not None
+    ]
+    return {
+        "success": True,
+        "total_count": collection.count_documents({}),
+        "constituents": constituents,
+        "violation_types": violation_types,
+        "sub_violation_types": sub_violation_types,
+        "min_date": min(available_dates).isoformat() if available_dates else "",
+        "max_date": max(available_dates).isoformat() if available_dates else "",
+    }
+
+
+@router.get("/violation-messages")
+async def get_violation_messages(
+    start_date: date = Query(...),
+    end_date: date = Query(...),
+    search: str = "",
+    constituent: str = "",
+    violation_type: Optional[List[str]] = Query(default=None),
+    sub_violation_type: Optional[List[str]] = Query(default=None),
+    grouping: str = Query("daily", pattern="^(daily|weekly|monthly)$"),
+    matrix_grouping: str = Query("daily", pattern="^(daily|monthly)$"),
+    limit: int = Query(100, ge=1, le=1000),
+    skip: int = Query(0, ge=0),
+):
+    if end_date < start_date:
+        start_date, end_date = end_date, start_date
+    service = MongoService()
+    collection = service.client[OLD_LOGBOOK_DB][VIOLATION_COLLECTION]
+    docs = filtered_violations(
+        collection, start_date, end_date, search, constituent,
+        violation_type, sub_violation_type,
+    )
+    type_counts = Counter(clean_text(doc.get("ViolationType")) or "Unspecified" for doc in docs)
+    constituent_counts = Counter(clean_text(doc.get("Constituent")) or "Unspecified" for doc in docs)
+    page_docs = docs[skip:skip + limit]
+    return {
+        "success": True,
+        "database": OLD_LOGBOOK_DB,
+        "collection": VIOLATION_COLLECTION,
+        "start_date": start_date.isoformat(),
+        "end_date": end_date.isoformat(),
+        "total_count": len(docs),
+        "returned_count": len(page_docs),
+        "rows": [normalize_violation(doc) for doc in page_docs],
+        "summary": violation_summary(docs, grouping),
+        "matrix": violation_matrix(docs, matrix_grouping),
+        "segregated_matrices": segregated_violation_matrices(docs, matrix_grouping),
+        "type_counts": dict(type_counts.most_common()),
+        "constituent_counts": dict(constituent_counts.most_common()),
+    }
+
+
+@router.get("/violation-messages/export")
+async def export_violation_messages(
+    start_date: date = Query(...),
+    end_date: date = Query(...),
+    search: str = "",
+    constituent: str = "",
+    violation_type: Optional[List[str]] = Query(default=None),
+    sub_violation_type: Optional[List[str]] = Query(default=None),
+    grouping: str = Query("daily", pattern="^(daily|weekly|monthly)$"),
+    matrix_grouping: str = Query("daily", pattern="^(daily|monthly)$"),
+):
+    if end_date < start_date:
+        start_date, end_date = end_date, start_date
+    service = MongoService()
+    collection = service.client[OLD_LOGBOOK_DB][VIOLATION_COLLECTION]
+    docs = filtered_violations(
+        collection, start_date, end_date, search, constituent,
+        violation_type, sub_violation_type,
+    )
+
+    workbook = Workbook()
+    details = workbook.active
+    details.title = "Violation Messages"
+    columns = [
+        "Date", "Time", "Constituent", "Violation Type", "Sub Violation Type", "Message",
+        "Frequency", "Schedule MW", "Actual MW", "Deviation MW", "ACE MW", "Desired",
+        "Message ID", "Request ID", "Logbook ID",
+    ]
+    details.append(columns)
+    for doc in docs:
+        row = normalize_violation(doc)
+        details.append([
+            row["date"], row["time"], row["constituent"], row["violation_type"],
+            row["sub_violation_type"], row["message"], row["frequency"], row["schedule_mw"],
+            row["actual_mw"], row["deviation_mw"], row["ace_mw"], row["desired"],
+            row["message_id"], row["request_id"], row["logbook_id"],
+        ])
+    details.freeze_panes = "A2"
+    details.auto_filter.ref = details.dimensions
+    detail_widths = [13, 10, 18, 23, 20, 58, 12, 14, 14, 14, 14, 22, 12, 38, 38]
+    for index, width in enumerate(detail_widths, start=1):
+        details.column_dimensions[details.cell(1, index).column_letter].width = width
+
+    summary_sheet = workbook.create_sheet("Summary")
+    summary_sheet.append(["Period", "Messages", "Constituents", "Violation Type Breakdown"])
+    for item in violation_summary(docs, grouping):
+        breakdown = ", ".join(f"{name}: {count}" for name, count in item["types"].items())
+        summary_sheet.append([item["label"], item["count"], item["constituent_count"], breakdown])
+    summary_sheet.freeze_panes = "A2"
+    for column, width in zip(("A", "B", "C", "D"), (28, 14, 16, 65)):
+        summary_sheet.column_dimensions[column].width = width
+
+    segregated = segregated_violation_matrices(docs, matrix_grouping)
+    matrix_sheet = workbook.create_sheet(f"{matrix_grouping.title()} Matrices")
+    matrix_sheet.append([f"SEGREGATED {matrix_grouping.upper()} VIOLATION MATRICES"])
+    for section in segregated:
+        matrix = section["matrix"]
+        matrix_columns = matrix["columns"]
+        matrix_sheet.append([])
+        matrix_sheet.append([section["label"]])
+        matrix_sheet.append(["Period", *[item["label"] for item in matrix_columns], "Total"])
+        for item in matrix["rows"]:
+            matrix_sheet.append([
+                item["label"],
+                *[item["values"].get(column["key"], 0) for column in matrix_columns],
+                item["total"],
+            ])
+        matrix_sheet.append(["Total", *[item["total"] for item in matrix_columns], matrix["grand_total"]])
+    matrix_sheet.freeze_panes = "B2"
+    matrix_sheet.column_dimensions["A"].width = 28
+    for cells in matrix_sheet.iter_cols(min_col=2, max_col=matrix_sheet.max_column):
+        matrix_sheet.column_dimensions[cells[0].column_letter].width = 15
+
+    output = io.BytesIO()
+    workbook.save(output)
+    output.seek(0)
+    filename = f"violation_messages_{start_date.isoformat()}_to_{end_date.isoformat()}.xlsx"
     return StreamingResponse(
         output,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

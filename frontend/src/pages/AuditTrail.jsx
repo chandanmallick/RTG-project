@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Alert, Box, Button, Chip, MenuItem, Paper, Stack, TextField, Typography } from "@mui/material";
 import { ClipboardList, RefreshCw } from "lucide-react";
 import axios from "axios";
+import { useSearchParams } from "react-router-dom";
 import AppShell from "../components/layout/AppShell";
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL || "/api";
@@ -9,8 +10,9 @@ const headers = () => ({ Authorization: `Bearer ${localStorage.getItem("portalTo
 const formatTime = (value) => value ? new Date(value).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" }) : "-";
 
 export default function AuditTrail() {
+  const [searchParams] = useSearchParams();
   const [data, setData] = useState({ items: [], sections: [], actors: [] });
-  const [filters, setFilters] = useState({ section: "", actorId: "", startDate: "", endDate: "" });
+  const [filters, setFilters] = useState({ section: searchParams.get("section") || "", actorId: "", startDate: "", endDate: "" });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [expanded, setExpanded] = useState("");

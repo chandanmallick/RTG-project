@@ -504,7 +504,8 @@ async def get_today_trend(
 
 @router.get("/trend/snapshot")
 async def get_snapshot_trend(
-    date_str: Optional[str] = None
+    date_str: Optional[str] = None,
+    historical_only: bool = False,
 ):
 
     print(
@@ -516,7 +517,7 @@ async def get_snapshot_trend(
 
         data = (
             RTGDashboardService
-            .fetch_snapshot_trend(date_str)
+            .fetch_snapshot_trend(date_str, historical_only=historical_only)
         )
 
         return {

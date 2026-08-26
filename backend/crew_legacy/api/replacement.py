@@ -20,6 +20,7 @@ from crew_legacy.database.database_mongo import (
     duty_denial_collection,
     duty_notification_collection,
     duty_switch_collection,
+    duty_balance_ledger_collection,
     duty_exchange_request_collection,
     organization_shift_group_collection,
     organization_unit_collection,
@@ -1231,6 +1232,311 @@ def decide_duty_exchange_request(
         type="DUTY",
     )
     return {"message": "Duty exchange finally approved and applied", "status": "Approved", **exchange_result}
+
+
+@router.get("/duty-switch/debits")
+def get_outstanding_duty_debits(
+    employeeId: Optional[str] = Query(None),
+    authorityDate: Optional[str] = Query(None),
+    user=Depends(get_authenticated_user),
+):
+    authority_date = authorityDate or datetime.now().strftime("%Y-%m-%d")
+    try:
+        datetime.strptime(authority_date, "%Y-%m-%d")
+    except ValueError as exc:
+        raise HTTPException(400, "Authority date must use YYYY-MM-DD format") from exc
+    require_duty_switch_authority(user, authority_date)
+    query = {"status": "Outstanding", "type": "DutyDebit"}
+    if employeeId:
+        query["employeeId"] = employee_id_filter(employeeId)
+    records = list(duty_balance_ledger_collection.find(query).sort([("createdOn", 1)]).limit(500))
+    return [{
+        "id": str(item["_id"]),
+        "employeeId": str(item.get("employeeId") or ""),
+        "employeeName": item.get("employeeName"),
+        "sourceDate": item.get("sourceDate"),
+        "owedDuty": item.get("owedDuty"),
+        "groupName": item.get("groupName"),
+        "reason": item.get("reason"),
+        "status": item.get("status"),
+        "createdOn": api_datetime(item.get("createdOn")),
+        "createdBy": item.get("createdBy"),
+    } for item in records]
+
+
+@router.put("/duty-switch/defer")
+def defer_employee_duty(
+    payload: dict,
+    user=Depends(get_authenticated_user),
+):
+    employee_id = str(payload.get("employeeId") or "").strip()
+    duty_date = str(payload.get("date") or "").strip()
+    reason = str(payload.get("reason") or "").strip()
+    try:
+        datetime.strptime(duty_date, "%Y-%m-%d")
+    except ValueError as exc:
+        raise HTTPException(400, "Duty date must use YYYY-MM-DD format") from exc
+    if not employee_id or not reason:
+        raise HTTPException(400, "Employee and reason are required")
+    actor = require_duty_switch_authority(user, duty_date)
+    current = employee_daily_collection.find_one({
+        "employeeId": employee_id_filter(employee_id),
+        "date": duty_date,
+    })
+    if not current:
+        raise HTTPException(404, "Employee duty record not found for the selected date")
+    if current.get("leaveStatus") in ACTIVE_LEAVE_STATUSES:
+        raise HTTPException(409, "A duty cannot be deferred while the employee is on leave")
+    previous_duty = current.get("assignedDuty")
+    if normalized_duty(previous_duty) not in SHIFT_DUTIES:
+        raise HTTPException(409, "Only an existing Morning, Evening or Night duty can be deferred")
+    existing = duty_balance_ledger_collection.find_one({
+        "employeeId": employee_id_filter(employee_id),
+        "sourceDate": duty_date,
+        "type": "DutyDebit",
+        "status": {"$in": ["Creating", "Outstanding", "Applying"]},
+    })
+    if existing:
+        raise HTTPException(409, "An outstanding duty debit already exists for this duty")
+    ensure_duty_switch_comp_off_releasable(employee_id, duty_date)
+
+    switch_id = str(uuid.uuid4())
+    changed_on = datetime.utcnow()
+    employee = employee_by_id(employee_id) or {}
+    ledger = {
+        "type": "DutyDebit",
+        "units": 1,
+        "status": "Creating",
+        "employeeId": employee_id,
+        "employeeName": current.get("name") or employee.get("name"),
+        "designation": current.get("designation") or employee.get("designation"),
+        "sourceDate": duty_date,
+        "owedDuty": previous_duty,
+        "groupName": current.get("groupName"),
+        "reason": reason,
+        "sourceSwitchId": switch_id,
+        "createdBy": actor,
+        "createdOn": changed_on,
+    }
+    inserted = duty_balance_ledger_collection.insert_one(ledger)
+    previous = {
+        "assignedDuty": previous_duty,
+        "groupName": current.get("groupName"),
+        "replacementDuty": bool(current.get("replacementDuty")),
+    }
+    updated = {"assignedDuty": "OFF", "groupName": current.get("groupName")}
+    common_switch = {
+        "switchId": switch_id,
+        "changedBy": actor,
+        "changedOn": changed_on,
+        "reason": reason,
+        "source": "Deferred duty debit",
+        "sourceDate": duty_date,
+        "destinationDate": None,
+        "dutyDebitId": str(inserted.inserted_id),
+    }
+    result = employee_daily_collection.update_one(
+        {"_id": current["_id"], "assignedDuty": previous_duty},
+        {"$set": {
+            **updated,
+            "lastDutySwitch": {**common_switch, "previous": previous, "direction": "debit"},
+        }},
+    )
+    if result.modified_count != 1:
+        duty_balance_ledger_collection.delete_one({"_id": inserted.inserted_id, "status": "Creating"})
+        raise HTTPException(409, "The duty changed before the OFF/debit entry could be saved")
+    try:
+        ledger_result = duty_balance_ledger_collection.update_one(
+            {"_id": inserted.inserted_id, "status": "Creating"},
+            {"$set": {"status": "Outstanding"}},
+        )
+        if ledger_result.modified_count != 1:
+            raise RuntimeError("Duty debit ledger could not be finalized")
+        duty_switch_collection.insert_one({
+            **common_switch,
+            "date": duty_date,
+            "direction": "debit",
+            "employeeId": employee_id,
+            "employeeName": ledger["employeeName"],
+            "designation": ledger["designation"],
+            "previous": previous,
+            "updated": updated,
+            "dutyDebitCreated": True,
+        })
+        clear_available_duty_switch_comp_off(employee_id, duty_date)
+    except Exception:
+        employee_daily_collection.update_one(
+            {"_id": current["_id"], "lastDutySwitch.switchId": switch_id},
+            {"$set": {"assignedDuty": previous_duty, "groupName": previous["groupName"]}, "$unset": {"lastDutySwitch": ""}},
+        )
+        duty_balance_ledger_collection.delete_one({"_id": inserted.inserted_id, "status": {"$in": ["Creating", "Outstanding"]}})
+        raise
+    notify_all(
+        employee_ids=[employee_id],
+        subject="Duty deferred with outstanding balance",
+        message=(
+            f"Your {previous_duty} duty on {duty_date} was changed to OFF. "
+            "One duty debit is outstanding and must be settled by a later duty assignment. "
+            f"Reason: {reason}"
+        ),
+        ref_id=switch_id,
+        action="VIEW_CALENDAR",
+        type="DUTY",
+    )
+    return {
+        "message": "Duty changed to OFF and one outstanding duty debit was created",
+        "switchId": switch_id,
+        "dutyDebitId": str(inserted.inserted_id),
+        "employeeId": employee_id,
+        "date": duty_date,
+        "previousDuty": previous_duty,
+        "updatedDuty": "OFF",
+        "balanceChange": 1,
+    }
+
+
+@router.put("/duty-switch/debits/{debit_id}/settle")
+def settle_employee_duty_debit(
+    debit_id: str,
+    payload: dict,
+    user=Depends(get_authenticated_user),
+):
+    try:
+        object_id = ObjectId(debit_id)
+    except Exception as exc:
+        raise HTTPException(400, "Invalid duty debit selection") from exc
+    destination_date = str(payload.get("destinationDate") or "").strip()
+    requested_duty = str(payload.get("assignedDuty") or "").strip()
+    reason = str(payload.get("reason") or "").strip()
+    try:
+        datetime.strptime(destination_date, "%Y-%m-%d")
+    except ValueError as exc:
+        raise HTTPException(400, "Destination date must use YYYY-MM-DD format") from exc
+    if not reason:
+        raise HTTPException(400, "Settlement reason is required")
+    actor = require_duty_switch_authority(user, destination_date)
+    debit = duty_balance_ledger_collection.find_one({"_id": object_id, "type": "DutyDebit", "status": "Outstanding"})
+    if not debit:
+        raise HTTPException(409, "The selected duty debit is no longer outstanding")
+    employee_id = str(debit.get("employeeId") or "").strip()
+    destination = employee_daily_collection.find_one({
+        "employeeId": employee_id_filter(employee_id),
+        "date": destination_date,
+    })
+    if not destination:
+        raise HTTPException(404, "Employee duty record not found for the settlement date")
+    if destination.get("leaveStatus") in ACTIVE_LEAVE_STATUSES:
+        raise HTTPException(409, "A deferred duty cannot be settled while the employee is on leave")
+    previous_duty = destination.get("assignedDuty")
+    if normalized_duty(previous_duty) not in OFF_DUTIES:
+        raise HTTPException(409, "The settlement date must currently be a rostered OFF day")
+    assigned_duty = requested_duty or str(debit.get("owedDuty") or "")
+    if normalized_duty(assigned_duty) not in SHIFT_DUTIES:
+        raise HTTPException(400, "Settlement duty must be Morning, Evening or Night")
+
+    switch_id = str(uuid.uuid4())
+    changed_on = datetime.utcnow()
+    claimed = duty_balance_ledger_collection.update_one(
+        {"_id": object_id, "status": "Outstanding"},
+        {"$set": {"status": "Applying", "settlementSwitchId": switch_id, "updatedOn": changed_on}},
+    )
+    if claimed.modified_count != 1:
+        raise HTTPException(409, "The selected duty debit is already being settled")
+    previous = {
+        "assignedDuty": previous_duty,
+        "groupName": destination.get("groupName"),
+        "replacementDuty": bool(destination.get("replacementDuty")),
+    }
+    updated = {"assignedDuty": assigned_duty, "groupName": destination.get("groupName") or debit.get("groupName")}
+    common_switch = {
+        "switchId": switch_id,
+        "changedBy": actor,
+        "changedOn": changed_on,
+        "reason": reason,
+        "source": "Deferred duty settlement",
+        "sourceDate": debit.get("sourceDate"),
+        "destinationDate": destination_date,
+        "dutyDebitId": debit_id,
+    }
+    destination_result = employee_daily_collection.update_one(
+        {"_id": destination["_id"], "assignedDuty": previous_duty},
+        {"$set": {
+            **updated,
+            "lastDutySwitch": {**common_switch, "previous": previous, "direction": "credit"},
+        }},
+    )
+    if destination_result.modified_count != 1:
+        duty_balance_ledger_collection.update_one(
+            {"_id": object_id, "status": "Applying", "settlementSwitchId": switch_id},
+            {"$set": {"status": "Outstanding"}, "$unset": {"settlementSwitchId": "", "updatedOn": ""}},
+        )
+        raise HTTPException(409, "The destination duty changed before the debit could be settled")
+    try:
+        ledger_result = duty_balance_ledger_collection.update_one(
+            {"_id": object_id, "status": "Applying", "settlementSwitchId": switch_id},
+            {"$set": {
+                "status": "Settled",
+                "settlementDate": destination_date,
+                "settledDuty": assigned_duty,
+                "settledBy": actor,
+                "settledOn": changed_on,
+                "settlementReason": reason,
+            }},
+        )
+        if ledger_result.modified_count != 1:
+            raise RuntimeError("Duty debit settlement could not be finalized")
+        duty_switch_collection.insert_one({
+            **common_switch,
+            "date": destination_date,
+            "direction": "credit",
+            "employeeId": employee_id,
+            "employeeName": destination.get("name") or debit.get("employeeName"),
+            "designation": destination.get("designation") or debit.get("designation"),
+            "previous": previous,
+            "updated": updated,
+            "dutyDebitSettled": True,
+            "compOffAwarded": False,
+        })
+    except Exception:
+        employee_daily_collection.update_one(
+            {"_id": destination["_id"], "lastDutySwitch.switchId": switch_id},
+            {"$set": {"assignedDuty": previous_duty, "groupName": previous["groupName"]}, "$unset": {"lastDutySwitch": ""}},
+        )
+        duty_balance_ledger_collection.update_one(
+            {"_id": object_id, "settlementSwitchId": switch_id},
+            {"$set": {"status": "Outstanding"}, "$unset": {
+                "settlementSwitchId": "", "settlementDate": "", "settledDuty": "",
+                "settledBy": "", "settledOn": "", "settlementReason": "", "updatedOn": "",
+            }},
+        )
+        raise
+    notify_all(
+        employee_ids=[employee_id],
+        subject="Outstanding duty balance settled",
+        message=(
+            f"Your outstanding {debit.get('owedDuty') or 'shift'} duty from {debit.get('sourceDate')} "
+            f"was settled by {assigned_duty} duty on {destination_date}. No C-OFF was created. "
+            f"Reason: {reason}"
+        ),
+        ref_id=switch_id,
+        action="VIEW_CALENDAR",
+        type="DUTY",
+    )
+    remaining = duty_balance_ledger_collection.count_documents({
+        "employeeId": employee_id_filter(employee_id), "type": "DutyDebit", "status": "Outstanding",
+    })
+    return {
+        "message": "Outstanding duty debit settled; no C-OFF was created",
+        "switchId": switch_id,
+        "dutyDebitId": debit_id,
+        "employeeId": employee_id,
+        "sourceDate": debit.get("sourceDate"),
+        "destinationDate": destination_date,
+        "assignedDuty": assigned_duty,
+        "balanceChange": -1,
+        "outstandingBalance": remaining,
+        "compOffAwarded": False,
+    }
 
 
 @router.put("/duty-switch/cross-date")

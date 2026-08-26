@@ -9,17 +9,20 @@ from urllib.parse import urlparse
 
 from bson import ObjectId
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from crew_legacy.admin_logic.auth_utils import (
     get_authenticated_user,
+    require_page_approve,
     require_page_view,
     require_page_write,
 )
 from crew_legacy.database.database_mongo import (
     crew_thread_collection,
     crew_thread_message_collection,
+    crew_thread_file_store,
+    USE_ATLAS,
     employee_collection,
     organization_unit_collection,
     roster_group_collection,
@@ -90,6 +93,11 @@ def employee_identity(user: dict):
             "sectionIds": 1, "departmentIds": 1,
         },
     ) or {}
+    identifiers = {
+        str(value).strip()
+        for value in (employee_id, employee.get("userId"), employee.get("employeeId"))
+        if str(value or "").strip()
+    }
     unit_ids = set()
     for key in ("functionIds", "verticalIds", "sectionIds", "departmentIds"):
         values = employee.get(key) or []
@@ -99,24 +107,37 @@ def employee_identity(user: dict):
     groups = roster_group_collection.find({
         "isActive": {"$ne": False},
         "$or": [
-            {"members.employeeId": employee_id}, {"members.userId": employee_id},
-            {"shiftInCharge.employeeId": employee_id}, {"shiftInCharge.userId": employee_id},
+            {"members.employeeId": {"$in": list(identifiers)}}, {"members.userId": {"$in": list(identifiers)}},
+            {"shiftInCharge.employeeId": {"$in": list(identifiers)}}, {"shiftInCharge.userId": {"$in": list(identifiers)}},
         ],
     }, {"groupName": 1})
     return {
         "employeeId": employee_id,
+        "identifiers": sorted(identifiers),
         "unitIds": sorted(unit_ids),
         "groupNames": sorted({str(item.get("groupName") or "").strip() for item in groups if item.get("groupName")}),
     }
 
 
+def can_approve_documents(user: dict) -> bool:
+    try:
+        require_page_approve(user, "crew_threads")
+        return True
+    except HTTPException:
+        return False
+
+
 def thread_access_query(user: dict):
+    # Approvers need an inbox spanning every notice, including restricted
+    # audiences, so that an upload can never be left without a reviewer.
+    if can_approve_documents(user):
+        return {}
     identity = employee_identity(user)
     conditions = [
         {"audience.scope": {"$in": [None, "", "everyone"]}},
         {"audience": {"$exists": False}},
-        {"createdBy.employeeId": identity["employeeId"]},
-        {"audience.employeeIds": identity["employeeId"]},
+        {"createdBy.employeeId": {"$in": identity["identifiers"]}},
+        {"audience.employeeIds": {"$in": identity["identifiers"]}},
     ]
     if identity["unitIds"]:
         conditions.append({"audience.unitIds": {"$in": identity["unitIds"]}})
@@ -126,14 +147,16 @@ def thread_access_query(user: dict):
 
 
 def can_access_thread(user: dict, thread: dict):
+    if can_approve_documents(user):
+        return True
     audience = thread.get("audience") or {"scope": "everyone"}
     if audience.get("scope") != "restricted":
         return True
     identity = employee_identity(user)
-    if str((thread.get("createdBy") or {}).get("employeeId") or "") == identity["employeeId"]:
+    if str((thread.get("createdBy") or {}).get("employeeId") or "") in identity["identifiers"]:
         return True
     return bool(
-        identity["employeeId"] in (audience.get("employeeIds") or [])
+        bool(set(identity["identifiers"]) & set(audience.get("employeeIds") or []))
         or set(identity["unitIds"]) & set(audience.get("unitIds") or [])
         or set(identity["groupNames"]) & set(audience.get("groupNames") or [])
     )
@@ -269,6 +292,9 @@ def message_response(item: dict):
         "createdBy": item.get("createdBy") or {},
         "createdAt": iso(item.get("createdAt")),
         "editedAt": iso(item.get("editedAt")),
+        "approvalStatus": item.get("approvalStatus") or "approved",
+        "approvedBy": item.get("approvedBy") or {},
+        "approvedAt": iso(item.get("approvedAt")),
     }
 
 
@@ -456,6 +482,7 @@ def post_message(
     message_id = ObjectId()
     message_folder = UPLOAD_ROOT / str(thread_oid) / str(message_id)
     attachments = []
+    stored_gridfs_ids = []
     try:
         for upload in upload_files:
             content = ensure_upload_allowed(
@@ -468,9 +495,21 @@ def post_message(
             extension = safe_name.rsplit(".", 1)[-1].lower() if "." in safe_name else ""
             attachment_id = uuid.uuid4().hex
             stored_name = f"{attachment_id}_{safe_name}"
-            message_folder.mkdir(parents=True, exist_ok=True)
-            target = message_folder / stored_name
-            target.write_bytes(content)
+            gridfs_id = None
+            if USE_ATLAS:
+                gridfs_id = crew_thread_file_store.put(
+                    content,
+                    filename=safe_name,
+                    contentType=upload.content_type or "application/octet-stream",
+                    messageId=message_id,
+                    attachmentId=attachment_id,
+                    sha256=hashlib.sha256(content).hexdigest(),
+                )
+                stored_gridfs_ids.append(gridfs_id)
+            if gridfs_id is None:
+                message_folder.mkdir(parents=True, exist_ok=True)
+                target = message_folder / stored_name
+                target.write_bytes(content)
             attachments.append({
                 "id": attachment_id,
                 "name": safe_name,
@@ -481,8 +520,12 @@ def post_message(
                 "extension": extension,
                 "isImage": extension in {"png", "jpg", "jpeg", "gif", "webp", "bmp"},
                 "sha256": hashlib.sha256(content).hexdigest(),
+                "gridFsId": gridfs_id,
             })
     except Exception:
+        for gridfs_id in stored_gridfs_ids:
+            if crew_thread_file_store.exists(gridfs_id):
+                crew_thread_file_store.delete(gridfs_id)
         if message_folder.exists():
             for candidate in message_folder.iterdir():
                 candidate.unlink(missing_ok=True)
@@ -501,6 +544,7 @@ def post_message(
         "createdBy": actor(user),
         "createdAt": now,
         "deleted": False,
+        "approvalStatus": "pending" if attachments or resolved_sharepoint_links else "approved",
     }
     crew_thread_message_collection.insert_one(document)
     preview = body[:180] if body else f"Shared {len(attachments) + len(resolved_sharepoint_links)} attachment(s)"
@@ -515,6 +559,25 @@ def post_message(
         },
     )
     return message_response(document)
+
+
+@router.post("/messages/{message_id}/approve")
+def approve_message(message_id: str, user=Depends(get_authenticated_user)):
+    require_page_approve(user, "crew_threads")
+    message_oid = object_id(message_id, "message")
+    message = crew_thread_message_collection.find_one({"_id": message_oid, "deleted": {"$ne": True}})
+    if not message:
+        raise HTTPException(404, "Post not found")
+    thread = crew_thread_collection.find_one({"_id": message.get("threadId"), "deleted": {"$ne": True}})
+    if not thread or not can_access_thread(user, thread):
+        raise HTTPException(404, "Post not found")
+    now = now_utc()
+    crew_thread_message_collection.update_one(
+        {"_id": message_oid},
+        {"$set": {"approvalStatus": "approved", "approvedBy": actor(user), "approvedAt": now}},
+    )
+    updated = crew_thread_message_collection.find_one({"_id": message_oid})
+    return message_response(updated)
 
 
 @router.patch("/messages/{message_id}")
@@ -567,12 +630,35 @@ def download_attachment(
     thread = crew_thread_collection.find_one({"_id": message.get("threadId"), "deleted": {"$ne": True}})
     if not thread or not can_access_thread(user, thread):
         raise HTTPException(404, "Attachment not found")
+    identity = employee_identity(user)
+    is_uploader = str((message.get("createdBy") or {}).get("employeeId") or "") in identity["identifiers"]
+    if message.get("approvalStatus") == "pending" and not is_uploader:
+        try:
+            require_page_approve(user, "crew_threads")
+        except HTTPException as exc:
+            raise HTTPException(403, "This document is awaiting approval") from exc
     attachment = next(
         (item for item in message.get("attachments") or [] if item.get("id") == attachment_id),
         None,
     )
     if not attachment:
         raise HTTPException(404, "Attachment not found")
+    gridfs_id = attachment.get("gridFsId")
+    if gridfs_id and crew_thread_file_store.exists(gridfs_id):
+        stored = crew_thread_file_store.get(gridfs_id)
+
+        def chunks():
+            while True:
+                chunk = stored.read(1024 * 1024)
+                if not chunk:
+                    break
+                yield chunk
+
+        return StreamingResponse(
+            chunks(),
+            media_type=attachment.get("contentType") or "application/octet-stream",
+            headers={"Content-Disposition": f'attachment; filename="{clean_filename(attachment.get("name"))}"'},
+        )
     candidate = (UPLOAD_ROOT / str(attachment.get("relativePath") or "")).resolve()
     root = UPLOAD_ROOT.resolve()
     if root not in candidate.parents or not candidate.is_file():

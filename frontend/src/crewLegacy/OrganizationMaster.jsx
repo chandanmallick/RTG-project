@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import {
-  Alert, Box, Button, Chip, Dialog, DialogActions, DialogContent, DialogTitle,
+  Alert, Box, Button, Checkbox, Chip, Dialog, DialogActions, DialogContent, DialogTitle,
   FormControl, InputLabel, MenuItem, OutlinedInput, Paper, Select, Stack,
   Table, TableBody, TableCell, TableContainer, TableHead, TableRow, TextField,
   Typography,
@@ -19,8 +19,9 @@ const EMPTY = {
 };
 
 const EMPTY_SHIFT_MAPPING = {
-  groupName: "",
+  groupNames: [],
   organizationUnitId: "",
+  directSupervisorIds: [],
 };
 
 const TYPE_LABELS = {
@@ -153,8 +154,9 @@ export default function OrganizationMaster() {
 
   const openShiftMapping = (mapping = null) => {
     setShiftMapping(mapping ? {
-      groupName: mapping.groupName || "",
+      groupNames: mapping.groupName ? [mapping.groupName] : [],
       organizationUnitId: mapping.organizationUnitId || "",
+      directSupervisorIds: mapping.directSupervisorIds || [],
     } : EMPTY_SHIFT_MAPPING);
     setShiftOpen(true);
   };
@@ -171,7 +173,8 @@ export default function OrganizationMaster() {
   };
 
   const removeShiftMapping = async (mapping) => {
-    if (!window.confirm(`Detach ${mapping.groupName} from ${mapping.organizationUnitName}?`)) return;
+    const targets = [mapping.organizationUnitName, ...(mapping.directSupervisorNames || [])].filter(Boolean).join(", ") || "its reporting hierarchy";
+    if (!window.confirm(`Detach ${mapping.groupName} from ${targets}?`)) return;
     try {
       await api.delete(`/admin/organization/shift-groups/${mapping.id}`);
       setNotice({ severity: "success", text: "Shift group detached." });
@@ -262,7 +265,7 @@ export default function OrganizationMaster() {
         <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ px: 2, py: 1.5, bgcolor: "#E8F5F1" }}>
           <Box>
             <Typography sx={{ fontWeight: 900, color: "#03624C" }}>Shift-group reporting</Typography>
-            <Typography sx={{ fontSize: 12, color: "#475569" }}>Each active shift group reports to one Department, Vertical, Section or Function—not to an employee or unit head.</Typography>
+            <Typography sx={{ fontSize: 12, color: "#475569" }}>Attach one or several groups directly to an SO-II/DIC, an organization unit, or both. Permanent group members then appear as subordinates.</Typography>
           </Box>
           <Button variant="contained" size="small" onClick={() => openShiftMapping()} sx={{ bgcolor: "#03624C" }}>Attach shift group</Button>
         </Stack>
@@ -270,6 +273,7 @@ export default function OrganizationMaster() {
           <TableHead><TableRow>
             <TableCell><strong>Shift group</strong></TableCell>
             <TableCell><strong>Reports to organization unit</strong></TableCell>
+            <TableCell><strong>Direct SO-II / DIC</strong></TableCell>
             <TableCell><strong>Unit type</strong></TableCell>
             <TableCell align="right"><strong>Action</strong></TableCell>
           </TableRow></TableHead>
@@ -278,6 +282,7 @@ export default function OrganizationMaster() {
               <TableRow key={mapping.id} hover>
                 <TableCell sx={{ fontWeight: 900 }}>{mapping.groupName}</TableCell>
                 <TableCell>{mapping.organizationUnitName || "-"}</TableCell>
+                <TableCell>{(mapping.directSupervisorNames || []).join(", ") || "-"}</TableCell>
                 <TableCell><Chip size="small" label={TYPE_LABELS[mapping.organizationUnitType] || mapping.organizationUnitType || "-"} /></TableCell>
                 <TableCell align="right">
                   <Button size="small" onClick={() => openShiftMapping(mapping)}>Change</Button>
@@ -286,7 +291,7 @@ export default function OrganizationMaster() {
               </TableRow>
             ))}
             {!shiftMappings.length && (
-              <TableRow><TableCell colSpan={4} align="center" sx={{ py: 3, color: "#64748B" }}>No shift group is attached to the organization hierarchy.</TableCell></TableRow>
+              <TableRow><TableCell colSpan={5} align="center" sx={{ py: 3, color: "#64748B" }}>No shift group is attached to the organization hierarchy.</TableCell></TableRow>
             )}
           </TableBody>
         </Table>
@@ -346,20 +351,40 @@ export default function OrganizationMaster() {
             <TextField
               select
               size="small"
-              label="Active shift group"
-              value={shiftMapping.groupName}
-              onChange={(event) => setShiftMapping((current) => ({ ...current, groupName: event.target.value }))}
+              label="Active shift group(s)"
+              value={shiftMapping.groupNames}
+              onChange={(event) => setShiftMapping((current) => ({ ...current, groupNames: typeof event.target.value === "string" ? event.target.value.split(",") : event.target.value }))}
+              SelectProps={{ multiple: true, renderValue: (selected) => selected.join(", ") }}
+              helperText="Select all four groups here to attach them together."
               fullWidth
             >
-              {shiftGroups.map((name) => <MenuItem key={name} value={name}>{name}</MenuItem>)}
+              {shiftGroups.map((name) => <MenuItem key={name} value={name}><Checkbox size="small" checked={shiftMapping.groupNames.includes(name)} />{name}</MenuItem>)}
             </TextField>
+            <FormControl size="small" fullWidth>
+              <InputLabel>Direct SO-II / DIC (optional)</InputLabel>
+              <Select
+                multiple
+                value={shiftMapping.directSupervisorIds}
+                onChange={(event) => setShiftMapping((current) => ({ ...current, directSupervisorIds: typeof event.target.value === "string" ? event.target.value.split(",") : event.target.value }))}
+                input={<OutlinedInput label="Direct SO-II / DIC (optional)" />}
+                renderValue={(selected) => selected.map((id) => employees.find((item) => item.userId === id)?.name || id).join(", ")}
+                MenuProps={{ PaperProps: { sx: { maxHeight: 380 } } }}
+              >
+                {employees.filter((employee) => employee.isActive !== false).map((employee) => (
+                  <MenuItem key={employee.id} value={employee.userId}>
+                    <Checkbox size="small" checked={shiftMapping.directSupervisorIds.includes(employee.userId)} />
+                    {employee.name} ({employee.userId}) · {employee.designation || "No designation"}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
             <TextField
               select
               size="small"
               label="Reports to"
               value={shiftMapping.organizationUnitId}
               onChange={(event) => setShiftMapping((current) => ({ ...current, organizationUnitId: event.target.value }))}
-              helperText="Select a Department, Vertical, Section or Function. Its configured heads become the approval hierarchy."
+              helperText="Optional when a direct supervisor is selected. Configured unit heads remain in the approval hierarchy."
               fullWidth
             >
               {shiftTargets.map((unit) => (
@@ -372,7 +397,7 @@ export default function OrganizationMaster() {
           <Button onClick={() => setShiftOpen(false)}>Cancel</Button>
           <Button
             variant="contained"
-            disabled={!shiftMapping.groupName || !shiftMapping.organizationUnitId}
+            disabled={!shiftMapping.groupNames.length || (!shiftMapping.organizationUnitId && !shiftMapping.directSupervisorIds.length)}
             onClick={saveShiftMapping}
           >
             Save reporting mapping

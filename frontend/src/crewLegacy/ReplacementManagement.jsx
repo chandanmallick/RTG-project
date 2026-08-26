@@ -80,10 +80,16 @@ export default function ReplacementManagement() {
   const sicShortcutHandled = useRef(false);
   const [activeWorkflow, setActiveWorkflow] = useState(() => {
     const params = new URLSearchParams(window.location.search);
+    if (["duty", "leave", "board", "sic"].includes(params.get("section"))) return params.get("section");
     if (params.get("action") === "assign-sic") return "sic";
     if (params.get("action") === "leave") return "leave";
     return null;
   });
+
+  useEffect(() => {
+    if (!activeWorkflow) return;
+    window.setTimeout(() => document.getElementById(`replacement-workflow-${activeWorkflow}`)?.scrollIntoView({ behavior: "smooth", block: "start" }), 220);
+  }, [activeWorkflow]);
 
   const openWorkflow = (workflow) => {
     setActiveWorkflow(workflow);

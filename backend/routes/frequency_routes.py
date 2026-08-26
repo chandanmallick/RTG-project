@@ -549,12 +549,18 @@ def _schedule_data_generators():
             continue
         mis_name = str(row.get("mis_name") or "").strip()
         display_name = mis_name or row.get("plant_name") or row.get("STAGE_NAME") or identifier
-        utility_type = str(row.get("utility_type") or row.get("type") or "Generator").strip()
+        is_state_flag = (
+            row.get("is_state") is True
+            or str(row.get("is_state") or "").strip().lower() in {"1", "true", "yes"}
+        )
         choices.setdefault(identifier, {
             "id": identifier,
             "label": display_name,
             "mis_name": mis_name,
-            "kind": "state" if bool(row.get("is_state")) or utility_type.lower() in {"state", "state_ipp"} else "generator",
+            # State_IPP rows are generating stations owned by a state entity;
+            # they are not state drawal schedules. Only an explicit state map
+            # row may enter the CR Health Card's WBES state schedule.
+            "kind": "state" if is_state_flag else "generator",
             "wbes_name": row.get("wbes_name") or row.get("wbes_acronym") or identifier,
             "plant_id": row.get("plant_id") or "",
         })

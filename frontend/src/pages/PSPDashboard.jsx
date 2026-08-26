@@ -88,6 +88,12 @@ const formatIsoLocal = (dateObj) => (
   `${dateObj.getFullYear()}-${String(dateObj.getMonth() + 1).padStart(2, "0")}-${String(dateObj.getDate()).padStart(2, "0")}`
 );
 
+const defaultPspDate = () => {
+  const dateObj = new Date();
+  dateObj.setDate(dateObj.getDate() - 1);
+  return formatIsoLocal(dateObj);
+};
+
 const NldcYearlyMarkerLabel = ({ viewBox, marker }) => {
   if (!viewBox || !marker) return null;
   const lane = marker.labelLane || 0;
@@ -500,7 +506,7 @@ export default function PSPDashboard({ highlightsOnly = false }) {
   const [modalLoading, setModalLoading] = useState(false);
   const [filterStart, setFilterStart] = useState("");
   const [filterEnd, setFilterEnd] = useState("");
-  const [selectedDate, setSelectedDate] = useState("");
+  const [selectedDate, setSelectedDate] = useState(defaultPspDate);
   const [powerPositionData, setPowerPositionData] = useState([]);
   const [powerPositionLoading, setPowerPositionLoading] = useState(true);
   const [powerSystemData, setPowerSystemData] = useState(null);
@@ -1068,18 +1074,18 @@ export default function PSPDashboard({ highlightsOnly = false }) {
     let isMounted = true;
 
     const loadInitialDashboardSections = async () => {
-      let portfolioDate = "";
+      let portfolioDate = selectedDate;
       await staggerLoadSequence([
         () => loadStatus(),
         () => loadAnalytics(),
         async () => {
-          portfolioDate = await loadPortfolioData(undefined, { loadRelatedSections: false });
+          portfolioDate = await loadPortfolioData(selectedDate, { loadRelatedSections: false });
         },
         ...getPortfolioSectionLoaders(() => portfolioDate),
         () => loadHighestRecords(),
-        () => loadPowerExchange(),
-        () => loadVoltageProfile(),
-        () => loadFrequencyCheck(),
+        () => loadPowerExchange(selectedDate),
+        () => loadVoltageProfile(selectedDate),
+        () => loadFrequencyCheck(selectedDate),
       ], 260);
 
       if (!isMounted) return;
@@ -1289,7 +1295,9 @@ export default function PSPDashboard({ highlightsOnly = false }) {
                     value={selectedDate}
                     onChange={(e) => handleDateChange(e.target.value)}
                   >
-                    <option value="" className="text-dark">Latest Date</option>
+                    {selectedDate && !statusData.some((item) => item.status === "SUCCESS" && item.date === selectedDate) && (
+                      <option value={selectedDate} className="text-dark">{selectedDate} (D-1)</option>
+                    )}
                     {statusData
                       .filter(d => d.status === "SUCCESS")
                       .map(d => (

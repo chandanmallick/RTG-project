@@ -560,23 +560,39 @@ def thermal_availability(report_date):
             ("REVIVAL_DATE", "revivalDate", "Synchronization_Time"),
             ("REVIVAL_TIME", "revivalTime", "Synchronization_Time"),
         ):
-            revived[identity] = capacity
-            details["revived"].append({
-                "unit": name,
-                "capacity_mw": capacity,
-                "reason": row.get("OUT_REASON") or row.get("REASON") or row.get("reason") or "",
-            })
+            if identity not in revived:
+                revived[identity] = capacity
+                details["revived"].append({
+                    "event": "Revived",
+                    "unit": name,
+                    "station": unit.get("Generating_Station_Name") or row.get("GENERATING_STATION_NAME") or row.get("stationName") or "",
+                    "capacity_mw": capacity,
+                    "fuel": fuel or "THERMAL",
+                    "event_date": next((str(row.get(key)) for key in ("REVIVAL_DATE", "revivalDate", "Synchronization_Time") if row.get(key)), ""),
+                    "event_time": next((str(row.get(key)) for key in ("REVIVAL_TIME", "revivalTime", "Synchronization_Time") if row.get(key)), ""),
+                    "outage_type": row.get("TYPE") or row.get("OUTAGE_TYPE") or row.get("outageCategory") or "",
+                    "reason": row.get("OUT_REASON") or row.get("REASON") or row.get("reason") or "",
+                    "mapped": bool(unit),
+                })
         if occurred_by_1700(
             row,
             ("OUTAGE_DATE", "outageDate", "Tripped_Time"),
             ("OUTAGE_TIME", "outageTime", "Tripped_Time"),
         ):
-            outage[identity] = capacity
-            details["outage"].append({
-                "unit": name,
-                "capacity_mw": capacity,
-                "reason": row.get("OUT_REASON") or row.get("REASON") or row.get("reason") or "",
-            })
+            if identity not in outage:
+                outage[identity] = capacity
+                details["outage"].append({
+                    "event": "Outage",
+                    "unit": name,
+                    "station": unit.get("Generating_Station_Name") or row.get("GENERATING_STATION_NAME") or row.get("stationName") or "",
+                    "capacity_mw": capacity,
+                    "fuel": fuel or "THERMAL",
+                    "event_date": next((str(row.get(key)) for key in ("OUTAGE_DATE", "outageDate", "Tripped_Time") if row.get(key)), ""),
+                    "event_time": next((str(row.get(key)) for key in ("OUTAGE_TIME", "outageTime", "Tripped_Time") if row.get(key)), ""),
+                    "outage_type": row.get("TYPE") or row.get("OUTAGE_TYPE") or row.get("outageCategory") or "",
+                    "reason": row.get("OUT_REASON") or row.get("REASON") or row.get("reason") or "",
+                    "mapped": bool(unit),
+                })
     revived_mw = round(sum(revived.values()), 3)
     outage_mw = round(sum(outage.values()), 3)
     return {
@@ -633,6 +649,9 @@ def current_generation_outage_summary(report_date, force_refresh=False):
             "source_url": CURRENT_CRMS_GENERATOR_OUTAGES_URL,
             "unit_master_source": "https://rtgapi.grid-india.in/sendData/generator/filtered_details/?region_name=ERLDC",
             "row_count": 0,
+            "included_row_count": 0,
+            "units": [],
+            "excluded_units": [],
             "error": str(exc),
             "from_cache": False,
         }
@@ -647,6 +666,8 @@ def current_generation_outage_summary(report_date, force_refresh=False):
         "THERMAL": {"planned_mw": 0.0, "forced_mw": 0.0, "planned_units": 0, "forced_units": 0},
         "HYDRO": {"planned_mw": 0.0, "forced_mw": 0.0, "planned_units": 0, "forced_units": 0},
     }
+    details = []
+    excluded_details = []
     seen = set()
     for row in rows:
         name = (
@@ -667,9 +688,33 @@ def current_generation_outage_summary(report_date, force_refresh=False):
             or unit.get("installed_capacity")
         )
         identity = (fuel_group, outage_group, compact(name), capacity)
-        if not fuel_group or not outage_group or not capacity or identity in seen:
+        exclusion_reason = (
+            "Fuel is not mapped as Thermal/Hydro" if not fuel_group
+            else "Outage type is not Planned/Forced" if not outage_group
+            else "Installed capacity is missing or zero" if not capacity
+            else "Duplicate source row" if identity in seen
+            else ""
+        )
+        normalized_detail = {
+            "unit": str(name or "").strip() or "Unnamed unit",
+            "station": unit.get("Generating_Station_Name") or row.get("GENERATING_STATION_NAME") or row.get("stationName") or "",
+            "fuel": fuel_group or str(fuel or "").strip() or "Unmapped",
+            "outage_type": outage_group.title() if outage_group else str(row.get("TYPE") or row.get("OUTAGE_TYPE") or row.get("outageCategory") or "").strip(),
+            "capacity_mw": round(capacity, 3),
+            "reason": row.get("OUT_REASON") or row.get("REASON") or row.get("reason") or row.get("Reason") or "",
+            "outage_date": row.get("OUTAGE_DATE") or row.get("outageDate") or row.get("openingTime") or "",
+            "outage_time": row.get("OUTAGE_TIME") or row.get("outageTime") or row.get("Tripped_Time") or row.get("trippedTime") or "",
+            "expected_revival": " ".join(filter(None, [
+                str(row.get("EXPECTED_REVIVAL_DATE") or row.get("expectedRevivalDate") or "").strip(),
+                str(row.get("EXPECTED_REVIVAL_TIME") or row.get("expectedRevivalTime") or row.get("exprecteTimeOfRestoration") or row.get("expectedRestorationTime") or "").strip(),
+            ])).strip(),
+            "mapped": bool(unit),
+        }
+        if exclusion_reason:
+            excluded_details.append({**normalized_detail, "exclusion_reason": exclusion_reason})
             continue
         seen.add(identity)
+        details.append(normalized_detail)
         bucket = totals[fuel_group]
         bucket[f"{outage_group.lower()}_mw"] += capacity
         bucket[f"{outage_group.lower()}_units"] += 1
@@ -686,6 +731,9 @@ def current_generation_outage_summary(report_date, force_refresh=False):
         "unit_master_source": "https://rtgapi.grid-india.in/sendData/generator/filtered_details/?region_name=ERLDC",
         "from_cache": from_cache,
         "row_count": len(rows),
+        "included_row_count": len(details),
+        "units": details,
+        "excluded_units": excluded_details,
     }
 
 

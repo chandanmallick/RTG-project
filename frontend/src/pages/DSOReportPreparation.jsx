@@ -18,6 +18,7 @@ import {
 import {
   CalendarDays,
   Download,
+  Eye,
   FileSpreadsheet,
   Pencil,
   Save,
@@ -88,6 +89,7 @@ export default function DSOReportPreparation({ reportType = "evening" }) {
   const [sourcePath, setSourcePath] = useState("W:\\ScadaData\\DSO_reports");
   const [syncLoading, setSyncLoading] = useState(false);
   const [configSaving, setConfigSaving] = useState(false);
+  const [unitDetailsOpen, setUnitDetailsOpen] = useState("");
 
   const load = async () => {
     setMessage({ type: "", text: "" });
@@ -358,6 +360,27 @@ export default function DSOReportPreparation({ reportType = "evening" }) {
   const thermal = report?.thermal_availability || {};
   const generationOutage = report?.generation_outage_summary?.by_fuel || {};
   const generationOutageMeta = report?.generation_outage_summary || {};
+  const thermalUnitDetails = useMemo(
+    () => [
+      ...(thermal.units?.revived || []).map((item) => ({ ...item, event: item.event || "Revived" })),
+      ...(thermal.units?.outage || []).map((item) => ({ ...item, event: item.event || "Outage" })),
+    ],
+    [thermal],
+  );
+  const currentOutageUnitDetails = generationOutageMeta.units || [];
+  const excludedOutageUnitDetails = generationOutageMeta.excluded_units || [];
+  const thermalDetailTotals = useMemo(
+    () => thermalUnitDetails.reduce((totals, item) => {
+      const key = String(item.event || "").toLowerCase() === "revived" ? "revived" : "outage";
+      totals[key] += Number(item.capacity_mw) || 0;
+      return totals;
+    }, { revived: 0, outage: 0 }),
+    [thermalUnitDetails],
+  );
+  const currentOutageDetailTotal = currentOutageUnitDetails.reduce(
+    (sum, item) => sum + (Number(item.capacity_mw) || 0),
+    0,
+  );
   const odItems = STATES.map((state) => ({
     state,
     value: stateRows[state]?.od_at_min_frequency_mw,
@@ -879,19 +902,32 @@ export default function DSOReportPreparation({ reportType = "evening" }) {
               }}
             >
               <Card sx={{ p: 0, overflow: "hidden" }}>
-                <Typography
+                <Stack
+                  direction="row"
+                  alignItems="center"
+                  justifyContent="space-between"
+                  spacing={1}
                   sx={{
                     px: 1.7,
-                    py: 1.2,
+                    py: 0.7,
                     color: "#006845",
                     bgcolor: "#E9F8F0",
-                    fontWeight: 900,
-                    textDecoration: "underline",
                   }}
                 >
-                  Thermal generation availability change from 00:00 hrs to 17:00
-                  hrs
-                </Typography>
+                  <Typography sx={{ fontWeight: 900, textDecoration: "underline" }}>
+                    Thermal generation availability change from 00:00 hrs to 17:00 hrs
+                  </Typography>
+                  <Button
+                    className="dso-download-exclude"
+                    size="small"
+                    variant="outlined"
+                    startIcon={<Eye size={15} />}
+                    onClick={() => setUnitDetailsOpen("thermal")}
+                    sx={{ whiteSpace: "nowrap", bgcolor: "#FFFFFF" }}
+                  >
+                    Unit details ({thermalUnitDetails.length})
+                  </Button>
+                </Stack>
                 <Box sx={{ overflowX: "auto", p: 1.5 }}>
                   <Box
                     component="table"
@@ -1057,17 +1093,32 @@ export default function DSOReportPreparation({ reportType = "evening" }) {
               }}
             >
               <Card sx={{ p: 0, overflow: "hidden" }}>
-                <Typography
+                <Stack
+                  direction="row"
+                  alignItems="center"
+                  justifyContent="space-between"
+                  spacing={1}
                   sx={{
                     px: 1.7,
-                    py: 1.1,
+                    py: 0.7,
                     color: "#7C4A03",
                     bgcolor: "#FFF7DB",
-                    fontWeight: 900,
                   }}
                 >
-                  Current generation under planned & forced outage (MW)
-                </Typography>
+                  <Typography sx={{ fontWeight: 900 }}>
+                    Current generation under planned &amp; forced outage (MW)
+                  </Typography>
+                  <Button
+                    className="dso-download-exclude"
+                    size="small"
+                    variant="outlined"
+                    startIcon={<Eye size={15} />}
+                    onClick={() => setUnitDetailsOpen("current")}
+                    sx={{ whiteSpace: "nowrap", bgcolor: "#FFFFFF" }}
+                  >
+                    Unit details ({currentOutageUnitDetails.length})
+                  </Button>
+                </Stack>
                 <Typography
                   className="dso-download-exclude"
                   sx={{
@@ -1612,6 +1663,84 @@ export default function DSOReportPreparation({ reportType = "evening" }) {
             {savingEdit ? "Saving…" : "Save All Sections"}
           </Button>
         </DialogActions>
+      </Dialog>
+
+      <Dialog
+        open={Boolean(unitDetailsOpen)}
+        onClose={() => setUnitDetailsOpen("")}
+        fullWidth
+        maxWidth="xl"
+      >
+        <DialogTitle sx={{ fontWeight: 900 }}>
+          {unitDetailsOpen === "thermal"
+            ? "Thermal availability change · unit cross-check"
+            : "Current planned & forced outage · unit cross-check"}
+        </DialogTitle>
+        <DialogContent dividers>
+          {unitDetailsOpen === "thermal" ? (
+            <>
+              <Alert severity="info" sx={{ mb: 1.5 }}>
+                Summary: revived {number(thermal.revived_capacity_mw, 0)} MW, outage {number(thermal.outage_capacity_mw, 0)} MW. Detail-row check: revived {number(thermalDetailTotals.revived, 0)} MW, outage {number(thermalDetailTotals.outage, 0)} MW. Duplicate unit events are counted once.
+              </Alert>
+              <Box sx={{ overflow: "auto", maxHeight: "65vh" }}>
+                <Box component="table" sx={{ ...tableSx, minWidth: 1050 }}>
+                  <thead><tr><th>Event</th><th>Generating station / unit</th><th>Fuel</th><th>Capacity (MW)</th><th>Event date &amp; time</th><th>Outage type</th><th>Reason</th><th>Master match</th></tr></thead>
+                  <tbody>
+                    {thermalUnitDetails.map((item, index) => (
+                      <tr key={`${item.event}-${item.unit}-${index}`}>
+                        <td><b>{item.event}</b></td>
+                        <td style={{ textAlign: "left" }}>{item.station ? <><b>{item.station}</b><br /></> : null}{item.unit || "Unnamed unit"}</td>
+                        <td>{item.fuel || "Thermal"}</td>
+                        <td>{number(item.capacity_mw, 0)}</td>
+                        <td>{[item.event_date, item.event_time].filter(Boolean).join(" · ") || "—"}</td>
+                        <td>{item.outage_type || "—"}</td>
+                        <td style={{ textAlign: "left" }}>{item.reason || "—"}</td>
+                        <td>{item.mapped === false ? "Unmapped" : "Matched"}</td>
+                      </tr>
+                    ))}
+                    {!thermalUnitDetails.length && <tr><td colSpan={8}>No stored unit-level details. Reprocess this report to populate the cross-check rows.</td></tr>}
+                  </tbody>
+                </Box>
+              </Box>
+            </>
+          ) : (
+            <>
+              <Alert severity={generationOutageMeta.error ? "error" : "info"} sx={{ mb: 1.5 }}>
+                Source rows: {generationOutageMeta.row_count || 0} · Included in totals: {generationOutageMeta.included_row_count ?? currentOutageUnitDetails.length} · Excluded: {excludedOutageUnitDetails.length} · Detail-row capacity check: {number(currentOutageDetailTotal, 0)} MW. The rows below are the exact unit records used for the summary.
+              </Alert>
+              <Box sx={{ overflow: "auto", maxHeight: "55vh" }}>
+                <Box component="table" sx={{ ...tableSx, minWidth: 1150 }}>
+                  <thead><tr><th>Fuel</th><th>Outage</th><th>Generating station / unit</th><th>Capacity (MW)</th><th>Outage date &amp; time</th><th>Expected revival</th><th>Reason</th><th>Master match</th></tr></thead>
+                  <tbody>
+                    {currentOutageUnitDetails.map((item, index) => (
+                      <tr key={`${item.fuel}-${item.outage_type}-${item.unit}-${index}`}>
+                        <td><b>{item.fuel || "—"}</b></td><td>{item.outage_type || "—"}</td>
+                        <td style={{ textAlign: "left" }}>{item.station ? <><b>{item.station}</b><br /></> : null}{item.unit || "Unnamed unit"}</td>
+                        <td>{number(item.capacity_mw, 0)}</td>
+                        <td>{[item.outage_date, item.outage_time].filter(Boolean).join(" · ") || "—"}</td>
+                        <td>{item.expected_revival || "—"}</td><td style={{ textAlign: "left" }}>{item.reason || "—"}</td>
+                        <td>{item.mapped ? "Matched" : "Unmapped"}</td>
+                      </tr>
+                    ))}
+                    {!currentOutageUnitDetails.length && <tr><td colSpan={8}>No stored unit-level details. Use “Fetch CRMS Outage” to refresh this report.</td></tr>}
+                  </tbody>
+                </Box>
+              </Box>
+              {!!excludedOutageUnitDetails.length && (
+                <Box sx={{ mt: 2 }}>
+                  <Typography sx={{ mb: 1, fontWeight: 900, color: "#B45309" }}>Excluded source rows requiring cross-check ({excludedOutageUnitDetails.length})</Typography>
+                  <Box sx={{ overflow: "auto", maxHeight: 240 }}>
+                    <Box component="table" sx={{ ...tableSx, minWidth: 850 }}>
+                      <thead><tr><th>Unit</th><th>Raw fuel</th><th>Raw outage type</th><th>Capacity (MW)</th><th>Why excluded</th></tr></thead>
+                      <tbody>{excludedOutageUnitDetails.map((item, index) => <tr key={`${item.unit}-${index}`}><td style={{ textAlign: "left" }}>{item.unit}</td><td>{item.fuel}</td><td>{item.outage_type || "—"}</td><td>{number(item.capacity_mw, 0)}</td><td style={{ textAlign: "left", color: "#B45309", fontWeight: 800 }}>{item.exclusion_reason}</td></tr>)}</tbody>
+                    </Box>
+                  </Box>
+                </Box>
+              )}
+            </>
+          )}
+        </DialogContent>
+        <DialogActions><Button onClick={() => setUnitDetailsOpen("")}>Close</Button></DialogActions>
       </Dialog>
     </AppShell>
   );

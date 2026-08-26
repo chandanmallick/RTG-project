@@ -4,24 +4,33 @@ import os
 
 from bson import ObjectId
 from fastapi import APIRouter, HTTPException, Query
-from pymongo import MongoClient, UpdateOne
+from pymongo import UpdateOne
+
+from crew_legacy.database.database_mongo import (
+    compensatory_off_collection,
+    cycle_config_collection,
+    employee_collection,
+    employee_daily_collection,
+    employee_shift_history,
+    leave_request_collection,
+    roster_collection,
+    roster_group_collection,
+    roster_master_collection,
+)
 
 
 router = APIRouter(prefix="/api/crew", tags=["Crew Management"])
 
-CREW_MONGO_URI = os.getenv("CREW_MONGO_URI", os.getenv("MONGO_URI", "mongodb://10.3.230.60:27017/"))
-CREW_DB_NAME = os.getenv("CREW_MONGO_DB_NAME", "crew_management")
-client = MongoClient(CREW_MONGO_URI, serverSelectionTimeoutMS=5000)
-db = client[CREW_DB_NAME]
+CREW_DB_NAME = os.getenv("CREW_ATLAS_MONGO_DB_NAME", os.getenv("CREW_MONGO_DB_NAME", "crew_management"))
 
-employees = db["employees"]
-groups = db["roster_group_history"]
-roster_working = db["roster_collection"]
-rosters = db["roster_master_collection"]
-cycle_config = db["roster_base_config"]
-employee_daily = db["employee_daily_collection"]
-employee_shift_history = db["employee_shift_history"]
-compensatory_off = db["compensatory_off_collection"]
+employees = employee_collection
+groups = roster_group_collection
+roster_working = roster_collection
+rosters = roster_master_collection
+cycle_config = cycle_config_collection
+employee_daily = employee_daily_collection
+leave_requests = leave_request_collection
+compensatory_off = compensatory_off_collection
 
 DUTY_SEQUENCE = ["E1", "E2", "M1", "M2", "N1", "N2", "O1", "O2"]
 SHIFT_NAMES = {
@@ -86,7 +95,8 @@ def serialize_group(doc: dict) -> dict:
 
 @router.get("/health")
 def crew_health():
-    client.admin.command("ping")
+    employee_collection.database.client.admin.command("ping")
+    roster_collection.database.client.admin.command("ping")
     return {"status": "ok", "database": CREW_DB_NAME}
 
 
@@ -348,7 +358,17 @@ def push_roster(roster_id: str):
     is_final = bool(roster.get("isFinal"))
     roster_type = "FINAL" if is_final else "DRAFT"
     start_date, end_date = roster.get("startDate"), roster.get("endDate")
-    employee_daily.delete_many({"date": {"$gte": start_date, "$lte": end_date}, "dataSource": "Roster"})
+    # Remove obsolete roster-only rows, but retain workflow data already
+    # attached to a daily row. Re-publishing a roster must not erase leave or
+    # training information from the calendar.
+    employee_daily.delete_many({
+        "date": {"$gte": start_date, "$lte": end_date},
+        "dataSource": "Roster",
+        "$nor": [
+            {"leaveStatus": {"$in": ["Applied", "Pending", "Forwarded by SIC", "Approved"]}},
+            {"trainingName": {"$exists": True, "$nin": [None, ""]}},
+        ],
+    })
     details_by_group = {item.get("groupName"): item for item in roster.get("groupDetails", [])}
     operations = []
     for group in roster.get("data", []):
@@ -388,7 +408,17 @@ def push_roster(roster_id: str):
     if operations:
         employee_daily.bulk_write(operations)
     update_shift_records(roster)
-    rosters.update_many({"_id": {"$ne": object_id}, "calendarPushed": True}, {"$set": {"calendarPushed": False}})
+    # Keep non-overlapping roster periods published. A September publish must
+    # not unpublish August; only a roster covering the same dates is replaced.
+    rosters.update_many(
+        {
+            "_id": {"$ne": object_id},
+            "calendarPushed": True,
+            "startDate": {"$lte": roster["endDate"]},
+            "endDate": {"$gte": roster["startDate"]},
+        },
+        {"$set": {"calendarPushed": False}},
+    )
     rosters.update_one({"_id": object_id}, {"$set": {"calendarPushed": True, "pushedOn": datetime.now(timezone.utc)}})
     return {"message": f"{roster_type.title()} roster published to the duty calendar"}
 
@@ -404,20 +434,29 @@ def calendar_view(start_date: str = Query(...), end_date: str = Query(...)):
     if (end - start).days > 45:
         raise HTTPException(400, "Calendar range cannot exceed 45 days")
 
-    active = rosters.find_one({"calendarPushed": True}, sort=[("pushedOn", -1), ("createdOn", -1)])
-    if not active:
+    active_rosters = list(rosters.find({
+        "calendarPushed": True,
+        "startDate": {"$lte": end_date},
+        "endDate": {"$gte": start_date},
+    }).sort([("pushedOn", 1), ("createdOn", 1)]))
+    if not active_rosters:
         return []
     members_by_group = {}
     roster_employee_ids = set()
-    for group in active.get("groupDetails", []):
-        people = [{**item, "IsSIC": False} for item in group.get("members", [])]
-        if employee_id(group.get("shiftInCharge")):
-            people.append({**group["shiftInCharge"], "IsSIC": True})
-        for person in people:
-            emp_id = employee_id(person)
-            if emp_id:
-                roster_employee_ids.add(emp_id)
-        members_by_group[group.get("groupName")] = people
+    for active in active_rosters:
+        for group in active.get("groupDetails", []):
+            group_name = group.get("groupName")
+            if not group_name:
+                continue
+            people = [{**item, "IsSIC": False} for item in group.get("members", [])]
+            if employee_id(group.get("shiftInCharge")):
+                people.append({**group["shiftInCharge"], "IsSIC": True})
+            group_members = members_by_group.setdefault(group_name, {})
+            for person in people:
+                emp_id = employee_id(person)
+                if emp_id:
+                    roster_employee_ids.add(emp_id)
+                    group_members[emp_id] = person
     if not roster_employee_ids:
         return [{"groupName": group_name, "employees": []} for group_name in sorted(members_by_group)]
 
@@ -518,6 +557,42 @@ def calendar_view(start_date: str = Query(...), end_date: str = Query(...)):
                 "actingSICFor": record.get("actingSICFor"),
                 "actingSICGroup": record.get("actingSICGroup"),
             }
+
+    # Leave requests are the workflow source of truth. Overlay them onto the
+    # roster duties so calendar data remains correct even if an older roster
+    # publish recreated a daily row without its leave fields.
+    active_leave_requests = leave_requests.find(
+        {
+            "employeeId": {"$in": list(roster_employee_ids)},
+            "date": {"$gte": start_date, "$lte": end_date},
+            "finalStatus": {"$nin": ["Cancelled", "Canceled", "Rejected", "Withdrawn"]},
+        },
+        {
+            "employeeId": 1,
+            "date": 1,
+            "leaveType": 1,
+            "finalStatus": 1,
+            "replacementRequired": 1,
+            "replacement": 1,
+        },
+    )
+    for leave in active_leave_requests:
+        emp_id, date = employee_id(leave), leave.get("date")
+        if not emp_id or not date:
+            continue
+        duty = daily.setdefault((emp_id, date), {
+            "shift": "-", "leaveType": None, "leaveStatus": None,
+            "trainingName": None, "replacementEmployee": None,
+            "replacementFor": None,
+        })
+        replacement = leave.get("replacement") or replacement_map.get((emp_id, date))
+        duty.update({
+            "leaveType": leave.get("leaveType"),
+            "leaveStatus": leave.get("finalStatus") or "Applied",
+            "leaveRequestId": str(leave["_id"]),
+            "replacementRequired": bool(leave.get("replacementRequired")),
+            "replacementEmployee": replacement,
+        })
     dates = []
     while start <= end:
         dates.append(start.strftime("%Y-%m-%d"))
@@ -525,7 +600,7 @@ def calendar_view(start_date: str = Query(...), end_date: str = Query(...)):
     output = []
     for group_name in sorted(members_by_group):
         crew = []
-        for person in sorted(members_by_group[group_name], key=lambda item: item.get("IsSIC", False), reverse=True):
+        for person in sorted(members_by_group[group_name].values(), key=lambda item: item.get("IsSIC", False), reverse=True):
             emp_id = employee_id(person)
             crew.append({
                 "employeeId": emp_id, "name": person.get("name"), "designation": person.get("designation"),

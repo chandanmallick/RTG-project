@@ -21,6 +21,7 @@ from services.psp_service import PSPService
 from services.db_handler import MongoService
 from crew_legacy.api.replacement import auto_accept_pending_duty_notifications
 from crew_legacy.api.morning_presentation import send_morning_presentation_reminders
+from crew_legacy.admin_logic.atlas_sync import sync_employee_directory_to_atlas
 
 scheduler = BackgroundScheduler()
 
@@ -107,6 +108,19 @@ scheduler.add_job(
     max_instances=1,
     coalesce=True,
     misfire_grace_time=1800,
+    replace_existing=True,
+)
+
+scheduler.add_job(
+    sync_employee_directory_to_atlas,
+    trigger="cron",
+    hour=2,
+    minute=30,
+    timezone="Asia/Kolkata",
+    id="crew_employee_directory_atlas_sync",
+    max_instances=1,
+    coalesce=True,
+    misfire_grace_time=3600,
     replace_existing=True,
 )
 

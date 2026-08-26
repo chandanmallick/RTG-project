@@ -1,6 +1,6 @@
-﻿from crew_legacy.database.database_mongo import db
+from crew_legacy.database.database_mongo import local_db
 
-dropdown_collection = db["dropdown_master"]
+dropdown_collection = local_db["dropdown_master"]
 
 
 def create_dropdown_logic(data):
@@ -13,4 +13,3 @@ def create_dropdown_logic(data):
 
 def get_dropdown_by_type_logic(dropdown_type):
     return list(dropdown_collection.find({"type": dropdown_type}))
-

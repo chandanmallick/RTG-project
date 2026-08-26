@@ -19,9 +19,18 @@ import {
   TextField,
   Typography,
 } from "@mui/material";
-import { Download, Maximize2, RefreshCw, Table2, X } from "lucide-react";
+import {
+  Download,
+  History,
+  Maximize2,
+  RefreshCw,
+  Table2,
+  X,
+} from "lucide-react";
 import ReactECharts from "echarts-for-react";
+import { useLocation, useNavigate } from "react-router-dom";
 import AppShell from "../components/layout/AppShell";
+import RTGHistoricalDownload from "../components/rtg/RTGHistoricalDownload";
 import API from "../services/api";
 import { useAuth } from "../auth/AuthContext";
 
@@ -60,8 +69,80 @@ const roundOne = (value) => {
   return Number.isFinite(numeric) ? numeric.toFixed(1) : "";
 };
 
+function ScheduleDataHeader({ activeView, onViewChange }) {
+  return (
+    <>
+      <Box
+        sx={{
+          mb: 1.5,
+          p: 2.5,
+          borderRadius: 3,
+          color: "#fff",
+          background:
+            "linear-gradient(105deg,#07194F 0%,#0754B8 62%,#1186D4 100%)",
+        }}
+      >
+        <Stack direction="row" justifyContent="space-between" alignItems="center">
+          <Box>
+            <Typography sx={{ fontSize: 23, fontWeight: 900 }}>
+              Schedule Data
+            </Typography>
+            <Typography sx={{ fontSize: 12, opacity: 0.9 }}>
+              Schedule, actual, deviation and historical RTG data exports.
+            </Typography>
+          </Box>
+          {activeView === "rtg" ? <History size={30} /> : <Table2 size={30} />}
+        </Stack>
+      </Box>
+      <Paper
+        component="nav"
+        aria-label="Schedule data modules"
+        elevation={0}
+        sx={{
+          mb: 2,
+          p: 0.75,
+          display: "flex",
+          gap: 0.75,
+          width: "fit-content",
+          maxWidth: "100%",
+          border: "1px solid #C9D9EE",
+          borderRadius: 2.5,
+        }}
+      >
+        <Button
+          size="small"
+          variant={activeView === "schedule" ? "contained" : "text"}
+          startIcon={<Table2 size={16} />}
+          onClick={() => onViewChange("schedule")}
+          sx={{ fontWeight: 900, whiteSpace: "nowrap" }}
+        >
+          Schedule &amp; Actual
+        </Button>
+        <Button
+          size="small"
+          variant={activeView === "rtg" ? "contained" : "text"}
+          startIcon={<History size={16} />}
+          onClick={() => onViewChange("rtg")}
+          sx={{ fontWeight: 900, whiteSpace: "nowrap" }}
+        >
+          RTG Data
+        </Button>
+      </Paper>
+    </>
+  );
+}
+
 export default function ScheduleData() {
   const { user } = useAuth();
+  const location = useLocation();
+  const navigate = useNavigate();
+  const activeView =
+    new URLSearchParams(location.search).get("view") === "rtg"
+      ? "rtg"
+      : "schedule";
+  const changeView = (view) => {
+    navigate(view === "rtg" ? "?view=rtg" : "", { replace: true });
+  };
   const isAdmin =
     String(user?.role || "").toLowerCase() === "admin" ||
     String(user?.employeeId || "") === "50041";
@@ -512,6 +593,26 @@ export default function ScheduleData() {
     link.click();
     URL.revokeObjectURL(link.href);
   };
+  if (activeView === "rtg") {
+    return (
+      <AppShell>
+        <Box
+          sx={{
+            minHeight: "calc(100vh - 76px)",
+            bgcolor: "#F5F8FC",
+            p: { xs: 1, md: 2 },
+          }}
+        >
+          <ScheduleDataHeader
+            activeView={activeView}
+            onViewChange={changeView}
+          />
+          <RTGHistoricalDownload />
+        </Box>
+      </AppShell>
+    );
+  }
+
   return (
     <AppShell>
       <Box
@@ -521,32 +622,10 @@ export default function ScheduleData() {
           p: { xs: 1, md: 2 },
         }}
       >
-        <Box
-          sx={{
-            mb: 2,
-            p: 2.5,
-            borderRadius: 3,
-            color: "#fff",
-            background:
-              "linear-gradient(105deg,#07194F 0%,#0754B8 62%,#1186D4 100%)",
-          }}
-        >
-          <Stack
-            direction="row"
-            justifyContent="space-between"
-            alignItems="center"
-          >
-            <Box>
-              <Typography sx={{ fontSize: 23, fontWeight: 900 }}>
-                Schedule & Actual Data
-              </Typography>
-              <Typography sx={{ fontSize: 12, opacity: 0.9 }}>
-                MIS names, WBES schedules, actual generation and deviation.
-              </Typography>
-            </Box>
-            <Table2 size={30} />
-          </Stack>
-        </Box>
+        <ScheduleDataHeader
+          activeView={activeView}
+          onViewChange={changeView}
+        />
         <Paper
           elevation={0}
           sx={{ p: 2, border: "1px solid #C8E6DE", borderRadius: 3, mb: 2 }}

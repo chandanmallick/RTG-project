@@ -1262,6 +1262,7 @@ def get_calendar_view(
             "shift": rec.get("assignedDuty") or "-",
             "leaveType": rec.get("leaveType"),
             "leaveStatus": rec.get("leaveStatus"),
+            "leaveRequestId": str(rec.get("leaveRequestId") or ""),
             "trainingName": rec.get("trainingName"),
             "replacementRequired": bool(
                 rec.get("replacementRequired")
@@ -1320,6 +1321,7 @@ def get_calendar_view(
                         "shift": "-",
                         "leaveType": None,
                         "leaveStatus": None,
+                        "leaveRequestId": "",
                         "trainingName": None,
                         "replacementRequired": False,
                         "replacementEmployee": None,

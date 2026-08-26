@@ -100,10 +100,6 @@ def organization_leave_observer_ids(employee: dict) -> list[str]:
     """Reporting officers and HOD resolved from the Organization Master."""
     employee_id = clean_id(employee.get("userId") or employee.get("employeeId"))
     stored = employee.get("reportingOfficerIds") or employee.get("reportingOfficerId") or []
-    values = list(stored if isinstance(stored, list) else [stored])
-    values.extend([employee.get("intermediaryReportingId"), employee.get("hodId")])
-    if any(clean_id(value) for value in values):
-        return [value for value in dict.fromkeys(clean_id(item) for item in values) if value and value != employee_id]
     values = []
     try:
         from crew_legacy.api.admin_api import resolve_employee_organization
@@ -118,6 +114,8 @@ def organization_leave_observer_ids(employee: dict) -> list[str]:
         ])
     except Exception:
         pass
+    values.extend(stored if isinstance(stored, list) else [stored])
+    values.extend([employee.get("intermediaryReportingId"), employee.get("hodId")])
     return [
         value for value in dict.fromkeys(clean_id(item) for item in values)
         if value and value != employee_id
@@ -365,9 +363,20 @@ def sic_record_for(employee_id: str, date_str: str, group_name: str = None):
     return employee_daily_collection.find_one(query)
 
 
-def leave_authority_id(leave: dict) -> str:
+def leave_authority_ids(leave: dict) -> list[str]:
+    """Current organization authority plus the roster's legacy DIC snapshot."""
     duty = daily_record(leave.get("employeeId"), leave.get("date")) or {}
-    return clean_id((duty.get("departmentIC") or {}).get("employeeId"))
+    legacy_id = clean_id((duty.get("departmentIC") or {}).get("employeeId"))
+    employee = employee_by_id(leave.get("employeeId"))
+    organization_ids = direct_reporting_officer_ids(employee) if employee else []
+    return [
+        value for value in dict.fromkeys([*organization_ids, legacy_id])
+        if value and value != clean_id(leave.get("employeeId"))
+    ]
+
+
+def leave_authority_id(leave: dict) -> str:
+    return next(iter(leave_authority_ids(leave)), "")
 
 
 def can_apply_for(user: dict, employee_id: str, date_str: str = None) -> bool:
@@ -390,7 +399,7 @@ def can_sic_act(user: dict, leave: dict) -> bool:
 
 
 def can_authority_act(user: dict, leave: dict) -> bool:
-    return is_admin(user) or clean_id(user.get("employeeId")) == leave_authority_id(leave)
+    return is_admin(user) or clean_id(user.get("employeeId")) in leave_authority_ids(leave)
 
 
 def can_delete_leave_master(user: dict) -> bool:
@@ -405,7 +414,7 @@ def cancellation_role(user: dict, leave: dict) -> Optional[str]:
     actor = clean_id(user.get("employeeId"))
     if actor == clean_id(leave.get("employeeId")):
         return "Employee"
-    if actor == leave_authority_id(leave):
+    if actor in leave_authority_ids(leave):
         return "DIC"
     if sic_record_for(actor, leave.get("date"), leave.get("groupName")):
         return "SIC"
@@ -594,7 +603,7 @@ def get_my_role(user=Depends(get_authenticated_user)):
         "employeeId": emp_id,
         "isSIC": is_sic,
         "isDeptIC": is_dept_ic,
-        "isLeaveAuthority": is_dept_ic,
+        "isLeaveAuthority": is_dept_ic or is_reporting_officer,
         "isAdmin": is_admin(user),
         "isReportingOfficer": is_reporting_officer,
         "canViewAll": can_view_all_leaves(user),
@@ -671,6 +680,32 @@ def get_organization_approval_calendar(
         "date": {"$gte": startDate, "$lte": endDate},
     })) if employee_ids else []
     duty_map = {(clean_id(item.get("employeeId")), item.get("date")): item for item in daily}
+    # Leave requests are the workflow source of truth. employee_daily is a
+    # roster projection and may be rebuilt when a roster is republished, so it
+    # must never be the only source used to render leave in this calendar.
+    leave_map = {}
+    if employee_ids:
+        active_requests = leave_request_collection.find({
+            "employeeId": {"$in": employee_ids},
+            "date": {"$gte": startDate, "$lte": endDate},
+            "finalStatus": {"$nin": ["Cancelled", "Canceled", "Rejected", "Withdrawn"]},
+        }).sort([("updatedOn", 1), ("createdOn", 1)])
+        for leave in active_requests:
+            leave_map[(clean_id(leave.get("employeeId")), leave.get("date"))] = leave
+    permanent_shift_groups = {}
+    for group in roster_group_collection.find(
+        {"isActive": {"$ne": False}},
+        {"groupName": 1, "shiftInCharge": 1, "members": 1},
+    ):
+        group_name = clean_id(group.get("groupName"))
+        if not group_name:
+            continue
+        for person in [group.get("shiftInCharge") or {}, *(group.get("members") or [])]:
+            member_id = clean_id(
+                person.get("employeeId") or person.get("userId") or person.get("id")
+            )
+            if member_id:
+                permanent_shift_groups[member_id] = group_name
     dates = []
     cursor = start
     while cursor <= end:
@@ -685,24 +720,29 @@ def get_organization_approval_calendar(
             department_values = [department_values]
         departments = [clean_id(value) for value in department_values if clean_id(value)] or ["Unmapped department"]
         employee_records = [duty_map.get((target_id, date), {}) for date in dates]
-        group_name = next(
-            (clean_id(record.get("groupName")) for record in employee_records
-             if clean_id(record.get("groupName")) and clean_id(record.get("groupName")).lower() != "general"),
-            f"General · {departments[0]}",
-        )
+        # Daily replacement assignments carry the covered shift's groupName,
+        # but they do not make the replacement employee a permanent member of
+        # that group. Group calendar rows only by Organization Master or the
+        # active roster-group master; keep replacement duty in the date cell.
+        group_name = permanent_shift_groups.get(target_id) or f"General · {departments[0]}"
         duties = {}
         for date in dates:
             record = duty_map.get((target_id, date), {})
             if not record:
                 record = general_duty_record(target_id, date) or {}
+            leave = leave_map.get((target_id, date)) or {}
             duties[date] = {
                 "shift": record.get("assignedDuty") or "General",
-                "leaveType": record.get("leaveType"),
-                "leaveStatus": record.get("leaveStatus"),
+                "leaveType": leave.get("leaveType") or record.get("leaveType"),
+                "leaveStatus": leave.get("finalStatus") or record.get("leaveStatus"),
+                "leaveRequestId": str(leave["_id"]) if leave.get("_id") else record.get("leaveRequestId"),
                 "trainingName": record.get("trainingName"),
-                "replacementEmployee": record.get("replacementEmployee"),
+                "replacementEmployee": leave.get("replacement") or record.get("replacementEmployee"),
                 "replacementRequired": bool(
-                    record.get("replacementRequired")
+                    leave.get("replacementRequired")
+                    or leave.get("sicReplacementRequired")
+                    or leave.get("dicReplacementRequired")
+                    or record.get("replacementRequired")
                     or (record.get("trainingFinal") or {}).get("replacementRequired")
                 ),
             }
@@ -713,7 +753,7 @@ def get_organization_approval_calendar(
             "name": employee.get("name") or target_id,
             "designation": employee.get("designation"),
             "IsSIC": any(bool(record.get("isSIC")) for record in employee_records),
-            "employeeType": "Shift" if not group_name.startswith("General ·") else "Non-shift",
+            "employeeType": "Shift" if target_id in permanent_shift_groups else "Non-shift",
             "departments": departments,
             "duties": duties,
         })
@@ -1358,21 +1398,15 @@ def sic_forward_bulk(data: dict, user=Depends(get_authenticated_user)):
             }
         )
 
-        # ðŸ”¥ FIND DEPT IC FOR THAT DATE
-        dept_ic_record = daily_record(leave.get("employeeId"), leave.get("date"))
-
-        dept_ic_id = clean_id((dept_ic_record or {}).get("departmentIC", {}).get("employeeId"))
-        dept_ic_emp = employee_collection.find_one({
-            "userId": employee_id_filter(dept_ic_id)
-        }) if dept_ic_id else None
-
-        # After SIC approval: notify the employee, DIC, and the DIC's direct
-        # reporting officer(s), by both mail and portal notification.
+        # After SIC approval, notify all current authorities resolved from the
+        # shift-group/Organization Master as well as the legacy roster DIC.
+        authority_ids = leave_authority_ids(leave)
         forward_recipient_ids = [clean_id(leave.get("employeeId"))]
-        if dept_ic_id:
-            forward_recipient_ids.append(dept_ic_id)
-        if dept_ic_emp:
-            forward_recipient_ids.extend(direct_reporting_officer_ids(dept_ic_emp))
+        forward_recipient_ids.extend(authority_ids)
+        for authority_id in authority_ids:
+            authority_employee = employee_by_id(authority_id)
+            if authority_employee:
+                forward_recipient_ids.extend(direct_reporting_officer_ids(authority_employee))
         forward_recipient_ids = [
             value for value in dict.fromkeys(forward_recipient_ids) if value
         ]
@@ -1613,12 +1647,13 @@ def approve_leave_bulk(data: dict, user=Depends(get_authenticated_user)):
 
         # After DIC final approval: notify the employee, group SIC/acting SIC,
         # the DIC's direct reporting officer(s), and administrator(s).
-        dept_ic_id = leave_authority_id(leave)
-        dept_ic_emp = employee_by_id(dept_ic_id)
+        authority_ids = leave_authority_ids(leave)
         final_recipient_ids = [clean_id(leave.get("employeeId"))]
         final_recipient_ids.extend(group_sic_ids(leave.get("date"), leave.get("groupName")))
-        if dept_ic_emp:
-            final_recipient_ids.extend(direct_reporting_officer_ids(dept_ic_emp))
+        for authority_id in authority_ids:
+            authority_employee = employee_by_id(authority_id)
+            if authority_employee:
+                final_recipient_ids.extend(direct_reporting_officer_ids(authority_employee))
         final_recipient_ids.extend(administrator_ids())
         final_recipient_ids = [
             value for value in dict.fromkeys(final_recipient_ids) if value
@@ -1842,6 +1877,7 @@ def get_leave_list(
 
         result.append({
             "id": str(r["_id"]),
+            "leaveGroupId": r.get("leaveGroupId"),
             "employeeId": clean_id(r.get("employeeId")),
             "name": r.get("name"),
             "departments": departments,

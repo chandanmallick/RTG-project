@@ -16,11 +16,14 @@ import CalendarInput from "../components/ui/CalendarInput";
 import API from "../services/api";
 import { CHART_GRID_PROPS, CHART_TOOLTIP_PROPS } from "../theme/chartTheme";
 
-const todayIso = () => new Date().toISOString().slice(0, 10);
+const todayIso = () => {
+  const value = new Date();
+  return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")}`;
+};
 const addDays = (dateStr, days) => {
   const dt = new Date(`${dateStr}T00:00:00`);
   dt.setDate(dt.getDate() + days);
-  return dt.toISOString().slice(0, 10);
+  return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}-${String(dt.getDate()).padStart(2, "0")}`;
 };
 
 const formatDate = (dateStr) => {

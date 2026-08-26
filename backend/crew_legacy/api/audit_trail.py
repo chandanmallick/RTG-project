@@ -2,14 +2,10 @@ from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from crew_legacy.admin_logic.auth_utils import get_authenticated_user
+from crew_legacy.admin_logic.auth_utils import get_authenticated_user, require_page_view
 from crew_legacy.database.database_mongo import audit_trail_collection, employee_collection
 
 router = APIRouter()
-
-
-def _is_audit_admin(user: dict) -> bool:
-    return str(user.get("employeeId") or user.get("userId") or "") == "50041"
 
 
 @router.get("")
@@ -21,8 +17,7 @@ def list_audit_trail(
     limit: int = Query(default=250, ge=1, le=1000),
     user=Depends(get_authenticated_user),
 ):
-    if not _is_audit_admin(user):
-        raise HTTPException(403, "Audit trail access is restricted to the configured administrator")
+    require_page_view(user, "audit_trail")
     query = {}
     if section:
         query["section"] = section

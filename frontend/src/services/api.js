@@ -230,12 +230,15 @@ const API = {
     return res.data;
   },
 
-  getRTGSnapshotTrend: async (dateStr) => {
+  getRTGSnapshotTrend: async (dateStr, historicalOnly = false) => {
 
     const params = new URLSearchParams();
 
     if (dateStr) {
       params.append("date_str", dateStr);
+    }
+    if (historicalOnly) {
+      params.append("historical_only", "true");
     }
 
     const query = params.toString();
@@ -790,6 +793,50 @@ const API = {
       responseType: "blob",
     });
     return res.data;
+  },
+
+  getOldLogbookViolationMeta: async () => {
+    const res = await axios.get(`${BASE_URL}/old-logbook/violation-messages/meta`);
+    return res.data;
+  },
+
+  getOldLogbookViolationMessages: async ({ startDate, endDate, search = "", constituent = "", violationTypes = [], subViolationTypes = [], grouping = "daily", matrixGrouping = "daily", limit = 100, skip = 0 } = {}) => {
+    const params = new URLSearchParams({
+      start_date: startDate,
+      end_date: endDate,
+      grouping,
+      matrix_grouping: matrixGrouping,
+      limit: String(limit),
+      skip: String(skip),
+    });
+    if (search) params.append("search", search);
+    if (constituent) params.append("constituent", constituent);
+    violationTypes.forEach((value) => params.append("violation_type", value));
+    subViolationTypes.forEach((value) => params.append("sub_violation_type", value));
+    const res = await axios.get(`${BASE_URL}/old-logbook/violation-messages?${params.toString()}`);
+    return res.data;
+  },
+
+  downloadOldLogbookViolationExcel: async ({ startDate, endDate, search = "", constituent = "", violationTypes = [], subViolationTypes = [], grouping = "daily", matrixGrouping = "daily" } = {}) => {
+    const params = new URLSearchParams({ start_date: startDate, end_date: endDate, grouping, matrix_grouping: matrixGrouping });
+    if (search) params.append("search", search);
+    if (constituent) params.append("constituent", constituent);
+    violationTypes.forEach((value) => params.append("violation_type", value));
+    subViolationTypes.forEach((value) => params.append("sub_violation_type", value));
+    return (await axios.get(`${BASE_URL}/old-logbook/violation-messages/export?${params.toString()}`, {
+      responseType: "blob",
+    })).data;
+  },
+
+  downloadOldLogbookViolationPdf: async ({ startDate, endDate, search = "", constituent = "", violationTypes = [], subViolationTypes = [], matrixGrouping = "daily" } = {}) => {
+    const params = new URLSearchParams({ start_date: startDate, end_date: endDate, matrix_grouping: matrixGrouping });
+    if (search) params.append("search", search);
+    if (constituent) params.append("constituent", constituent);
+    violationTypes.forEach((value) => params.append("violation_type", value));
+    subViolationTypes.forEach((value) => params.append("sub_violation_type", value));
+    return (await axios.get(`${BASE_URL}/old-logbook/violation-messages/export-pdf?${params.toString()}`, {
+      responseType: "blob",
+    })).data;
   },
 
   getOutageMlOverview: async () => (await axios.get(`${BASE_URL}/outage-ml/overview`)).data,

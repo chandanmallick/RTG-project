@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import {
-  Alert, Box, Button, Checkbox, Chip, CircularProgress, ListItemText, MenuItem, Paper, Stack,
-  Tab, Table, TableBody, TableCell, TableHead, TableRow, Tabs, TextField, Typography,
+  Alert, Box, Button, Checkbox, Chip, CircularProgress, Dialog, DialogContent, DialogTitle,
+  IconButton, ListItemText, MenuItem, Paper, Stack, Tab, Table, TableBody, TableCell, TableHead,
+  TableRow, Tabs, TextField, Typography,
 } from "@mui/material";
-import { Award, Briefcase, CalendarCheck2, RefreshCw, Repeat2 } from "lucide-react";
+import { Award, Briefcase, CalendarCheck2, RefreshCw, Repeat2, X } from "lucide-react";
 
 import AppShell from "../../components/layout/AppShell";
 import api from "../../crewLegacy/api";
@@ -39,6 +40,8 @@ export default function CrewActivityReport() {
   const [startDate, setStartDate] = useState(yearStart());
   const [endDate, setEndDate] = useState(today());
   const [kind, setKind] = useState("All");
+  const [matrixKind, setMatrixKind] = useState("All");
+  const [trainingDetails, setTrainingDetails] = useState(null);
   const [reportMode, setReportMode] = useState("detail");
   const [report, setReport] = useState({ summary: {}, rows: [], employees: [], canViewAll: false });
   const [matrix, setMatrix] = useState({ leaveCategories: [], rows: [] });
@@ -73,6 +76,9 @@ export default function CrewActivityReport() {
     }
   };
   const rows = useMemo(() => (report.rows || []).filter((row) => kind === "All" || row.kind === kind), [report.rows, kind]);
+  const matrixRows = useMemo(() => (matrix.rows || []).filter((row) => (
+    matrixKind === "All" || (matrixKind === "Training" ? row.trainingDays > 0 : row.leaveTotal > 0)
+  )), [matrix.rows, matrixKind]);
 
   return <AppShell>
     <Paper elevation={0} sx={{ p: { xs: 1.75, md: 2.1 }, borderRadius: 3, color: "#fff", background: "linear-gradient(105deg,#08103A 0%,#0057B7 62%,#1378DD 100%)" }}>
@@ -102,8 +108,10 @@ export default function CrewActivityReport() {
         </TextField>}
         <TextField size="small" type="date" label="From" value={startDate} onChange={(event) => setStartDate(event.target.value)} InputLabelProps={{ shrink: true }} />
         <TextField size="small" type="date" label="To" value={endDate} onChange={(event) => setEndDate(event.target.value)} InputLabelProps={{ shrink: true }} />
-        {reportMode === "detail" && <TextField select size="small" label="Show" value={kind} onChange={(event) => setKind(event.target.value)} sx={{ minWidth: 170 }}>
+        {reportMode === "detail" ? <TextField select size="small" label="Activity type" value={kind} onChange={(event) => setKind(event.target.value)} sx={{ minWidth: 170 }}>
           {["All", "Leave", "Training", "C-OFF", "Replacement duty"].map((value) => <MenuItem key={value} value={value}>{value}</MenuItem>)}
+        </TextField> : <TextField select size="small" label="Activity type" value={matrixKind} onChange={(event) => setMatrixKind(event.target.value)} sx={{ minWidth: 170 }}>
+          {["All", "Training", "Leave"].map((value) => <MenuItem key={value} value={value}>{value}</MenuItem>)}
         </TextField>}
         <Button variant="contained" onClick={reportMode === "matrix" ? loadMatrix : load} sx={{ textTransform: "none", fontWeight: 900, background: "#0057B7" }}>Load report</Button>
       </Stack>
@@ -142,13 +150,34 @@ export default function CrewActivityReport() {
         </TableBody></Table>
       </Box>}
     </Paper> : <Paper elevation={0} sx={{ overflow: "hidden", borderRadius: 3 }}>
-      <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ px: 2, py: 1.4, borderBottom: "1px solid #E2E8F0" }}><Box><Typography sx={{ fontWeight: 950, color: "#0F172A" }}>Employee-wise leave and training days</Typography><Typography sx={{ fontSize: 11.5, color: "#64748B" }}>Approved records only. Leave categories are generated from the selected period.</Typography></Box><Chip label={`${matrix.rows?.length || 0} employee(s)`} size="small" sx={{ fontWeight: 850 }} /></Stack>
+      <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ px: 2, py: 1.4, borderBottom: "1px solid #E2E8F0" }}><Box><Typography sx={{ fontWeight: 950, color: "#0F172A" }}>Employee-wise leave and training days</Typography><Typography sx={{ fontSize: 11.5, color: "#64748B" }}>Approved records only. Training is measured against the 7-day target; click a value to see the training list.</Typography></Box><Chip label={`${matrixRows.length} employee(s)`} size="small" sx={{ fontWeight: 850 }} /></Stack>
       {loading ? <Box sx={{ minHeight: 300, display: "grid", placeItems: "center" }}><CircularProgress /></Box> : <Box sx={{ overflow: "auto", maxHeight: "calc(100vh - 420px)" }}><Table stickyHeader size="small"><TableHead><TableRow>
-        <TableCell sx={{ fontWeight: 900 }}>Employee</TableCell><TableCell align="right" sx={{ fontWeight: 900 }}>Training days</TableCell><TableCell align="right" sx={{ fontWeight: 900 }}>Total leave days</TableCell>{(matrix.leaveCategories || []).map((category) => <TableCell key={category} align="right" sx={{ fontWeight: 900 }}>{category}</TableCell>)}
+        <TableCell sx={{ fontWeight: 900 }}>Employee</TableCell>{matrixKind !== "Leave" && <TableCell align="right" sx={{ fontWeight: 900 }}>Training days (of 7)</TableCell>}{matrixKind !== "Training" && <><TableCell align="right" sx={{ fontWeight: 900 }}>Total leave days</TableCell>{(matrix.leaveCategories || []).map((category) => <TableCell key={category} align="right" sx={{ fontWeight: 900 }}>{category}</TableCell>)}</>}
       </TableRow></TableHead><TableBody>
-        {!matrix.rows?.length && <TableRow><TableCell colSpan={(matrix.leaveCategories?.length || 0) + 3} align="center" sx={{ py: 7, color: "#64748B" }}>Load the matrix report for the selected period.</TableCell></TableRow>}
-        {(matrix.rows || []).map((row) => <TableRow key={row.employeeId} hover><TableCell><Typography sx={{ fontWeight: 850 }}>{row.employeeName || row.employeeId}</Typography><Typography variant="caption">{row.designation || "—"} · {row.employeeId}</Typography></TableCell><TableCell align="right" sx={{ fontWeight: 850 }}>{row.trainingDays || 0}</TableCell><TableCell align="right" sx={{ fontWeight: 850 }}>{row.leaveTotal || 0}</TableCell>{(matrix.leaveCategories || []).map((category) => <TableCell key={category} align="right">{row.leaveByType?.[category] || 0}</TableCell>)}</TableRow>)}
+        {!matrixRows.length && <TableRow><TableCell colSpan={matrixKind === "Training" ? 2 : matrixKind === "Leave" ? (matrix.leaveCategories?.length || 0) + 2 : (matrix.leaveCategories?.length || 0) + 3} align="center" sx={{ py: 7, color: "#64748B" }}>No {matrixKind === "All" ? "activity" : matrixKind.toLowerCase()} found for the selected period.</TableCell></TableRow>}
+        {matrixRows.map((row) => <TableRow key={row.employeeId} hover><TableCell><Typography sx={{ fontWeight: 850 }}>{row.employeeName || row.employeeId}</Typography><Typography variant="caption">{row.designation || "—"} · {row.employeeId}</Typography></TableCell>{matrixKind !== "Leave" && <TableCell align="right"><Button size="small" variant="outlined" disabled={!(row.trainings || []).length} onClick={() => setTrainingDetails(row)} sx={{ minWidth: 72, textTransform: "none", fontWeight: 900, color: "#6A1B9A", borderColor: "#CDB4EA" }}>{row.trainingDays || 0} / {row.trainingTargetDays || matrix.trainingTargetDays || 7}</Button></TableCell>}{matrixKind !== "Training" && <><TableCell align="right" sx={{ fontWeight: 850 }}>{row.leaveTotal || 0}</TableCell>{(matrix.leaveCategories || []).map((category) => <TableCell key={category} align="right">{row.leaveByType?.[category] || 0}</TableCell>)}</>}</TableRow>)}
       </TableBody></Table></Box>}
     </Paper>}
+
+    <Dialog open={Boolean(trainingDetails)} onClose={() => setTrainingDetails(null)} fullWidth maxWidth="sm">
+      <DialogTitle sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontWeight: 950 }}>
+        Training details
+        <IconButton onClick={() => setTrainingDetails(null)}><X size={19} /></IconButton>
+      </DialogTitle>
+      <DialogContent dividers>
+        {trainingDetails && <Stack spacing={1.25}>
+          <Box>
+            <Typography sx={{ fontWeight: 950, fontSize: 17 }}>{trainingDetails.employeeName || trainingDetails.employeeId}</Typography>
+            <Typography sx={{ color: "#64748B", fontSize: 12 }}>{trainingDetails.employeeId} · {trainingDetails.trainingDays || 0} of {trainingDetails.trainingTargetDays || matrix.trainingTargetDays || 7} training days</Typography>
+          </Box>
+          {(trainingDetails.trainings || []).map((training) => <Paper key={training.id} variant="outlined" sx={{ p: 1.4, borderColor: "#D8C4EE", background: "#FCF9FF" }}>
+            <Stack direction="row" justifyContent="space-between" spacing={1}>
+              <Box><Typography sx={{ color: "#4A148C", fontWeight: 900 }}>{training.name}</Typography><Typography sx={{ mt: .3, color: "#64748B", fontSize: 11.5 }}>{displayDate(training.startDate)}{training.endDate && training.endDate !== training.startDate ? ` to ${displayDate(training.endDate)}` : ""}{training.location ? ` · ${training.location}` : ""}</Typography></Box>
+              <Chip size="small" label={`${training.days || 0} day(s)`} sx={{ fontWeight: 850, background: "#F0E7FA", color: "#6A1B9A" }} />
+            </Stack>
+          </Paper>)}
+        </Stack>}
+      </DialogContent>
+    </Dialog>
   </AppShell>;
 }

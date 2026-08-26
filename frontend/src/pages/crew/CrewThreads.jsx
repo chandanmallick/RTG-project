@@ -27,8 +27,10 @@ import {
 } from "@mui/material";
 import {
   CalendarClock,
+  CheckCircle2,
   ChevronDown,
   Clock3,
+  ClipboardList,
   Download,
   ExternalLink,
   File,
@@ -68,6 +70,7 @@ const officeProtocol = (link) => {
 export default function CrewThreads() {
   const { user } = useAuth();
   const canWrite = user?.permissions?.crew_threads?.write !== false;
+  const canApprove = Boolean(user?.permissions?.crew_threads?.approve);
 
   const [threads, setThreads] = useState([]);
   const [selectedId, setSelectedId] = useState("");
@@ -322,6 +325,16 @@ export default function CrewThreads() {
     }
   };
 
+  const approvePost = async (item) => {
+    try {
+      await api.post(`/threads/messages/${item.id}/approve`);
+      setNotice({ severity: "success", text: `Approved ${item.heading || "document post"}.` });
+      await loadMessages(selectedId);
+    } catch (error) {
+      setNotice({ severity: "error", text: errorText(error, "Document could not be approved.") });
+    }
+  };
+
   const downloadAttachment = async (attachment) => {
     try {
       const result = await api.get(attachment.downloadUrl.replace("/api/crew", ""), { responseType: "blob" });
@@ -348,6 +361,7 @@ export default function CrewThreads() {
             <Typography sx={{ mt: 0.1, fontSize: 11.5, opacity: 0.9 }}>Publish dated notices, meeting notes and documents with audience control.</Typography>
           </Box>
           <Stack direction="row" spacing={0.75} alignItems="center">
+            {user?.permissions?.audit_trail?.view && <Button onClick={() => { window.location.href = "/admin/audit-trail?section=Crew%20Notices"; }} startIcon={<ClipboardList size={14} />} sx={{ minHeight: 30, px: 1, py: 0.25, color: "#fff", border: "1px solid rgba(255,255,255,.55)", fontSize: 10.5, fontWeight: 850 }}>Audit trail</Button>}
             <Button onClick={() => { loadThreads(); if (selectedId) loadMessages(selectedId); }} startIcon={<RefreshCw size={14} />} sx={{ minHeight: 30, px: 1, py: 0.25, color: "#fff", border: "1px solid rgba(255,255,255,.55)", fontSize: 10.5, fontWeight: 850 }}>Refresh</Button>
             {canWrite && <Button variant="contained" onClick={() => setNewOpen(true)} startIcon={<Plus size={15} />} sx={{ minHeight: 30, px: 1.05, py: 0.25, bgcolor: "#fff", color: "#0057B7", fontSize: 10.5, fontWeight: 900, "&:hover": { bgcolor: "#EAF2FF" } }}>New notice</Button>}
           </Stack>
@@ -460,6 +474,8 @@ export default function CrewThreads() {
                 const title = item.heading || (item.text ? item.text.split(/\r?\n/).find(Boolean)?.slice(0, 90) || "Post" : (item.attachments?.length ? "Attachment post" : "Post"));
                 const postMoment = dayjs(item.meetingAt || item.createdAt);
                 const isRight = index % 2 === 0;
+                const pendingApproval = item.approvalStatus === "pending";
+                const canOpenDocuments = !pendingApproval || own || canApprove;
                 return (
                   <Box key={item.id} sx={{ display: "grid", gridTemplateColumns: { xs: "58px minmax(0,1fr)", sm: "minmax(0,1fr) 42px minmax(0,1fr)" }, columnGap: 1.25, position: "relative", zIndex: 1, pb: 2.2 }}>
                     <Box sx={{ gridColumn: { xs: 1, sm: isRight ? 1 : 3 }, textAlign: { xs: "right", sm: isRight ? "right" : "left" }, pt: 0.5, pr: { xs: 0.25, sm: isRight ? 0.5 : 0 }, pl: { sm: isRight ? 0 : 0.5 } }}>
@@ -474,6 +490,7 @@ export default function CrewThreads() {
                         <Stack direction={isRight ? "row" : "row-reverse"} alignItems="center" gap={0.75} sx={{ mb: 0.5, flexWrap: "wrap" }}>
                           <Chip size="small" label={title} sx={{ height: 21, maxWidth: 220, bgcolor: own ? "#DDEBFF" : "#E7F8F5", color: own ? "#0057B7" : "#087A72", fontWeight: 900 }} />
                           {item.isUnread && <Chip size="small" label="New" sx={{ height: 21, bgcolor: "#FFE4E6", color: "#BE123C", fontWeight: 950 }} />}
+                          {pendingApproval ? <Chip size="small" label="Pending approval" sx={{ height: 21, bgcolor: "#FFF4E5", color: "#B45309", fontWeight: 950 }} /> : (item.attachments?.length || item.sharePointLinks?.length) ? <Chip size="small" icon={<CheckCircle2 size={12} />} label="Approved" sx={{ height: 21, bgcolor: "#E8FAF1", color: "#047857", fontWeight: 950 }} /> : null}
                           <Typography sx={{ color: "#64748B", fontSize: 10.5, fontWeight: 800 }}>{postMoment.format("DD MMM YYYY, HH:mm")}</Typography>
                            <Typography sx={{ color: "#94A3B8", fontSize: 10.5 }}>·</Typography>
                           <Typography sx={{ color: "#64748B", fontSize: 10.5, fontWeight: 800 }}>{item.createdBy?.name || item.createdBy?.employeeId}</Typography>
@@ -483,7 +500,9 @@ export default function CrewThreads() {
                         <Box sx={{ px: 1.2, py: 0.95, border: "1px solid", borderColor: own ? "#B8D3F3" : "#BFD9F8", borderRadius: 2.5, background: own ? "#EAF3FF" : "#F3F8FF", boxShadow: "0 4px 14px rgba(15,23,42,.045)" }}>
                           <Typography sx={{ mb: 0.35, fontSize: 11.5, fontWeight: 900, color: "#334155" }}>{title}</Typography>
                           {item.text && <Typography sx={{ display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden", color: "#172033", fontSize: 13, lineHeight: 1.42 }}>{item.text}</Typography>}
-                          {(item.attachments || []).length > 0 && (
+                          {pendingApproval && canApprove && <Button size="small" variant="contained" color="success" startIcon={<CheckCircle2 size={14} />} onClick={() => approvePost(item)} sx={{ mt: .75, textTransform: "none", fontWeight: 900 }}>Approve document</Button>}
+                          {pendingApproval && !canOpenDocuments && <Alert severity="warning" sx={{ mt: .75, py: 0, fontSize: 11 }}>Document access will be available after approval.</Alert>}
+                          {canOpenDocuments && (item.attachments || []).length > 0 && (
                             <Stack direction="row" gap={0.75} sx={{ mt: 0.75, flexWrap: "wrap" }}>
                               {(item.attachments || []).map((attachment) => (
                                 <Button
@@ -498,7 +517,7 @@ export default function CrewThreads() {
                               ))}
                             </Stack>
                           )}
-                          {(item.sharePointLinks || []).length > 0 && (
+                          {canOpenDocuments && (item.sharePointLinks || []).length > 0 && (
                             <Stack direction="row" gap={0.75} sx={{ mt: 0.75, flexWrap: "wrap" }}>
                               {(item.sharePointLinks || []).map((link) => (
                                 <Chip

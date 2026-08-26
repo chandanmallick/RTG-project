@@ -109,12 +109,46 @@ def resolve_employee_organization(function_ids=None, employee_id=None):
         if unit_id not in role_function_ids
     ]
 
+    # Shift crews are maintained in the roster-group master rather than as
+    # ordinary Function members. Include their dedicated organization mapping
+    # so unit heads (and any explicitly selected SO-II/DIC) become reporting
+    # officers without editing every crew member separately.
+    shift_group_names = []
+    if employee_id:
+        for group in roster_group_collection.find(
+            {"isActive": {"$ne": False}},
+            {"groupName": 1, "shiftInCharge": 1, "members": 1},
+        ):
+            people = [group.get("shiftInCharge") or {}, *(group.get("members") or [])]
+            member_ids = {
+                str(person.get("employeeId") or person.get("userId") or person.get("id") or "").strip()
+                for person in people
+            }
+            if employee_id in member_ids:
+                group_name = str(group.get("groupName") or "").strip()
+                if group_name:
+                    shift_group_names.append(group_name)
+    shift_mappings = list(organization_shift_group_collection.find({
+        "groupName": {"$in": shift_group_names}
+    })) if shift_group_names else []
+    shift_unit_ids = [
+        str(item.get("organizationUnitId") or "")
+        for item in shift_mappings
+        if str(item.get("organizationUnitId") or "") in unit_by_id
+    ]
+    shift_supervisor_ids = [
+        value
+        for item in shift_mappings
+        for value in normalize_list(item.get("directSupervisorIds"))
+        if value in active_employee_ids and value != employee_id
+    ]
+
     selected_function_ids = list(dict.fromkeys(manual_function_ids + role_function_ids))
-    seed_ids = list(dict.fromkeys(selected_function_ids + role_unit_ids))
+    seed_ids = list(dict.fromkeys(selected_function_ids + role_unit_ids + shift_unit_ids))
     vertical_ids = []
     section_ids = []
     department_ids = []
-    reporting_ids = []
+    reporting_ids = list(dict.fromkeys(shift_supervisor_ids))
     intermediary_candidates = []
     hod_candidates = []
 
@@ -193,6 +227,7 @@ def resolve_employee_organization(function_ids=None, employee_id=None):
         "reportingOfficerId": reporting_ids[0] if reporting_ids else None,
         "intermediaryReportingId": intermediary_candidates[0] if intermediary_candidates else None,
         "hodId": hod_candidates[0] if hod_candidates else None,
+        "shiftGroupNames": list(dict.fromkeys(shift_group_names)),
     }
 
 
@@ -750,6 +785,13 @@ def get_organization_shift_groups():
         {"name": 1, "unitType": 1},
     ).sort([("unitType", 1), ("name", 1)]))
     unit_map = {str(item["_id"]): item for item in units}
+    employee_names = {
+        str(item.get("userId") or item.get("employeeId") or "").strip(): item.get("name")
+        for item in employee_collection.find(
+            {"isActive": {"$ne": False}},
+            {"userId": 1, "employeeId": 1, "name": 1},
+        )
+    }
     mappings = []
     for item in organization_shift_group_collection.find({}).sort("groupName", 1):
         unit_id = str(item.get("organizationUnitId") or "")
@@ -760,6 +802,11 @@ def get_organization_shift_groups():
             "organizationUnitId": unit_id,
             "organizationUnitName": (unit or {}).get("name") or item.get("organizationUnitName"),
             "organizationUnitType": (unit or {}).get("unitType") or item.get("organizationUnitType"),
+            "directSupervisorIds": normalize_list(item.get("directSupervisorIds")),
+            "directSupervisorNames": [
+                employee_names.get(value, value)
+                for value in normalize_list(item.get("directSupervisorIds"))
+            ],
             "isGroupActive": item.get("groupName") in active_group_names,
             "updatedAt": item.get("updatedAt"),
         })
@@ -776,45 +823,72 @@ def get_organization_shift_groups():
 
 @router.post("/organization/shift-groups/attach")
 def attach_organization_shift_group(data: dict):
-    group_name = str(data.get("groupName") or "").strip()
+    group_names = normalize_list(data.get("groupNames") or data.get("groupName"))
     unit_id = str(data.get("organizationUnitId") or "").strip()
-    if not group_name or not ObjectId.is_valid(unit_id):
-        raise HTTPException(400, "Active shift group and reporting organization unit are required")
-    active_group = roster_group_collection.find_one({
-        "groupName": group_name,
-        "isActive": {"$ne": False},
-    })
-    if not active_group:
-        raise HTTPException(404, "Active shift group not found")
-    unit = organization_unit_collection.find_one({
-        "_id": ObjectId(unit_id),
-        "isActive": {"$ne": False},
-        "unitType": {"$in": ["department", "vertical", "section", "function"]},
-    })
-    if not unit:
-        raise HTTPException(404, "Department, Vertical, Section or Function not found")
+    supervisor_ids = normalize_list(data.get("directSupervisorIds"))
+    if not group_names or (not unit_id and not supervisor_ids):
+        raise HTTPException(400, "Select at least one active shift group and a direct supervisor or organization unit")
+    active_groups = {
+        str(item.get("groupName") or "").strip()
+        for item in roster_group_collection.find({
+            "groupName": {"$in": group_names},
+            "isActive": {"$ne": False},
+        }, {"groupName": 1})
+    }
+    missing_groups = [name for name in group_names if name not in active_groups]
+    if missing_groups:
+        raise HTTPException(404, f"Active shift group not found: {', '.join(missing_groups)}")
+    unit = None
+    if unit_id:
+        if not ObjectId.is_valid(unit_id):
+            raise HTTPException(400, "Invalid reporting organization unit")
+        unit = organization_unit_collection.find_one({
+            "_id": ObjectId(unit_id),
+            "isActive": {"$ne": False},
+            "unitType": {"$in": ["department", "vertical", "section", "function"]},
+        })
+        if not unit:
+            raise HTTPException(404, "Department, Vertical, Section or Function not found")
+    active_supervisors = {
+        str(item.get("userId") or item.get("employeeId") or "").strip()
+        for item in employee_collection.find({
+            "$or": [
+                {"userId": {"$in": supervisor_ids}},
+                {"employeeId": {"$in": supervisor_ids}},
+            ],
+            "isActive": {"$ne": False},
+        }, {"userId": 1, "employeeId": 1})
+    } if supervisor_ids else set()
+    missing_supervisors = [value for value in supervisor_ids if value not in active_supervisors]
+    if missing_supervisors:
+        raise HTTPException(404, f"Active supervisor not found: {', '.join(missing_supervisors)}")
     now = datetime.utcnow()
-    organization_shift_group_collection.update_one(
-        {"groupName": group_name},
-        {
-            "$set": {
-                "groupName": group_name,
-                "organizationUnitId": unit["_id"],
-                "organizationUnitName": unit.get("name"),
-                "organizationUnitType": unit.get("unitType"),
-                "updatedAt": now,
+    for group_name in group_names:
+        organization_shift_group_collection.update_one(
+            {"groupName": group_name},
+            {
+                "$set": {
+                    "groupName": group_name,
+                    "organizationUnitId": unit["_id"] if unit else None,
+                    "organizationUnitName": unit.get("name") if unit else None,
+                    "organizationUnitType": unit.get("unitType") if unit else None,
+                    "directSupervisorIds": supervisor_ids,
+                    "updatedAt": now,
+                },
+                "$setOnInsert": {"createdAt": now},
             },
-            "$setOnInsert": {"createdAt": now},
-        },
-        upsert=True,
-    )
+            upsert=True,
+        )
     # Remove the short-lived embedded representation, if it was saved before
     # shift-group reporting was moved into this dedicated mapping collection.
     organization_unit_collection.update_many(
-        {"shiftGroupNames": group_name},
-        {"$pull": {"shiftGroupNames": group_name}},
+        {"shiftGroupNames": {"$in": group_names}},
+        {"$pull": {"shiftGroupNames": {"$in": group_names}}},
     )
-    return {"message": f"{group_name} now reports to {unit.get('name')}"}
+    sync_employee_organization()
+    target_names = [unit.get("name")] if unit else []
+    target_names.extend(supervisor_ids)
+    return {"message": f"{len(group_names)} shift group(s) now report to {', '.join(target_names)}"}
 
 
 @router.delete("/organization/shift-groups/{mapping_id}")
@@ -824,6 +898,7 @@ def detach_organization_shift_group(mapping_id: str):
     result = organization_shift_group_collection.delete_one({"_id": ObjectId(mapping_id)})
     if not result.deleted_count:
         raise HTTPException(404, "Shift-group mapping not found")
+    sync_employee_organization()
     return {"message": "Shift group detached from the organization hierarchy"}
 
 

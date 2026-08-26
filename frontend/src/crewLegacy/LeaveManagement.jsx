@@ -49,12 +49,14 @@ const statusColor = (status) => ({
 const compactDutyStyle = (duty = {}) => {
   const leave = String(duty.leaveStatus || "").toLowerCase();
   const shift = String(duty.shift || "").toUpperCase();
-  if (leave && !["rejected", "cancelled", "canceled", "withdrawn"].includes(leave)) return { bg: "#FDE8EC", color: "#C62828", border: "#F3A8B3" };
-  if (duty.trainingName || shift.includes("TRAINING") || shift.includes("TOUR")) return { bg: "#F0E7FA", color: "#6A1B9A", border: "#CDB4EA" };
-  if (["MORNING", "M1", "M2"].includes(shift)) return { bg: "#E7F6E9", color: "#000", border: "#A9DDB2" };
-  if (["EVENING", "E1", "E2"].includes(shift)) return { bg: "#FFF4CC", color: "#000", border: "#E8D184" };
-  if (["NIGHT", "N1", "N2"].includes(shift)) return { bg: "#E4F2FF", color: "#000", border: "#A7CFEF" };
-  if (["OFF", "O1", "O2"].includes(shift)) return { bg: "#ECEFF3", color: "#000", border: "#C9D0D9" };
+  const activeLeave = leave && !["rejected", "cancelled", "canceled", "withdrawn"].includes(leave);
+  if (leave === "approved") return { bg: "#FEE2E2", color: "#B91C1C", border: "#F87171" };
+  if (activeLeave) return { bg: "#FFEDD5", color: "#C2410C", border: "#FB923C" };
+  if (duty.trainingName || shift.includes("TRAINING") || shift.includes("TOUR")) return { bg: "#F3E8FF", color: "#6B21A8", border: "#C4B5FD" };
+  if (["MORNING", "M1", "M2"].includes(shift)) return { bg: "#DCFCE7", color: "#14532D", border: "#86EFAC" };
+  if (["EVENING", "E1", "E2"].includes(shift)) return { bg: "#FEF3C7", color: "#78350F", border: "#FCD34D" };
+  if (["NIGHT", "N1", "N2"].includes(shift)) return { bg: "#DBEAFE", color: "#1E3A8A", border: "#93C5FD" };
+  if (["OFF", "O1", "O2"].includes(shift)) return { bg: "#E5E7EB", color: "#111827", border: "#9CA3AF" };
   return { bg: "#F8FAFC", color: "#000", border: "#D6DEE8" };
 };
 
@@ -91,7 +93,7 @@ function SectionTitle({ icon: Icon, title, subtitle, count }) {
   );
 }
 
-export default function LeaveManagement() {
+export default function LeaveManagement({ embeddedApproval = false, initialApprovalDate = "", initialLeaveId = "", onApprovalChanged } = {}) {
   const [employees, setEmployees] = useState([]);
   const [selectedEmployee, setSelectedEmployee] = useState(null);
   const [leaveTypes, setLeaveTypes] = useState([]);
@@ -105,21 +107,23 @@ export default function LeaveManagement() {
   const [working, setWorking] = useState(false);
   const [notice, setNotice] = useState(null);
   const dragFill = useRef(null);
-  const [selectedWorkflowIds, setSelectedWorkflowIds] = useState([]);
+  const [selectedWorkflowIds, setSelectedWorkflowIds] = useState(() => initialLeaveId ? [initialLeaveId] : []);
   const [replacementChoices, setReplacementChoices] = useState({});
   const [completedFrom, setCompletedFrom] = useState(dayjs().subtract(1, "day").format("YYYY-MM-DD"));
   const [completedTo, setCompletedTo] = useState("");
-  const [workflowView, setWorkflowView] = useState(() => new URLSearchParams(window.location.search).get("view") === "calendar" ? "calendar" : "table");
+  const [workflowView, setWorkflowView] = useState(() => embeddedApproval || new URLSearchParams(window.location.search).get("view") === "calendar" ? "calendar" : "table");
   const [approvalRoster, setApprovalRoster] = useState([]);
   const [approvalDates, setApprovalDates] = useState([]);
-  const [approvalFrom, setApprovalFrom] = useState(() => new URLSearchParams(window.location.search).get("from") || "");
-  const [approvalTo, setApprovalTo] = useState(() => new URLSearchParams(window.location.search).get("to") || "");
+  const [approvalFrom, setApprovalFrom] = useState(() => initialApprovalDate || new URLSearchParams(window.location.search).get("from") || "");
+  const [approvalTo, setApprovalTo] = useState(() => initialApprovalDate || new URLSearchParams(window.location.search).get("to") || "");
   const [approvalCalendarLoading, setApprovalCalendarLoading] = useState(false);
   const [approvalCalendarError, setApprovalCalendarError] = useState("");
   const [approvalDepartment, setApprovalDepartment] = useState("");
   const [rejectDialog, setRejectDialog] = useState({ open: false, stage: "sic", leaves: [] });
   const [rejectComment, setRejectComment] = useState("");
-  const [activeSection, setActiveSection] = useState(null);
+  const [activeSection, setActiveSection] = useState(() => new URLSearchParams(window.location.search).get("section") || null);
+  const notificationLeaveRef = useMemo(() => new URLSearchParams(window.location.search).get("leaveRef") || "", []);
+  const notificationRequestId = useMemo(() => new URLSearchParams(window.location.search).get("requestId") || "", []);
   const [approvedTraining, setApprovedTraining] = useState([]);
   const [pendingTrainingApprovals, setPendingTrainingApprovals] = useState([]);
   const [selectedTrainingApprovalIds, setSelectedTrainingApprovalIds] = useState([]);
@@ -132,6 +136,16 @@ export default function LeaveManagement() {
       document.getElementById(`leave-workspace-${section}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
     }, 180);
   };
+
+  useEffect(() => {
+    if (!activeSection || loading) return;
+    const targetId = activeSection === "exchange" && notificationRequestId
+      ? `duty-exchange-request-${notificationRequestId}`
+      : activeSection === "pending" && notificationLeaveRef
+        ? `leave-workflow-${notificationLeaveRef}`
+        : `leave-workspace-${activeSection}`;
+    window.setTimeout(() => document.getElementById(targetId)?.scrollIntoView({ behavior: "smooth", block: "center" }), 240);
+  }, [activeSection, loading, notificationLeaveRef, notificationRequestId]);
 
   const loadLeaves = async () => {
     const { data } = await api.get("/leave/list", {
@@ -268,6 +282,7 @@ export default function LeaveManagement() {
       setNotice({ severity: "success", text: data.message || successText });
       setSelectedWorkflowIds([]);
       await Promise.all([loadLeaves(), selectedEmployee ? api.get("/leave/comp-off/available", { params: { employeeId: employeeIdOf(selectedEmployee) } }).then(({ data: credits }) => setCompOffs(credits || [])) : Promise.resolve()]);
+      onApprovalChanged?.();
     } catch (error) {
       setNotice({ severity: "error", text: error.response?.data?.detail || "Action could not be completed." });
     } finally {
@@ -833,7 +848,7 @@ export default function LeaveManagement() {
             </TableHead>
             <TableBody>
               {items.map((leave) => (
-                <TableRow key={leave.id} hover>
+                <TableRow id={`leave-workflow-${leave.leaveGroupId || leave.id}`} key={leave.id} hover sx={(leave.leaveGroupId === notificationLeaveRef || leave.id === notificationLeaveRef) ? { background: "#FFF7D6", outline: "2px solid #F59E0B", outlineOffset: -2 } : undefined}>
                   {selectionEnabled && (
                     <TableCell padding="checkbox">
                       <Checkbox disabled={!leave.canSICAct && !leave.canFinalAct} checked={selectedWorkflowIds.includes(leave.id)} onChange={(event) => toggleWorkflowSelection(leave.id, event.target.checked)} />
@@ -919,6 +934,29 @@ export default function LeaveManagement() {
 
   if (loading) return <Box sx={{ minHeight: 420, display: "grid", placeItems: "center" }}><CircularProgress /></Box>;
 
+  if (embeddedApproval) return (
+    <Box sx={{ display: "grid", gap: 1.5 }}>
+      {notice && <Alert severity={notice.severity} onClose={() => setNotice(null)}>{notice.text}</Alert>}
+      <Paper variant="outlined" sx={{ p: { xs: 1, md: 1.5 }, borderColor: "#B8CDEA" }}>
+        {rosterWorkflowCalendar()}
+      </Paper>
+      <Dialog open={rejectDialog.open} onClose={() => setRejectDialog((current) => ({ ...current, open: false }))} fullWidth maxWidth="sm">
+        <DialogTitle sx={{ fontWeight: 950 }}>{rejectDialog.stage === "sic" ? "Reject leave at SIC stage" : "Reject leave at DIC stage"}</DialogTitle>
+        <DialogContent>
+          <Typography sx={{ mb: 1.5, color: "#64748B", fontSize: 12 }}>
+            {rejectDialog.leaves.length} leave record(s) selected. The comment will be recorded with the rejecting officer and timestamp.
+          </Typography>
+          <TextField autoFocus fullWidth multiline minRows={3} label="Rejection comment (optional)" value={rejectComment} onChange={(event) => setRejectComment(event.target.value)} inputProps={{ maxLength: 1000 }} />
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2 }}>
+          <Button onClick={() => setRejectDialog((current) => ({ ...current, open: false }))}>Cancel</Button>
+          <Button color="error" variant="contained" onClick={confirmReject}>Reject leave</Button>
+        </DialogActions>
+      </Dialog>
+      {working && <Box sx={{ position: "absolute", inset: 0, zIndex: 2, display: "grid", placeItems: "center", background: "rgba(255,255,255,.58)", pointerEvents: "none" }}><CircularProgress /></Box>}
+    </Box>
+  );
+
   return (
     <Box className="ui-kit-page" sx={{ display: "grid", gap: 2.5 }}>
       <Box sx={{ p: 3, mb: 3, borderRadius: 3, background: "linear-gradient(105deg,#08103A 0%,#0057B7 65%,#0F6FDB 100%)", color: "white" }}>
@@ -982,7 +1020,7 @@ export default function LeaveManagement() {
 
       <Collapse in={activeSection === "exchange"} timeout={420} unmountOnExit>
       <Box id="leave-workspace-exchange" sx={{ scrollMarginTop: 110 }}>
-        <DutyReassignmentPanel initialMode="exchange" onChanged={loadLeaves} />
+        <DutyReassignmentPanel initialMode="exchange" initialRequestId={notificationRequestId} onChanged={loadLeaves} />
       </Box>
       </Collapse>
 

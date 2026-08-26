@@ -398,7 +398,7 @@ def activity_matrix(
         str(item.get("userId") or item.get("employeeId") or "").strip(): {
             "employeeId": str(item.get("userId") or item.get("employeeId") or "").strip(),
             "employeeName": item.get("name") or "", "designation": item.get("designation") or "",
-            "trainingDays": 0, "leaveTotal": 0, "leaveByType": {},
+            "trainingDays": 0, "trainingTargetDays": 7, "trainings": [], "leaveTotal": 0, "leaveByType": {},
         }
         for item in employee_collection.find({"isActive": {"$ne": False}}, {"userId": 1, "employeeId": 1, "name": 1, "designation": 1})
     }
@@ -409,7 +409,7 @@ def activity_matrix(
         employee_id = str(leave.get("employeeId") or "").strip()
         if not employee_id:
             continue
-        row = people.setdefault(employee_id, {"employeeId": employee_id, "employeeName": leave.get("name") or employee_id, "designation": "", "trainingDays": 0, "leaveTotal": 0, "leaveByType": {}})
+        row = people.setdefault(employee_id, {"employeeId": employee_id, "employeeName": leave.get("name") or employee_id, "designation": "", "trainingDays": 0, "trainingTargetDays": 7, "trainings": [], "leaveTotal": 0, "leaveByType": {}})
         leave_type = str(leave.get("leaveType") or "Other").strip() or "Other"
         categories.add(leave_type)
         row["leaveTotal"] += 1
@@ -419,15 +419,24 @@ def activity_matrix(
         employee_id = str(nomination.get("employeeId") or "").strip()
         if not employee_id:
             continue
-        row = people.setdefault(employee_id, {"employeeId": employee_id, "employeeName": nomination.get("employeeName") or nomination.get("name") or employee_id, "designation": "", "trainingDays": 0, "leaveTotal": 0, "leaveByType": {}})
-        row["trainingDays"] += _inclusive_days(nomination.get("startDate"), nomination.get("endDate"), startDate, endDate)
+        row = people.setdefault(employee_id, {"employeeId": employee_id, "employeeName": nomination.get("employeeName") or nomination.get("name") or employee_id, "designation": "", "trainingDays": 0, "trainingTargetDays": 7, "trainings": [], "leaveTotal": 0, "leaveByType": {}})
+        counted_days = _inclusive_days(nomination.get("startDate"), nomination.get("endDate"), startDate, endDate)
+        row["trainingDays"] += counted_days
+        row["trainings"].append({
+            "id": str(nomination.get("_id")),
+            "name": nomination.get("trainingName") or "Training",
+            "startDate": nomination.get("startDate"),
+            "endDate": nomination.get("endDate"),
+            "days": counted_days,
+            "location": nomination.get("trainingLocation") or nomination.get("location") or "",
+        })
 
     category_order = sorted(categories, key=lambda value: (value not in {"CL", "C-OFF"}, value))
     rows = sorted(
         [row for row in people.values() if row["trainingDays"] or row["leaveTotal"]],
         key=lambda row: ((row["employeeName"] or "").lower(), row["employeeId"]),
     )
-    return {"startDate": startDate, "endDate": endDate, "leaveCategories": category_order, "rows": rows}
+    return {"startDate": startDate, "endDate": endDate, "trainingTargetDays": 7, "leaveCategories": category_order, "rows": rows}
 
 
 # -----------------------------

@@ -11,6 +11,7 @@ import { useAuth } from "../../auth/AuthContext";
 import GlassCard from "../../components/ui/GlassCard";
 import DutyReassignmentPanel from "../../components/crew/DutyReassignmentPanel";
 import crewApi from "../../services/crewApi";
+import LeaveManagement from "../../crewLegacy/LeaveManagement";
 
 const iso = (date) => {
   const y = date.getFullYear();
@@ -48,12 +49,15 @@ const replacementLabelSx = {
   px: .65,
   py: .2,
   borderRadius: 1,
-  border: "1px solid #86D3A5",
-  background: "#DCFCE7",
-  color: "#15803D",
+  border: "1px solid #93C5FD",
+  background: "#DBEAFE",
+  color: "#1D4ED8",
   fontSize: 9.5,
   fontWeight: 950,
   lineHeight: 1.2,
+  display: "flex",
+  alignItems: "center",
+  gap: .4,
 };
 
 const shiftStyle = (duty) => {
@@ -61,15 +65,16 @@ const shiftStyle = (duty) => {
   const shift = String(duty?.shift || "").trim().toUpperCase();
   const activeLeave = leave && !["rejected", "cancelled", "canceled", "withdrawn"].includes(leave);
 
-  if (activeLeave) return { background: "#FDE8EC", color: "#C62828", border: "#F3A8B3" };
+  if (leave === "approved") return { background: "#FEE2E2", color: "#B91C1C", border: "#F87171" };
+  if (activeLeave) return { background: "#FFEDD5", color: "#C2410C", border: "#FB923C" };
   if (duty?.trainingName || shift.includes("TRAINING") || shift.includes("TOUR")) {
-    return { background: "#F0E7FA", color: "#6A1B9A", border: "#CDB4EA" };
+    return { background: "#F3E8FF", color: "#6B21A8", border: "#C4B5FD" };
   }
 
-  if (["MORNING", "M1", "M2"].includes(shift)) return { background: "#E7F6E9", color: "#000000", border: "#A9DDB2" };
-  if (["EVENING", "E1", "E2"].includes(shift)) return { background: "#FFF4CC", color: "#000000", border: "#E8D184" };
-  if (["NIGHT", "N1", "N2"].includes(shift)) return { background: "#E4F2FF", color: "#000000", border: "#A7CFEF" };
-  if (["OFF", "O1", "O2"].includes(shift)) return { background: "#ECEFF3", color: "#000000", border: "#C9D0D9" };
+  if (["MORNING", "M1", "M2"].includes(shift)) return { background: "#DCFCE7", color: "#14532D", border: "#86EFAC" };
+  if (["EVENING", "E1", "E2"].includes(shift)) return { background: "#FEF3C7", color: "#78350F", border: "#FCD34D" };
+  if (["NIGHT", "N1", "N2"].includes(shift)) return { background: "#DBEAFE", color: "#1E3A8A", border: "#93C5FD" };
+  if (["OFF", "O1", "O2"].includes(shift)) return { background: "#E5E7EB", color: "#111827", border: "#9CA3AF" };
   return { background: "#F8FAFC", color: "#000000", border: "#D6DEE8" };
 };
 
@@ -83,10 +88,10 @@ const EmployeeRow = memo(({ person, groupName, active, dates, selectedColumn, on
         const duty = person.duties?.[date] || { shift: "-" };
         const palette = shiftStyle(duty);
         const columnActive = selectedColumn === date;
-        const replacementPending = Boolean(canManageReplacement && duty.replacementRequired && !duty.replacementEmployee?.name);
+        const replacementPending = Boolean(duty.replacementRequired && !duty.replacementEmployee?.name);
         const leaveApproved = String(duty.leaveStatus || "").toLowerCase() === "approved";
         return <TableCell key={date} align="center" sx={{ p: .7, background: active ? "#F0FDFA" : columnActive ? "#F0FDF4" : "#FFF" }}>
-          <Paper
+          <Box
             role="button"
             tabIndex={0}
             aria-label={`${person.name || person.employeeId}, ${date}, ${duty.shift || "no duty"}`}
@@ -101,24 +106,18 @@ const EmployeeRow = memo(({ person, groupName, active, dates, selectedColumn, on
                 onSelectDuty({ person, groupName, date, duty });
               }
             }}
-            elevation={0}
             className="crew-calendar-duty-cell"
-            style={{
-              "--crew-duty-background": palette.background,
-              "--crew-duty-color": palette.color,
-              "--crew-duty-border": palette.border,
-            }}
-            sx={{ minHeight: 50, px: .7, py: .65, display: "flex", flexDirection: "column", justifyContent: "center", cursor: "pointer", "&:hover": { boxShadow: "0 0 0 2px rgba(0,87,183,.18)" } }}
+            sx={{ minHeight: 50, px: .7, py: .65, display: "flex", flexDirection: "column", justifyContent: "center", cursor: "pointer", borderRadius: 2, backgroundColor: palette.background, backgroundImage: "none", color: palette.color, border: `1px solid ${palette.border}`, boxShadow: "none", "& .MuiTypography-root": { color: "inherit" }, "&:hover": { boxShadow: "0 0 0 2px rgba(0,87,183,.18)" } }}
           >
             <Typography sx={{ fontSize: 12.5, fontWeight: 900 }}>{duty.shift || "-"}</Typography>
             {duty.leaveStatus && <Typography sx={{ fontSize: 9.5, fontWeight: 800, lineHeight: 1.2 }}>{duty.leaveType || "Leave"} · {duty.leaveStatus}</Typography>}
             {duty.trainingName && <Typography sx={{ fontSize: 9.5, fontWeight: 800 }}>{duty.trainingName}</Typography>}
             {leaveApproved && <CheckCircle2 size={13} color="#15803D" strokeWidth={3} aria-label="Leave finally approved" style={{ alignSelf: "center" }} />}
-            {replacementPending && <Typography sx={{ mt: .25, px: .6, py: .15, borderRadius: 1, background: "#FEF3C7", color: "#B45309", fontSize: 9.5, fontWeight: 950, animation: "calendarReplacementPulse 1s ease-in-out infinite", "@keyframes calendarReplacementPulse": { "50%": { opacity: .35, transform: "scale(.92)" } } }}>R · Replacement required</Typography>}
-            {duty.replacementEmployee?.name && <Typography sx={replacementLabelSx}>Replacement: {duty.replacementEmployee.name}</Typography>}
-            {duty.replacementFor?.name && <Typography sx={replacementLabelSx}>Replacement for: {duty.replacementFor.name}</Typography>}
+            {replacementPending && <Box sx={{ mt: .25, px: .6, py: .15, borderRadius: 1, background: "#F59E0B", color: "#FFFFFF", fontSize: 9.5, fontWeight: 950, animation: "calendarReplacementPulse 1s ease-in-out infinite", "@keyframes calendarReplacementPulse": { "50%": { opacity: .35, transform: "scale(.92)" } } }}>R · Replacement required</Box>}
+            {duty.replacementEmployee?.name && <Box sx={replacementLabelSx}><Box sx={{ width: 15, height: 15, borderRadius: .6, display: "grid", placeItems: "center", background: "#2563EB", color: "#FFF", fontSize: 8, flex: "0 0 auto" }}>R</Box><Box>Replacement: {duty.replacementEmployee.name}</Box></Box>}
+            {duty.replacementFor?.name && <Box sx={replacementLabelSx}><Box sx={{ width: 15, height: 15, borderRadius: .6, display: "grid", placeItems: "center", background: "#2563EB", color: "#FFF", fontSize: 8, flex: "0 0 auto" }}>R</Box><Box>For: {duty.replacementFor.name}</Box></Box>}
             {duty.isActingSIC && <Typography sx={{ fontSize: 9.5, fontWeight: 900, color: "#6A1B9A" }}>Acting SIC · {duty.actingSICGroup || groupName}</Typography>}
-          </Paper>
+          </Box>
         </TableCell>;
       })}
     </TableRow>
@@ -138,6 +137,7 @@ export default function CrewCalendar() {
   const [selectedColumn, setSelectedColumn] = useState("");
   const [exchangeOpen, setExchangeOpen] = useState(false);
   const [selectedDuty, setSelectedDuty] = useState(null);
+  const [leaveApprovalPopup, setLeaveApprovalPopup] = useState(null);
   const [replacementPopup, setReplacementPopup] = useState(null);
   const [replacementCandidates, setReplacementCandidates] = useState([]);
   const [replacementLoading, setReplacementLoading] = useState(false);
@@ -200,11 +200,12 @@ export default function CrewCalendar() {
   const canManageReplacement = Boolean(user?.role === "admin" || user?.permissions?.crew_replacement?.write || user?.permissions?.crew_leave?.write || user?.permissions?.crew_training?.write);
   const openLeaveWorkflow = () => {
     if (!selectedDuty) return;
-    navigate(`/crew/leave?view=calendar&from=${selectedDuty.date}&to=${selectedDuty.date}&employeeId=${encodeURIComponent(selectedDuty.person.employeeId)}`);
+    setLeaveApprovalPopup(selectedDuty);
+    setSelectedDuty(null);
   };
   const openReplacementWorkflow = () => {
     if (!selectedDuty) return;
-    navigate(`/crew/replacement?action=leave&date=${selectedDuty.date}&employeeId=${encodeURIComponent(selectedDuty.person.employeeId)}`);
+    openReplacementCandidates(selectedDuty);
   };
   const openTrainingWorkflow = () => {
     if (!selectedDuty) return;
@@ -220,11 +221,23 @@ export default function CrewCalendar() {
     setReplacementError("");
     setReplacementLoading(true);
     try {
-      const pending = await crewApi.pendingReplacements();
-      const leave = pending.find((item) => (
-        item.date === selection.date
-        && String(item.employeeId || "") === String(selection.person.employeeId || "")
-      ));
+      const leaveRequestId = String(selection.duty.leaveRequestId || "").trim();
+      let leave = leaveRequestId ? {
+        id: leaveRequestId,
+        date: selection.date,
+        employeeId: selection.person.employeeId,
+        name: selection.person.name,
+        groupName: selection.groupName,
+        assignedDuty: selection.duty.shift,
+        isSIC: Boolean(selection.person.IsSIC),
+      } : null;
+      if (!leave) {
+        const pending = await crewApi.pendingReplacements();
+        leave = pending.find((item) => (
+          item.date === selection.date
+          && String(item.employeeId || "") === String(selection.person.employeeId || "")
+        ));
+      }
       if (!leave) {
         setReplacementError("This replacement request is not available in your current approval scope. Open Replacement Management to review it.");
         return;
@@ -305,6 +318,18 @@ export default function CrewCalendar() {
       </GlassCard>
 
       {error && <Alert severity="error">{error}</Alert>}
+      <Box sx={{ px: 1.2, py: .8, display: "flex", alignItems: "center", gap: 1.3, flexWrap: "wrap", border: "1px solid #CBD5E1", borderRadius: 2, background: "#FFFFFF" }}>
+        {[
+          ["Morning", "#DCFCE7", "#86EFAC"],
+          ["Evening", "#FEF3C7", "#FCD34D"],
+          ["Night", "#DBEAFE", "#93C5FD"],
+          ["OFF", "#E5E7EB", "#9CA3AF"],
+          ["Pending leave", "#FFEDD5", "#FB923C"],
+        ].map(([label, background, border]) => <Stack key={label} direction="row" spacing={.45} alignItems="center"><Box sx={{ width: 18, height: 14, borderRadius: .7, background, border: `1px solid ${border}` }} /><Typography sx={{ color: "#475569", fontSize: 10, fontWeight: 800 }}>{label}</Typography></Stack>)}
+        <Stack direction="row" spacing={.4} alignItems="center"><Box sx={{ width: 24, height: 18, borderRadius: .7, display: "grid", placeItems: "center", background: "#FEE2E2", border: "1px solid #F87171" }}><CheckCircle2 size={12} color="#15803D" strokeWidth={3} /></Box><Typography sx={{ color: "#475569", fontSize: 10, fontWeight: 800 }}>Approved leave</Typography></Stack>
+        <Stack direction="row" spacing={.4} alignItems="center"><Box sx={{ width: 18, height: 18, borderRadius: .7, display: "grid", placeItems: "center", background: "#F59E0B", color: "#FFF", fontSize: 9, fontWeight: 950, animation: "calendarReplacementPulse 1s ease-in-out infinite", "@keyframes calendarReplacementPulse": { "50%": { opacity: .35, transform: "scale(.86)" } } }}>R</Box><Typography sx={{ color: "#475569", fontSize: 10, fontWeight: 800 }}>Replacement required</Typography></Stack>
+        <Stack direction="row" spacing={.4} alignItems="center"><Box sx={{ width: 18, height: 18, borderRadius: .7, display: "grid", placeItems: "center", background: "#2563EB", color: "#FFF", fontSize: 9, fontWeight: 950 }}>R</Box><Typography sx={{ color: "#475569", fontSize: 10, fontWeight: 800 }}>Replacement assigned</Typography></Stack>
+      </Box>
       <GlassCard hover={false} padding={0} sx={{ overflow: "hidden" }}>
         {loading ? (
           <Box sx={{ minHeight: 360, display: "grid", placeItems: "center" }}><CircularProgress sx={{ color: "#03624C" }} /></Box>
@@ -406,9 +431,25 @@ export default function CrewCalendar() {
         </DialogContent>
       </Dialog>
 
+      <Dialog open={Boolean(leaveApprovalPopup)} onClose={() => setLeaveApprovalPopup(null)} fullWidth maxWidth="xl">
+        <DialogTitle sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", color: "#0F172A", fontWeight: 900 }}>
+          Leave calendar approval
+          <IconButton onClick={() => setLeaveApprovalPopup(null)}><X size={19} /></IconButton>
+        </DialogTitle>
+        <DialogContent dividers sx={{ p: { xs: 1, md: 2 }, background: "#F8FAFC", minHeight: 480, position: "relative" }}>
+          {leaveApprovalPopup && <LeaveManagement
+            key={`${leaveApprovalPopup.person.employeeId}-${leaveApprovalPopup.date}-${leaveApprovalPopup.duty.leaveRequestId || "leave"}`}
+            embeddedApproval
+            initialApprovalDate={leaveApprovalPopup.date}
+            initialLeaveId={leaveApprovalPopup.duty.leaveRequestId || ""}
+            onApprovalChanged={load}
+          />}
+        </DialogContent>
+      </Dialog>
+
       <Dialog open={Boolean(replacementPopup)} onClose={() => setReplacementPopup(null)} fullWidth maxWidth="md">
         <DialogTitle sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", color: "#0F172A", fontWeight: 900 }}>
-          Replacement candidates
+          Direct replacement assignment
           <IconButton onClick={() => setReplacementPopup(null)}><X size={19} /></IconButton>
         </DialogTitle>
         <DialogContent dividers sx={{ p: { xs: 1.5, md: 2.25 } }}>
@@ -416,6 +457,9 @@ export default function CrewCalendar() {
             <Alert severity="warning" sx={{ fontWeight: 700 }}>
               Replacement required for {replacementPopup.person.name || replacementPopup.person.employeeId} on {displayDate(replacementPopup.date)} · {replacementPopup.duty.shift || "Duty"} · {replacementPopup.groupName}
             </Alert>
+            {replacementPopup.duty.replacementEmployee?.name && <Alert severity="info">
+              Current assignment: <strong>{replacementPopup.duty.replacementEmployee.name}</strong>{replacementPopup.duty.replacementEmployee.employeeId ? ` (${replacementPopup.duty.replacementEmployee.employeeId})` : ""}. Selecting another candidate will change the assignment.
+            </Alert>}
             {replacementError && <Alert severity="error" action={<Button size="small" onClick={() => navigate(`/crew/replacement?action=leave&date=${replacementPopup.date}&employeeId=${encodeURIComponent(replacementPopup.person.employeeId)}`)}>Open module</Button>}>{replacementError}</Alert>}
             {replacementLoading ? <Box sx={{ py: 5, display: "grid", placeItems: "center" }}><CircularProgress /></Box> : !replacementError && (
               <Box sx={{ overflowX: "auto", maxHeight: "58vh" }}>
