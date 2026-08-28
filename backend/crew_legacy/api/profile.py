@@ -1,6 +1,17 @@
 from datetime import datetime, timedelta
+from difflib import SequenceMatcher
+import base64
+import hashlib
+import hmac
+import json
+import os
 from pathlib import Path
+import re
+import ssl
 from bson import ObjectId
+import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.ssl_ import create_urllib3_context
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
@@ -8,6 +19,8 @@ from fastapi.responses import FileResponse
 from crew_legacy.admin_logic.auth_utils import get_current_user, hash_password, validate_password_policy, verify_password
 from crew_legacy.database.database_mongo import (
     compensatory_off_collection,
+    DutyLeave_collection,
+    duty_switch_collection,
     employee_collection,
     employee_daily_collection,
     leave_request_collection,
@@ -17,8 +30,10 @@ from crew_legacy.database.database_mongo import (
     organization_shift_group_collection,
     roster_group_collection,
     system_settings_collection,
+    operational_collection,
 )
 from crew_legacy.security_utils import ensure_upload_allowed
+from crew_legacy.api.duty_rules import duty_category, is_excluded_duty_record, normalized_duty
 
 router = APIRouter()
 
@@ -30,6 +45,118 @@ PROFILE_EDIT_FIELDS = (
     "name", "nameHindi", "designation", "designationHindi",
     "phone", "gmail", "profilePhoto", "password",
 )
+
+CRMS_BASE_URL = "https://crms.erldc.in/"
+CRMS_LOGBOOK_URL = os.getenv(
+    "CRMS_LOGBOOK_URL", "https://crms.erldc.in/LogBook/viewAllLoagBooks"
+).strip()
+CRMS_SSO_TOKEN_URL = os.getenv(
+    "CRMS_SSO_TOKEN_URL", "https://sso.erldc.in:5000/token"
+).strip()
+# The ERLDC browser-based SSO client uses this public client-side signing
+# value. It is not a CRMS account credential; deployments may override it.
+DEFAULT_CRMS_SSO_JWT_SECRET = "frontendss0@posoco"
+crms_logbook_cache_collection = operational_collection("crms_logbook_duty_cache")
+
+
+class _CrmsLegacySslAdapter(HTTPAdapter):
+    def init_poolmanager(self, *args, **kwargs):
+        context = create_urllib3_context()
+        context.check_hostname = False
+        context.verify_mode = ssl.CERT_NONE
+        context.options |= 0x4  # OP_LEGACY_SERVER_CONNECT
+        kwargs["ssl_context"] = context
+        return super().init_poolmanager(*args, **kwargs)
+
+
+def _base64url(value: bytes) -> str:
+    return base64.urlsafe_b64encode(value).decode("ascii").rstrip("=")
+
+
+def _crms_sso_assertion(username: str, password: str, signing_secret: str) -> str:
+    """Build the credential assertion expected by the ERLDC SSO token API."""
+    header = _base64url(json.dumps(
+        {"alg": "HS256", "typ": "JWT"}, separators=(",", ":")
+    ).encode())
+    body = _base64url(json.dumps(
+        {"username": username, "password": password}, separators=(",", ":")
+    ).encode())
+    unsigned = f"{header}.{body}"
+    signature = hmac.new(
+        signing_secret.encode(), unsigned.encode(), hashlib.sha256
+    ).digest()
+    return f"{unsigned}.{_base64url(signature)}"
+
+
+def _new_crms_session() -> tuple[requests.Session, str]:
+    """Create an authenticated CRMS session using the central SSO token flow.
+
+    A static cookie remains supported as a break-glass fallback, but normal
+    operation uses stable service-account credentials and obtains fresh CRMS
+    session/CSRF cookies for every report refresh.
+    """
+    session = requests.Session()
+    session.mount("https://", _CrmsLegacySslAdapter())
+
+    username = str(os.getenv("CRMS_SSO_USERNAME") or "").strip()
+    password = str(os.getenv("CRMS_SSO_PASSWORD") or "").strip()
+    static_cookie = str(os.getenv("CRMS_LOGBOOK_COOKIE") or "").strip()
+    static_csrf = str(os.getenv("CRMS_LOGBOOK_CSRF_TOKEN") or "").strip()
+    if not (username and password) and static_cookie:
+        if not static_csrf:
+            csrf_match = re.search(
+                r"(?:^|;\s*)csrftoken=([^;]+)", static_cookie, re.IGNORECASE
+            )
+            static_csrf = csrf_match.group(1) if csrf_match else ""
+        session.headers["Cookie"] = static_cookie
+        return session, static_csrf
+
+    signing_secret = str(
+        os.getenv("CRMS_SSO_JWT_SECRET") or DEFAULT_CRMS_SSO_JWT_SECRET
+    ).strip()
+    if not all((username, password)):
+        raise RuntimeError(
+            "CRMS automatic SSO is not configured. Save an authorized CRMS "
+            "username and password in Admin Module > Mail & 2FA Settings."
+        )
+
+    assertion = _crms_sso_assertion(username, password, signing_secret)
+    token_response = session.post(
+        CRMS_SSO_TOKEN_URL,
+        json={"headers": {"token": assertion}},
+        timeout=30,
+        verify=False,
+    )
+    token_response.raise_for_status()
+    try:
+        token_payload = token_response.json()
+    except ValueError as exc:
+        raise RuntimeError("CRMS SSO returned an unexpected token response") from exc
+    sso_token = str(
+        (token_payload.get("Token") or token_payload.get("token") or "")
+        if isinstance(token_payload, dict) else ""
+    ).strip()
+    if not sso_token:
+        raise RuntimeError("CRMS SSO rejected the configured service account")
+
+    # This is the same hand-off used by the ERLDC SSO application launcher.
+    login_response = session.get(
+        CRMS_BASE_URL,
+        params={"token": sso_token},
+        timeout=60,
+        verify=False,
+        allow_redirects=True,
+    )
+    login_response.raise_for_status()
+    if "sso.erldc.in" in str(login_response.url).lower():
+        raise RuntimeError("CRMS did not accept the SSO service-account session")
+
+    csrf_token = ""
+    for cookie in session.cookies:
+        if cookie.name.lower() == "csrftoken":
+            csrf_token = cookie.value
+            break
+    return session, csrf_token
 
 
 def _employee_id_query(employee_id: str) -> dict:
@@ -285,6 +412,7 @@ def activity_report(
         })
 
     training_query = ({"employeeId": target_ids[0]} if len(target_ids) == 1 else {"employeeId": {"$in": target_ids}}) if target_ids else {}
+    training_query["workflowKind"] = {"$ne": "Adjacent OFF"}
     trainings = list(training_nomination_history_collection.find(training_query).sort("startDate", -1).limit(2000))
     filtered_trainings = [item for item in trainings if within(item.get("startDate")) or within(item.get("endDate"))]
     for item in filtered_trainings:
@@ -388,38 +516,192 @@ def activity_matrix(
     endDate: str | None = Query(default=None),
     user=Depends(get_current_user),
 ):
-    """Employee-wise approved leave and training-day matrix for the selected period."""
+    """Consolidated employee duty, replacement, training and leave matrix."""
     if not _report_actor_can_view_all(user):
         raise HTTPException(403, detail="Employee activity matrix is available to administrators")
     if not startDate or not endDate or startDate > endDate:
         raise HTTPException(400, detail="A valid From and To date are required")
 
-    people = {
-        str(item.get("userId") or item.get("employeeId") or "").strip(): {
-            "employeeId": str(item.get("userId") or item.get("employeeId") or "").strip(),
-            "employeeName": item.get("name") or "", "designation": item.get("designation") or "",
-            "trainingDays": 0, "trainingTargetDays": 7, "trainings": [], "leaveTotal": 0, "leaveByType": {},
-        }
-        for item in employee_collection.find({"isActive": {"$ne": False}}, {"userId": 1, "employeeId": 1, "name": 1, "designation": 1})
+    duty_categories = ["Morning", "Evening", "Night", "OFF", "Other"]
+    shift_duty_categories = ["Morning", "Evening", "Night", "OFF"]
+
+    units = list(organization_unit_collection.find({"isActive": {"$ne": False}}))
+    unit_map = {str(unit.get("_id")): unit for unit in units}
+    department_sub_departments = {
+        str(department.get("name") or "").strip(): sorted({
+            str(unit.get("name") or "").strip()
+            for unit in units
+            if unit.get("unitType") == "vertical"
+            and str(unit.get("parentId") or "") == str(department.get("_id") or "")
+            and str(unit.get("name") or "").strip()
+        })
+        for department in units
+        if department.get("unitType") == "department" and str(department.get("name") or "").strip()
     }
-    people = {key: value for key, value in people.items() if key}
+
+    period_groups = list(roster_group_collection.find({
+        "startDate": {"$lte": endDate},
+        "$or": [
+            {"endDate": {"$gte": startDate}},
+            {"endDate": {"$in": [None, ""]}},
+            {"endDate": {"$exists": False}},
+        ],
+    }))
+    period_group_members: dict[str, set[str]] = {}
+    employee_period_groups: dict[str, set[str]] = {}
+    for group in period_groups:
+        group_name = str(group.get("groupName") or "").strip()
+        if not group_name:
+            continue
+        member_ids = period_group_members.setdefault(group_name, set())
+        for person in [group.get("shiftInCharge") or {}, *(group.get("members") or [])]:
+            employee_id = str(person.get("employeeId") or person.get("userId") or person.get("id") or "").strip()
+            if not employee_id:
+                continue
+            member_ids.add(employee_id)
+            employee_period_groups.setdefault(employee_id, set()).add(group_name)
+
+    sub_department_groups: dict[str, list[str]] = {}
+    group_organization: dict[str, dict] = {}
+    for mapping in organization_shift_group_collection.find({}):
+        group_name = str(mapping.get("groupName") or "").strip()
+        if not group_name or group_name not in period_group_members:
+            continue
+        unit_id = str(mapping.get("organizationUnitId") or "")
+        lineage = []
+        visited = set()
+        while unit_id and unit_id in unit_map and unit_id not in visited:
+            visited.add(unit_id)
+            unit = unit_map[unit_id]
+            lineage.append(unit)
+            unit_id = str(unit.get("parentId") or "")
+        sub_department = next((
+            str(unit.get("name") or "").strip()
+            for unit in lineage if unit.get("unitType") == "vertical"
+        ), "")
+        department = next((
+            str(unit.get("name") or "").strip()
+            for unit in lineage if unit.get("unitType") == "department"
+        ), "")
+        if sub_department:
+            sub_department_groups.setdefault(sub_department, []).append(group_name)
+            group_organization[group_name] = {"department": department, "subDepartment": sub_department}
+    sub_department_groups = {
+        name: sorted(set(groups), key=str.lower)
+        for name, groups in sub_department_groups.items()
+    }
+
+    def empty_row(employee_id: str, name: str = "", designation: str = "", employee: dict | None = None) -> dict:
+        organization = _current_organization(employee or {}, employee_id) if employee else {}
+        departments = organization.get("departments") or (employee or {}).get("departments") or []
+        if isinstance(departments, str):
+            departments = [departments]
+        fallback_department = organization.get("department") or (employee or {}).get("department")
+        if fallback_department and fallback_department not in departments:
+            departments.append(fallback_department)
+        sub_departments = organization.get("verticals") or (employee or {}).get("verticals") or []
+        if isinstance(sub_departments, str):
+            sub_departments = [sub_departments]
+        group_name = organization.get("groupName") or ""
+        period_group_names = sorted(employee_period_groups.get(employee_id, set()), key=str.lower)
+        for period_group_name in period_group_names:
+            period_organization = group_organization.get(period_group_name) or {}
+            period_department = period_organization.get("department")
+            period_sub_department = period_organization.get("subDepartment")
+            if period_department and period_department not in departments:
+                departments.append(period_department)
+            if period_sub_department and period_sub_department not in sub_departments:
+                sub_departments.append(period_sub_department)
+        return {
+            "employeeId": employee_id,
+            "employeeName": name,
+            "designation": designation,
+            "departments": [str(value).strip() for value in departments if str(value).strip()],
+            "department": (departments or [""])[0],
+            "subDepartments": [str(value).strip() for value in sub_departments if str(value).strip()],
+            "groupName": group_name,
+            "periodGroupNames": period_group_names,
+            "workforceType": "Shift" if period_group_names or group_name else "Non-shift",
+            "assignedDutyDays": 0,
+            "shiftDutyDays": 0,
+            "dutyCounts": {category: 0 for category in duty_categories},
+            "replacementDutyDays": 0,
+            "trainingDays": 0,
+            "trainingTargetDays": 7,
+            "trainings": [],
+            "leaveTotal": 0,
+            "leaveByType": {},
+            "compOffDays": 0,
+        }
+
+    people = {}
+    for item in employee_collection.find({"isActive": {"$ne": False}}):
+        employee_id = str(item.get("userId") or item.get("employeeId") or "").strip()
+        if employee_id:
+            people[employee_id] = empty_row(employee_id, item.get("name") or "", item.get("designation") or "", item)
     categories = set()
 
-    for leave in leave_request_collection.find({"date": {"$gte": startDate, "$lte": endDate}, "finalStatus": "Approved"}):
+    approved_leaves = list(leave_request_collection.find({
+        "date": {"$gte": startDate, "$lte": endDate},
+        "finalStatus": "Approved",
+    }))
+    approved_leave_dates = {
+        (str(leave.get("employeeId") or "").strip(), _report_date(leave.get("date")))
+        for leave in approved_leaves
+        if str(leave.get("employeeId") or "").strip() and _report_date(leave.get("date"))
+    }
+
+    for daily in employee_daily_collection.find(
+        {"date": {"$gte": startDate, "$lte": endDate}, "employeeId": {"$exists": True, "$ne": None}},
+        {"employeeId": 1, "name": 1, "designation": 1, "assignedDuty": 1, "actualStatus": 1,
+         "date": 1, "groupName": 1, "replacementDuty": 1, "trainingName": 1,
+         "trainingFinal": 1, "trainingAdjacentOff": 1, "leaveStatus": 1},
+    ):
+        employee_id = str(daily.get("employeeId") or "").strip()
+        if not employee_id:
+            continue
+        row = people.setdefault(employee_id, empty_row(employee_id, daily.get("name") or employee_id, daily.get("designation") or ""))
+        is_approved_leave_date = (employee_id, _report_date(daily.get("date"))) in approved_leave_dates
+        category = duty_category(daily)
+        excluded_from_duty = is_excluded_duty_record(daily, is_approved_leave_date)
+        if category and not excluded_from_duty:
+            row["assignedDutyDays"] += 1
+            row["dutyCounts"][category] = row["dutyCounts"].get(category, 0) + 1
+            if category in shift_duty_categories:
+                row["shiftDutyDays"] += 1
+        if daily.get("replacementDuty") and not excluded_from_duty:
+            row["replacementDutyDays"] += 1
+        if not row.get("groupName") and daily.get("groupName") and daily.get("groupName") != "Other Employees":
+            row["groupName"] = daily.get("groupName")
+            row["workforceType"] = "Shift"
+
+    comp_off_keys = set()
+    for leave in approved_leaves:
         employee_id = str(leave.get("employeeId") or "").strip()
         if not employee_id:
             continue
-        row = people.setdefault(employee_id, {"employeeId": employee_id, "employeeName": leave.get("name") or employee_id, "designation": "", "trainingDays": 0, "trainingTargetDays": 7, "trainings": [], "leaveTotal": 0, "leaveByType": {}})
+        row = people.setdefault(employee_id, empty_row(employee_id, leave.get("name") or employee_id))
         leave_type = str(leave.get("leaveType") or "Other").strip() or "Other"
+        if leave_type.upper().replace(" ", "-") in {"C-OFF", "COFF"}:
+            comp_off_key = (employee_id, _report_date(leave.get("date")))
+            if comp_off_key not in comp_off_keys:
+                comp_off_keys.add(comp_off_key)
+                row["compOffDays"] += 1
+            continue
         categories.add(leave_type)
         row["leaveTotal"] += 1
         row["leaveByType"][leave_type] = row["leaveByType"].get(leave_type, 0) + 1
 
-    for nomination in training_nomination_history_collection.find({"status": "Approved", "startDate": {"$lte": endDate}, "endDate": {"$gte": startDate}}):
+    for nomination in training_nomination_history_collection.find({
+        "status": "Approved",
+        "workflowKind": {"$ne": "Adjacent OFF"},
+        "startDate": {"$lte": endDate},
+        "endDate": {"$gte": startDate},
+    }):
         employee_id = str(nomination.get("employeeId") or "").strip()
         if not employee_id:
             continue
-        row = people.setdefault(employee_id, {"employeeId": employee_id, "employeeName": nomination.get("employeeName") or nomination.get("name") or employee_id, "designation": "", "trainingDays": 0, "trainingTargetDays": 7, "trainings": [], "leaveTotal": 0, "leaveByType": {}})
+        row = people.setdefault(employee_id, empty_row(employee_id, nomination.get("employeeName") or nomination.get("name") or employee_id))
         counted_days = _inclusive_days(nomination.get("startDate"), nomination.get("endDate"), startDate, endDate)
         row["trainingDays"] += counted_days
         row["trainings"].append({
@@ -431,12 +713,403 @@ def activity_matrix(
             "location": nomination.get("trainingLocation") or nomination.get("location") or "",
         })
 
-    category_order = sorted(categories, key=lambda value: (value not in {"CL", "C-OFF"}, value))
-    rows = sorted(
-        [row for row in people.values() if row["trainingDays"] or row["leaveTotal"]],
-        key=lambda row: ((row["employeeName"] or "").lower(), row["employeeId"]),
+    for comp_off in compensatory_off_collection.find({
+        "$or": [
+            {"earnedDate": {"$gte": startDate, "$lte": endDate}},
+            {"date": {"$gte": startDate, "$lte": endDate}},
+        ],
+    }):
+        employee_id = str(comp_off.get("employeeId") or "").strip()
+        if not employee_id:
+            continue
+        row = people.setdefault(employee_id, empty_row(employee_id, comp_off.get("employeeName") or employee_id))
+        comp_off_key = (employee_id, _report_date(comp_off.get("earnedDate") or comp_off.get("date")))
+        if comp_off_key not in comp_off_keys:
+            comp_off_keys.add(comp_off_key)
+            row["compOffDays"] += 1
+
+    configured_leave_categories = {
+        str(item.get("value") or "").strip()
+        for item in DutyLeave_collection.find(
+            {"dutyLeaveType_cat": "leaveType", "status": "Active"},
+            {"value": 1},
+        )
+        if str(item.get("value") or "").strip()
+        and str(item.get("value") or "").strip().upper().replace(" ", "-") not in {"C-OFF", "COFF"}
+    }
+    category_order = sorted(categories | configured_leave_categories, key=lambda value: (value not in {"CL", "C-OFF"}, value))
+    rows = sorted(people.values(), key=lambda row: ((row["employeeName"] or "").lower(), row["employeeId"]))
+    department_options = sorted({value for row in rows for value in row.get("departments") or []})
+    sub_department_options = sorted({value for values in department_sub_departments.values() for value in values})
+    group_options = sorted(period_group_members, key=str.lower)
+    return {
+        "startDate": startDate,
+        "endDate": endDate,
+        "trainingTargetDays": 7,
+        "dutyCategories": duty_categories,
+        "shiftDutyCategories": shift_duty_categories,
+        "leaveCategories": category_order,
+        "otherCategories": ["Training", "C-OFF"],
+        "departments": department_options,
+        "subDepartments": sub_department_options,
+        "departmentSubDepartments": department_sub_departments,
+        "groupNames": group_options,
+        "subDepartmentGroups": sub_department_groups,
+        "groupMembers": {name: sorted(members) for name, members in period_group_members.items()},
+        "workforceTypes": ["Shift", "Non-shift"],
+        "rows": rows,
+    }
+
+
+def _crms_name_key(value) -> str:
+    text = re.sub(r"[^a-z0-9 ]+", " ", str(value or "").lower())
+    text = re.sub(r"\b(shri|sri|mr|ms|mrs|dr)\b", " ", text)
+    return " ".join(text.split())
+
+
+def _crms_shift(value) -> str:
+    text = str(value or "").strip().lower()
+    if text.startswith("m"):
+        return "Morning"
+    if text.startswith("e"):
+        return "Evening"
+    if text.startswith("n"):
+        return "Night"
+    return str(value or "").strip()
+
+
+def _crms_log_datetime(value) -> datetime | None:
+    text = str(value or "").strip()
+    for pattern in ("%Y-%m-%d %H:%M", "%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S"):
+        try:
+            return datetime.strptime(text[:19], pattern)
+        except ValueError:
+            continue
+    return None
+
+
+def _fetch_crms_logbooks(start_date: str, end_date: str) -> list[dict]:
+    session, csrf_token = _new_crms_session()
+    headers = {
+        "Accept": "application/json, text/javascript, */*; q=0.01",
+        "Content-Type": "application/json",
+        "Referer": "https://crms.erldc.in/LogBook/",
+        "User-Agent": "Mozilla/5.0",
+        "X-Requested-With": "XMLHttpRequest",
+    }
+    if csrf_token:
+        headers["X-CSRFToken"] = csrf_token
+    response = session.post(
+        CRMS_LOGBOOK_URL,
+        json={"start_date": f"{start_date} 00:00", "end_date": f"{end_date} 23:59"},
+        headers=headers,
+        timeout=120,
+        verify=False,
+        allow_redirects=False,
     )
-    return {"startDate": startDate, "endDate": endDate, "trainingTargetDays": 7, "leaveCategories": category_order, "rows": rows}
+    content_type = str(response.headers.get("content-type") or "").lower()
+    if response.status_code in {302, 401, 403} or "json" not in content_type:
+        raise RuntimeError(
+            "CRMS logbook access was not authorized. Verify the configured CRMS "
+            "SSO service account, then refresh this report."
+        )
+    response.raise_for_status()
+    payload = response.json()
+    rows = (payload.get("data") or payload.get("rows") or []) if isinstance(payload, dict) else payload
+    if not isinstance(rows, list):
+        raise RuntimeError("CRMS returned an unexpected logbook response")
+    now = datetime.utcnow()
+    for item in rows:
+        if not isinstance(item, dict) or not item.get("Log_Key"):
+            continue
+        crms_logbook_cache_collection.update_one(
+            {"Log_Key": item["Log_Key"]},
+            {"$set": {**item, "cachedAt": now, "source": "CRMS"}},
+            upsert=True,
+        )
+    return [item for item in rows if isinstance(item, dict)]
+
+
+@router.get("/crms-duty-reconciliation")
+def crms_duty_reconciliation(
+    startDate: str = Query(...),
+    endDate: str = Query(...),
+    refresh: bool = Query(default=False),
+    user=Depends(get_current_user),
+):
+    """Compare actual CRMS desk staffing with the final Crew daily assignment."""
+    if not _report_actor_can_view_all(user):
+        raise HTTPException(403, detail="CRMS duty reconciliation is available to administrators")
+    if not startDate or not endDate or startDate > endDate:
+        raise HTTPException(400, detail="A valid From and To date are required")
+
+    source_error = ""
+    source = "CRMS live"
+    logs = []
+    try:
+        logs = _fetch_crms_logbooks(startDate, endDate)
+    except Exception as exc:
+        source_error = str(exc)
+    if not logs:
+        source = "Cached CRMS"
+        logs = list(crms_logbook_cache_collection.find({
+            "Log_In_Time": {"$gte": f"{startDate} 00:00", "$lte": f"{endDate} 23:59"}
+        }, {"_id": 0}).sort("Log_In_Time", 1))
+    if not logs and source_error:
+        raise HTTPException(502, detail=source_error)
+
+    employee_docs = list(employee_collection.find({"isActive": {"$ne": False}}))
+    employees = {}
+    exact_names = {}
+    sorted_names = {}
+    for item in employee_docs:
+        employee_id = str(item.get("userId") or item.get("employeeId") or "").strip()
+        if not employee_id:
+            continue
+        name = str(item.get("name") or employee_id).strip()
+        employees[employee_id] = {
+            "employeeId": employee_id,
+            "employeeName": name,
+            "designation": item.get("designation") or "",
+        }
+        stored_aliases = item.get("aliases") or []
+        if isinstance(stored_aliases, str):
+            stored_aliases = [stored_aliases]
+        aliases = [name, *stored_aliases, item.get("nameHindi")]
+        for alias in aliases:
+            key = _crms_name_key(alias)
+            if key:
+                exact_names[key] = employee_id
+                sorted_names[" ".join(sorted(key.split()))] = employee_id
+
+    def match_employee(crms_name: str):
+        key = _crms_name_key(crms_name)
+        if not key:
+            return None, 0.0
+        employee_id = exact_names.get(key) or sorted_names.get(" ".join(sorted(key.split())))
+        if employee_id:
+            return employee_id, 1.0
+        best_id, best_score = None, 0.0
+        for candidate, candidate_id in exact_names.items():
+            score = SequenceMatcher(None, key, candidate).ratio()
+            if score > best_score:
+                best_id, best_score = candidate_id, score
+        return (best_id, round(best_score, 3)) if best_score >= 0.82 else (None, round(best_score, 3))
+
+    daily_records = list(employee_daily_collection.find(
+        {"date": {"$gte": startDate, "$lte": endDate}},
+        {"_id": 0, "employeeId": 1, "date": 1, "assignedDuty": 1, "groupName": 1,
+         "replacementDuty": 1, "replacementFor": 1, "lastDutySwitch": 1, "leaveId": 1,
+         "leaveStatus": 1, "actualStatus": 1, "trainingName": 1, "trainingFinal": 1,
+         "trainingAdjacentOff": 1},
+    ))
+    approved_leave_keys = {
+        (str(item.get("employeeId") or "").strip(), _report_date(item.get("date")))
+        for item in leave_request_collection.find({
+            "date": {"$gte": startDate, "$lte": endDate},
+            "finalStatus": "Approved",
+        }, {"employeeId": 1, "date": 1})
+    }
+    daily_records = [
+        item for item in daily_records
+        if not is_excluded_duty_record(
+            item,
+            (str(item.get("employeeId") or "").strip(), _report_date(item.get("date"))) in approved_leave_keys,
+        )
+    ]
+    destination_switches = list(duty_switch_collection.find({
+        "date": {"$gte": startDate, "$lte": endDate},
+        "direction": "destination",
+        "source": "Cross-date duty transfer",
+    }, {"_id": 0, "switchId": 1, "date": 1, "sourceDate": 1, "destinationDate": 1, "previous": 1, "updated": 1}))
+    destination_switch_ids = [str(item.get("switchId") or "") for item in destination_switches if item.get("switchId")]
+    source_switches = list(duty_switch_collection.find({
+        "switchId": {"$in": destination_switch_ids},
+        "direction": "source",
+    }, {"_id": 0, "switchId": 1, "previous": 1, "updated": 1})) if destination_switch_ids else []
+    source_switch_by_id = {str(item.get("switchId")): item for item in source_switches if item.get("switchId")}
+    destination_switch_by_daily_key = {
+        (str(item.get("date") or item.get("destinationDate") or ""), str(item.get("switchId") or "")): item
+        for item in destination_switches
+        if item.get("switchId")
+    }
+
+    roster_entries = []
+    for daily in daily_records:
+        employee_id = str(daily.get("employeeId") or "").strip()
+        assigned_duty = _crms_shift(daily.get("assignedDuty"))
+        if not employee_id or assigned_duty not in {"Morning", "Evening", "Night"}:
+            continue
+        switch = daily.get("lastDutySwitch") or {}
+        switch_id = str(switch.get("switchId") or "")
+        destination_switch = destination_switch_by_daily_key.get((str(daily.get("date") or ""), switch_id))
+        source_switch = source_switch_by_id.get(switch_id) or {}
+        original_duty = _crms_shift((destination_switch or {}).get("previous", {}).get("assignedDuty"))
+        original_group = (destination_switch or {}).get("previous", {}).get("groupName") or daily.get("groupName") or ""
+        moved_group = (source_switch.get("previous") or {}).get("groupName") or daily.get("groupName") or ""
+        # A cross-group rescheduled duty is additional to the person's normal
+        # roster duty on the destination date. Reconstruct both assignments
+        # from the approved switch audit instead of letting the moved duty hide
+        # the normal roster duty in reconciliation/reporting.
+        is_cross_group_additional = bool(
+            destination_switch
+            and original_duty in {"Morning", "Evening", "Night"}
+            and original_group
+            and moved_group
+            and original_group != moved_group
+        )
+        if is_cross_group_additional:
+            roster_entries.extend([
+                {
+                    "id": f"roster:{daily.get('date')}:{employee_id}:normal:{switch_id}",
+                    "date": str(daily.get("date") or ""), "employeeId": employee_id,
+                    "employeeName": employees.get(employee_id, {}).get("employeeName") or employee_id,
+                    "shift": original_duty, "groupName": original_group,
+                    "replacementDuty": False, "replacementFor": "", "assignmentType": "Normal roster duty",
+                },
+                {
+                    "id": f"roster:{daily.get('date')}:{employee_id}:rescheduled:{switch_id}",
+                    "date": str(daily.get("date") or ""), "employeeId": employee_id,
+                    "employeeName": employees.get(employee_id, {}).get("employeeName") or employee_id,
+                    "shift": assigned_duty, "groupName": moved_group,
+                    "replacementDuty": True, "replacementFor": "", "assignmentType": f"Rescheduled duty from {destination_switch.get('sourceDate') or 'another date'}",
+                },
+            ])
+            continue
+        roster_entries.append({
+            "id": f"roster:{daily.get('date')}:{employee_id}",
+            "date": str(daily.get("date") or ""),
+            "employeeId": employee_id,
+            "employeeName": employees.get(employee_id, {}).get("employeeName") or employee_id,
+            "shift": assigned_duty,
+            "groupName": daily.get("groupName") or "",
+            "replacementDuty": bool(daily.get("replacementDuty")),
+            "replacementFor": daily.get("replacementFor") or "",
+            "assignmentType": "Replacement duty" if daily.get("replacementDuty") else "Normal roster duty",
+        })
+    roster_by_employee_date = {}
+    for entry in roster_entries:
+        roster_by_employee_date.setdefault((entry["date"], entry["employeeId"]), []).append(entry)
+    role_fields = [
+        ("Shift_Incharge_Name", "Shift In-charge"),
+        ("Sch_Open_Acc_Desk", "Schedule & Open Access"),
+        ("Rea_Tim_Sec_Desk", "Real-time Security"),
+        ("Rep_Desk", "Reporting"),
+        ("Rea_Tim_Mon_Con_Desk", "Real-time Monitoring & Control"),
+    ]
+    details = []
+    seen_actual_by_log = {}
+
+    for log in sorted(logs, key=lambda item: str(item.get("Log_In_Time") or "")):
+        if str(log.get("Generated_Status") or "Generated").strip().lower() != "generated":
+            continue
+        log_dt = _crms_log_datetime(log.get("Log_In_Time"))
+        if not log_dt:
+            continue
+        duty_date = log_dt.strftime("%Y-%m-%d")
+        shift = _crms_shift(log.get("Shift_Type"))
+        log_key = str(log.get("Log_Key") or f"{duty_date}-{shift}")
+        people = [(str(log.get(field) or "").strip(), role) for field, role in role_fields]
+        for extra in log.get("additional_employees") or []:
+            if isinstance(extra, dict):
+                name = extra.get("name") or extra.get("employee_name") or extra.get("Employee_Name")
+                role = extra.get("desk") or extra.get("role") or "Additional employee"
+            else:
+                name, role = extra, "Additional employee"
+            people.append((str(name or "").strip(), str(role or "Additional employee")))
+        actual_ids = set()
+        for crms_name, desk in people:
+            if not crms_name:
+                continue
+            employee_id, confidence = match_employee(crms_name)
+            expected_entries = roster_by_employee_date.get((duty_date, employee_id), []) if employee_id else []
+            daily = next((entry for entry in expected_entries if entry.get("shift") == shift), {})
+            assigned = daily.get("shift") or ""
+            if employee_id:
+                actual_ids.add(employee_id)
+            if not employee_id:
+                status = "Unmapped employee"
+            elif not daily and expected_entries:
+                assigned = ", ".join(entry.get("shift") or "" for entry in expected_entries)
+                status = "Duty mismatch"
+            elif not daily:
+                status = "No roster record"
+            elif assigned != shift:
+                status = "Duty mismatch"
+            elif daily.get("replacementDuty"):
+                status = "Replacement match"
+            elif daily.get("lastDutySwitch"):
+                status = "Reassigned match"
+            else:
+                status = "Matched"
+            details.append({
+                "id": f"{log_key}:{desk}:{crms_name}", "logKey": log_key, "date": duty_date,
+                "logInTime": log.get("Log_In_Time"), "logGeneratedTime": log.get("Log_Gen_Time"),
+                "shift": shift, "desk": desk, "crmsName": crms_name, "employeeId": employee_id or "",
+                "employeeName": employees.get(employee_id, {}).get("employeeName") if employee_id else "",
+                "matchConfidence": confidence, "assignedDuty": assigned or "No record",
+                "groupName": daily.get("groupName") or "", "replacementDuty": bool(daily.get("replacementDuty")),
+                "replacementFor": daily.get("replacementFor") or "", "status": status,
+            })
+        seen_actual_by_log[log_key] = actual_ids
+
+        for daily in roster_entries:
+            employee_id = str(daily.get("employeeId") or "")
+            if str(daily.get("date")) != duty_date or daily.get("shift") != shift or employee_id in actual_ids:
+                continue
+            person = employees.get(employee_id, {})
+            details.append({
+                "id": f"{log_key}:missing:{employee_id}", "logKey": log_key, "date": duty_date,
+                "logInTime": log.get("Log_In_Time"), "logGeneratedTime": log.get("Log_Gen_Time"),
+                "shift": shift, "desk": "Not present in CRMS log", "crmsName": "",
+                "employeeId": employee_id, "employeeName": person.get("employeeName") or employee_id,
+                "matchConfidence": 1.0, "assignedDuty": shift, "groupName": daily.get("groupName") or "",
+                "replacementDuty": bool(daily.get("replacementDuty")), "replacementFor": daily.get("replacementFor") or "",
+                "status": "Rostered but absent",
+            })
+
+    summary_rows = {}
+    for item in details:
+        key = item.get("employeeId") or f"unmapped:{_crms_name_key(item.get('crmsName'))}"
+        row = summary_rows.setdefault(key, {
+            "employeeId": item.get("employeeId") or "", "employeeName": item.get("employeeName") or item.get("crmsName") or "Unmapped",
+            "Morning": 0, "Evening": 0, "Night": 0, "actualDuties": 0, "matched": 0,
+            "replacementDuties": 0, "exceptions": 0, "rosteredButAbsent": 0, "deskCounts": {},
+        })
+        if item["status"] == "Rostered but absent":
+            row["rosteredButAbsent"] += 1
+            row["exceptions"] += 1
+            continue
+        row["actualDuties"] += 1
+        if item.get("shift") in {"Morning", "Evening", "Night"}:
+            row[item["shift"]] += 1
+        row["deskCounts"][item.get("desk") or "Other"] = row["deskCounts"].get(item.get("desk") or "Other", 0) + 1
+        if item["status"] in {"Matched", "Replacement match", "Reassigned match"}:
+            row["matched"] += 1
+        else:
+            row["exceptions"] += 1
+        if item.get("replacementDuty"):
+            row["replacementDuties"] += 1
+
+    actual_details = [item for item in details if item["status"] != "Rostered but absent"]
+    matched_count = sum(item["status"] in {"Matched", "Replacement match", "Reassigned match"} for item in actual_details)
+    exception_count = sum(item["status"] not in {"Matched", "Replacement match", "Reassigned match"} for item in details)
+    return {
+        "startDate": startDate, "endDate": endDate, "source": source, "sourceUrl": CRMS_LOGBOOK_URL,
+        "sourceWarning": source_error, "logCount": len(logs),
+        "summary": {
+            "actualAssignments": len(actual_details), "matched": matched_count,
+            "matchPercent": round((matched_count / len(actual_details) * 100), 1) if actual_details else 0,
+            "exceptions": exception_count,
+            "unmapped": sum(item["status"] == "Unmapped employee" for item in actual_details),
+            "rosteredButAbsent": sum(item["status"] == "Rostered but absent" for item in details),
+        },
+        "deskRoles": [label for _, label in role_fields] + ["Additional employee"],
+        "statuses": sorted({item["status"] for item in details}),
+        "rows": sorted(summary_rows.values(), key=lambda row: (row["employeeName"].lower(), row["employeeId"])),
+        "details": details,
+        "rosterEntries": sorted(roster_entries, key=lambda item: (item["date"], item["employeeName"].lower())),
+    }
 
 
 # -----------------------------
@@ -535,36 +1208,33 @@ def get_profile_photo(employeeId: str):
 # ---------------------------------
 @router.get("/stats/duty")
 def duty_stats(employeeId: str, year: int, month: int):
-    pipeline = [
-        {
-            "$addFields": {
-                "dateObj": {
-                    "$dateFromString": {
-                        "dateString": "$date"
-                    }
-                }
-            }
-        },
-        {
-            "$match": {
-                "employeeId": employeeId,
-                "$expr": {
-                    "$and": [
-                        {"$eq": [{"$year": "$dateObj"}, year]},
-                        {"$eq": [{"$month": "$dateObj"}, month]}
-                    ]
-                }
-            }
-        },
-        {
-            "$group": {
-                "_id": "$assignedDuty",
-                "count": {"$sum": 1}
-            }
-        }
-    ]
-
-    stats = list(employee_daily_collection.aggregate(pipeline))
+    if month < 1 or month > 12:
+        raise HTTPException(400, detail="Month must be between 1 and 12")
+    start_date = f"{year:04d}-{month:02d}-01"
+    next_year, next_month = (year + 1, 1) if month == 12 else (year, month + 1)
+    end_date = (datetime(next_year, next_month, 1) - timedelta(days=1)).strftime("%Y-%m-%d")
+    approved_leave_dates = {
+        _report_date(item.get("date"))
+        for item in leave_request_collection.find({
+            "employeeId": employeeId,
+            "date": {"$gte": start_date, "$lte": end_date},
+            "finalStatus": "Approved",
+        }, {"date": 1})
+    }
+    counts = {}
+    records = employee_daily_collection.find({
+        "employeeId": employeeId,
+        "date": {"$gte": start_date, "$lte": end_date},
+    })
+    for record in records:
+        record_date = _report_date(record.get("date"))
+        if is_excluded_duty_record(record, record_date in approved_leave_dates):
+            continue
+        duty = normalized_duty(record.get("assignedDuty"))
+        if not duty or duty.upper() in {"-", "NIL", "NONE"}:
+            continue
+        counts[duty] = counts.get(duty, 0) + 1
+    stats = [{"_id": duty, "count": count} for duty, count in sorted(counts.items())]
 
     return {
         "employeeId": employeeId,
@@ -632,6 +1302,7 @@ def training_stats(
                 "$match": {
                     "employeeId": employeeId,
                     "status": "Approved",
+                    "workflowKind": {"$ne": "Adjacent OFF"},
                     "financialYear": financialYear
                 }
             },

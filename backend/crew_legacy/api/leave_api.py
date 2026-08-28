@@ -142,6 +142,99 @@ def direct_reporting_officer_ids(employee: dict) -> list[str]:
     ]
 
 
+def organization_leave_approval_chain(employee: dict) -> tuple[list[dict], int]:
+    """Snapshot a non-shift employee's configured reporting hierarchy."""
+    from crew_legacy.api.admin_api import resolve_employee_organization
+
+    employee_id = clean_id(employee.get("userId") or employee.get("employeeId"))
+    resolved = resolve_employee_organization(
+        employee.get("manualFunctionIds", employee.get("functionIds")), employee_id
+    )
+    override = employee.get("leaveApprovalLevelsOverride")
+    configured_levels = int(override) if str(override or "") in {"2", "3"} else int(resolved.get("organizationLeaveApprovalLevels") or 2)
+    level_values = [
+        ("Reporting Officer", resolved.get("reportingOfficerIds") or []),
+    ]
+    if configured_levels == 3:
+        level_values.append(("Intermediary Reporting Officer", [resolved.get("intermediaryReportingId")]))
+    level_values.append(("HOD", [resolved.get("hodId")]))
+
+    used = set()
+    chain = []
+    for level, raw_ids in level_values:
+        approver_ids = [
+            value for value in dict.fromkeys(clean_id(item) for item in raw_ids)
+            if value and value != employee_id and value not in used
+        ]
+        if not approver_ids:
+            continue
+        used.update(approver_ids)
+        people = {value: employee_by_id(value) for value in approver_ids}
+        chain.append({
+            "level": level,
+            "employeeIds": approver_ids,
+            "employeeId": approver_ids[0],
+            "names": [people[value].get("name") or value for value in approver_ids],
+            "name": people[approver_ids[0]].get("name") or approver_ids[0],
+            "status": "Pending", "actedBy": None, "actedOn": None,
+        })
+    if len(chain) != configured_levels:
+        missing = " → ".join(level for level, _values in level_values)
+        raise HTTPException(
+            409,
+            f"The employee's {configured_levels}-level leave hierarchy is incomplete. Configure {missing} in Employee/Organization Master.",
+        )
+    return chain, configured_levels
+
+
+def is_organization_leave(leave: dict) -> bool:
+    return leave.get("approvalMode") == "Organization"
+
+
+def current_organization_approval(leave: dict):
+    chain = leave.get("approvalChain") or []
+    index = int(leave.get("currentApprovalIndex") or 0)
+    return (index, chain[index]) if 0 <= index < len(chain) else (index, None)
+
+
+def step_approver_ids(step: dict) -> list[str]:
+    return [
+        value for value in dict.fromkeys(
+            clean_id(item) for item in (step.get("employeeIds") or [step.get("employeeId")])
+        ) if value
+    ]
+
+
+def migrate_pending_nonshift_leave_workflows() -> int:
+    """Lazily convert legacy General-duty requests that were incorrectly waiting for SIC."""
+    migrated = 0
+    records = leave_request_collection.find({
+        "finalStatus": "Applied",
+        "$or": [{"approvalMode": {"$exists": False}}, {"approvalMode": None}],
+    })
+    for leave in records:
+        if shift_group_for_date(leave.get("employeeId"), leave.get("date")):
+            continue
+        employee = employee_by_id(leave.get("employeeId"))
+        if not employee:
+            continue
+        try:
+            chain, configured_levels = organization_leave_approval_chain(employee)
+        except HTTPException:
+            continue
+        result = leave_request_collection.update_one(
+            {"_id": leave["_id"], "$or": [{"approvalMode": {"$exists": False}}, {"approvalMode": None}]},
+            {"$set": {
+                "approvalMode": "Organization", "approvalChain": chain,
+                "configuredApprovalLevels": configured_levels, "currentApprovalIndex": 0,
+                "organizationApprovalStatus": "Pending", "sicApprovalStatus": "Not Applicable",
+                "updatedOn": datetime.utcnow(),
+            }},
+        )
+        migrated += result.modified_count
+    return migrated
+
+
 def visible_leave_employee_ids(user: dict, employees: Optional[list[dict]] = None) -> set[str]:
     """Actor plus every recursively reporting subordinate from Organization Master."""
     active_employees = employees if employees is not None else list(
@@ -365,6 +458,10 @@ def sic_record_for(employee_id: str, date_str: str, group_name: str = None):
 
 def leave_authority_ids(leave: dict) -> list[str]:
     """Current organization authority plus the roster's legacy DIC snapshot."""
+    if is_organization_leave(leave):
+        return list(dict.fromkeys(
+            value for step in (leave.get("approvalChain") or []) for value in step_approver_ids(step)
+        ))
     duty = daily_record(leave.get("employeeId"), leave.get("date")) or {}
     legacy_id = clean_id((duty.get("departmentIC") or {}).get("employeeId"))
     employee = employee_by_id(leave.get("employeeId"))
@@ -395,10 +492,16 @@ def can_apply_for(user: dict, employee_id: str, date_str: str = None) -> bool:
 
 
 def can_sic_act(user: dict, leave: dict) -> bool:
+    if is_organization_leave(leave):
+        index, step = current_organization_approval(leave)
+        return is_admin(user) or bool(index == 0 and step and clean_id(user.get("employeeId")) in step_approver_ids(step))
     return is_admin(user) or bool(sic_record_for(user.get("employeeId"), leave.get("date"), leave.get("groupName")))
 
 
 def can_authority_act(user: dict, leave: dict) -> bool:
+    if is_organization_leave(leave):
+        index, step = current_organization_approval(leave)
+        return is_admin(user) or bool(index > 0 and step and clean_id(user.get("employeeId")) in step_approver_ids(step))
     return is_admin(user) or clean_id(user.get("employeeId")) in leave_authority_ids(leave)
 
 
@@ -1209,13 +1312,27 @@ def apply_leave_v2(data: dict, user=Depends(get_authenticated_user)):
             "compOffId": comp_off_id,
             "duty": duty,
             "groupName": group_name,
+            "isShiftEmployee": bool(shift_group_for_date(employee_id, date_str)),
         })
 
     leave_group_id = str(uuid.uuid4())
     inserted_ids = []
     notified_sics = set()
+    notified_reporting_officers = set()
+    organization_chain_template = None
+    organization_level_count = None
+    if any(not item["isShiftEmployee"] for item in prepared):
+        organization_chain_template, organization_level_count = organization_leave_approval_chain(employee)
     for item in prepared:
         duty = item["duty"]
+        approval_chain = []
+        configured_approval_levels = None
+        if not item["isShiftEmployee"]:
+            approval_chain = [
+                {**step, "employeeIds": list(step.get("employeeIds") or []), "names": list(step.get("names") or [])}
+                for step in (organization_chain_template or [])
+            ]
+            configured_approval_levels = organization_level_count
         document = {
             "employeeId": employee_id,
             "name": duty.get("name") or employee.get("name"),
@@ -1229,6 +1346,11 @@ def apply_leave_v2(data: dict, user=Depends(get_authenticated_user)):
             "sicApprovalStatus": "Pending",
             "deptApprovalStatus": "Pending",
             "finalStatus": "Applied",
+            "approvalMode": "Shift" if item["isShiftEmployee"] else "Organization",
+            "approvalChain": approval_chain,
+            "configuredApprovalLevels": configured_approval_levels,
+            "currentApprovalIndex": 0,
+            "organizationApprovalStatus": "Pending" if approval_chain else None,
             "replacementRequired": False,
             "sicReplacementRequired": False,
             "dicReplacementRequired": None,
@@ -1278,6 +1400,8 @@ def apply_leave_v2(data: dict, user=Depends(get_authenticated_user)):
             for record in group_supervisors
             if clean_id(record.get("employeeId"))
         )
+        if approval_chain:
+            notified_reporting_officers.update(step_approver_ids(approval_chain[0]))
 
     # Application-stage notification is intentionally limited to the SIC(s)
     # responsible for the affected shift group.
@@ -1306,7 +1430,25 @@ def apply_leave_v2(data: dict, user=Depends(get_authenticated_user)):
             },
         )
 
-    return {"message": "Leave application submitted to the Shift-in-Charge", "leaveRecords": inserted_ids}
+    notified_reporting_officers.discard(employee_id)
+    if notified_reporting_officers:
+        date_text = leave_date_summary(prepared)
+        notify_all(
+            email_list=recipient_emails(sorted(notified_reporting_officers)),
+            employee_ids=sorted(notified_reporting_officers),
+            subject="Leave application for Reporting Officer approval",
+            message=f"{employee.get('name')} ({employee_id}) applied for {len(inserted_ids)} leave day(s): {date_text}.",
+            ref_id=leave_group_id, action="VIEW_LEAVE", type="LEAVE",
+            template_key="leave_reporting_applied",
+            template_values={
+                "employee_name": employee.get("name"), "employee_id": employee_id,
+                "leave_count": len(inserted_ids), "leave_dates": date_text,
+                "group_name": "Organization hierarchy",
+            },
+        )
+
+    route_label = "Shift-in-Charge" if notified_sics else "Reporting Officer"
+    return {"message": f"Leave application submitted to the {route_label}", "leaveRecords": inserted_ids}
 
 # =========================================================
 # GET ALL LEAVES
@@ -1358,6 +1500,38 @@ def sic_forward_bulk(data: dict, user=Depends(get_authenticated_user)):
         leave = leave_request_collection.find_one({"_id": ObjectId(leave_id)})
 
         if not leave:
+            continue
+
+        if is_organization_leave(leave):
+            if not can_sic_act(user, leave):
+                raise HTTPException(403, "This leave is awaiting its configured Reporting Officer")
+            index, step = current_organization_approval(leave)
+            if leave.get("finalStatus") != "Applied" or not step or step.get("status") != "Pending":
+                raise HTTPException(409, f"Leave for {leave.get('date')} is no longer pending Reporting Officer review")
+            now = datetime.utcnow()
+            next_index = index + 1
+            chain = leave.get("approvalChain") or []
+            leave_request_collection.update_one(
+                {"_id": leave["_id"]},
+                {"$set": {
+                    f"approvalChain.{index}.status": "Approved",
+                    f"approvalChain.{index}.actedBy": clean_id(user.get("employeeId")),
+                    f"approvalChain.{index}.actedOn": now,
+                    "currentApprovalIndex": next_index,
+                    "organizationApprovalStatus": "In Progress",
+                    "sicApprovalStatus": "Not Applicable",
+                    "updatedOn": now,
+                }},
+            )
+            employee_daily_collection.update_one(
+                {"employeeId": leave["employeeId"], "date": leave["date"]},
+                {"$set": {"leaveStatus": "Forwarded by Reporting Officer"}},
+            )
+            next_step = chain[next_index] if next_index < len(chain) else None
+            recipient_ids = step_approver_ids(next_step) if next_step else []
+            if recipient_ids:
+                add_grouped_leave_notification(notification_groups, leave, recipient_ids)
+            updated_count += 1
             continue
 
         if not can_sic_act(user, leave):
@@ -1421,12 +1595,13 @@ def sic_forward_bulk(data: dict, user=Depends(get_authenticated_user)):
         recipient_ids = sorted(group["recipient_ids"])
         date_text = leave_date_summary(grouped_leaves)
         leave_type_text = leave_type_summary(grouped_leaves)
+        organization_route = is_organization_leave(first_leave)
         notify_all(
             email_list=recipient_emails(recipient_ids),
             employee_ids=recipient_ids,
-            subject="Leave Approved and Forwarded by SIC",
+            subject="Leave approved by Reporting Officer" if organization_route else "Leave Approved and Forwarded by SIC",
             message=(
-                "Leave approved by SIC and forwarded for final approval\n\n"
+                ("Leave approved by Reporting Officer and forwarded to the next organization approver\n\n" if organization_route else "Leave approved by SIC and forwarded for final approval\n\n") +
                 f"Name: {first_leave.get('name')}\n"
                 f"Employee ID: {first_leave.get('employeeId')}\n"
                 f"Dates: {date_text}\n"
@@ -1436,7 +1611,7 @@ def sic_forward_bulk(data: dict, user=Depends(get_authenticated_user)):
             ref_id=first_leave.get("leaveGroupId") or str(first_leave["_id"]),
             action="VIEW_LEAVE",
             type="LEAVE",
-            template_key="leave_sic_forwarded",
+            template_key="leave_reporting_forwarded" if organization_route else "leave_sic_forwarded",
             template_values={
                 "employee_name": first_leave.get("name"),
                 "employee_id": first_leave.get("employeeId"),
@@ -1469,6 +1644,38 @@ def sic_reject_bulk(data: dict, user=Depends(get_authenticated_user)):
         leave = leave_request_collection.find_one({"_id": ObjectId(lid)})
 
         if not leave:
+            continue
+
+        if is_organization_leave(leave):
+            if not can_sic_act(user, leave):
+                raise HTTPException(403, "This leave is awaiting its configured Reporting Officer")
+            index, step = current_organization_approval(leave)
+            if leave.get("finalStatus") != "Applied" or not step or step.get("status") != "Pending":
+                raise HTTPException(409, f"Leave for {leave.get('date')} is no longer pending Reporting Officer review")
+            rejected_on = datetime.utcnow()
+            actor = clean_id(user.get("employeeId"))
+            rejection = {"stage": step.get("level") or "Reporting Officer", "comment": comment, "rejectedBy": actor, "rejectedByRole": step.get("level") or "Reporting Officer", "rejectedOn": rejected_on}
+            leave_request_collection.update_one(
+                {"_id": leave["_id"]},
+                {"$set": {
+                    f"approvalChain.{index}.status": "Rejected", f"approvalChain.{index}.actedBy": actor,
+                    f"approvalChain.{index}.actedOn": rejected_on, "organizationApprovalStatus": "Rejected",
+                    "finalStatus": "Rejected", "rejectionComment": comment, "rejectedBy": actor,
+                    "rejectedByRole": rejection["rejectedByRole"], "rejectedOn": rejected_on, "updatedOn": rejected_on,
+                }, "$push": {"rejectionHistory": rejection}},
+            )
+            employee_daily_collection.update_one(
+                {"employeeId": leave["employeeId"], "date": leave["date"]}, {"$set": {"leaveStatus": "Rejected"}},
+            )
+            restore_comp_off(leave)
+            notify_all(
+                email_list=recipient_emails([leave["employeeId"]]), employee_ids=[leave["employeeId"]],
+                subject="Leave rejected by Reporting Officer",
+                message=f"Your leave for {leave.get('date')} has been rejected by the Reporting Officer.\nComment: {comment or 'No comment provided'}",
+                ref_id=str(leave["_id"]), action="VIEW_LEAVE", type="LEAVE", template_key="leave_reporting_rejected",
+                template_values={"employee_name": leave.get("name"), "employee_id": leave.get("employeeId"), "leave_date": leave.get("date"), "leave_type": leave.get("leaveType"), "comment": comment or "No comment provided"},
+            )
+            updated += 1
             continue
 
         if not can_sic_act(user, leave):
@@ -1577,6 +1784,7 @@ def approve_leave_bulk(data: dict, user=Depends(get_authenticated_user)):
         raise HTTPException(400, "No leave selected")
 
     updated_count = 0
+    advanced_count = 0
     notification_groups = {}
 
     for item in decision_items:
@@ -1588,10 +1796,47 @@ def approve_leave_bulk(data: dict, user=Depends(get_authenticated_user)):
         if not leave:
             continue
 
+        if is_organization_leave(leave):
+            if not can_authority_act(user, leave):
+                raise HTTPException(403, "This leave is awaiting another configured organization approver")
+            index, step = current_organization_approval(leave)
+            chain = leave.get("approvalChain") or []
+            if leave.get("finalStatus") != "Applied" or not step or step.get("status") != "Pending":
+                raise HTTPException(409, f"Leave for {leave.get('date')} is no longer pending this approval")
+            now = datetime.utcnow()
+            next_index = index + 1
+            if next_index < len(chain):
+                leave_request_collection.update_one(
+                    {"_id": leave["_id"]},
+                    {"$set": {
+                        f"approvalChain.{index}.status": "Approved", f"approvalChain.{index}.actedBy": clean_id(user.get("employeeId")),
+                        f"approvalChain.{index}.actedOn": now, "currentApprovalIndex": next_index,
+                        "organizationApprovalStatus": "In Progress", "updatedOn": now,
+                    }},
+                )
+                employee_daily_collection.update_one(
+                    {"employeeId": leave["employeeId"], "date": leave["date"]},
+                    {"$set": {"leaveStatus": f"Forwarded to {chain[next_index].get('level') or 'next approver'}"}},
+                )
+                next_ids = step_approver_ids(chain[next_index])
+                notify_all(
+                    email_list=recipient_emails(next_ids), employee_ids=next_ids,
+                    subject=f"Leave awaiting {chain[next_index].get('level') or 'organization'} approval",
+                    message=f"{leave.get('name')} ({leave.get('employeeId')}) leave for {leave.get('date')} awaits your approval.",
+                    ref_id=leave.get("leaveGroupId") or str(leave["_id"]), action="VIEW_LEAVE", type="LEAVE",
+                    template_key="leave_reporting_forwarded",
+                    template_values={"employee_name": leave.get("name"), "employee_id": leave.get("employeeId"), "leave_date": leave.get("date"), "leave_dates": leave.get("date"), "leave_count": 1, "leave_type": leave.get("leaveType")},
+                )
+                advanced_count += 1
+                continue
+
+            # Last configured organization level reaches the existing finalization block.
+            item["replacementRequired"] = False
+
         if not can_authority_act(user, leave):
             raise HTTPException(403, "Only the configured Leave Approving Authority can make the final decision")
 
-        if leave.get("sicApprovalStatus") != "Forwarded":
+        if not is_organization_leave(leave) and leave.get("sicApprovalStatus") != "Forwarded":
             raise HTTPException(400, f"Leave for {leave.get('date')} has not been forwarded by the SIC")
 
         if leave.get("finalStatus") != "Applied" or leave.get("deptApprovalStatus") != "Pending":
@@ -1606,8 +1851,10 @@ def approve_leave_bulk(data: dict, user=Depends(get_authenticated_user)):
                 leave.get("sicReplacementRequired", leave.get("replacementRequired", False)),
             )
         )
+        organization_route = is_organization_leave(leave)
+        current_index, current_step = current_organization_approval(leave) if organization_route else (None, None)
         decision = {
-            "stage": "DIC",
+            "stage": current_step.get("level") if current_step else "DIC",
             "required": dic_replacement_required,
             "sicRequired": bool(leave.get("sicReplacementRequired", leave.get("replacementRequired", False))),
             "changedFromSIC": dic_replacement_required != bool(leave.get("sicReplacementRequired", leave.get("replacementRequired", False))),
@@ -1616,16 +1863,23 @@ def approve_leave_bulk(data: dict, user=Depends(get_authenticated_user)):
         }
 
         # ðŸ”¥ APPROVE
+        final_set = {
+            "deptApprovalStatus": "Approved", "finalStatus": "Approved",
+            "dicReplacementRequired": dic_replacement_required, "replacementRequired": dic_replacement_required,
+            "updatedOn": datetime.utcnow(),
+        }
+        if organization_route:
+            final_set.update({
+                f"approvalChain.{current_index}.status": "Approved",
+                f"approvalChain.{current_index}.actedBy": clean_id(user.get("employeeId")),
+                f"approvalChain.{current_index}.actedOn": datetime.utcnow(),
+                "currentApprovalIndex": len(leave.get("approvalChain") or []),
+                "organizationApprovalStatus": "Approved",
+            })
         leave_request_collection.update_one(
             {"_id": leave["_id"]},
             {
-                "$set": {
-                    "deptApprovalStatus": "Approved",
-                    "finalStatus": "Approved",
-                    "dicReplacementRequired": dic_replacement_required,
-                    "replacementRequired": dic_replacement_required,
-                    "updatedOn": datetime.utcnow()
-                },
+                "$set": final_set,
                 "$push": {"replacementDecisionHistory": decision},
             }
         )
@@ -1663,7 +1917,7 @@ def approve_leave_bulk(data: dict, user=Depends(get_authenticated_user)):
 
         updated_count += 1
 
-    if updated_count == 0:
+    if updated_count == 0 and advanced_count == 0:
         raise HTTPException(400, "No valid leaves approved")
 
     for group in notification_groups.values():
@@ -1672,12 +1926,13 @@ def approve_leave_bulk(data: dict, user=Depends(get_authenticated_user)):
         recipient_ids = sorted(group["recipient_ids"])
         date_text = leave_date_summary(grouped_leaves)
         leave_type_text = leave_type_summary(grouped_leaves)
+        organization_route = is_organization_leave(first_leave)
         notify_all(
             email_list=recipient_emails(recipient_ids),
             employee_ids=recipient_ids,
-            subject="Leave Finally Approved by DIC",
+            subject="Leave finally approved by Reporting Hierarchy" if organization_route else "Leave Finally Approved by DIC",
             message=(
-                "Leave has received final approval from the DIC\n\n"
+                ("Leave has received final approval from the configured reporting hierarchy\n\n" if organization_route else "Leave has received final approval from the DIC\n\n") +
                 f"Name: {first_leave.get('name')}\n"
                 f"Employee ID: {first_leave.get('employeeId')}\n"
                 f"Dates: {date_text}\n"
@@ -1687,7 +1942,7 @@ def approve_leave_bulk(data: dict, user=Depends(get_authenticated_user)):
             ref_id=first_leave.get("leaveGroupId") or str(first_leave["_id"]),
             action="VIEW_LEAVE",
             type="LEAVE",
-            template_key="leave_dic_approved",
+            template_key="leave_hierarchy_approved" if organization_route else "leave_dic_approved",
             template_values={
                 "employee_name": first_leave.get("name"),
                 "employee_id": first_leave.get("employeeId"),
@@ -1698,7 +1953,7 @@ def approve_leave_bulk(data: dict, user=Depends(get_authenticated_user)):
             },
         )
 
-    return {"message": f"{updated_count} leave(s) approved"}
+    return {"message": f"{updated_count} leave(s) finally approved; {advanced_count} forwarded to the next approver"}
 
 
 
@@ -1723,7 +1978,7 @@ def reject_bulk(data: dict, user=Depends(get_authenticated_user)):
         if not can_authority_act(user, leave):
             raise HTTPException(403, "Only the configured Leave Approving Authority can make the final decision")
 
-        if leave.get("sicApprovalStatus") != "Forwarded":
+        if not is_organization_leave(leave) and leave.get("sicApprovalStatus") != "Forwarded":
             raise HTTPException(400, f"Leave for {leave.get('date')} has not been forwarded by the SIC")
 
         if leave.get("finalStatus") != "Applied" or leave.get("deptApprovalStatus") != "Pending":
@@ -1734,25 +1989,31 @@ def reject_bulk(data: dict, user=Depends(get_authenticated_user)):
 
         # ðŸ”¥ UPDATE DB
         rejected_on = datetime.utcnow()
+        organization_route = is_organization_leave(leave)
+        approval_index, approval_step = current_organization_approval(leave) if organization_route else (None, None)
         rejection = {
-            "stage": "DIC",
+            "stage": approval_step.get("level") if approval_step else "DIC",
             "comment": comment,
             "rejectedBy": clean_id(user.get("employeeId")),
-            "rejectedByRole": "Administrator" if is_admin(user) else "DIC",
+            "rejectedByRole": "Administrator" if is_admin(user) else (approval_step.get("level") if approval_step else "DIC"),
             "rejectedOn": rejected_on,
         }
+        rejection_set = {
+            "deptApprovalStatus": "Rejected", "finalStatus": "Rejected", "rejectionComment": comment,
+            "rejectedBy": rejection["rejectedBy"], "rejectedByRole": rejection["rejectedByRole"],
+            "rejectedOn": rejected_on, "updatedOn": rejected_on,
+        }
+        if organization_route:
+            rejection_set.update({
+                f"approvalChain.{approval_index}.status": "Rejected",
+                f"approvalChain.{approval_index}.actedBy": clean_id(user.get("employeeId")),
+                f"approvalChain.{approval_index}.actedOn": rejected_on,
+                "organizationApprovalStatus": "Rejected",
+            })
         leave_request_collection.update_one(
             {"_id": leave["_id"]},
             {
-                "$set": {
-                    "deptApprovalStatus": "Rejected",
-                    "finalStatus": "Rejected",
-                    "rejectionComment": comment,
-                    "rejectedBy": rejection["rejectedBy"],
-                    "rejectedByRole": rejection["rejectedByRole"],
-                    "rejectedOn": rejected_on,
-                    "updatedOn": rejected_on,
-                },
+                "$set": rejection_set,
                 "$push": {"rejectionHistory": rejection},
             }
         )
@@ -1780,7 +2041,7 @@ def reject_bulk(data: dict, user=Depends(get_authenticated_user)):
         notify_all(
             email_list=[emp_email] if emp_email else [],
             employee_ids=[leave["employeeId"]],
-            subject="Leave Rejected",
+            subject="Leave Rejected by Reporting Hierarchy" if organization_route else "Leave Rejected",
             message=f"""
             Your leave has been rejected
 
@@ -1791,7 +2052,7 @@ def reject_bulk(data: dict, user=Depends(get_authenticated_user)):
             ref_id=str(leave["_id"]),
             action="VIEW_LEAVE",
             type="LEAVE",
-            template_key="leave_dic_rejected",
+            template_key="leave_hierarchy_rejected" if organization_route else "leave_dic_rejected",
             template_values={
                 "employee_name": leave.get("name"),
                 "employee_id": leave.get("employeeId"),
@@ -1816,6 +2077,7 @@ def get_leave_list(
     completedTo: Optional[str] = Query(None),
     user=Depends(get_authenticated_user),
 ):
+    migrate_pending_nonshift_leave_workflows()
     actor = clean_id(user.get("employeeId"))
     visible_employee_ids = visible_leave_employee_ids(user)
     delete_allowed = can_delete_leave_master(user)
@@ -1863,7 +2125,7 @@ def get_leave_list(
             "date": r.get("date"),
             "groupName": r.get("groupName"),
             "leaveStatus": {
-                "$in": ["Applied", "Forwarded by SIC", "Approved"]
+                "$in": ["Applied", "Forwarded by SIC", "Forwarded by Reporting Officer", "Forwarded to Intermediary Reporting Officer", "Forwarded to HOD", "Approved"]
             },
             "employeeId": {"$ne": r.get("employeeId")}
         }))
@@ -1874,6 +2136,8 @@ def get_leave_list(
             "replacementDuty": True,
             "replacementFor.employeeId": employee_id_filter(r.get("employeeId")),
         }) or {}
+        organization_route = is_organization_leave(r)
+        approval_index, approval_step = current_organization_approval(r) if organization_route else (None, None)
 
         result.append({
             "id": str(r["_id"]),
@@ -1889,6 +2153,14 @@ def get_leave_list(
             "dutyType": map_duty_type(assigned_duty),
             "sicApprovalStatus": r.get("sicApprovalStatus"),
             "deptApprovalStatus": r.get("deptApprovalStatus"),
+            "approvalMode": r.get("approvalMode") or "Shift",
+            "approvalChain": r.get("approvalChain") or [],
+            "configuredApprovalLevels": r.get("configuredApprovalLevels"),
+            "organizationApprovalStatus": r.get("organizationApprovalStatus"),
+            "currentApprovalIndex": approval_index,
+            "currentApproverLevel": approval_step.get("level") if approval_step else None,
+            "currentApproverNames": approval_step.get("names") if approval_step else [],
+            "approvalProgress": f"{sum(1 for step in (r.get('approvalChain') or []) if step.get('status') == 'Approved')}/{len(r.get('approvalChain') or [])}" if organization_route else None,
             "finalStatus": r.get("finalStatus"),
             "replacementRequired": r.get("replacementRequired", False),
             "replacementAssigned": bool(replacement),
@@ -1911,8 +2183,8 @@ def get_leave_list(
             "isOrganizationObserver": organization_observer,
             "canCancel": bool(cancellation_role(user, r)) and r.get("finalStatus") in ["Applied", "Approved"],
             "canDeleteMaster": delete_allowed,
-            "canSICAct": sic_allowed and r.get("sicApprovalStatus") == "Pending" and r.get("finalStatus") == "Applied",
-            "canFinalAct": authority_allowed and r.get("sicApprovalStatus") == "Forwarded" and r.get("deptApprovalStatus") == "Pending",
+            "canSICAct": sic_allowed and r.get("finalStatus") == "Applied" and (organization_route or r.get("sicApprovalStatus") == "Pending"),
+            "canFinalAct": authority_allowed and r.get("finalStatus") == "Applied" and r.get("deptApprovalStatus") == "Pending" and (organization_route or r.get("sicApprovalStatus") == "Forwarded"),
             # ðŸ”¥ NEW FIELD
             "othersOnLeave": [
                 {
@@ -2295,8 +2567,12 @@ def withdraw_leave(leave_id: str, user=Depends(get_authenticated_user)):
         raise HTTPException(403, "Not allowed")
 
     # Withdrawal is available only while the request is still waiting for SIC review.
-    if leave.get("finalStatus") != "Applied" or leave.get("sicApprovalStatus") != "Pending":
-        raise HTTPException(400, "Leave cannot be withdrawn after the SIC has acted")
+    first_stage_pending = (
+        current_organization_approval(leave)[0] == 0
+        and (current_organization_approval(leave)[1] or {}).get("status") == "Pending"
+    ) if is_organization_leave(leave) else leave.get("sicApprovalStatus") == "Pending"
+    if leave.get("finalStatus") != "Applied" or not first_stage_pending:
+        raise HTTPException(400, "Leave cannot be withdrawn after the first approver has acted")
 
     # âœ… UPDATE LEAVE
     leave_request_collection.update_one(

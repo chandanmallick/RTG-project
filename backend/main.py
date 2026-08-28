@@ -29,6 +29,8 @@ from routes.crew_routes import router as crew_router
 from routes.crew_legacy_routes import router as crew_legacy_router
 from routes.dso_report_routes import router as dso_report_router
 from routes.plant_deviation_routes import router as plant_deviation_router
+from routes.data_validation_routes import router as data_validation_router
+from routes.sri_routes import router as sri_router
 from crew_legacy.admin_logic.audit_service import record_audit_event
 
 import urllib3
@@ -41,7 +43,7 @@ urllib3.disable_warnings(
 app = FastAPI(
     title=os.getenv(
         "APP_BACKEND_TITLE",
-        "ASTRO Backend"
+        "COMPASS Backend"
     )
 )
 
@@ -167,6 +169,14 @@ app.include_router(
 
 app.include_router(
     plant_deviation_router
+)
+
+app.include_router(
+    data_validation_router
+)
+
+app.include_router(
+    sri_router
 )
 
 @app.on_event("startup")

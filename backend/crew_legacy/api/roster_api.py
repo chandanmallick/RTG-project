@@ -1,6 +1,6 @@
 ﻿# roster_api.py
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from datetime import datetime, timedelta
 from bson import ObjectId
 from collections import defaultdict
@@ -33,10 +33,115 @@ from crew_legacy.database.database_mongo import (
 
 from crew_legacy.database.database_mongo import roster_master_collection, employee_daily_collection, holiday_master_collection
 from crew_legacy.services.daily_service import generate_or_update_daily_from_roster
+from crew_legacy.admin_logic.auth_utils import get_current_user
 
 router = APIRouter()
 
 DUTY_SEQUENCE = ["E1","E2","M1","M2","N1","N2","O1","O2"]
+
+
+def _availability_shift(value):
+    duty = str(value or "").strip().upper()
+    if duty in {"M", "M1", "M2", "MORNING"}:
+        return "Morning"
+    if duty in {"E", "E1", "E2", "EVENING"}:
+        return "Evening"
+    if duty in {"N", "N1", "N2", "NIGHT"}:
+        return "Night"
+    return ""
+
+
+@router.get("/shift-availability")
+def get_shift_availability(
+    date: str = Query(..., description="Duty date in YYYY-MM-DD format"),
+    shiftType: str | None = Query(default=None, description="Morning, Evening or Night"),
+    availableOnly: bool = Query(default=True),
+    user=Depends(get_current_user),
+):
+    """Share the final date/shift-wise available Crew employee list."""
+    try:
+        datetime.strptime(date, "%Y-%m-%d")
+    except ValueError:
+        raise HTTPException(400, "date must be in YYYY-MM-DD format")
+    selected_shift = _availability_shift(shiftType) if shiftType else ""
+    if shiftType and not selected_shift:
+        raise HTTPException(400, "shiftType must be Morning, Evening or Night")
+
+    records = list(employee_daily_collection.find(
+        {"date": date, "employeeId": {"$exists": True, "$nin": [None, ""]}},
+        {"_id": 0, "employeeId": 1, "name": 1, "designation": 1, "assignedDuty": 1,
+         "groupName": 1, "leaveType": 1, "leaveStatus": 1, "leaveRequestId": 1,
+         "trainingName": 1, "replacementDuty": 1, "replacementFor": 1,
+         "replacementMode": 1, "sic": 1},
+    ))
+    employee_ids = [str(item.get("employeeId") or "").strip() for item in records]
+    directory = {
+        str(item.get("userId") or item.get("employeeId")): item
+        for item in employee_collection.find(
+            {"$or": [{"userId": {"$in": employee_ids}}, {"employeeId": {"$in": employee_ids}}]},
+            {"_id": 0, "userId": 1, "employeeId": 1, "name": 1, "designation": 1,
+             "departments": 1, "department": 1, "sections": 1},
+        )
+    } if employee_ids else {}
+
+    grouped = {"Morning": [], "Evening": [], "Night": []}
+    for record in records:
+        shift = _availability_shift(record.get("assignedDuty"))
+        if not shift or (selected_shift and shift != selected_shift):
+            continue
+        employee_id = str(record.get("employeeId") or "").strip()
+        employee = directory.get(employee_id) or {}
+        leave_type = str(record.get("leaveType") or "").strip()
+        training_name = str(record.get("trainingName") or "").strip()
+        if leave_type:
+            availability_status = "On leave"
+        elif training_name:
+            availability_status = "Training"
+        else:
+            availability_status = "Available"
+        if availableOnly and availability_status != "Available":
+            continue
+        replacement_for = record.get("replacementFor") or {}
+        if not isinstance(replacement_for, dict):
+            replacement_for = {"employeeId": str(replacement_for)}
+        sic_record = record.get("sic") or {}
+        if not isinstance(sic_record, dict):
+            sic_record = {}
+        grouped[shift].append({
+            "employeeId": employee_id,
+            "name": record.get("name") or employee.get("name") or employee_id,
+            "designation": record.get("designation") or employee.get("designation") or "",
+            "date": date,
+            "shiftType": shift,
+            "assignedDuty": record.get("assignedDuty"),
+            "groupName": record.get("groupName") or "",
+            "availabilityStatus": availability_status,
+            "isReplacement": bool(record.get("replacementDuty")),
+            "replacementFor": {
+                "employeeId": replacement_for.get("employeeId") or "",
+                "name": replacement_for.get("name") or "",
+            } if record.get("replacementDuty") else None,
+            "isTemporarySic": bool(sic_record.get("type") == "temporary"),
+            "leaveType": leave_type or None,
+            "trainingName": training_name or None,
+            "departments": employee.get("departments") or ([employee.get("department")] if employee.get("department") else []),
+            "subDepartments": employee.get("sections") or [],
+        })
+    for people in grouped.values():
+        people.sort(key=lambda item: (item["groupName"], item["name"].lower(), item["employeeId"]))
+    if selected_shift:
+        result_groups = {selected_shift: grouped[selected_shift]}
+    else:
+        result_groups = grouped
+    return {
+        "date": date,
+        "shiftType": selected_shift or "All",
+        "availableOnly": availableOnly,
+        "counts": {shift: len(people) for shift, people in result_groups.items()},
+        "total": sum(len(people) for people in result_groups.values()),
+        "shifts": result_groups,
+        "people": [person for people in result_groups.values() for person in people],
+    }
 
 def calculate_expiry(date_str):
     from datetime import datetime

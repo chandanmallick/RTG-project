@@ -23,6 +23,7 @@ import {
   CheckSquare,
   Activity,
   FileText,
+  FileSpreadsheet,
   AlertTriangle,
   BookOpen,
   Settings,
@@ -161,9 +162,11 @@ export default function TopNavbar() {
     
   const isAnalyticsActive =
     location.pathname === "/frequency-report" ||
+    location.pathname === "/analytics/data-validation" ||
     location.pathname === "/outage-analysis" ||
     location.pathname === "/outage-analysis/ml-training" ||
-    location.pathname === "/mis-report";
+    location.pathname === "/mis-report" ||
+    location.pathname.startsWith("/analytics/data-validation");
 
   const isReportPreparationActive = location.pathname.startsWith("/report-preparation/");
   const isCrewActive = location.pathname.startsWith("/crew/") && location.pathname !== "/crew/user-context";
@@ -247,7 +250,7 @@ export default function TopNavbar() {
               lineHeight: 0.95,
             }}
           >
-            DRUPAd
+            COMPASS
           </Typography>
           <Typography
             sx={{
@@ -260,7 +263,7 @@ export default function TopNavbar() {
               maxWidth: 205,
             }}
           >
-            Data Dashboard &amp; Resource Utilization Portal for Administration
+            Companion for Operations Management, Planning, Analytics, Support &amp; Services
           </Typography>
         </Box>
       </Box>
@@ -450,6 +453,16 @@ export default function TopNavbar() {
                     onClick={handleNavigate}
                   />
                   <DropdownItem
+                    title="Data Validation"
+                    description="Validate SCADA dumps and inspect marked data issues"
+                    icon={CheckSquare}
+                    iconColor="#B42318"
+                    iconBg="#FEF3F2"
+                    path="/analytics/data-validation"
+                    active={location.pathname === "/analytics/data-validation"}
+                    onClick={handleNavigate}
+                  />
+                  <DropdownItem
                     title="S/D Analysis"
                     description="Outage breakdowns and duration details"
                     icon={AlertTriangle}
@@ -536,6 +549,16 @@ export default function TopNavbar() {
                     iconBg="#EAF2FF"
                     path="/report-preparation/dso-evening"
                     active={location.pathname === "/report-preparation/dso-evening"}
+                    onClick={handleNavigate}
+                  />
+                  <DropdownItem
+                    title="System Reliability Report (SRI)"
+                    description="State drawal against TTC/ATC with two-page report"
+                    icon={FileSpreadsheet}
+                    iconColor="#B42318"
+                    iconBg="#FEF3F2"
+                    path="/report-preparation/sri"
+                    active={location.pathname === "/report-preparation/sri"}
                     onClick={handleNavigate}
                   />
                   <DropdownItem
@@ -920,8 +943,8 @@ export default function TopNavbar() {
                     onClick={handleNavigate}
                   />
                   <DropdownItem
-                    title="Mail & 2FA Settings"
-                    description="Configure replacement-duty mail delivery"
+                    title="Mail, 2FA & CRMS Settings"
+                    description="Configure mail, sign-in security and CRMS access"
                     icon={Mail}
                     iconColor="#0057B7"
                     iconBg="#EAF2FF"
@@ -1079,7 +1102,7 @@ export default function TopNavbar() {
         }}
       >
         <DialogTitle sx={{ fontWeight: 800, fontSize: 20, color: "#03624C", pb: 1 }}>
-          DRUPAd System Support
+          COMPASS System Support
         </DialogTitle>
         <DialogContent sx={{ display: "flex", flexDirection: "column", gap: 2.5, pt: 1.5 }}>
           <Typography sx={{ fontSize: 13.5, color: "#64748B", fontWeight: 550, lineHeight: 1.5 }}>

@@ -2548,7 +2548,7 @@ def resolve_plant_data_series(
             if has_values(rtg_scada):
                 block_size = max(1, 1440 // len(rtg_scada))
                 actual_val = at_index(rtg_scada, idx, minute_of_day // block_size)
-                actual_src = "RTG Portal"
+                actual_src = "COMPASS"
             else:
                 actual_src = "Missing (RTG & SCADA unavailable)"
 

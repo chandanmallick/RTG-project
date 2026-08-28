@@ -324,10 +324,11 @@ def finalize_daily_records(record: dict):
     acting_sic = record.get("actingSICEmployee") or {}
     replacement_id = clean_id(replacement.get("employeeId"))
     acting_sic_id = clean_id(acting_sic.get("employeeId"))
-    for date in date_range(
+    training_dates = [] if record.get("workflowKind") == "Adjacent OFF" else date_range(
         record.get("startDate") or record.get("trainingDate"),
         record.get("endDate") or record.get("trainingDate"),
-    ):
+    )
+    for date in training_dates:
         trainee_daily = employee_daily_collection.find_one({
             "employeeId": record.get("employeeId"),
             "date": date,

@@ -51,7 +51,8 @@ export default function EmployeeMaster() {
     reportingOfficerIds: [],
     functionIds: [],
     intermediaryReportingId: "",
-    hodId: ""
+    hodId: "",
+    leaveApprovalLevelsOverride: ""
   });
 
   const [employees, setEmployees] = useState([]);
@@ -158,7 +159,8 @@ export default function EmployeeMaster() {
     reportingOfficerIds: [],
     functionIds: [],
     intermediaryReportingId: "",
-    hodId: ""
+    hodId: "",
+    leaveApprovalLevelsOverride: ""
   };
 
   const handleChange = (e) => {
@@ -519,6 +521,11 @@ export default function EmployeeMaster() {
               InputProps={{ readOnly: true }}
               helperText="Department head configured in Organization Master"
             />
+            <TextField size="small" select label="Leave approval levels" name="leaveApprovalLevelsOverride" fullWidth InputLabelProps={{ shrink: true }} value={formData.leaveApprovalLevelsOverride || ""} onChange={handleChange} helperText={`Employee override; organization currently resolves to ${formData.organizationLeaveApprovalLevels || 2} levels`}>
+              <MenuItem value="">Use Organization Master</MenuItem>
+              <MenuItem value={2}>2 levels: Reporting Officer → HOD</MenuItem>
+              <MenuItem value={3}>3 levels: Reporting Officer → Intermediary → HOD</MenuItem>
+            </TextField>
           </Box>
         </DialogContent>
         <DialogActions sx={{ px: 3, py: 2 }}>

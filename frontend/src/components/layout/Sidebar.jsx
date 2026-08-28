@@ -256,7 +256,7 @@ export default function Sidebar() {
                 lineHeight: 1,
               }}
             >
-              ASTRO
+              COMPASS
             </Typography>
 
             <Typography
@@ -384,7 +384,7 @@ export default function Sidebar() {
                 fontSize: 15,
               }}
             >
-              ASTRO Admin
+              COMPASS Admin
             </Typography>
 
             <Typography
@@ -608,7 +608,7 @@ export default function Sidebar() {
               fontSize: 14,
             }}
           >
-            ASTRO Operations Suite
+            COMPASS Operations Suite
           </Typography>
 
           <Typography

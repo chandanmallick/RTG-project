@@ -200,9 +200,9 @@ def _send_otp(employee, otp):
     settings = replacement_mail_settings()
     result = send_email(
         [email],
-        "DRUPAd sign-in verification code",
+        "COMPASS sign-in verification code",
         (
-            f"Your DRUPAd verification code is {otp}.\n\n"
+            f"Your COMPASS verification code is {otp}.\n\n"
             f"It expires in {OTP_EXPIRY_MINUTES} minutes. "
             "Do not share this code with anyone. If you did not attempt to sign in, contact the administrator."
         ),

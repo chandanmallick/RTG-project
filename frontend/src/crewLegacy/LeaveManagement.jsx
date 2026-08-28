@@ -355,7 +355,7 @@ export default function LeaveManagement({ embeddedApproval = false, initialAppro
   const sicForward = (leave) => act(
     "/leave/sic-forward-bulk",
     { leaves: [{ id: leave.id, replacementRequired: replacementChoice(leave, "sic") }] },
-    "Approved and forwarded to Leave Approving Authority.",
+    "Approved and forwarded to the next configured approver.",
   );
   const openRejectDialog = (stage, targetLeaves) => {
     setRejectComment("");
@@ -369,7 +369,7 @@ export default function LeaveManagement({ embeddedApproval = false, initialAppro
     await act(
       isSicStage ? "/leave/sic-reject-bulk" : "/leave/reject-bulk",
       { leaveIds: targetLeaves.map((leave) => leave.id), comment: rejectComment.trim() },
-      isSicStage ? "Leave rejected by SIC." : "Leave rejected by DIC.",
+      "Leave rejected by the current approver.",
     );
   };
   const sicReject = (leave) => openRejectDialog("sic", [leave]);
@@ -539,7 +539,7 @@ export default function LeaveManagement({ embeddedApproval = false, initialAppro
     return act(
       "/leave/sic-forward-bulk",
       { leaves: selectedSicLeaves.map((leave) => ({ id: leave.id, replacementRequired: replacementChoice(leave, "sic") })) },
-      "Approved and forwarded to Leave Approving Authority.",
+      "Approved and forwarded to the next configured approver.",
     );
   };
   const sicRejectBulk = () => {
@@ -589,7 +589,7 @@ export default function LeaveManagement({ embeddedApproval = false, initialAppro
               <Button size="small" color="error" variant="outlined" disabled={!selectedSicLeaves.length} onClick={sicRejectBulk}>Reject ({selectedSicLeaves.length})</Button>
             </>}
             {hasFinalActions && <>
-              <Button size="small" color="success" variant="contained" disabled={!selectedFinalLeaves.length} startIcon={<CheckCircle2 size={14} />} onClick={finalApproveBulk}>DIC Final Approve ({selectedFinalLeaves.length})</Button>
+              <Button size="small" color="success" variant="contained" disabled={!selectedFinalLeaves.length} startIcon={<CheckCircle2 size={14} />} onClick={finalApproveBulk}>Approve Current Stage ({selectedFinalLeaves.length})</Button>
               <Button size="small" color="error" variant="outlined" disabled={!selectedFinalLeaves.length} onClick={finalRejectBulk}>Reject ({selectedFinalLeaves.length})</Button>
             </>}
           </Stack>
@@ -625,7 +625,7 @@ export default function LeaveManagement({ embeddedApproval = false, initialAppro
                         <Stack spacing={.55}>
                           {cellLeaves.map((leave) => {
                             const selected = selectedWorkflowIds.includes(leave.id);
-                            const stage = leave.canSICAct ? "SIC review" : "DIC final";
+                            const stage = leave.currentApproverLevel || (leave.canSICAct ? "SIC review" : "Final authority");
                             return (
                               <Box key={leave.id} sx={{ p: .65, borderRadius: 1.5, border: `1px solid ${selected ? "#0057B7" : "#FECDD3"}`, background: selected ? "#EAF2FF" : "#FFF1F2", transition: "all .18s ease" }}>
                                 <Stack direction="row" alignItems="flex-start" spacing={.35}>
@@ -635,10 +635,10 @@ export default function LeaveManagement({ embeddedApproval = false, initialAppro
                                     <Typography noWrap sx={{ color: "#64748B", fontSize: 9.2, fontWeight: 700 }}>{leave.dutyType || leave.assignedDuty || "-"} · {leave.leaveType} · {stage}</Typography>
                                   </Box>
                                 </Stack>
-                                <Stack direction="row" alignItems="center" spacing={.15} sx={{ pl: .3, mt: .15 }}>
+                                {leave.approvalMode !== "Organization" && <Stack direction="row" alignItems="center" spacing={.15} sx={{ pl: .3, mt: .15 }}>
                                   <Checkbox size="small" checked={replacementChoice(leave, leave.canSICAct ? "sic" : "dic")} onChange={(event) => setReplacementChoice(leave, leave.canSICAct ? "sic" : "dic", event.target.checked)} sx={{ p: .2 }} />
                                   <Typography sx={{ color: "#64748B", fontSize: 8.8, fontWeight: 800 }}>Replacement required</Typography>
-                                </Stack>
+                                </Stack>}
                               </Box>
                             );
                           })}
@@ -693,7 +693,7 @@ export default function LeaveManagement({ embeddedApproval = false, initialAppro
               <Button size="small" color="error" variant="outlined" disabled={!selectedSicLeaves.length} onClick={sicRejectBulk}>Reject ({selectedSicLeaves.length})</Button>
             </>}
             {hasFinalActions && <>
-              <Button size="small" color="success" variant="contained" disabled={!selectedFinalLeaves.length} startIcon={<CheckCircle2 size={13} />} onClick={finalApproveBulk}>DIC Final Approve ({selectedFinalLeaves.length})</Button>
+              <Button size="small" color="success" variant="contained" disabled={!selectedFinalLeaves.length} startIcon={<CheckCircle2 size={13} />} onClick={finalApproveBulk}>Approve Current Stage ({selectedFinalLeaves.length})</Button>
               <Button size="small" color="error" variant="outlined" disabled={!selectedFinalLeaves.length} onClick={finalRejectBulk}>Reject ({selectedFinalLeaves.length})</Button>
             </>}
           </Stack>
@@ -758,8 +758,9 @@ export default function LeaveManagement({ embeddedApproval = false, initialAppro
                           <Box sx={{ p: .35 }}>
                             <Typography sx={{ fontSize: 11, fontWeight: 950 }}>{leave.name} · {leave.leaveType}</Typography>
                             <Typography sx={{ mt: .45, fontSize: 10 }}>Applied: {leave.createdOn ? dayjs(leave.createdOn).format("DD MMM YYYY, HH:mm") : "Time not recorded"}</Typography>
-                            <Typography sx={{ fontSize: 10 }}>SIC: {sicForwarded ? "Approved & Forwarded" : leave.sicApprovalStatus || "Pending"}{sicDecision?.decidedOn ? ` · ${dayjs(sicDecision.decidedOn).format("DD MMM YYYY, HH:mm")}` : ""}</Typography>
-                            <Typography sx={{ fontSize: 10 }}>DIC: {leave.deptApprovalStatus || "Pending"}{dicDecision?.decidedOn ? ` · ${dayjs(dicDecision.decidedOn).format("DD MMM YYYY, HH:mm")}` : ""}</Typography>
+                            {leave.approvalMode === "Organization" && <Typography sx={{ fontSize: 10 }}>Hierarchy: {(leave.approvalChain || []).map((step) => `${step.level}: ${step.status}`).join(" → ")} · {leave.approvalProgress}</Typography>}
+                            <Typography sx={{ fontSize: 10, display: leave.approvalMode === "Organization" ? "none" : "block" }}>SIC: {sicForwarded ? "Approved & Forwarded" : leave.sicApprovalStatus || "Pending"}{sicDecision?.decidedOn ? ` · ${dayjs(sicDecision.decidedOn).format("DD MMM YYYY, HH:mm")}` : ""}</Typography>
+                            <Typography sx={{ fontSize: 10, display: leave.approvalMode === "Organization" ? "none" : "block" }}>DIC: {leave.deptApprovalStatus || "Pending"}{dicDecision?.decidedOn ? ` · ${dayjs(dicDecision.decidedOn).format("DD MMM YYYY, HH:mm")}` : ""}</Typography>
                             {rejection && <Typography sx={{ mt: .35, color: "#FCA5A5", fontSize: 10 }}>Rejected by {rejection.rejectedByRole || rejection.stage}: {rejection.comment || "No comment"}{rejection.rejectedOn ? ` · ${dayjs(rejection.rejectedOn).format("DD MMM YYYY, HH:mm")}` : ""}</Typography>}
                           </Box>
                         ) : "";
@@ -817,7 +818,7 @@ export default function LeaveManagement({ embeddedApproval = false, initialAppro
                 {hasFinalActions && (
                   <>
                     <Button size="small" color="success" variant="contained" disabled={!selectedFinalLeaves.length} startIcon={<CheckCircle2 size={14} />} onClick={finalApproveBulk}>
-                      DIC Final Approve Selected ({selectedFinalLeaves.length})
+                      Approve Current Stage ({selectedFinalLeaves.length})
                     </Button>
                     <Button size="small" color="error" variant="outlined" disabled={!selectedFinalLeaves.length} onClick={finalRejectBulk}>
                       Reject Selected
@@ -843,7 +844,7 @@ export default function LeaveManagement({ embeddedApproval = false, initialAppro
                   </TableCell>
                 )}
                 <TableCell>Employee</TableCell><TableCell>Date</TableCell><TableCell>Group</TableCell><TableCell>Duty Type</TableCell><TableCell>Other persons on leave</TableCell><TableCell>Leave</TableCell>
-                <TableCell>SIC</TableCell><TableCell>Final Authority</TableCell><TableCell>Replacement</TableCell><TableCell>Final Status</TableCell>{hasActionColumn && <TableCell align="right">Action</TableCell>}
+                <TableCell>First Approver</TableCell><TableCell>Subsequent / Final Approval</TableCell><TableCell>Replacement</TableCell><TableCell>Final Status</TableCell>{hasActionColumn && <TableCell align="right">Action</TableCell>}
               </TableRow>
             </TableHead>
             <TableBody>
@@ -878,15 +879,14 @@ export default function LeaveManagement({ embeddedApproval = false, initialAppro
                     ) : <Typography sx={{ color: "#94A3B8", fontSize: 11 }}>None</Typography>}
                   </TableCell>
                   <TableCell sx={{ fontWeight: 800 }}>{leave.leaveType}</TableCell>
-                  <TableCell><StatusChip value={leave.sicApprovalStatus} /></TableCell><TableCell><StatusChip value={leave.deptApprovalStatus} /></TableCell>
+                  <TableCell>{leave.approvalMode === "Organization" ? <Stack spacing={.25}><StatusChip value={(leave.approvalChain || [])[0]?.status || "Pending"} /><Typography sx={{ fontSize: 9, color: "#64748B" }}>{(leave.approvalChain || [])[0]?.level || "Reporting Officer"}</Typography></Stack> : <StatusChip value={leave.sicApprovalStatus} />}</TableCell><TableCell>{leave.approvalMode === "Organization" ? <Stack spacing={.25}><StatusChip value={leave.finalStatus === "Approved" ? "Approved" : leave.organizationApprovalStatus || "Pending"} /><Typography sx={{ fontSize: 9, color: "#64748B" }}>{leave.currentApproverLevel ? `Awaiting ${leave.currentApproverLevel}` : `Hierarchy ${leave.approvalProgress || ""}`}</Typography></Stack> : <StatusChip value={leave.deptApprovalStatus} />}</TableCell>
                   <TableCell sx={{ minWidth: 190 }}>
                     <Stack direction="row" spacing={.8} alignItems="center" sx={{ mb: .35 }}>
                       <ReplacementFlag required={leave.replacementRequired || leave.sicReplacementRequired || (leave.canSICAct && replacementChoice(leave, "sic")) || (leave.canFinalAct && replacementChoice(leave, "dic"))} assigned={leave.replacementAssigned} title={leave.replacementAssigned ? `Replacement assigned: ${leave.replacementEmployee?.name || leave.replacementEmployee?.employeeId || "Employee"}` : "Replacement required; assignment is pending"} />
                       {leave.replacementAssigned && <Typography sx={{fontSize:10.5,color:"#15803D",fontWeight:850}}>{leave.replacementEmployee?.name || leave.replacementEmployee?.employeeId}</Typography>}
                     </Stack>
-                    {leave.canSICAct && <Stack direction="row" alignItems="center"><Checkbox size="small" checked={replacementChoice(leave, "sic")} onChange={(event) => setReplacementChoice(leave, "sic", event.target.checked)} /><Typography sx={{ fontSize: 11.5, fontWeight: 750 }}>Replacement required</Typography></Stack>}
-                    {leave.canFinalAct && <Stack><Typography sx={{ fontSize: 10.5, color: "#64748B" }}>SIC decision: {leave.sicReplacementRequired ? "Required" : "Not required"}</Typography><Stack direction="row" alignItems="center"><Checkbox size="small" checked={replacementChoice(leave, "dic")} onChange={(event) => setReplacementChoice(leave, "dic", event.target.checked)} /><Typography sx={{ fontSize: 11.5, fontWeight: 750 }}>DIC final decision</Typography></Stack></Stack>}
-                    {!leave.canSICAct && !leave.canFinalAct && (
+                    {leave.approvalMode === "Organization" ? <Typography sx={{ fontSize: 10.5, color: "#64748B" }}>Not applicable for non-shift workflow</Typography> : <>{leave.canSICAct && <Stack direction="row" alignItems="center"><Checkbox size="small" checked={replacementChoice(leave, "sic")} onChange={(event) => setReplacementChoice(leave, "sic", event.target.checked)} /><Typography sx={{ fontSize: 11.5, fontWeight: 750 }}>Replacement required</Typography></Stack>}{leave.canFinalAct && <Stack><Typography sx={{ fontSize: 10.5, color: "#64748B" }}>SIC decision: {leave.sicReplacementRequired ? "Required" : "Not required"}</Typography><Stack direction="row" alignItems="center"><Checkbox size="small" checked={replacementChoice(leave, "dic")} onChange={(event) => setReplacementChoice(leave, "dic", event.target.checked)} /><Typography sx={{ fontSize: 11.5, fontWeight: 750 }}>DIC final decision</Typography></Stack></Stack>}</>}
+                    {leave.approvalMode !== "Organization" && !leave.canSICAct && !leave.canFinalAct && (
                       completedTable ? (
                         <Stack spacing={0.2}>
                           <Typography sx={{ fontSize: 10.5, color: "#64748B" }}>SIC: {leave.sicReplacementRequired ? "Required" : "Not required"}</Typography>
@@ -916,8 +916,8 @@ export default function LeaveManagement({ embeddedApproval = false, initialAppro
                           Assign acting SIC
                         </Button>
                       )}
-                      {leave.canSICAct && <><Button size="small" variant="contained" startIcon={<Send size={14} />} onClick={() => sicForward(leave)}>Approve & Forward</Button><Button size="small" color="error" variant="outlined" onClick={() => sicReject(leave)}>Reject</Button></>}
-                      {leave.canFinalAct && <><Button size="small" color="success" variant="contained" startIcon={<CheckCircle2 size={14} />} onClick={() => finalApprove(leave)}>Final approve</Button><Button size="small" color="error" variant="outlined" onClick={() => finalReject(leave)}>Reject</Button></>}
+                      {leave.canSICAct && <><Button size="small" variant="contained" startIcon={<Send size={14} />} onClick={() => sicForward(leave)}>{leave.approvalMode === "Organization" ? "Approve as Reporting Officer" : "Approve & Forward"}</Button><Button size="small" color="error" variant="outlined" onClick={() => sicReject(leave)}>Reject</Button></>}
+                      {leave.canFinalAct && <><Button size="small" color="success" variant="contained" startIcon={<CheckCircle2 size={14} />} onClick={() => finalApprove(leave)}>{leave.approvalMode === "Organization" && Number(leave.currentApprovalIndex) < (leave.approvalChain || []).length - 1 ? "Approve & Forward" : "Final approve"}</Button><Button size="small" color="error" variant="outlined" onClick={() => finalReject(leave)}>Reject</Button></>}
                       {leave.canDeleteMaster && <Button size="small" color="error" variant="contained" onClick={() => deleteMaster(leave)}>Delete master</Button>}
                       {!leave.canCancel && !leave.canDeleteMaster && !leave.isOwner && !leave.canSICAct && !leave.canFinalAct && <Typography sx={{ fontSize: 11, color: "#94A3B8" }}>Awaiting action</Typography>}
                     </Stack>
@@ -941,7 +941,7 @@ export default function LeaveManagement({ embeddedApproval = false, initialAppro
         {rosterWorkflowCalendar()}
       </Paper>
       <Dialog open={rejectDialog.open} onClose={() => setRejectDialog((current) => ({ ...current, open: false }))} fullWidth maxWidth="sm">
-        <DialogTitle sx={{ fontWeight: 950 }}>{rejectDialog.stage === "sic" ? "Reject leave at SIC stage" : "Reject leave at DIC stage"}</DialogTitle>
+        <DialogTitle sx={{ fontWeight: 950 }}>Reject leave at current approval stage</DialogTitle>
         <DialogContent>
           <Typography sx={{ mb: 1.5, color: "#64748B", fontSize: 12 }}>
             {rejectDialog.leaves.length} leave record(s) selected. The comment will be recorded with the rejecting officer and timestamp.
@@ -964,7 +964,7 @@ export default function LeaveManagement({ embeddedApproval = false, initialAppro
           Leave Application &amp; Approval
         </Typography>
         <Typography variant="body2" sx={{ color: "rgba(255,255,255,.88)" }}>
-          Employee → Shift-in-Charge → Leave Approving Authority
+          Shift employee: Employee → SIC → Leave Authority · Other employee: Reporting Officer → configured organization hierarchy
         </Typography>
       </Box>
 
@@ -1012,7 +1012,7 @@ export default function LeaveManagement({ embeddedApproval = false, initialAppro
           </TableRow>)}</TableBody>
         </Table></TableContainer>
         <TextField fullWidth multiline minRows={2} label="Reason" value={reason} onChange={(event) => setReason(event.target.value)} sx={{ mt: 2 }} />
-        <Box sx={{ display: "flex", justifyContent: "flex-end", mt: 1.5 }}><Button variant="contained" startIcon={<Send size={16} />} onClick={submit} disabled={working}>Submit to SIC</Button></Box>
+        <Box sx={{ display: "flex", justifyContent: "flex-end", mt: 1.5 }}><Button variant="contained" startIcon={<Send size={16} />} onClick={submit} disabled={working}>Submit for approval</Button></Box>
       </Paper>}
 
       </Box>
@@ -1131,7 +1131,7 @@ export default function LeaveManagement({ embeddedApproval = false, initialAppro
       </Box>
       </Collapse>
       <Dialog open={rejectDialog.open} onClose={() => setRejectDialog((current) => ({ ...current, open: false }))} fullWidth maxWidth="sm">
-        <DialogTitle sx={{ fontWeight: 950 }}>{rejectDialog.stage === "sic" ? "Reject leave at SIC stage" : "Reject leave at DIC stage"}</DialogTitle>
+        <DialogTitle sx={{ fontWeight: 950 }}>Reject leave at current approval stage</DialogTitle>
         <DialogContent>
           <Typography sx={{ mb: 1.5, color: "#64748B", fontSize: 12 }}>
             {rejectDialog.leaves.length} leave record(s) selected. The comment will be recorded with the rejecting officer and timestamp.

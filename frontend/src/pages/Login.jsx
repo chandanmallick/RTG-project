@@ -89,8 +89,8 @@ export default function Login() {
       <Box sx={{ display: { xs: "none", md: "flex" }, flexDirection: "column", justifyContent: "space-between", p: 7, color: "#fff", background: "linear-gradient(145deg,#08103A 0%,#0057B7 68%,#0F6FDB 130%)" }}>
         <Box component="img" src="/logo.png" alt="GRID-INDIA" sx={{ width: 250, p: 1.5, borderRadius: 2, background: "rgba(255,255,255,.96)" }} />
         <Box>
-          <Typography sx={{ fontSize: 64, fontWeight: 950, lineHeight: 0.95, letterSpacing: "-.045em" }}>DRUPAd</Typography>
-          <Typography sx={{ mt: 1.2, maxWidth: 580, fontSize: 16, fontWeight: 750, color: "rgba(255,255,255,.9)" }}>Data Dashboard &amp; Resource Utilization Portal for Administration</Typography>
+          <Typography sx={{ fontSize: 64, fontWeight: 950, lineHeight: 0.95, letterSpacing: "-.045em" }}>COMPASS</Typography>
+          <Typography sx={{ mt: 1.2, maxWidth: 680, fontSize: 16, fontWeight: 750, color: "rgba(255,255,255,.9)" }}>Companion for Operations Management, Planning, Analytics, Support &amp; Services</Typography>
           <Typography sx={{ mt: 2.5, maxWidth: 540, color: "rgba(255,255,255,.72)" }}>Dashboards, analytics, reports and crew management with controlled View and Write access.</Typography>
         </Box>
         <Typography sx={{ fontSize: 12, color: "rgba(255,255,255,.62)" }}>GRID-INDIA · Eastern Region</Typography>
@@ -98,8 +98,8 @@ export default function Login() {
       <Box sx={{ display: "grid", placeItems: "center", p: 3 }}>
         <Paper component="form" onSubmit={submit} elevation={0} sx={{ width: "min(440px, 100%)", p: { xs: 3, sm: 5 }, border: "1px solid #E2E8F0", borderRadius: 3, boxShadow: "0 18px 50px rgba(15,23,42,.08)" }}>
           <Box sx={{ width: 48, height: 48, display: "grid", placeItems: "center", color: "#0057B7", background: "#E8F1FB", borderRadius: 2 }}><LockKeyhole size={23} /></Box>
-          <Typography sx={{ mt: 2.5, fontSize: 34, lineHeight: 1, fontWeight: 950, letterSpacing: "-.035em", color: "#0057B7" }}>DRUPAd</Typography>
-          <Typography sx={{ mt: .65, color: "#64748B", fontSize: 11.5, fontWeight: 750 }}>Data Dashboard &amp; Resource Utilization Portal for Administration</Typography>
+          <Typography sx={{ mt: 2.5, fontSize: 34, lineHeight: 1, fontWeight: 950, letterSpacing: "-.035em", color: "#0057B7" }}>COMPASS</Typography>
+          <Typography sx={{ mt: .65, color: "#64748B", fontSize: 11.5, fontWeight: 750 }}>Companion for Operations Management, Planning, Analytics, Support &amp; Services</Typography>
           <Typography variant="h4" sx={{ mt: 2.5, fontWeight: 800, color: "#0F172A" }}>{challenge ? "Verify your identity" : "Welcome back"}</Typography>
           <Typography sx={{ mt: .7, mb: 3, color: "#64748B" }}>
             {challenge ? `Enter the 6-digit code sent to ${challenge.maskedEmail}.` : "Sign in using your Crew Management user ID and password."}

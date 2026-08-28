@@ -95,7 +95,7 @@ ATLAS_PRIMARY_COLLECTIONS = {
     "deleted_leave_collection", "duty_denial_collection", "duty_notification_collection",
     "duty_switch_collection", "duty_balance_ledger", "duty_exchange_request_collection", "crew_threads",
     "crew_thread_messages", "employee_shift_history", "portal_audit_trail",
-    "employee_duty_collection",
+    "employee_duty_collection", "crms_logbook_duty_cache",
 }
 
 EMPLOYEE_DIRECTORY_MIRROR_COLLECTIONS = {

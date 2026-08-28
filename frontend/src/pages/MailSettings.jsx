@@ -13,7 +13,7 @@ import {
   TextField,
   Typography,
 } from "@mui/material";
-import { KeyRound, LockKeyhole, Mail, Save, ShieldCheck } from "lucide-react";
+import { DatabaseZap, KeyRound, LockKeyhole, Mail, Save, ShieldCheck } from "lucide-react";
 import AppShell from "../components/layout/AppShell";
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL || "/api";
@@ -26,6 +26,8 @@ export default function MailSettings() {
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [credentials, setCredentials] = useState({ tenantId: "", clientId: "", clientSecret: "" });
+  const [crmsCredentials, setCrmsCredentials] = useState({ username: "", password: "" });
+  const [crmsSaving, setCrmsSaving] = useState(false);
 
   const load = async () => {
     setLoading(true);
@@ -68,6 +70,7 @@ export default function MailSettings() {
     }
   };
   const updateCredential = (field, value) => setCredentials((current) => ({ ...current, [field]: value }));
+  const updateCrmsCredential = (field, value) => setCrmsCredentials((current) => ({ ...current, [field]: value }));
   const updateTemplate = (key, field, value) => setSettings((current) => ({
     ...current,
     templates: (current.templates || []).map((template) => (
@@ -105,6 +108,27 @@ export default function MailSettings() {
     }
   };
 
+  const saveCrms = async () => {
+    setCrmsSaving(true);
+    setMessage("");
+    setError("");
+    try {
+      const { data } = await axios.put(
+        `${BASE_URL}/crew/admin/mail-settings/crms`,
+        crmsCredentials,
+        { headers: headers() },
+      );
+      setSettings((current) => ({ ...current, crms: data.crms }));
+      setCrmsCredentials({ username: "", password: "" });
+      if (data.connectionVerified) setMessage(data.message || "CRMS credentials saved and verified.");
+      else setError(data.message || "CRMS credentials were saved, but the login could not be verified.");
+    } catch (requestError) {
+      setError(requestError.response?.data?.detail || "CRMS credentials could not be saved.");
+    } finally {
+      setCrmsSaving(false);
+    }
+  };
+
   return (
     <AppShell>
       <Box sx={{ width: "100%", p: { xs: 1.5, md: 2.5 } }}>
@@ -112,8 +136,8 @@ export default function MailSettings() {
           <Stack direction={{ xs: "column", md: "row" }} justifyContent="space-between" alignItems={{ xs: "flex-start", md: "center" }} spacing={2}>
             <Box>
               <Typography sx={{ fontSize: 11, fontWeight: 900, letterSpacing: 1, opacity: .85 }}>ADMINISTRATION</Typography>
-              <Typography variant="h4" sx={{ fontWeight: 950, mt: .4 }}>Mail &amp; Sign-in Security</Typography>
-              <Typography sx={{ fontSize: 12.5, opacity: .9, mt: .35 }}>Configure Microsoft Graph delivery, replacement mail, and email OTP authentication. Credentials remain server-only.</Typography>
+              <Typography variant="h4" sx={{ fontWeight: 950, mt: .4 }}>Mail, Sign-in &amp; External Data</Typography>
+              <Typography sx={{ fontSize: 12.5, opacity: .9, mt: .35 }}>Configure Microsoft Graph delivery, email OTP authentication, and protected CRMS LogBook access. Credentials remain server-only.</Typography>
             </Box>
             <Chip icon={<Mail size={15} />} label={settings?.enabled ? "Mail enabled" : "Mail disabled"} sx={{ bgcolor: "rgba(255,255,255,.14)", color: "white", fontWeight: 900 }} />
           </Stack>
@@ -165,6 +189,58 @@ export default function MailSettings() {
                   </Alert>
                 );
               })()}
+            </Paper>
+            <Paper variant="outlined" sx={{ p: 2.2, borderRadius: 3, borderColor: "#E5C76B", bgcolor: "#FFFCF2", gridColumn: "1 / -1" }}>
+              <Stack direction={{ xs: "column", md: "row" }} spacing={2.5} alignItems={{ xs: "stretch", md: "flex-start" }}>
+                <Box sx={{ width: 46, height: 46, borderRadius: 2, display: "grid", placeItems: "center", color: "#8A5A00", bgcolor: "#FFF1BE", flexShrink: 0 }}>
+                  <DatabaseZap size={23} />
+                </Box>
+                <Box sx={{ flex: 1 }}>
+                  <Stack direction={{ xs: "column", sm: "row" }} justifyContent="space-between" alignItems={{ xs: "flex-start", sm: "center" }} gap={1}>
+                    <Box>
+                      <Typography sx={{ fontWeight: 950, color: "#0F172A" }}>CRMS LogBook access</Typography>
+                      <Typography sx={{ mt: .35, fontSize: 12.5, color: "#64748B" }}>Save an authorized CRMS account for Crew duty reconciliation. The password is write-only and is never returned to the browser.</Typography>
+                    </Box>
+                    <Chip
+                      size="small"
+                      color={settings.crms?.credentialsConfigured ? "success" : "warning"}
+                      label={settings.crms?.credentialsConfigured ? "Credentials configured" : "Configuration required"}
+                    />
+                  </Stack>
+                  <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "minmax(220px,.8fr) minmax(280px,1fr) auto" }, gap: 1.5, mt: 2, alignItems: "start" }}>
+                    <TextField
+                      size="small"
+                      fullWidth
+                      label="CRMS username"
+                      value={crmsCredentials.username}
+                      onChange={(event) => updateCrmsCredential("username", event.target.value)}
+                      placeholder={settings.crms?.usernameConfigured ? "Leave blank to keep current username" : "Enter CRMS username"}
+                      helperText={settings.crms?.usernameHint ? `Currently configured: ${settings.crms.usernameHint}` : "Not configured"}
+                      autoComplete="off"
+                    />
+                    <TextField
+                      size="small"
+                      fullWidth
+                      type="password"
+                      label="CRMS password"
+                      value={crmsCredentials.password}
+                      onChange={(event) => updateCrmsCredential("password", event.target.value)}
+                      placeholder={settings.crms?.passwordConfigured ? "Leave blank to keep current password" : "Enter CRMS password"}
+                      helperText={settings.crms?.passwordConfigured ? "A password is saved; its value is never displayed." : "Not configured"}
+                      autoComplete="new-password"
+                    />
+                    <Button
+                      variant="contained"
+                      startIcon={<KeyRound size={16} />}
+                      onClick={saveCrms}
+                      disabled={crmsSaving || (!crmsCredentials.username && !crmsCredentials.password)}
+                      sx={{ bgcolor: "#8A5A00", fontWeight: 900, textTransform: "none", minHeight: 40, whiteSpace: "nowrap" }}
+                    >
+                      {crmsSaving ? "Testing..." : "Save & test CRMS login"}
+                    </Button>
+                  </Box>
+                </Box>
+              </Stack>
             </Paper>
             <Paper variant="outlined" sx={{ p: 2.2, borderRadius: 3, borderColor: "#CFE1F8" }}>
               <Stack spacing={2}>
@@ -238,6 +314,28 @@ export default function MailSettings() {
                       label={<Typography sx={{ fontWeight: 900, color: "#0F172A" }}>{template.label}</Typography>}
                     />
                     <Stack spacing={1.3} sx={{ mt: 1 }}>
+                      {template.key === "psp_voltage_discrepancy" && (
+                        <>
+                          <TextField
+                            size="small"
+                            fullWidth
+                            label="Receiver mail IDs (To)"
+                            value={template.recipients || ""}
+                            onChange={(event) => updateTemplate(template.key, "recipients", event.target.value)}
+                            placeholder="recipient1@grid-india.in, recipient2@grid-india.in"
+                            helperText="Separate multiple recipients with commas or semicolons."
+                          />
+                          <TextField
+                            size="small"
+                            fullWidth
+                            label="Copy mail IDs (CC)"
+                            value={template.ccRecipients || ""}
+                            onChange={(event) => updateTemplate(template.key, "ccRecipients", event.target.value)}
+                            placeholder="copy1@grid-india.in, copy2@grid-india.in"
+                            helperText="Optional. Addresses already present in To will not be duplicated in CC."
+                          />
+                        </>
+                      )}
                       <TextField size="small" fullWidth label="Subject template" value={template.subjectTemplate || ""} onChange={(event) => updateTemplate(template.key, "subjectTemplate", event.target.value)} />
                       <TextField size="small" fullWidth multiline minRows={4} label="Mail body template" value={template.bodyTemplate || ""} onChange={(event) => updateTemplate(template.key, "bodyTemplate", event.target.value)} />
                     </Stack>

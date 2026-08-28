@@ -151,11 +151,15 @@ def resolve_employee_organization(function_ids=None, employee_id=None):
     reporting_ids = list(dict.fromkeys(shift_supervisor_ids))
     intermediary_candidates = []
     hod_candidates = []
+    leave_approval_levels = None
 
     for seed_id in seed_ids:
         current = unit_by_id.get(seed_id)
         if not current:
             continue
+
+        if leave_approval_levels is None and current.get("leaveApprovalLevels") in (2, 3):
+            leave_approval_levels = int(current["leaveApprovalLevels"])
 
         configured_current_heads = normalize_list(current.get("headEmployeeIds"))
         employee_is_current_head = employee_id in configured_current_heads
@@ -171,6 +175,8 @@ def resolve_employee_organization(function_ids=None, employee_id=None):
         parent_id = str(current.get("parentId")) if current.get("parentId") else ""
         while parent_id and parent_id in unit_by_id:
             parent = unit_by_id[parent_id]
+            if leave_approval_levels is None and parent.get("leaveApprovalLevels") in (2, 3):
+                leave_approval_levels = int(parent["leaveApprovalLevels"])
             parent_type = parent.get("unitType")
             if parent_type == "vertical":
                 vertical_ids.append(parent_id)
@@ -228,6 +234,7 @@ def resolve_employee_organization(function_ids=None, employee_id=None):
         "intermediaryReportingId": intermediary_candidates[0] if intermediary_candidates else None,
         "hodId": hod_candidates[0] if hod_candidates else None,
         "shiftGroupNames": list(dict.fromkeys(shift_group_names)),
+        "organizationLeaveApprovalLevels": leave_approval_levels or 2,
     }
 
 
@@ -314,6 +321,8 @@ def serialize(emp):
         "reportingOfficerId": reporting_ids[0] if reporting_ids else None,
         "intermediaryReportingId": emp.get("intermediaryReportingId"),
         "hodId": emp.get("hodId"),
+        "leaveApprovalLevelsOverride": emp.get("leaveApprovalLevelsOverride"),
+        "organizationLeaveApprovalLevels": emp.get("organizationLeaveApprovalLevels", 2),
 
         # ðŸ”¥ NAMES (for frontend display)
         "reportingOfficerNames": [
@@ -702,6 +711,7 @@ def serialize_org_unit(unit, employee_names=None, parent_names=None):
         "headEmployeeNames": [employee_names.get(value, value) for value in head_ids],
         "juniorEmployeeIds": junior_ids,
         "juniorEmployeeNames": [employee_names.get(value, value) for value in junior_ids],
+        "leaveApprovalLevels": unit.get("leaveApprovalLevels"),
         "isActive": unit.get("isActive", True),
     }
 
@@ -738,12 +748,15 @@ def validate_org_unit(data, current_id=None):
     if not allowed and parent:
         raise HTTPException(400, "Department is a top-level unit")
 
+    raw_approval_levels = data.get("leaveApprovalLevels")
+    approval_levels = int(raw_approval_levels) if str(raw_approval_levels or "").strip() in {"2", "3"} else None
     return {
         "name": name,
         "unitType": unit_type,
         "parentId": parent.get("_id") if parent else None,
         "headEmployeeIds": normalize_list(data.get("headEmployeeIds")),
         "juniorEmployeeIds": normalize_list(data.get("juniorEmployeeIds")) if unit_type == "function" else [],
+        "leaveApprovalLevels": approval_levels,
         "isActive": bool(data.get("isActive", True)),
         "updatedAt": datetime.utcnow(),
     }
@@ -1085,6 +1098,8 @@ def update_employee(employee_id: str, data: dict):
         "roleFunctionIds": organization["roleFunctionIds"],
         "intermediaryReportingId": organization["intermediaryReportingId"],
         "hodId": organization["hodId"],
+        "organizationLeaveApprovalLevels": organization.get("organizationLeaveApprovalLevels", 2),
+        "leaveApprovalLevelsOverride": int(data["leaveApprovalLevelsOverride"]) if str(data.get("leaveApprovalLevelsOverride") or "") in {"2", "3"} else None,
         "isActive": existing.get("isActive", True) is not False,
     }
 

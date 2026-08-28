@@ -418,7 +418,7 @@ export default function FrequencyReport() {
   const [transmissionLineEvents, setTransmissionLineEvents] = useState([]);
   const [crmsStatus, setCrmsStatus] = useState({ loading: false, error: "", fetched: false });
 
-  // RTG Portal Status
+  // COMPASS actual-data status
   const [rtgStatusOk, setRtgStatusOk] = useState(false);
   const [rtgStatusMsg, setRtgStatusMsg] = useState("");
   const [rtgStatusLoading, setRtgStatusLoading] = useState(false);
@@ -1103,7 +1103,7 @@ export default function FrequencyReport() {
       } catch (err) {
         if (active) {
           setRtgStatusOk(false);
-          setRtgStatusMsg("Failed to check RTG portal actuals status.");
+          setRtgStatusMsg("Failed to check COMPASS actuals status.");
         }
       } finally {
         if (active) setRtgStatusLoading(false);

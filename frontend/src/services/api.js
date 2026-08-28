@@ -871,6 +871,30 @@ const API = {
   // FREQUENCY REPORT
   // =========================================
 
+  validatePspVoltageDump: async (file) => {
+    const form = new FormData();
+    form.append("file", file);
+    const res = await axios.post(`${BASE_URL}/data-validation/psp-voltage/validate`, form);
+    return res.data;
+  },
+
+  generatePspVoltageReport: async (reportDate) => (
+    await axios.post(`${BASE_URL}/data-validation/psp-voltage/generate`, { reportDate })
+  ).data,
+
+  previewPspVoltageMail: async (reportId) => (
+    await axios.post(`${BASE_URL}/data-validation/psp-voltage/mail-preview`, { reportId })
+  ).data,
+
+  sendPspVoltageMail: async (reportId, draft = {}) => (
+    await axios.post(`${BASE_URL}/data-validation/psp-voltage/send-mail`, { reportId, ...draft })
+  ).data,
+
+  downloadPspVoltageValidation: async (reportId) => {
+    const res = await axios.get(`${BASE_URL}/data-validation/psp-voltage/${reportId}/excel`, { responseType: "blob" });
+    return res.data;
+  },
+
   getFrequencyPlantMapping: async () => {
     const res = await axios.get(`${BASE_URL}/frequency/plant-mapping`);
     return res.data;
@@ -1066,6 +1090,29 @@ const API = {
 
   getDsoMaster: async () => {
     const res = await axios.get(`${BASE_URL}/dso-reports/master`);
+    return res.data;
+  },
+
+  getSriReport: async (reportDate) => {
+    const res = await axios.get(`${BASE_URL}/sri/report`, { params: { report_date: reportDate } });
+    return res.data;
+  },
+
+  saveSriReport: async (reportDate, sections) => {
+    const res = await axios.put(`${BASE_URL}/sri/report/${reportDate}`, { sections });
+    return res.data;
+  },
+
+  resetSriReport: async (reportDate) => {
+    const res = await axios.delete(`${BASE_URL}/sri/report/${reportDate}/edits`);
+    return res.data;
+  },
+
+  downloadSriReport: async (reportDate, format) => {
+    const res = await axios.get(`${BASE_URL}/sri/export.${format}`, {
+      params: { report_date: reportDate },
+      responseType: "blob",
+    });
     return res.data;
   },
 

@@ -20,6 +20,18 @@ DEFAULT_REPLACEMENT_BODY = (
 )
 
 WORKFLOW_MAIL_DEFAULTS = {
+    "psp_voltage_discrepancy": {
+        "label": "PSP Voltage discrepancy report",
+        "enabled": False,
+        "recipients": "",
+        "ccRecipients": "",
+        "subjectTemplate": "PSP Voltage Discrepancy Report - {report_date}",
+        "bodyTemplate": (
+            "Dear Sir/Madam,<br><br>"
+            "Please find below the PSP voltage data discrepancies for <strong>{report_date}</strong>. "
+            "The report contains {issue_station_count} affected substation(s) and {issue_block_count} issue block(s)."
+        ),
+    },
     "replacement_assigned": {
         "label": "Replacement duty assigned",
         "enabled": True,
@@ -43,6 +55,36 @@ WORKFLOW_MAIL_DEFAULTS = {
         "enabled": True,
         "subjectTemplate": "Leave Rejected by SIC",
         "bodyTemplate": "Your leave has been rejected by SIC.\n\nDate: {leave_date}\nType: {leave_type}\nComment: {comment}",
+    },
+    "leave_reporting_applied": {
+        "label": "Non-shift leave submitted to Reporting Officer",
+        "enabled": True,
+        "subjectTemplate": "Leave application for Reporting Officer approval - {employee_name}",
+        "bodyTemplate": "{employee_name} ({employee_id}) applied for {leave_count} leave day(s): {leave_dates}.",
+    },
+    "leave_reporting_forwarded": {
+        "label": "Non-shift leave forwarded in reporting hierarchy",
+        "enabled": True,
+        "subjectTemplate": "Leave forwarded for organization approval",
+        "bodyTemplate": "Leave for {employee_name} ({employee_id}) on {leave_date} awaits the next configured approval.",
+    },
+    "leave_reporting_rejected": {
+        "label": "Non-shift leave rejected by Reporting Officer",
+        "enabled": True,
+        "subjectTemplate": "Leave Rejected by Reporting Officer",
+        "bodyTemplate": "Your leave has been rejected by the Reporting Officer.\n\nDate: {leave_date}\nType: {leave_type}\nComment: {comment}",
+    },
+    "leave_hierarchy_approved": {
+        "label": "Non-shift leave finally approved",
+        "enabled": True,
+        "subjectTemplate": "Leave Finally Approved",
+        "bodyTemplate": "Leave has received final approval from the reporting hierarchy.\n\nName: {employee_name}\nEmployee ID: {employee_id}\nDate: {leave_date}\nType: {leave_type}",
+    },
+    "leave_hierarchy_rejected": {
+        "label": "Non-shift leave rejected in reporting hierarchy",
+        "enabled": True,
+        "subjectTemplate": "Leave Rejected",
+        "bodyTemplate": "Your leave has been rejected in the reporting hierarchy.\n\nDate: {leave_date}\nType: {leave_type}\nComment: {comment}",
     },
     "leave_dic_approved": {
         "label": "Leave finally approved by DIC",
@@ -104,6 +146,8 @@ def workflow_mail_templates():
             "enabled": bool(custom.get("enabled", defaults["enabled"])),
             "subjectTemplate": custom.get("subjectTemplate") or defaults["subjectTemplate"],
             "bodyTemplate": custom.get("bodyTemplate") or defaults["bodyTemplate"],
+            "recipients": custom.get("recipients", defaults.get("recipients", "")),
+            "ccRecipients": custom.get("ccRecipients", defaults.get("ccRecipients", "")),
         }
     return result
 
@@ -166,9 +210,11 @@ def _clean_recipients(to_list):
     return recipients
 
 
-def send_email(to_list, subject, body, *, html=False, sender=None, enabled=None, attachments=None):
+def send_email(to_list, subject, body, *, html=False, sender=None, enabled=None, attachments=None, cc_list=None):
     """Send mail through Microsoft Graph without exposing credentials or tokens."""
     recipients = _clean_recipients(to_list)
+    recipient_keys = {value.lower() for value in recipients}
+    cc_recipients = [value for value in _clean_recipients(cc_list) if value.lower() not in recipient_keys]
     if enabled is None:
         enabled = os.getenv("CREW_EMAIL_ENABLED", "0").strip().lower() in TRUTHY
     if not enabled:
@@ -220,6 +266,11 @@ def send_email(to_list, subject, body, *, html=False, sender=None, enabled=None,
                 for email in recipients
             ],
         }
+        if cc_recipients:
+            message["ccRecipients"] = [
+                {"emailAddress": {"address": email}}
+                for email in cc_recipients
+            ]
         if graph_attachments:
             message["attachments"] = graph_attachments
 
@@ -238,7 +289,7 @@ def send_email(to_list, subject, body, *, html=False, sender=None, enabled=None,
                 "recipientCount": len(recipients),
                 "error": f"Microsoft Graph returned HTTP {message_response.status_code}",
             }
-        return {"status": "sent", "recipientCount": len(recipients)}
+        return {"status": "sent", "recipientCount": len(recipients), "ccRecipientCount": len(cc_recipients)}
     except requests.RequestException as exc:
         status_code = getattr(getattr(exc, "response", None), "status_code", None)
         suffix = f" (HTTP {status_code})" if status_code else ""

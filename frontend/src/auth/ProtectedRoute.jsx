@@ -70,7 +70,7 @@ export default function ProtectedRoute({ pageKey, children, allowWorkflowAccess 
               <Button
                 variant="outlined"
                 onClick={() => {
-                  window.location.href = `mailto:${supportEmail}?subject=${encodeURIComponent(`DRUPAd access request for ${user?.employeeId || ""}`)}&body=${encodeURIComponent(`User ID: ${user?.employeeId || ""}\nName: ${user?.name || ""}\nRequested page: ${location.pathname}`)}`;
+                  window.location.href = `mailto:${supportEmail}?subject=${encodeURIComponent(`COMPASS access request for ${user?.employeeId || ""}`)}&body=${encodeURIComponent(`User ID: ${user?.employeeId || ""}\nName: ${user?.name || ""}\nRequested page: ${location.pathname}`)}`;
                 }}
                 sx={{ minWidth: 180, borderColor: "#0057B7", color: "#0057B7" }}
               >

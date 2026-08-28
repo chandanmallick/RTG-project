@@ -777,7 +777,7 @@ def download_version(version_id: str, user=Depends(get_authenticated_user)):
             writer.writerows(rows)
         bundle.writestr("training_data.csv", csv_output.getvalue())
         bundle.writestr("README.txt", (
-            "DRUPAd Outage ML portable archive\n\n"
+            "COMPASS Outage ML portable archive\n\n"
             "reason_classifier.json contains a three-stage multinomial Naive Bayes model.\n"
             "restoration_model.json contains Kaplan-Meier survival curves and supports censored open outages.\n"
             "Probabilities and token weights are plain JSON and may be consumed by other software.\n"

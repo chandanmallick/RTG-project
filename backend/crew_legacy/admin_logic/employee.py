@@ -77,6 +77,8 @@ def create_employee_logic(data):
         "roleFunctionIds": _normalize_list(data.get("roleFunctionIds")),
         "intermediaryReportingId": data.get("intermediaryReportingId"),
         "hodId": data.get("hodId"),
+        "organizationLeaveApprovalLevels": data.get("organizationLeaveApprovalLevels", 2),
+        "leaveApprovalLevelsOverride": int(data["leaveApprovalLevelsOverride"]) if str(data.get("leaveApprovalLevelsOverride") or "") in {"2", "3"} else None,
 
         # ðŸ”¥ Metadata
         "createdAt": data.get("createdAt"),

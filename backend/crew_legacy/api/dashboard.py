@@ -1,6 +1,7 @@
 ﻿from fastapi import APIRouter, Query
 from datetime import datetime, timedelta
 from crew_legacy.database.database_mongo import employee_daily_collection, leave_request_collection, employee_collection
+from crew_legacy.api.duty_rules import is_excluded_duty_record
 
 dashboard_router = APIRouter(prefix="/dashboard", tags=["Dashboard"])
 
@@ -80,6 +81,13 @@ def duty_today_tomorrow():
     data = list(employee_daily_collection.find({
         "date": {"$in": [today_str, tomorrow_str]}
     }))
+    approved_leave_keys = {
+        (str(item.get("employeeId") or "").strip(), str(item.get("date") or ""))
+        for item in leave_request_collection.find({
+            "date": {"$in": [today_str, tomorrow_str]},
+            "finalStatus": "Approved",
+        }, {"employeeId": 1, "date": 1})
+    }
 
     result = {
         "today": {"Morning": [], "Evening": [], "Night": []},
@@ -100,21 +108,14 @@ def duty_today_tomorrow():
         # final SIC flag
         is_sic = True if (is_sic_flag or is_acting_sic) else False
 
-        leave_status = row.get("leaveStatus")
-        training = row.get("trainingName")
-        actual_status = row.get("actualStatus")
-
-        # âŒ EXCLUDE CONDITIONS
-        leave_status = (row.get("leaveStatus") or "").strip().lower()
-        training = row.get("trainingName")
         actual_status = (row.get("actualStatus") or "").strip().upper()
+        approved_leave = (str(row.get("employeeId") or "").strip(), str(date or "")) in approved_leave_keys
 
         # ðŸš« EXCLUDE CONDITIONS (STRICT)
         if (
             not shift
             or shift == "OFF"
-            or leave_status == "approved"
-            or training not in [None, "", "null"]
+            or is_excluded_duty_record(row, approved_leave)
             or actual_status == "OFF"
         ):
             continue

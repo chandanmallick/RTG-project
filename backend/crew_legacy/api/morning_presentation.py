@@ -450,7 +450,7 @@ def _presentation_mail_html(entries, heading, intro):
         "<th style='padding:8px;border:1px solid #C7DDF8;text-align:left'>Presentation date</th>"
         "</tr></thead><tbody>"
         + "".join(rows)
-        + "</tbody></table><p style='color:#64748B'>This is an automated notification from DRUPAd.</p></div>"
+        + "</tbody></table><p style='color:#64748B'>This is an automated notification from COMPASS.</p></div>"
     )
 
 
@@ -540,7 +540,7 @@ def send_morning_presentation_reminders(target_date=None):
                 f"Dear {html.escape(employee_name)},<br><br>"
                 f"This is a reminder that your Morning Presentation is scheduled for "
                 f"<strong>{target.strftime('%A, %d %B %Y')}</strong>.<br><br>"
-                "Regards,<br>DRUPAd"
+                "Regards,<br>COMPASS"
             )
             mail_result = send_email(
                 [recipient] if recipient else [],

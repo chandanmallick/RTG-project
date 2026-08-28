@@ -16,10 +16,12 @@ const PSPDashboard = lazy(() => import("./pages/PSPDashboard"));
 const PSPAdmin = lazy(() => import("./pages/PSPAdmin"));
 const PSPReportChecking = lazy(() => import("./pages/PSPReportChecking"));
 const FrequencyReport = lazy(() => import("./pages/FrequencyReport"));
+const DataValidation = lazy(() => import("./pages/DataValidation"));
 const MISReport = lazy(() => import("./pages/MISReport"));
 const NLDCPlots = lazy(() => import("./pages/NLDCPlots"));
 const ScheduleData = lazy(() => import("./pages/ScheduleData"));
 const DSOReportPreparation = lazy(() => import("./pages/DSOReportPreparation"));
+const SRIReport = lazy(() => import("./pages/SRIReport"));
 const DSOMorningReport = lazy(() => import("./pages/DSOMorningReport"));
 const PlantDeviationMOP = lazy(() => import("./pages/PlantDeviationMOP"));
 const OutageAnalysis = lazy(() => import("./pages/OutageAnalysis"));
@@ -117,6 +119,11 @@ export default function App() {
         />
 
         <Route
+          path="/analytics/data-validation"
+          element={protectedPage("data_validation", <DataValidation />)}
+        />
+
+        <Route
           path="/mis-report"
           element={protectedPage("mis_report", <MISReport />)}
         />
@@ -134,6 +141,11 @@ export default function App() {
         <Route
           path="/report-preparation/dso-evening"
           element={protectedPage("dso_evening_report", <DSOReportPreparation reportType="evening" />)}
+        />
+
+        <Route
+          path="/report-preparation/sri"
+          element={protectedPage("sri_report", <SRIReport />)}
         />
 
         <Route

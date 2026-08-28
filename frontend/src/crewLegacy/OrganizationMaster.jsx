@@ -15,6 +15,7 @@ const EMPTY = {
   reportingMode: "either",
   headEmployeeIds: [],
   juniorEmployeeIds: [],
+  leaveApprovalLevels: "",
   isActive: true,
 };
 
@@ -112,6 +113,7 @@ export default function OrganizationMaster() {
       reportingMode: unit.unitType === "function" ? inferFunctionReportingMode(unit.parentId) : "either",
       headEmployeeIds: unit.headEmployeeIds || [],
       juniorEmployeeIds: unit.juniorEmployeeIds || [],
+      leaveApprovalLevels: unit.leaveApprovalLevels || "",
       isActive: unit.isActive !== false,
     });
     setEditId(unit.id);
@@ -242,7 +244,7 @@ export default function OrganizationMaster() {
           <TableHead><TableRow sx={{ bgcolor: "#EAF2FF" }}>
             <TableCell><strong>Type</strong></TableCell><TableCell><strong>Name</strong></TableCell>
             <TableCell><strong>Reports under</strong></TableCell><TableCell><strong>Head(s)</strong></TableCell>
-            <TableCell><strong>Function Junior(s)</strong></TableCell><TableCell align="right"><strong>Action</strong></TableCell>
+            <TableCell><strong>Function Junior(s)</strong></TableCell><TableCell><strong>Leave approval</strong></TableCell><TableCell align="right"><strong>Action</strong></TableCell>
           </TableRow></TableHead>
           <TableBody>
             {units.map((unit) => <TableRow key={unit.id} hover>
@@ -251,12 +253,13 @@ export default function OrganizationMaster() {
               <TableCell>{unit.parentName || "Top level"}</TableCell>
               <TableCell>{(unit.headEmployeeNames || []).join(", ") || "-"}</TableCell>
               <TableCell>{(unit.juniorEmployeeNames || []).join(", ") || "-"}</TableCell>
+              <TableCell>{unit.leaveApprovalLevels ? `${unit.leaveApprovalLevels} levels` : "Inherit"}</TableCell>
               <TableCell align="right">
                 <Button size="small" onClick={() => openEdit(unit)}>Edit</Button>
                 <Button size="small" color="error" startIcon={<Trash2 size={14} />} onClick={() => remove(unit)}>Delete</Button>
               </TableCell>
             </TableRow>)}
-            {!units.length && <TableRow><TableCell colSpan={6} align="center" sx={{ py: 5, color: "text.secondary" }}>Create the first Department to start the hierarchy.</TableCell></TableRow>}
+            {!units.length && <TableRow><TableCell colSpan={7} align="center" sx={{ py: 5, color: "text.secondary" }}>Create the first Department to start the hierarchy.</TableCell></TableRow>}
           </TableBody>
         </Table>
       </TableContainer>
@@ -339,6 +342,9 @@ export default function OrganizationMaster() {
             )}
             {employeeSelect(`${TYPE_LABELS[form.unitType]} Head(s)`, "headEmployeeIds")}
             {form.unitType === "function" && employeeSelect("Function Junior(s)", "juniorEmployeeIds")}
+            <TextField size="small" select label="Non-shift leave approval levels" value={form.leaveApprovalLevels || ""} onChange={(event) => setForm((current) => ({ ...current, leaveApprovalLevels: event.target.value }))} helperText="Inherited by child units unless they configure their own value." fullWidth>
+              <MenuItem value="">Inherit (system default: 2)</MenuItem><MenuItem value={2}>2 levels: Reporting Officer → HOD</MenuItem><MenuItem value={3}>3 levels: Reporting Officer → Intermediary → HOD</MenuItem>
+            </TextField>
           </Box>
         </DialogContent>
         <DialogActions><Button onClick={() => setOpen(false)}>Cancel</Button><Button variant="contained" onClick={save}>Save mapping</Button></DialogActions>

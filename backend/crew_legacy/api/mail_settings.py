@@ -1,5 +1,6 @@
 from datetime import datetime
 import os
+import re
 from pathlib import Path
 from threading import Lock
 
@@ -54,6 +55,15 @@ ALLOWED_PLACEHOLDERS = {
     "leave_date",
     "leave_type",
     "comment",
+    "training_name",
+    "training_period",
+    "training_location",
+    "adjacent_off",
+    "report_date",
+    "file_name",
+    "station_count",
+    "issue_station_count",
+    "issue_block_count",
 }
 REQUIRED_BODY_PLACEHOLDERS = {
     "replacement_person",
@@ -79,12 +89,21 @@ class TwoFactorModeUpdate(BaseModel):
     mode: str = Field(default="off", max_length=20)
 
 
+class CrmsCredentialsUpdate(BaseModel):
+    username: str = Field(default="", max_length=200)
+    password: str = Field(default="", max_length=1000)
+
+
 ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
 ENV_WRITE_LOCK = Lock()
 GRAPH_ENV_KEYS = {
     "tenantId": "CREW_GRAPH_TENANT_ID",
     "clientId": "CREW_GRAPH_CLIENT_ID",
     "clientSecret": "CREW_GRAPH_CLIENT_SECRET",
+}
+CRMS_ENV_KEYS = {
+    "username": "CRMS_SSO_USERNAME",
+    "password": "CRMS_SSO_PASSWORD",
 }
 
 
@@ -95,7 +114,7 @@ def _safe_credential(value: str, label: str):
     return value
 
 
-def _persist_graph_credentials(updates):
+def _persist_backend_credentials(updates, comment="Backend credentials managed from Administration"):
     if not updates:
         return
     with ENV_WRITE_LOCK:
@@ -114,7 +133,7 @@ def _persist_graph_credentials(updates):
             if remaining:
                 if output and output[-1].strip():
                     output.append("")
-                output.append("# Microsoft Graph credentials managed from Admin > Duty Mail Settings")
+                output.append(f"# {comment}")
                 output.extend(f"{key}={value}" for key, value in remaining.items())
             temporary = ENV_FILE.with_suffix(".env.tmp")
             temporary.write_text("\n".join(output) + "\n", encoding="utf-8")
@@ -130,6 +149,26 @@ def _persist_graph_credentials(updates):
             os.environ.update(updates)
         except OSError:
             raise HTTPException(500, detail="Protected backend credential file could not be updated")
+
+
+def _credential_hint(value: str) -> str:
+    value = str(value or "").strip()
+    if not value:
+        return ""
+    if len(value) <= 4:
+        return f"{value[:1]}***"
+    return f"{value[:2]}***{value[-2:]}"
+
+
+def _crms_settings_status() -> dict:
+    username = str(os.getenv(CRMS_ENV_KEYS["username"]) or "").strip()
+    password_configured = bool(str(os.getenv(CRMS_ENV_KEYS["password"]) or "").strip())
+    return {
+        "usernameConfigured": bool(username),
+        "usernameHint": _credential_hint(username),
+        "passwordConfigured": password_configured,
+        "credentialsConfigured": bool(username and password_configured),
+    }
 
 
 def _validate_template(template: str, required=None):
@@ -163,6 +202,52 @@ def get_replacement_mail_settings():
                 "all": two_factor_readiness("all"),
             },
         },
+        "crms": _crms_settings_status(),
+    }
+
+
+@router.put("/crms")
+def update_crms_credentials(
+    payload: CrmsCredentialsUpdate,
+    user=Depends(require_mail_admin),
+):
+    username = _safe_credential(payload.username, "CRMS username")
+    password = _safe_credential(payload.password, "CRMS password")
+    updates = {}
+    if username:
+        updates[CRMS_ENV_KEYS["username"]] = username
+    if password:
+        updates[CRMS_ENV_KEYS["password"]] = password
+    if not updates:
+        raise HTTPException(400, detail="Enter a CRMS username or password to save")
+
+    final_username = updates.get(CRMS_ENV_KEYS["username"]) or os.getenv(CRMS_ENV_KEYS["username"], "").strip()
+    final_password = updates.get(CRMS_ENV_KEYS["password"]) or os.getenv(CRMS_ENV_KEYS["password"], "").strip()
+    if not final_username or not final_password:
+        raise HTTPException(400, detail="Both CRMS username and password must be configured")
+
+    _persist_backend_credentials(
+        updates,
+        "CRMS SSO credentials managed from Admin > Mail & 2FA Settings",
+    )
+
+    test_error = ""
+    try:
+        # Import here to avoid coupling the settings router at module startup.
+        from crew_legacy.api.profile import _new_crms_session
+        session, _ = _new_crms_session()
+        session.close()
+    except Exception as exc:
+        test_error = str(exc)
+
+    return {
+        "crms": _crms_settings_status(),
+        "connectionVerified": not test_error,
+        "message": (
+            "CRMS credentials saved and SSO login verified."
+            if not test_error
+            else f"CRMS credentials were saved, but login verification failed: {test_error}"
+        ),
     }
 
 
@@ -232,7 +317,10 @@ def update_replacement_mail_settings(
         sender=sender,
     )
 
-    _persist_graph_credentials(env_updates)
+    _persist_backend_credentials(
+        env_updates,
+        "Microsoft Graph credentials managed from Admin > Mail & 2FA Settings",
+    )
 
     template_updates = {}
     for item in payload.templates:
@@ -245,10 +333,22 @@ def update_replacement_mail_settings(
             raise HTTPException(400, detail=f"Subject and body are required for {WORKFLOW_MAIL_DEFAULTS[key]['label']}")
         _validate_template(subject)
         _validate_template(body)
+        recipients = str(item.get("recipients") or "").strip()
+        recipient_values = [value.strip() for value in re.split(r"[,;\n]+", recipients) if value.strip()]
+        invalid_recipients = [value for value in recipient_values if "@" not in value or "." not in value.rsplit("@", 1)[-1]]
+        if invalid_recipients:
+            raise HTTPException(400, detail=f"Invalid recipient mail ID for {WORKFLOW_MAIL_DEFAULTS[key]['label']}: {invalid_recipients[0]}")
+        cc_recipients = str(item.get("ccRecipients") or "").strip()
+        cc_values = [value.strip() for value in re.split(r"[,;\n]+", cc_recipients) if value.strip()]
+        invalid_cc = [value for value in cc_values if "@" not in value or "." not in value.rsplit("@", 1)[-1]]
+        if invalid_cc:
+            raise HTTPException(400, detail=f"Invalid copy (CC) mail ID for {WORKFLOW_MAIL_DEFAULTS[key]['label']}: {invalid_cc[0]}")
         template_updates[key] = {
             "enabled": bool(item.get("enabled")),
             "subjectTemplate": subject,
             "bodyTemplate": body,
+            "recipients": ", ".join(dict.fromkeys(recipient_values)),
+            "ccRecipients": ", ".join(dict.fromkeys(cc_values)),
         }
 
     if template_updates:
@@ -289,5 +389,6 @@ def update_replacement_mail_settings(
                 "all": two_factor_readiness("all"),
             },
         },
+        "crms": _crms_settings_status(),
         "message": "Mail and two-factor authentication settings saved",
     }
