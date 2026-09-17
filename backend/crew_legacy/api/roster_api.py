@@ -154,6 +154,12 @@ def get_emp_id(obj):
     return (obj.get("employeeId") or obj.get("id") or "").strip()
 
 
+def sync_group_reporting_hierarchy():
+    """Refresh employee reporting fields after a roster-group role changes."""
+    from crew_legacy.api.admin_api import sync_employee_organization
+    sync_employee_organization()
+
+
 def enrich_authority_snapshot(authority: dict | None):
     if not authority:
         return None
@@ -249,6 +255,8 @@ def create_group(data: dict):
         "isActive": True
     })
 
+    sync_group_reporting_hierarchy()
+
     return {"message": "Group saved successfully"}
 
 
@@ -294,6 +302,8 @@ def toggle_group_status(group_id: str):
             }
         }
     )
+
+    sync_group_reporting_hierarchy()
 
     return {
         "message": "Group status updated",
@@ -352,6 +362,8 @@ def update_group(group_id: str, data: dict):
         {"_id": object_id},
         {"$set": update_fields}
     )
+
+    sync_group_reporting_hierarchy()
 
     return {"message": "Group updated successfully"}
 
@@ -749,10 +761,16 @@ def download_roster_pdf(data: dict):
 
     os.remove(temp_html)
 
+    download_stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     return FileResponse(
         output_pdf,
         media_type="application/pdf",
-        filename=f"Duty_Roster_{start_date_raw}_to_{end_date_raw}.pdf"
+        filename=f"Duty_Roster_{start_date_raw}_to_{end_date_raw}_{download_stamp}.pdf",
+        headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+            "Pragma": "no-cache",
+            "Expires": "0",
+        },
     )
 
 
@@ -1266,15 +1284,48 @@ def get_calendar_view(
     # ==========================================
     # 1ï¸âƒ£ GET MASTER ROSTER (SOURCE OF ROWS)
     # ==========================================
-    roster = roster_master_collection.find_one(
-        {"calendarPushed": True},
-        sort=[("createdOn", -1)]
+    overlapping_rosters = list(roster_master_collection.find({
+        "calendarPushed": True,
+        "startDate": {"$lte": end_date},
+        "endDate": {"$gte": start_date},
+    }).sort("createdOn", 1))
+    roster = next(
+        (item for item in reversed(overlapping_rosters)
+         if item.get("startDate", "") <= start_date <= item.get("endDate", "")),
+        overlapping_rosters[-1] if overlapping_rosters else None,
     )
 
     if not roster:
         raise HTTPException(404, "No active roster found")
 
+    holiday_map = {
+        item.get("date"): item.get("holidayName") or "Holiday"
+        for item in holiday_master_collection.find({
+            "date": {"$gte": start_date, "$lte": end_date},
+            "status": {"$not": {"$regex": "^(inactive|deleted)$", "$options": "i"}},
+        }, {"date": 1, "holidayName": 1})
+        if item.get("date")
+    }
+
     group_details = roster.get("groupDetails", [])
+
+    def calendar_shift_name(value):
+        shift = str(value or "").strip().upper()
+        if shift in {"M", "M1", "M2", "MORNING"}:
+            return "Morning"
+        if shift in {"E", "E1", "E2", "EVENING"}:
+            return "Evening"
+        if shift in {"N", "N1", "N2", "NIGHT"}:
+            return "Night"
+        if shift in {"O", "O1", "O2", "OFF"}:
+            return "OFF"
+        return str(value or "-")
+
+    roster_shift_map = {}
+    for published_roster in overlapping_rosters:
+        for group in (published_roster.get("data") or []):
+            for date, shift in (group.get("data") or {}).items():
+                roster_shift_map[(group.get("groupName"), date)] = calendar_shift_name(shift)
 
     group_members_map = {}
 
@@ -1365,8 +1416,15 @@ def get_calendar_view(
 
         daily_map[(emp_id, date)] = {
             "shift": rec.get("assignedDuty") or "-",
+            "isHoliday": bool(date in holiday_map or str(rec.get("isHoliday") or "").upper() == "Y"),
+            "holidayName": holiday_map.get(date) or rec.get("holidayName"),
+            "replacementDuty": bool(rec.get("replacementDuty")),
+            "replacementFor": rec.get("replacementFor"),
+            "replacementGroupName": rec.get("groupName"),
             "leaveType": rec.get("leaveType"),
             "leaveStatus": rec.get("leaveStatus"),
+            "stationLeave": bool(rec.get("stationLeave")),
+            "stationLeaveOnly": bool(rec.get("stationLeaveOnly")),
             "leaveRequestId": str(rec.get("leaveRequestId") or ""),
             "trainingName": rec.get("trainingName"),
             "replacementRequired": bool(
@@ -1420,12 +1478,42 @@ def get_calendar_view(
                 duty = daily_map.get((emp_id, d))
 
                 if duty:
-                    duties[d] = duty
+                    # Replacement duty is an additional assignment. The
+                    # employee's own row must continue to show their normal
+                    # published-roster shift; the replacement Night/Evening is
+                    # already shown on the absent employee's cell.
+                    if duty.get("replacementDuty"):
+                        duties[d] = {
+                            "shift": roster_shift_map.get((group_name, d), duty.get("shift") or "-"),
+                            "isHoliday": bool(duty.get("isHoliday")),
+                            "holidayName": duty.get("holidayName"),
+                            "leaveType": None,
+                            "leaveStatus": None,
+                            "stationLeave": False,
+                            "stationLeaveOnly": False,
+                            "leaveRequestId": "",
+                            "trainingName": None,
+                            "replacementRequired": False,
+                            "replacementEmployee": None,
+                            "additionalDuties": [{
+                                "shift": duty.get("shift") or "-",
+                                "groupName": duty.get("replacementGroupName"),
+                                "replacementFor": duty.get("replacementFor"),
+                                "type": "Replacement",
+                            }],
+                            "tempSIC": duty.get("tempSIC", False),
+                        }
+                    else:
+                        duties[d] = duty
                 else:
                     duties[d] = {
                         "shift": "-",
+                        "isHoliday": d in holiday_map,
+                        "holidayName": holiday_map.get(d),
                         "leaveType": None,
                         "leaveStatus": None,
+                        "stationLeave": False,
+                        "stationLeaveOnly": False,
                         "leaveRequestId": "",
                         "trainingName": None,
                         "replacementRequired": False,

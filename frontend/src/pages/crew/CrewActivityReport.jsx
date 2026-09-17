@@ -217,18 +217,19 @@ export default function CrewActivityReport() {
     return result;
   }, {}), [selectedCrmsShiftRows]);
   const pairedShiftRows = useMemo(() => {
-    const usedCrmsIds = new Set();
-    const paired = selectedRosterShiftRows.map((roster) => {
-      const crmsRows = selectedCrmsRowsByDate[String(roster.date || "")] || [];
-      crmsRows.forEach((item) => usedCrmsIds.add(item.id));
-      const mismatch = !crmsRows.length || crmsRows.some((item) => !["Matched", "Replacement match", "Reassigned match"].includes(item.status));
-      return { id: roster.id, date: roster.date, roster, crmsRows, mismatch };
+    const dates = Array.from(new Set([
+      ...selectedCrmsShiftRows.map((item) => String(item.date || "")),
+      ...selectedRosterShiftRows.map((item) => String(item.date || "")),
+    ])).filter(Boolean).sort();
+    return dates.map((date) => {
+      const crmsRows = Array.from(new Map(
+        (selectedCrmsRowsByDate[date] || []).map((item) => [`${item.desk || ""}:${item.crmsName || item.employeeId || ""}`, item]),
+      ).values());
+      const rosterRows = selectedRosterShiftRows.filter((item) => String(item.date || "") === date);
+      const crmsMatched = crmsRows.length > 0 && crmsRows.every((item) => ["Matched", "Replacement match", "Reassigned match"].includes(item.status));
+      return { id: `${date}:${crmsShiftDetails?.employeeId || crmsShiftDetails?.employeeName}:${crmsShiftDetails?.shift}`, date, rosterRows, crmsRows, mismatch: !crmsMatched || !rosterRows.length };
     });
-    selectedCrmsShiftRows.filter((item) => !usedCrmsIds.has(item.id)).forEach((item) => {
-      paired.push({ id: item.id, date: item.date, roster: null, crmsRows: [item], mismatch: true });
-    });
-    return paired.sort((first, second) => String(first.date || "").localeCompare(String(second.date || "")) || String(first.id).localeCompare(String(second.id)));
-  }, [selectedCrmsShiftRows, selectedRosterShiftRows, selectedCrmsRowsByDate]);
+  }, [selectedCrmsShiftRows, selectedRosterShiftRows, selectedCrmsRowsByDate, crmsShiftDetails]);
   const rosterShiftResult = (roster) => {
     const actualRows = selectedCrmsRowsByDate[String(roster.date || "")] || [];
     if (!actualRows.length) return { label: "Not in CRMS", mismatch: true };
@@ -374,15 +375,15 @@ export default function CrewActivityReport() {
       <Box sx={{ display: "grid", gridTemplateColumns: { xs: "repeat(2,minmax(0,1fr))", md: "repeat(5,minmax(0,1fr))" }, gap: 1.25 }}>
         {[
           ["CRMS logs", crms.logCount || 0, crms.source || "No source"],
-          ["Actual desk duties", crms.summary?.actualAssignments || 0, "Five control-room desks + additional staff"],
-          ["Roster matched", `${crms.summary?.matchPercent || 0}%`, `${crms.summary?.matched || 0} actual assignments aligned`],
+          ["Unique CRMS duties", crms.summary?.actualAssignments || 0, "Employee + date + shift; simultaneous desks count once"],
+          ["Roster matched", `${crms.summary?.matchPercent || 0}%`, `${crms.summary?.matched || 0} unique duties aligned`],
           ["Exceptions", crms.summary?.exceptions || 0, "Mismatch, missing roster or absent"],
           ["Unmapped names", crms.summary?.unmapped || 0, "Needs employee alias review"],
         ].map(([label, value, detail]) => <Paper key={label} elevation={0} sx={{ p: 1.5, borderRadius: 3, border: "1px solid #D9E7F5", background: label === "Exceptions" || label === "Unmapped names" ? "#FFF8ED" : "#F7FBFF" }}><Typography sx={{ fontSize: 11.5, color: "#475569", fontWeight: 850 }}>{label}</Typography><Typography sx={{ mt: .4, fontSize: 25, lineHeight: 1.1, fontWeight: 950, color: "#0B4F8A" }}>{value}</Typography><Typography sx={{ mt: .5, fontSize: 10.5, color: "#64748B" }}>{detail}</Typography></Paper>)}
       </Box>
       <Paper elevation={0} sx={{ overflow: "hidden", borderRadius: 3 }}>
-        <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ px: 2, py: 1.35, borderBottom: "1px solid #E2E8F0" }}><Box><Typography sx={{ fontWeight: 950 }}>Actual CRMS duties by employee</Typography><Typography sx={{ fontSize: 11.5, color: "#64748B" }}>Click an employee to inspect every CRMS desk posting against the final assigned roster.</Typography></Box><Chip size="small" label={`${crmsRows.length} employee(s)`} sx={{ fontWeight: 850 }} /></Stack>
-        {loading ? <Box sx={{ minHeight: 260, display: "grid", placeItems: "center" }}><CircularProgress /></Box> : <Box sx={{ overflow: "auto" }}><Table size="small"><TableHead><TableRow><TableCell sx={{ fontWeight: 900 }}>Employee</TableCell><TableCell align="right" sx={{ fontWeight: 900 }}>Actual total</TableCell><TableCell align="right" sx={{ fontWeight: 900 }}>Morning</TableCell><TableCell align="right" sx={{ fontWeight: 900 }}>Evening</TableCell><TableCell align="right" sx={{ fontWeight: 900 }}>Night</TableCell><TableCell align="right" sx={{ fontWeight: 900 }}>Roster matched</TableCell><TableCell align="right" sx={{ fontWeight: 900 }}>Replacement</TableCell><TableCell align="right" sx={{ fontWeight: 900 }}>Exceptions</TableCell><TableCell align="right" sx={{ fontWeight: 900 }}>Rostered absent</TableCell></TableRow></TableHead><TableBody>
+        <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ px: 2, py: 1.35, borderBottom: "1px solid #E2E8F0" }}><Box><Typography sx={{ fontWeight: 950 }}>Unique CRMS duties by employee</Typography><Typography sx={{ fontSize: 11.5, color: "#64748B" }}>One employee/date/shift is one duty; simultaneous desk postings remain available in the comparison details.</Typography></Box><Chip size="small" label={`${crmsRows.length} employee(s)`} sx={{ fontWeight: 850 }} /></Stack>
+        {loading ? <Box sx={{ minHeight: 260, display: "grid", placeItems: "center" }}><CircularProgress /></Box> : <Box sx={{ overflow: "auto" }}><Table size="small"><TableHead><TableRow><TableCell sx={{ fontWeight: 900 }}>Employee</TableCell><TableCell align="right" sx={{ fontWeight: 900 }}>Unique duty total</TableCell><TableCell align="right" sx={{ fontWeight: 900 }}>Morning</TableCell><TableCell align="right" sx={{ fontWeight: 900 }}>Evening</TableCell><TableCell align="right" sx={{ fontWeight: 900 }}>Night</TableCell><TableCell align="right" sx={{ fontWeight: 900 }}>Roster matched</TableCell><TableCell align="right" sx={{ fontWeight: 900 }}>Replacement</TableCell><TableCell align="right" sx={{ fontWeight: 900 }}>Exceptions</TableCell><TableCell align="right" sx={{ fontWeight: 900 }}>Rostered absent</TableCell></TableRow></TableHead><TableBody>
           {!crmsRows.length && <TableRow><TableCell colSpan={9} align="center" sx={{ py: 6, color: "#64748B" }}>No CRMS duty data found for the selected filters.</TableCell></TableRow>}
           {crmsRows.map((row) => <TableRow key={row.employeeId || row.employeeName} hover onClick={() => setCrmsEmployeeDetails(row)} sx={{ cursor: "pointer" }}><TableCell><Typography sx={{ fontWeight: 850 }}>{row.employeeName}</Typography><Typography variant="caption">{row.employeeId || "CRMS name not mapped"}</Typography></TableCell><TableCell align="right" sx={{ fontWeight: 900 }}>{row.actualDuties || 0}</TableCell>{["Morning", "Evening", "Night"].map((shift) => <TableCell key={shift} align="right"><Button size="small" onClick={(event) => { event.stopPropagation(); setCrmsOnly(false); setCrmsShiftDetails({ ...row, shift }); }} sx={{ minWidth: 34, px: .5, fontWeight: 900, textTransform: "none", color: "#0057B7" }}>{row[shift] || 0}</Button></TableCell>)}<TableCell align="right" sx={{ color: "#15803D", fontWeight: 850 }}>{row.matched || 0}</TableCell><TableCell align="right">{row.replacementDuties || 0}</TableCell><TableCell align="right" sx={{ color: row.exceptions ? "#C2410C" : "inherit", fontWeight: 850 }}>{row.exceptions || 0}</TableCell><TableCell align="right">{row.rosteredButAbsent || 0}</TableCell></TableRow>)}
         </TableBody></Table></Box>}
@@ -438,10 +439,7 @@ export default function CrewActivityReport() {
       <DialogContent dividers>
         <Stack spacing={1.5}>
           <Stack direction={{ xs: "column", sm: "row" }} justifyContent="space-between" alignItems={{ sm: "center" }} gap={1}>
-            <Typography sx={{ fontSize: 12, color: "#64748B" }}>CRMS desk postings are checked against the final Crew roster for the selected shift. Red rows require review.</Typography>
-            <Button size="small" variant={crmsOnly ? "contained" : "outlined"} onClick={() => setCrmsOnly((current) => !current)} sx={{ textTransform: "none", fontWeight: 850, whiteSpace: "nowrap" }}>
-              {crmsOnly ? "Show CRMS & roster" : "CRMS data only"}
-            </Button>
+            <Typography sx={{ fontSize: 12, color: "#64748B" }}>One row represents one employee/date/shift. Multiple simultaneous CRMS desks remain listed together and count as one duty. Red rows require review.</Typography>
           </Stack>
           <Box sx={{ display: "none" }}>
             <Paper variant="outlined" sx={{ overflow: "hidden", borderColor: "#B9D5F7" }}>
@@ -460,10 +458,10 @@ export default function CrewActivityReport() {
             </Paper>}
           </Box>
           <Paper variant="outlined" sx={{ overflow: "hidden", borderColor: "#B9D5F7" }}>
-            <Stack direction="row" justifyContent="space-between" sx={{ px: 1.5, py: 1, bgcolor: "#F3F8FE", borderBottom: "1px solid #D9E7F5" }}><Typography sx={{ fontWeight: 950 }}>CRMS and final roster duty comparison</Typography><Chip size="small" label={`${crmsOnly ? selectedCrmsShiftRows.length : pairedShiftRows.length} row(s)`} /></Stack>
-            <Box sx={{ maxHeight: 500, overflow: "auto" }}><Table stickyHeader size="small"><TableHead><TableRow><TableCell sx={{ fontWeight: 900 }}>Date</TableCell><TableCell sx={{ fontWeight: 900 }}>CRMS desk / name</TableCell><TableCell sx={{ fontWeight: 900 }}>CRMS result</TableCell>{!crmsOnly && <><TableCell sx={{ fontWeight: 900 }}>Final roster assignment</TableCell><TableCell sx={{ fontWeight: 900 }}>Roster check</TableCell></>}</TableRow></TableHead><TableBody>
-              {!(crmsOnly ? pairedShiftRows.filter((item) => item.crmsRows.length) : pairedShiftRows).length && <TableRow><TableCell colSpan={crmsOnly ? 3 : 5} align="center" sx={{ py: 5, color: "#64748B" }}>No {crmsOnly ? "CRMS posting" : "duty comparison"} found for {crmsShiftDetails?.shift}.</TableCell></TableRow>}
-              {(crmsOnly ? pairedShiftRows.filter((item) => item.crmsRows.length) : pairedShiftRows).map((item) => { const crmsMismatched = !item.crmsRows.length || item.crmsRows.some((entry) => !["Matched", "Replacement match", "Reassigned match"].includes(entry.status)); const crmsLabel = !item.crmsRows.length ? "Not in CRMS" : crmsMismatched ? "Mismatch" : "Matched"; const rosterLabel = !item.roster ? "No roster record" : !item.crmsRows.length ? "Not in CRMS" : crmsMismatched ? "Mismatch" : "Matched"; return <TableRow key={item.id} sx={item.mismatch ? { bgcolor: "#FEF2F2", "& td": { borderColor: "#FECACA" } } : undefined}><TableCell sx={{ whiteSpace: "nowrap", fontWeight: 800 }}>{displayDate(item.date)}</TableCell><TableCell>{item.crmsRows.length ? item.crmsRows.map((entry) => <Box key={entry.id} sx={{ mb: .45 }}><Typography sx={{ fontSize: 12.5, fontWeight: 850 }}>{entry.desk}</Typography><Typography variant="caption">{entry.crmsName || "Not listed"}</Typography></Box>) : <Typography variant="caption" sx={{ color: "#B91C1C", fontWeight: 800 }}>No CRMS posting</Typography>}</TableCell><TableCell><Chip size="small" label={crmsLabel} sx={{ fontWeight: 850, bgcolor: crmsMismatched ? "#FEE2E2" : "#DCFCE7", color: crmsMismatched ? "#B91C1C" : "#15803D" }} /></TableCell>{!crmsOnly && <><TableCell>{item.roster ? <><Typography sx={{ fontSize: 12.5, fontWeight: 850 }}>{item.roster.shift}</Typography><Typography variant="caption">{item.roster.groupName || "No group"}{item.roster.assignmentType ? ` · ${item.roster.assignmentType}` : ""}</Typography></> : <Typography variant="caption" sx={{ color: "#B91C1C", fontWeight: 800 }}>No final roster duty</Typography>}</TableCell><TableCell><Chip size="small" label={rosterLabel} sx={{ fontWeight: 850, bgcolor: item.mismatch ? "#FEE2E2" : "#DCFCE7", color: item.mismatch ? "#B91C1C" : "#15803D" }} /></TableCell></>}</TableRow>; })}
+            <Stack direction="row" justifyContent="space-between" sx={{ px: 1.5, py: 1, bgcolor: "#F3F8FE", borderBottom: "1px solid #D9E7F5" }}><Typography sx={{ fontWeight: 950 }}>CRMS and COMPASS duty comparison</Typography><Chip size="small" label={`${pairedShiftRows.length} duty row(s)`} /></Stack>
+            <Box sx={{ maxHeight: 500, overflow: "auto" }}><Table stickyHeader size="small"><TableHead><TableRow><TableCell sx={{ width: "42%", fontWeight: 900 }}>CRMS</TableCell><TableCell sx={{ width: "38%", fontWeight: 900 }}>COMPASS</TableCell><TableCell sx={{ width: "20%", fontWeight: 900 }}>Remarks</TableCell></TableRow></TableHead><TableBody>
+              {!pairedShiftRows.length && <TableRow><TableCell colSpan={3} align="center" sx={{ py: 5, color: "#64748B" }}>No duty comparison found for {crmsShiftDetails?.shift}.</TableCell></TableRow>}
+              {pairedShiftRows.map((item) => { const matched = !item.mismatch; const remark = !item.crmsRows.length ? "Not in CRMS" : !item.rosterRows.length ? "Not in COMPASS" : matched ? "Matched" : "Mismatch"; return <TableRow key={item.id} sx={item.mismatch ? { bgcolor: "#FEF2F2", "& td": { borderColor: "#FECACA" } } : undefined}><TableCell><Typography sx={{ mb: .45, fontSize: 12.5, fontWeight: 950 }}>{displayDate(item.date)} · {crmsShiftDetails?.shift}</Typography>{item.crmsRows.length ? item.crmsRows.map((entry) => <Typography key={entry.id} sx={{ fontSize: 11.5, fontWeight: 800 }}>{entry.desk}<Typography component="span" sx={{ ml: .5, fontSize: 10.5, color: "#64748B" }}>· {entry.crmsName || "Not listed"}</Typography></Typography>) : <Typography sx={{ color: "#B91C1C", fontSize: 11.5, fontWeight: 850 }}>No CRMS posting</Typography>}</TableCell><TableCell><Typography sx={{ mb: .45, fontSize: 12.5, fontWeight: 950 }}>{displayDate(item.date)} · {crmsShiftDetails?.shift}</Typography>{item.rosterRows.length ? item.rosterRows.map((roster) => <Box key={roster.id} sx={{ mb: .3 }}><Typography sx={{ fontSize: 11.5, fontWeight: 850 }}>{roster.groupName || "No group"}</Typography><Typography sx={{ fontSize: 10.5, color: "#64748B" }}>{roster.assignmentType || (roster.replacementDuty ? "Replacement duty" : "Normal roster duty")}</Typography></Box>) : <Typography sx={{ color: "#B91C1C", fontSize: 11.5, fontWeight: 850 }}>No COMPASS duty</Typography>}</TableCell><TableCell><Chip size="small" label={remark} sx={{ fontWeight: 900, bgcolor: matched ? "#DCFCE7" : "#FEE2E2", color: matched ? "#15803D" : "#B91C1C" }} /></TableCell></TableRow>; })}
             </TableBody></Table></Box>
           </Paper>
         </Stack>

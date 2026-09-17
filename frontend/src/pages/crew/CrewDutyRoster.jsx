@@ -23,6 +23,7 @@ import {
   TableHead,
   TableRow,
   TextField,
+  Tooltip,
   Typography,
   IconButton,
 } from "@mui/material";
@@ -101,6 +102,7 @@ export default function CrewDutyRoster() {
   const [employees, setEmployees] = useState([]);
   const [groups, setGroups] = useState([]);
   const [history, setHistory] = useState([]);
+  const [holidays, setHolidays] = useState([]);
   const [rosterId, setRosterId] = useState("");
   const [isFinal, setIsFinal] = useState(false);
   const [calendarPushed, setCalendarPushed] = useState(false);
@@ -180,6 +182,16 @@ export default function CrewDutyRoster() {
   useEffect(() => { loadReferenceData(); }, []);
 
   const dates = useMemo(() => rosterData[0] ? Object.keys(rosterData[0].data || {}) : [], [rosterData]);
+  const holidayByDate = useMemo(() => Object.fromEntries((holidays || []).map((item) => [item.date, item.holidayName || "Holiday"])), [holidays]);
+
+  useEffect(() => {
+    const startYear = Number(String(startDate).slice(0, 4));
+    const endYear = Number(String(endDate).slice(0, 4));
+    const years = Array.from(new Set([startYear, endYear])).filter(Boolean);
+    Promise.all(years.map((year) => crewApi.holidays(year)))
+      .then((results) => setHolidays(results.flat()))
+      .catch(() => setHolidays([]));
+  }, [startDate, endDate]);
   const person = (id) => employees.find((item) => employeeKey(item) === String(id)) || null;
   const notify = (severity, text) => setMessage({ severity, text });
 
@@ -310,8 +322,8 @@ export default function CrewDutyRoster() {
               <tr>
                 <th style={{ border: "1px solid #000000", padding: "4px 6px", background: "#E8E8E8", fontWeight: 800, textAlign: "center" }}>Group</th>
                 {dates.map((date) => (
-                  <th key={`print-head-${date}`} style={{ border: "1px solid #000000", padding: "4px 6px", background: "#E8E8E8", fontWeight: 800, textAlign: "center" }}>
-                    {new Date(`${date}T00:00:00`).getDate()}
+                  <th key={`print-head-${date}`} title={holidayByDate[date] || undefined} style={{ border: "1px solid #000000", borderBottom: holidayByDate[date] ? "4px solid #A855F7" : "1px solid #000000", padding: "4px 6px", background: holidayByDate[date] ? "#F3E8FF" : "#E8E8E8", color: holidayByDate[date] ? "#581C87" : "#000000", fontWeight: 800, textAlign: "center" }}>
+                    {new Date(`${date}T00:00:00`).getDate()}{holidayByDate[date] ? " H" : ""}
                   </th>
                 ))}
               </tr>
@@ -339,6 +351,7 @@ export default function CrewDutyRoster() {
                           textAlign: "center",
                           fontWeight: 800,
                           backgroundColor: printBg,
+                          boxShadow: holidayByDate[date] ? "inset 4px 0 #A855F7" : undefined,
                           color: "#000000"
                         }}
                       >
@@ -365,19 +378,19 @@ export default function CrewDutyRoster() {
                 }}
               >
                 {/* Header strip */}
-                <div style={{ backgroundColor: "#E2F0D9", borderBottom: "1px solid #CCCCCC", padding: "4px 6px", fontWeight: "bold", color: "#0F5132" }}>
+                <div className="crew-roster-print-group-title" style={{ backgroundColor: "#E2F0D9", borderBottom: "1px solid #CCCCCC", padding: "4px 6px", fontWeight: "bold", color: "#000000" }}>
                   {group.groupName}
                 </div>
                 {/* Content */}
                 <div style={{ padding: "6px" }}>
-                  <div style={{ fontWeight: "bold", marginBottom: "2px" }}>Shift Incharge:</div>
-                  <div style={{ marginBottom: "6px", color: "#333333" }}>
+                  <div className="crew-roster-print-label" style={{ fontWeight: "bold", marginBottom: "2px" }}>Shift Incharge:</div>
+                  <div className="crew-roster-print-person" style={{ marginBottom: "6px", color: "#000000" }}>
                     {group.shiftInCharge ? `${group.shiftInCharge.name} - (${group.shiftInCharge.employeeId}) - ${group.shiftInCharge.designation}` : "Not assigned"}
                   </div>
-                  <div style={{ fontWeight: "bold", marginBottom: "2px" }}>Members:</div>
+                  <div className="crew-roster-print-label" style={{ fontWeight: "bold", marginBottom: "2px" }}>Members:</div>
                   <div style={{ display: "flex", flexDirection: "column", gap: "1px" }}>
                     {(group.members || []).map((member, mIdx) => (
-                      <div key={member.employeeId} style={{ color: "#444444" }}>
+                      <div className="crew-roster-print-person" key={member.employeeId} style={{ color: "#000000" }}>
                         {mIdx + 1}. {member.name} ({member.designation}) - {member.employeeId}
                       </div>
                     ))}
@@ -926,12 +939,12 @@ export default function CrewDutyRoster() {
                     Group
                   </TableCell>
                   {dates.map((date) => (
-                    <TableCell key={date} align="center" sx={{ minWidth: 88, background: "#F8FAFC", fontWeight: 900 }}>
-                      <Box sx={{ fontSize: 13, color: "#334155" }}>
+                    <TableCell key={date} title={holidayByDate[date] || undefined} align="center" sx={{ minWidth: 88, background: holidayByDate[date] ? "#F3E8FF" : "#F8FAFC", fontWeight: 900, borderBottom: holidayByDate[date] ? "3px solid #A855F7" : undefined }}>
+                      <Box sx={{ fontSize: 13, color: holidayByDate[date] ? "#6B21A8" : "#334155" }}>
                         {new Date(`${date}T00:00:00`).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}
                       </Box>
-                      <Typography variant="caption" color="#94A3B8" fontWeight={900}>
-                        {new Date(`${date}T00:00:00`).toLocaleDateString("en-IN", { weekday: "short" })}
+                      <Typography variant="caption" color={holidayByDate[date] ? "#7E22CE" : "#94A3B8"} fontWeight={900}>
+                        {new Date(`${date}T00:00:00`).toLocaleDateString("en-IN", { weekday: "short" })}{holidayByDate[date] ? " · Holiday" : ""}
                       </Typography>
                     </TableCell>
                   ))}
@@ -953,6 +966,7 @@ export default function CrewDutyRoster() {
                       const [background, color] = dutyColor(duty);
                       return (
                         <TableCell key={date} align="center" sx={{ p: 0.6 }}>
+                          <Box sx={{ position: "relative", display: "inline-flex", borderRadius: 2, border: holidayByDate[date] ? "1px solid #A855F7" : "1px solid transparent", boxShadow: holidayByDate[date] ? "inset 4px 0 #A855F7" : undefined }}>
                           <Select
                             value={duty || ""}
                             onChange={(event) => updateDuty(groupIndex, date, event.target.value)}
@@ -978,6 +992,8 @@ export default function CrewDutyRoster() {
                               </MenuItem>
                             ))}
                           </Select>
+                          {holidayByDate[date] && <Tooltip title={`${holidayByDate[date]} · shift duty continues`} arrow><Box sx={{ position: "absolute", top: -6, right: -6, width: 16, height: 16, borderRadius: "50%", display: "grid", placeItems: "center", background: "#9333EA", color: "#FFF", fontSize: 8, fontWeight: 950, zIndex: 2 }}>H</Box></Tooltip>}
+                          </Box>
                         </TableCell>
                       );
                     })}

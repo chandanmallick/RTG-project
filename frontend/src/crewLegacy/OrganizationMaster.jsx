@@ -268,7 +268,7 @@ export default function OrganizationMaster() {
         <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ px: 2, py: 1.5, bgcolor: "#E8F5F1" }}>
           <Box>
             <Typography sx={{ fontWeight: 900, color: "#03624C" }}>Shift-group reporting</Typography>
-            <Typography sx={{ fontSize: 12, color: "#475569" }}>Attach one or several groups directly to an SO-II/DIC, an organization unit, or both. Permanent group members then appear as subordinates.</Typography>
+            <Typography sx={{ fontSize: 12, color: "#475569" }}>Automatic chain: group member → configured SIC → attached vertical head. The department head remains HOD.</Typography>
           </Box>
           <Button variant="contained" size="small" onClick={() => openShiftMapping()} sx={{ bgcolor: "#03624C" }}>Attach shift group</Button>
         </Stack>
@@ -276,7 +276,7 @@ export default function OrganizationMaster() {
           <TableHead><TableRow>
             <TableCell><strong>Shift group</strong></TableCell>
             <TableCell><strong>Reports to organization unit</strong></TableCell>
-            <TableCell><strong>Direct SO-II / DIC</strong></TableCell>
+            <TableCell><strong>SIC fallback officer</strong></TableCell>
             <TableCell><strong>Unit type</strong></TableCell>
             <TableCell align="right"><strong>Action</strong></TableCell>
           </TableRow></TableHead>
@@ -343,7 +343,7 @@ export default function OrganizationMaster() {
             {employeeSelect(`${TYPE_LABELS[form.unitType]} Head(s)`, "headEmployeeIds")}
             {form.unitType === "function" && employeeSelect("Function Junior(s)", "juniorEmployeeIds")}
             <TextField size="small" select label="Non-shift leave approval levels" value={form.leaveApprovalLevels || ""} onChange={(event) => setForm((current) => ({ ...current, leaveApprovalLevels: event.target.value }))} helperText="Inherited by child units unless they configure their own value." fullWidth>
-              <MenuItem value="">Inherit (system default: 2)</MenuItem><MenuItem value={2}>2 levels: Reporting Officer → HOD</MenuItem><MenuItem value={3}>3 levels: Reporting Officer → Intermediary → HOD</MenuItem>
+              <MenuItem value="">Inherit (system default: 2)</MenuItem><MenuItem value={1}>1 level: Reporting Officer / HOD (Vertical head)</MenuItem><MenuItem value={2}>2 levels: Reporting Officer → HOD</MenuItem><MenuItem value={3}>3 levels: Reporting Officer → Intermediary → HOD</MenuItem>
             </TextField>
           </Box>
         </DialogContent>
@@ -367,12 +367,12 @@ export default function OrganizationMaster() {
               {shiftGroups.map((name) => <MenuItem key={name} value={name}><Checkbox size="small" checked={shiftMapping.groupNames.includes(name)} />{name}</MenuItem>)}
             </TextField>
             <FormControl size="small" fullWidth>
-              <InputLabel>Direct SO-II / DIC (optional)</InputLabel>
+              <InputLabel>SIC reporting fallback (optional)</InputLabel>
               <Select
                 multiple
                 value={shiftMapping.directSupervisorIds}
                 onChange={(event) => setShiftMapping((current) => ({ ...current, directSupervisorIds: typeof event.target.value === "string" ? event.target.value.split(",") : event.target.value }))}
-                input={<OutlinedInput label="Direct SO-II / DIC (optional)" />}
+                input={<OutlinedInput label="SIC reporting fallback (optional)" />}
                 renderValue={(selected) => selected.map((id) => employees.find((item) => item.userId === id)?.name || id).join(", ")}
                 MenuProps={{ PaperProps: { sx: { maxHeight: 380 } } }}
               >
@@ -390,7 +390,7 @@ export default function OrganizationMaster() {
               label="Reports to"
               value={shiftMapping.organizationUnitId}
               onChange={(event) => setShiftMapping((current) => ({ ...current, organizationUnitId: event.target.value }))}
-              helperText="Optional when a direct supervisor is selected. Configured unit heads remain in the approval hierarchy."
+              helperText="Attach the group to its Vertical. Members report to the Group SIC; the SIC reports to that Vertical's head."
               fullWidth
             >
               {shiftTargets.map((unit) => (

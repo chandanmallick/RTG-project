@@ -523,7 +523,9 @@ export default function EmployeeMaster() {
             />
             <TextField size="small" select label="Leave approval levels" name="leaveApprovalLevelsOverride" fullWidth InputLabelProps={{ shrink: true }} value={formData.leaveApprovalLevelsOverride || ""} onChange={handleChange} helperText={`Employee override; organization currently resolves to ${formData.organizationLeaveApprovalLevels || 2} levels`}>
               <MenuItem value="">Use Organization Master</MenuItem>
+              <MenuItem value={1}>1 level: Reporting Officer / HOD (Vertical head)</MenuItem>
               <MenuItem value={2}>2 levels: Reporting Officer → HOD</MenuItem>
+              <MenuItem value="2_intermediary">2 levels: Reporting Officer → Intermediary</MenuItem>
               <MenuItem value={3}>3 levels: Reporting Officer → Intermediary → HOD</MenuItem>
             </TextField>
           </Box>

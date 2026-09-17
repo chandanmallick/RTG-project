@@ -78,7 +78,11 @@ def create_employee_logic(data):
         "intermediaryReportingId": data.get("intermediaryReportingId"),
         "hodId": data.get("hodId"),
         "organizationLeaveApprovalLevels": data.get("organizationLeaveApprovalLevels", 2),
-        "leaveApprovalLevelsOverride": int(data["leaveApprovalLevelsOverride"]) if str(data.get("leaveApprovalLevelsOverride") or "") in {"2", "3"} else None,
+        "leaveApprovalLevelsOverride": (
+            "2_intermediary" if str(data.get("leaveApprovalLevelsOverride") or "") == "2_intermediary"
+            else int(data["leaveApprovalLevelsOverride"]) if str(data.get("leaveApprovalLevelsOverride") or "") in {"1", "2", "3"}
+            else None
+        ),
 
         # ðŸ”¥ Metadata
         "createdAt": data.get("createdAt"),

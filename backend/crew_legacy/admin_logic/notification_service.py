@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 import logging
 from datetime import datetime
 
@@ -152,9 +153,29 @@ def workflow_mail_templates():
     return result
 
 
+BACKEND_ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
+
+
+def _runtime_env_value(key: str) -> str:
+    """Read admin-managed settings from disk so every Uvicorn worker sees updates."""
+    try:
+        if BACKEND_ENV_FILE.exists():
+            with BACKEND_ENV_FILE.open(encoding="utf-8") as env_file:
+                for raw_line in env_file:
+                    line = raw_line.strip()
+                    if not line or line.startswith("#") or "=" not in line:
+                        continue
+                    stored_key, stored_value = line.split("=", 1)
+                    if stored_key.strip() == key:
+                        return stored_value.strip().strip('"').strip("'")
+    except OSError:
+        pass
+    return str(os.getenv(key, "")).strip()
+
+
 def graph_credentials_configured():
     return all(
-        str(os.getenv(key, "")).strip()
+        _runtime_env_value(key)
         for key in ("CREW_GRAPH_TENANT_ID", "CREW_GRAPH_CLIENT_ID", "CREW_GRAPH_CLIENT_SECRET")
     )
 
@@ -177,8 +198,8 @@ def replacement_mail_settings():
 
 def public_replacement_mail_settings():
     settings = replacement_mail_settings()
-    tenant_id = os.getenv("CREW_GRAPH_TENANT_ID", "").strip()
-    client_id = os.getenv("CREW_GRAPH_CLIENT_ID", "").strip()
+    tenant_id = _runtime_env_value("CREW_GRAPH_TENANT_ID")
+    client_id = _runtime_env_value("CREW_GRAPH_CLIENT_ID")
 
     def masked_hint(value):
         if not value:
@@ -193,7 +214,7 @@ def public_replacement_mail_settings():
         "tenantHint": masked_hint(tenant_id),
         "clientConfigured": bool(client_id),
         "clientHint": masked_hint(client_id),
-        "secretConfigured": bool(os.getenv("CREW_GRAPH_CLIENT_SECRET", "").strip()),
+        "secretConfigured": bool(_runtime_env_value("CREW_GRAPH_CLIENT_SECRET")),
     }
 
 
@@ -224,9 +245,9 @@ def send_email(to_list, subject, body, *, html=False, sender=None, enabled=None,
     if not graph_credentials_configured():
         return {"status": "failed", "recipientCount": len(recipients), "error": "Microsoft Graph credentials are not configured"}
 
-    tenant_id = os.getenv("CREW_GRAPH_TENANT_ID", "").strip()
-    client_id = os.getenv("CREW_GRAPH_CLIENT_ID", "").strip()
-    client_secret = os.getenv("CREW_GRAPH_CLIENT_SECRET", "").strip()
+    tenant_id = _runtime_env_value("CREW_GRAPH_TENANT_ID")
+    client_id = _runtime_env_value("CREW_GRAPH_CLIENT_ID")
+    client_secret = _runtime_env_value("CREW_GRAPH_CLIENT_SECRET")
     sender_address = str(sender or os.getenv("CREW_GRAPH_SENDER", "")).strip()
     if not sender_address:
         return {"status": "failed", "recipientCount": len(recipients), "error": "Sender mailbox is not configured"}
@@ -242,8 +263,16 @@ def send_email(to_list, subject, body, *, html=False, sender=None, enabled=None,
             },
             timeout=20,
         )
-        token_response.raise_for_status()
-        access_token = token_response.json().get("access_token")
+        token_payload = token_response.json() if token_response.content else {}
+        if token_response.status_code != 200:
+            aad_codes = token_payload.get("error_codes") or []
+            safe_code = aad_codes[0] if aad_codes else token_payload.get("error") or "unknown"
+            return {
+                "status": "failed",
+                "recipientCount": len(recipients),
+                "error": f"Microsoft Graph authentication failed (HTTP {token_response.status_code}, {safe_code})",
+            }
+        access_token = token_payload.get("access_token")
         if not access_token:
             raise RuntimeError("Microsoft Graph did not return an access token")
 
@@ -284,10 +313,19 @@ def send_email(to_list, subject, body, *, html=False, sender=None, enabled=None,
             timeout=30,
         )
         if message_response.status_code != 202:
+            try:
+                graph_error = (message_response.json().get("error") or {})
+            except (ValueError, AttributeError):
+                graph_error = {}
+            safe_code = str(graph_error.get("code") or "unknown")[:80]
+            safe_message = " ".join(str(graph_error.get("message") or "").split())[:240]
+            detail = f", {safe_code}"
+            if safe_message:
+                detail += f": {safe_message}"
             return {
                 "status": "failed",
                 "recipientCount": len(recipients),
-                "error": f"Microsoft Graph returned HTTP {message_response.status_code}",
+                "error": f"Microsoft Graph returned HTTP {message_response.status_code}{detail}",
             }
         return {"status": "sent", "recipientCount": len(recipients), "ccRecipientCount": len(cc_recipients)}
     except requests.RequestException as exc:

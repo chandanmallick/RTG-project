@@ -85,6 +85,7 @@ export default function MorningPresentationRoster() {
   const [loading, setLoading] = useState(true);
   const [working, setWorking] = useState(false);
   const [notice, setNotice] = useState(null);
+  const [holidays, setHolidays] = useState([]);
   const snapshotRef = useRef(null);
 
   const employees = setup?.employees || [];
@@ -155,6 +156,10 @@ export default function MorningPresentationRoster() {
 
   useEffect(() => { loadSetup(); }, []);
   useEffect(() => { loadRoster(month); }, [month]);
+  useEffect(() => {
+    const year = Number(month.split("-")[0]);
+    api.get(`/Training_holiday/holiday/${year}`).then(({ data }) => setHolidays(data || [])).catch(() => setHolidays([]));
+  }, [month]);
 
   const participantIds = draft?.participantIds || [];
   const excluded = new Set(draft?.excludedIds || []);
@@ -167,6 +172,7 @@ export default function MorningPresentationRoster() {
     const assignmentByDate = new Map(
       blocks.flatMap((block) => block.dates.map((item) => [item.date, block])),
     );
+    const holidayByDate = new Map(holidays.map((item) => [item.date, item.holidayName || "Holiday"]));
     const numberOfDays = new Date(year, monthNumber, 0).getDate();
     return Array.from({ length: numberOfDays }, (_, index) => {
       const dayNumber = index + 1;
@@ -182,9 +188,10 @@ export default function MorningPresentationRoster() {
           year: "numeric",
         }),
         employeeName: assignmentByDate.get(dateValue)?.employeeName || "",
+        holidayName: holidayByDate.get(dateValue) || "",
       };
     });
-  }, [blocks, month]);
+  }, [blocks, holidays, month]);
 
   const useEligiblePool = () => {
     setDraft((current) => ({
@@ -548,9 +555,9 @@ export default function MorningPresentationRoster() {
               </TableHead>
               <TableBody>
                 {calendarRows.map((row) => (
-                  <TableRow key={row.date} sx={{ background: row.employeeName ? "#FFFFFF" : "#F8FAFC" }}>
-                    <TableCell sx={{ py: .55, fontWeight: row.employeeName ? 800 : 500 }}>{row.employeeName}</TableCell>
-                    <TableCell sx={{ py: .55 }}>{row.displayDate}</TableCell>
+                  <TableRow key={row.date} title={row.holidayName || undefined} sx={{ background: row.holidayName ? "#E9D5FF" : row.employeeName ? "#FFFFFF" : "#F8FAFC", borderLeft: row.holidayName ? "4px solid #A855F7" : undefined }}>
+                    <TableCell sx={{ py: .55, fontWeight: row.employeeName ? 800 : 500 }}>{row.employeeName}{row.holidayName && <Chip size="small" label="Holiday" sx={{ ml: 1, height: 19, background: "#F3E8FF", color: "#6B21A8", border: "1px solid #A855F7", fontWeight: 900 }} />}</TableCell>
+                    <TableCell sx={{ py: .55, color: row.holidayName ? "#6B21A8" : undefined, fontWeight: row.holidayName ? 800 : undefined }}>{row.displayDate}{row.holidayName ? ` · ${row.holidayName}` : ""}</TableCell>
                   </TableRow>
                 ))}
               </TableBody>

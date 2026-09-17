@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { Box, Button, Paper, Typography } from "@mui/material";
-import { Activity, ArrowRight, BarChart3, Building2, Clock3, Gauge, RefreshCw, ShieldCheck, TrendingUp, Zap } from "lucide-react";
+import { Box, Button, Dialog, DialogActions, DialogContent, DialogTitle, Divider, Paper, Typography } from "@mui/material";
+import { Activity, ArrowRight, BarChart3, Building2, CalendarDays, Clock3, Gauge, RefreshCw, ShieldCheck, TrendingUp, Zap } from "lucide-react";
 import AppShell from "../components/layout/AppShell";
 import PSPFrequencyCheckTiles from "../components/ui/PSPFrequencyCheckTiles";
 import PSPComparisonBar from "../components/ui/PSPComparisonBar";
@@ -50,7 +50,8 @@ const addDays = (dateStr, amount) => {
 
 export default function HomePage() {
   const [rtgRows, setRtgRows] = useState([]);
-  const [duty, setDuty] = useState({ today: { Morning: [], Evening: [], Night: [] } });
+  const [duty, setDuty] = useState({ today: { Morning: [], Evening: [], Night: [] }, tomorrow: { Morning: [], Evening: [], Night: [] } });
+  const [tomorrowDutyOpen, setTomorrowDutyOpen] = useState(false);
   const [frequencyCheck, setFrequencyCheck] = useState(null);
   const [powerPositionRows, setPowerPositionRows] = useState([]);
   const [nldcRows, setNldcRows] = useState([]);
@@ -138,7 +139,7 @@ export default function HomePage() {
             </Box>
           </SectionCard>
 
-          <SectionCard title="Crew Management Dashboard" subtitle="Today duty assignments" icon={ShieldCheck}>
+          <SectionCard title="Crew Management Dashboard" subtitle="Today duty assignments" icon={ShieldCheck} action={<Box sx={{ display: "flex", gap: .75, flexWrap: "wrap" }}><Button size="small" startIcon={<CalendarDays size={14} />} onClick={() => setTomorrowDutyOpen(true)} sx={{ textTransform: "none", fontWeight: 850 }}>Tomorrow duty</Button><Button size="small" variant="outlined" href="/public/crew-calendar" target="_blank" sx={{ textTransform: "none", fontWeight: 850 }}>Public calendar</Button></Box>}>
             {["Morning", "Evening", "Night"].map((shift) => (
               <Box key={shift} sx={{ mb: 1.5 }}>
                 <Typography sx={{ fontSize: 13, fontWeight: 900, color: "#0F172A", mb: 0.75 }}>{shift}</Typography>
@@ -156,11 +157,24 @@ export default function HomePage() {
                 </Box>
               </Box>
             ))}
-            <Box sx={{ display: "flex", justifyContent: "space-between", mt: 2, pt: 1.5, borderTop: "1px solid #EEF2F7", color: "#64748B", fontSize: 12 }}>
+            <Box role="button" tabIndex={0} onClick={() => setTomorrowDutyOpen(true)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") setTomorrowDutyOpen(true); }} sx={{ display: "flex", justifyContent: "space-between", mt: 2, pt: 1.5, borderTop: "1px solid #EEF2F7", color: "#0057B7", fontSize: 12, fontWeight: 850, cursor: "pointer" }}>
               <span>Tomorrow duty snapshot</span>
               <ArrowRight size={14} />
             </Box>
             <DutyNotificationBoard limit={2} />
+            <Dialog open={tomorrowDutyOpen} onClose={() => setTomorrowDutyOpen(false)} fullWidth maxWidth="sm">
+              <DialogTitle sx={{ fontWeight: 900 }}>Tomorrow duty list</DialogTitle>
+              <DialogContent dividers>
+                {["Morning", "Evening", "Night"].map((shift, shiftIndex) => <Box key={shift}>
+                  {shiftIndex > 0 && <Divider sx={{ my: 1.5 }} />}
+                  <Typography sx={{ mb: .8, fontSize: 15, fontWeight: 900, color: shift === "Morning" ? "#15803D" : shift === "Evening" ? "#B45309" : "#1E40AF" }}>{shift}</Typography>
+                  <Box sx={{ display: "flex", flexWrap: "wrap", gap: .75 }}>
+                    {(duty.tomorrow?.[shift] || []).length ? (duty.tomorrow?.[shift] || []).map((person, index) => <Box key={`${shift}-tomorrow-${person.employeeId || index}`} sx={{ px: 1.1, py: .65, borderRadius: 2, background: person?.isSIC ? "#DBEAFE" : "#F1F5F9", color: "#0F172A", fontSize: 12, fontWeight: 800 }}>{person?.isSIC ? "SIC · " : ""}{person?.name || person?.employeeId || "-"}</Box>) : <Typography sx={{ fontSize: 12, color: "#94A3B8" }}>No duty assigned.</Typography>}
+                  </Box>
+                </Box>)}
+              </DialogContent>
+              <DialogActions><Button onClick={() => setTomorrowDutyOpen(false)}>Close</Button><Button href="/crew/calendar" variant="contained">Open calendar</Button></DialogActions>
+            </Dialog>
           </SectionCard>
 
           <SectionCard title="NLDC Data" subtitle="Last Day Demand trend & frequency Stat" icon={TrendingUp} action={

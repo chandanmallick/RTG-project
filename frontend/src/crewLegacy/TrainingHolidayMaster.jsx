@@ -29,6 +29,7 @@ Alert,
 Chip,
 CircularProgress,
 Stack,
+Tooltip,
 } from "@mui/material"
 
 import { ExpandLess, ExpandMore  } from "@mui/icons-material"
@@ -119,9 +120,17 @@ const [historyFY,setHistoryFY]=useState("")
 const [historyEmployee,setHistoryEmployee]=useState("")
 const [historyView,setHistoryView]=useState("history")
 const [matrixStatus,setMatrixStatus]=useState("All")
+const [matrixTrainingList,setMatrixTrainingList]=useState([])
 const [myApprovedTraining,setMyApprovedTraining]=useState([])
 const [myOffChoices,setMyOffChoices]=useState({})
 const [notice,setNotice]=useState(null)
+const calendarHolidayMap=useMemo(()=>{
+const result={}
+Object.values(calendarData).forEach((employees)=>(employees || []).forEach((employee)=>Object.entries(employee.duties || {}).forEach(([date,duty])=>{
+if(duty?.isHoliday) result[date]=duty.holidayName || "Holiday"
+})))
+return result
+},[calendarData])
 const [activeSection,setActiveSection]=useState(()=>new URLSearchParams(window.location.search).get("section") || null)
 const selectedApprovalDetail = pendingList.find((row)=>row.id===expandedApprovalId)
 
@@ -417,11 +426,14 @@ employeeId:historyEmployee
 
 setHistory(res.data || [])
 
+const programmeRes = await api.get(`/Training_holiday/training/${historyFY || selectedFY}`)
+setMatrixTrainingList(programmeRes.data || [])
+
 }
 
 useEffect(()=>{
 if(canViewTrainingPage) fetchHistory()
-},[historyFY,historyEmployee,canViewTrainingPage])
+},[historyFY,historyEmployee,selectedFY,canViewTrainingPage])
 
 const trainingHistory=useMemo(()=>(history || []).filter((row)=>(row.workflowKind || "Training")==="Training"),[history])
 
@@ -429,7 +441,17 @@ const matrixStatuses=useMemo(()=>Array.from(new Set(trainingHistory.map((row)=>r
 
 const nominationMatrix=useMemo(()=>{
 const rows=matrixStatus==="All" ? trainingHistory : trainingHistory.filter((row)=>row.status===matrixStatus)
-const programmes=Array.from(new Set(rows.map((row)=>row.trainingName || "Unnamed training"))).sort((a,b)=>a.localeCompare(b))
+const nominatedProgrammeNames=new Set(trainingHistory.map((row)=>row.trainingName || "Unnamed training"))
+const today=new Date().toISOString().slice(0,10)
+const zeroNominationUpcoming=matrixTrainingList.filter((programme)=>{
+const name=programme.trainingName || "Unnamed training"
+return Boolean(programme.startDate && programme.startDate>=today && !nominatedProgrammeNames.has(name))
+}).sort((a,b)=>String(a.startDate || "").localeCompare(String(b.startDate || "")) || String(a.trainingName || "").localeCompare(String(b.trainingName || "")))
+const zeroNominationUpcomingNames=Array.from(new Set(zeroNominationUpcoming.map((programme)=>programme.trainingName || "Unnamed training")))
+const zeroNominationUpcomingSet=new Set(zeroNominationUpcomingNames)
+const nominatedProgrammes=Array.from(new Set(rows.map((row)=>row.trainingName || "Unnamed training"))).filter((name)=>!zeroNominationUpcomingSet.has(name)).sort((a,b)=>a.localeCompare(b))
+const programmes=[...zeroNominationUpcomingNames,...nominatedProgrammes]
+const programmeDetails=Object.fromEntries(matrixTrainingList.map((programme)=>[programme.trainingName || "Unnamed training",programme]))
 const employees=new Map()
 
 const duration=(row)=>{
@@ -462,11 +484,21 @@ else employee.pending+=1
 
 return {
 programmes,
+programmeDetails,
+zeroNominationUpcomingNames,
 employees:Array.from(employees.values()).sort((a,b)=>a.employeeName.localeCompare(b.employeeName)),
 nominationCount:rows.length,
 approvedCount:rows.filter((row)=>row.status==="Approved").length,
 }
-},[trainingHistory,matrixStatus])
+},[trainingHistory,matrixStatus,matrixTrainingList])
+
+const trainingDaysSx=(days)=>{
+const value=Number(days || 0)
+if(value>=7) return {background:"#166534",color:"#FFFFFF",border:"1px solid #14532D"}
+if(value>5) return {background:"#BBF7D0",color:"#166534",border:"1px solid #4ADE80"}
+if(value>3) return {background:"#FEF08A",color:"#854D0E",border:"1px solid #FACC15"}
+return {background:"#FEE2E2",color:"#991B1B",border:"1px solid #FCA5A5"}
+}
 
 const statusChipSx=(status)=>{
 if(status==="Approved") return {background:"#DCFCE7",color:"#166534",border:"1px solid #86EFAC"}
@@ -1030,6 +1062,7 @@ Manage holiday masters, training programmes, nominations and approval workflows.
 
 <Box sx={{display:"flex",gap:1,mb:2,position:"sticky",top:0,zIndex:5,py:1,background:"#FFFFFF"}}>
 {["All","Shift","Non-shift"].map((value)=><Button key={value} size="small" variant={employeeTypeFilter===value ? "contained" : "outlined"} onClick={()=>setEmployeeTypeFilter(value)}>{value} employees</Button>)}
+<Stack direction="row" spacing={1} alignItems="center" sx={{ml:1}}><Chip size="small" label="Holiday" sx={{background:"#E9D5FF",color:"#6B21A8",border:"1px solid #A855F7",fontWeight:900}}/><Typography variant="caption">Full block: non-shift · H marker: shift duty continues</Typography></Stack>
 <Chip sx={{ml:"auto"}} color="primary" label={`${selectedEmployees.length} selected`} />
 </Box>
 
@@ -1051,8 +1084,9 @@ Manage holiday masters, training programmes, nominations and approval workflows.
 {calendarDates.map(date => {
 const item=trainingList.find((entry)=>entry.trainingName===selectedTraining)
 const highlighted=Boolean(item && date>=item.startDate && date<=item.endDate)
-return <TableCell key={date} align="center" sx={{background:highlighted ? "#D1FAE5" : undefined,color:highlighted ? "#065F46" : undefined,fontWeight:highlighted ? 900 : 600}}>
-{date}
+const holidayName=calendarHolidayMap[date]
+return <TableCell key={date} title={holidayName || undefined} align="center" sx={{background:holidayName ? "#F3E8FF" : highlighted ? "#D1FAE5" : undefined,color:holidayName ? "#6B21A8" : highlighted ? "#065F46" : undefined,fontWeight:highlighted || holidayName ? 900 : 600,borderBottom:holidayName ? "3px solid #A855F7" : undefined}}>
+{date}{holidayName && <Typography variant="caption" sx={{display:"block",fontWeight:900}}>Holiday</Typography>}
 </TableCell>
 })}
 
@@ -1081,6 +1115,8 @@ const shift = duty?.shift || "-"
 const trainingObj=trainingList.find((entry)=>entry.trainingName===selectedTraining)
 const isTrainingDate=Boolean(trainingObj && date>=trainingObj.startDate && date<=trainingObj.endDate)
 const hasLeave=Boolean(duty?.leaveStatus && !["Rejected","Cancelled","Withdrawn"].includes(duty.leaveStatus))
+const isHoliday=Boolean(duty?.isHoliday)
+const isNonShiftHoliday=isHoliday && emp.employeeType==="Non-shift"
 
 return(
 
@@ -1088,7 +1124,9 @@ return(
 key={date}
 align="center"
 sx={{
+position:"relative",
 backgroundColor:
+isNonShiftHoliday ? "#E9D5FF" :
 hasLeave ? "#FFF1F2" :
 shift==="Morning" ? "#E3F2FD" :
 shift==="Evening" ? "#FFF3E0" :
@@ -1096,15 +1134,19 @@ shift==="Night" ? "#E8F5E9" :
 shift==="OFF" ? "#FFEBEE" :
 "#fff",
 borderTop:isTrainingDate ? "3px solid #0F766E" : undefined,
+borderLeft:isHoliday ? "4px solid #A855F7" : undefined,
 minWidth:118
 }}
 >
 
+{isHoliday && !isNonShiftHoliday && <Tooltip title={`${duty.holidayName || "Holiday"} · shift duty continues`} arrow><Box sx={{position:"absolute",top:3,right:3,width:16,height:16,borderRadius:"50%",display:"grid",placeItems:"center",background:"#9333EA",color:"#FFF",fontSize:8,fontWeight:950}}>H</Box></Tooltip>}
+
 <Typography sx={{fontWeight:shift==="Training" ? 900 : 500}}>
-{shift}
+{isNonShiftHoliday ? "Holiday" : shift}
 </Typography>
+{isNonShiftHoliday && <Typography variant="caption" title={duty.holidayName} sx={{display:"block",color:"#6B21A8",fontWeight:900}}>{duty.holidayName}</Typography>}
 {isTrainingDate && <Typography variant="caption" sx={{display:"block",color:"#047857",fontWeight:900}}>Training date</Typography>}
-{hasLeave && <Typography variant="caption" sx={{display:"block",color:"#DC2626",fontWeight:900}}>Leave: {duty.leaveType || duty.leaveStatus}</Typography>}
+{hasLeave && <Typography variant="caption" sx={{display:"block",color:"#DC2626",fontWeight:900}}>Leave: {duty.stationLeaveOnly ? "Station Leave" : `${duty.leaveType || duty.leaveStatus}${duty.stationLeave ? " + Station Leave" : ""}`}</Typography>}
 {duty?.trainingName && (
 <Typography variant="caption" sx={{display:"block",maxWidth:130,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",color:"#6A1B9A"}}>
 {duty.trainingName}
@@ -1654,9 +1696,13 @@ sx={{
 <Table size="small" sx={{minWidth:Math.max(1050,620+(nominationMatrix.programmes.length*230))}}>
 <TableHead>
 <TableRow sx={{background:"#E0E7FF"}}>
-<TableCell sx={{fontWeight:900,minWidth:220,position:"sticky",left:0,zIndex:3,background:"#E0E7FF"}}>Employee</TableCell>
+<TableCell sx={{fontWeight:900,minWidth:260,position:"sticky",left:0,zIndex:3,background:"#E0E7FF"}}>Employee (training days / 7 days)</TableCell>
 <TableCell sx={{fontWeight:900,minWidth:140}}>Designation / Group</TableCell>
-{nominationMatrix.programmes.map((programme)=><TableCell key={programme} align="center" sx={{fontWeight:900,minWidth:230,borderLeft:"1px solid #C7D2FE"}}>{programme}</TableCell>)}
+{nominationMatrix.programmes.map((programme)=>{
+const noNominationUpcoming=nominationMatrix.zeroNominationUpcomingNames.includes(programme)
+const details=nominationMatrix.programmeDetails[programme] || {}
+return <TableCell key={programme} align="center" sx={{fontWeight:900,minWidth:230,borderLeft:"1px solid #C7D2FE",background:noNominationUpcoming ? "#FEE2E2" : "#E0E7FF",color:noNominationUpcoming ? "#991B1B" : "inherit"}}><Typography sx={{fontSize:12,fontWeight:950,color:"inherit"}}>{programme}</Typography>{noNominationUpcoming && <Chip size="small" label="Upcoming · No nomination" sx={{mt:.7,height:22,background:"#DC2626",color:"#FFFFFF",fontSize:10,fontWeight:900}}/>}{details.startDate && <Typography sx={{mt:.55,fontSize:10.5,fontWeight:750,color:noNominationUpcoming ? "#B91C1C" : "#64748B"}}>{details.startDate}{details.endDate && details.endDate!==details.startDate ? ` to ${details.endDate}` : ""}</Typography>}</TableCell>
+})}
 <TableCell align="center" sx={{fontWeight:900,minWidth:90}}>Total</TableCell>
 <TableCell align="center" sx={{fontWeight:900,minWidth:90}}>Approved</TableCell>
 <TableCell align="center" sx={{fontWeight:900,minWidth:90}}>Pending</TableCell>
@@ -1666,9 +1712,9 @@ sx={{
 </TableHead>
 <TableBody>
 {!nominationMatrix.employees.length ? <TableRow><TableCell colSpan={nominationMatrix.programmes.length+7} align="center" sx={{py:5,color:"#64748B"}}>No nomination data found for the selected filters.</TableCell></TableRow> : nominationMatrix.employees.map((employee)=><TableRow key={employee.employeeId} hover>
-<TableCell sx={{position:"sticky",left:0,zIndex:2,background:"#FFFFFF"}}><Typography sx={{fontWeight:900,fontSize:13}}>{employee.employeeName}</Typography><Typography variant="caption" color="text.secondary">{employee.employeeId} · {employee.employeeType}</Typography></TableCell>
+<TableCell sx={{position:"sticky",left:0,zIndex:2,background:"#FFFFFF"}}><Stack direction="row" spacing={.8} alignItems="center" justifyContent="space-between"><Typography sx={{fontWeight:900,fontSize:13}}>{employee.employeeName}</Typography><Chip size="small" label={`${employee.approvedDays} days / 7 days`} sx={{height:23,fontSize:10.5,fontWeight:950,...trainingDaysSx(employee.approvedDays)}}/></Stack><Typography variant="caption" color="text.secondary">{employee.employeeId} · {employee.employeeType}</Typography></TableCell>
 <TableCell><Typography sx={{fontSize:12,fontWeight:750}}>{employee.designation}</Typography><Typography variant="caption" color="text.secondary">{employee.groupName}</Typography></TableCell>
-{nominationMatrix.programmes.map((programme)=><TableCell key={programme} sx={{borderLeft:"1px solid #EEF2FF",verticalAlign:"top"}}>
+{nominationMatrix.programmes.map((programme)=><TableCell key={programme} sx={{borderLeft:"1px solid #EEF2FF",verticalAlign:"top",background:nominationMatrix.zeroNominationUpcomingNames.includes(programme) ? "#FFF5F5" : undefined}}>
 <Stack spacing={.7}>{(employee.cells[programme] || []).map((item)=><Box key={item.id} sx={{p:.8,borderRadius:1.5,background:"#F8FAFC"}}><Chip size="small" label={item.status || "Unknown"} sx={{height:21,fontSize:10,fontWeight:850,...statusChipSx(item.status)}}/><Typography sx={{mt:.45,fontSize:10.5,color:"#475569"}}>{item.startDate || item.trainingDate}{item.endDate && item.endDate!==item.startDate ? ` to ${item.endDate}` : ""}</Typography></Box>)}</Stack>
 </TableCell>)}
 <TableCell align="center" sx={{fontWeight:900}}>{employee.total}</TableCell>

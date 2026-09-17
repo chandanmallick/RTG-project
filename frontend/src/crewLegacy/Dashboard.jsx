@@ -45,6 +45,7 @@ export default function Dashboard() {
   const [topReplacement, setTopReplacement] = useState([]);
   const [generalNotifications, setGeneralNotifications] = useState([]);
   const [loadingSecondary, setLoadingSecondary] = useState(false);
+  const [tomorrowDutyOpen, setTomorrowDutyOpen] = useState(false);
   
 
   const [duty,setDuty] = useState({
@@ -529,12 +530,24 @@ export default function Dashboard() {
             {renderShift("Night", duty.today?.Night)}
           </Paper>
 
-          <Paper sx={{ p:2, borderRadius:3, background:"#ffd54f" }}>
-            <Typography fontWeight="bold">Tomorrow Duty</Typography>
+          <Paper role="button" tabIndex={0} onClick={() => setTomorrowDutyOpen(true)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") setTomorrowDutyOpen(true); }} sx={{ p:2, borderRadius:3, background:"#ffd54f", cursor: "pointer", transition: "transform .2s, box-shadow .2s", "&:hover": { transform: "translateY(-2px)", boxShadow: "0 10px 24px rgba(15,23,42,.14)" } }}>
+            <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 1 }}><Typography fontWeight="bold">Tomorrow Duty</Typography><Chip size="small" label="Click to popup" sx={{ fontWeight: 850, background: "#FFF8D6" }} /></Box>
             {renderShift("Morning", duty.tomorrow?.Morning)}
             {renderShift("Evening", duty.tomorrow?.Evening)}
             {renderShift("Night", duty.tomorrow?.Night)}
           </Paper>
+
+          <Dialog open={tomorrowDutyOpen} onClose={() => setTomorrowDutyOpen(false)} fullWidth maxWidth="sm">
+            <DialogTitle sx={{ fontWeight: 900 }}>Tomorrow duty · {dayjs().add(1, "day").format("DD MMM YYYY")}</DialogTitle>
+            <DialogContent dividers>
+              {renderShift("Morning", duty.tomorrow?.Morning)}
+              <Divider sx={{ my: 1.2 }} />
+              {renderShift("Evening", duty.tomorrow?.Evening)}
+              <Divider sx={{ my: 1.2 }} />
+              {renderShift("Night", duty.tomorrow?.Night)}
+            </DialogContent>
+            <DialogActions><Button onClick={() => setTomorrowDutyOpen(false)}>Close</Button><Button variant="contained" onClick={() => navigate("/crew/calendar")}>Open calendar</Button></DialogActions>
+          </Dialog>
 
         </Grid>
 

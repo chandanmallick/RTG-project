@@ -19,6 +19,7 @@ const crewApi = {
   health: () => client.get(url("/health")).then((response) => response.data),
   employees: () => client.get(url("/employees")).then((response) => response.data),
   groups: () => client.get(url("/groups")).then((response) => response.data),
+  holidays: (year) => client.get(url(`/Training_holiday/holiday/${year}`)).then((response) => response.data),
   createGroup: (payload) => client.post(url("/groups"), payload).then((response) => response.data),
   updateGroup: (id, payload) => client.put(url(`/groups/${id}`), payload).then((response) => response.data),
   toggleGroup: (id) => client.patch(url(`/groups/${id}/status`)).then((response) => response.data),

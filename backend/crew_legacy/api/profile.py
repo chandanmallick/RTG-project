@@ -246,10 +246,11 @@ def _current_organization(employee: dict, employee_id: str) -> dict:
     direct_unit_heads = next((level.get("headEmployeeIds") or [] for level in (group_context.get("authorityLevels") or []) if level.get("headEmployeeIds")), [])
     department_heads = next((level.get("headEmployeeIds") or [] for level in (group_context.get("authorityLevels") or []) if level.get("unitType") == "department" and level.get("headEmployeeIds")), [])
     group_sic_id = str(sic.get("employeeId") or "").strip()
-    reporting_ids = list(dict.fromkeys(
-        ([group_sic_id] if group_sic_id and group_sic_id != employee_id else direct_unit_heads)
-        + list(resolved.get("reportingOfficerIds") or [])
-    ))
+    reporting_ids = (
+        [group_sic_id]
+        if group_sic_id and group_sic_id != employee_id
+        else list(resolved.get("reportingOfficerIds") or direct_unit_heads)
+    )
     return {
         **resolved,
         "verticalIds": resolved.get("verticalIds") or ([group_context.get("verticalId")] if group_context.get("verticalId") else []),
@@ -648,7 +649,7 @@ def activity_matrix(
     approved_leave_dates = {
         (str(leave.get("employeeId") or "").strip(), _report_date(leave.get("date")))
         for leave in approved_leaves
-        if str(leave.get("employeeId") or "").strip() and _report_date(leave.get("date"))
+        if str(leave.get("employeeId") or "").strip() and _report_date(leave.get("date")) and not leave.get("stationLeaveOnly")
     }
 
     for daily in employee_daily_collection.find(
@@ -681,6 +682,8 @@ def activity_matrix(
         if not employee_id:
             continue
         row = people.setdefault(employee_id, empty_row(employee_id, leave.get("name") or employee_id))
+        if leave.get("stationLeaveOnly"):
+            continue
         leave_type = str(leave.get("leaveType") or "Other").strip() or "Other"
         if leave_type.upper().replace(" ", "-") in {"C-OFF", "COFF"}:
             comp_off_key = (employee_id, _report_date(leave.get("date")))
@@ -1068,41 +1071,65 @@ def crms_duty_reconciliation(
                 "status": "Rostered but absent",
             })
 
-    summary_rows = {}
+    # A person can be posted at multiple CRMS desks simultaneously.  Counts are
+    # therefore duty counts (employee + date + shift), not desk-posting counts.
+    # Individual desks remain in `details` as evidence for the comparison popup.
+    matched_statuses = {"Matched", "Replacement match", "Reassigned match"}
+    duty_groups = {}
     for item in details:
-        key = item.get("employeeId") or f"unmapped:{_crms_name_key(item.get('crmsName'))}"
-        row = summary_rows.setdefault(key, {
-            "employeeId": item.get("employeeId") or "", "employeeName": item.get("employeeName") or item.get("crmsName") or "Unmapped",
+        identity = item.get("employeeId") or f"unmapped:{_crms_name_key(item.get('crmsName'))}"
+        duty_key = (identity, item.get("date") or "", item.get("shift") or "")
+        duty_groups.setdefault(duty_key, []).append(item)
+
+    summary_rows = {}
+    matched_count = 0
+    exception_count = 0
+    actual_assignment_count = 0
+    rostered_absent_count = 0
+    unmapped_count = 0
+    for (identity, _date, shift), duty_items in duty_groups.items():
+        representative = duty_items[0]
+        row = summary_rows.setdefault(identity, {
+            "employeeId": representative.get("employeeId") or "",
+            "employeeName": representative.get("employeeName") or representative.get("crmsName") or "Unmapped",
             "Morning": 0, "Evening": 0, "Night": 0, "actualDuties": 0, "matched": 0,
             "replacementDuties": 0, "exceptions": 0, "rosteredButAbsent": 0, "deskCounts": {},
         })
-        if item["status"] == "Rostered but absent":
+        is_absent = all(item.get("status") == "Rostered but absent" for item in duty_items)
+        if is_absent:
             row["rosteredButAbsent"] += 1
             row["exceptions"] += 1
+            rostered_absent_count += 1
+            exception_count += 1
             continue
+
+        actual_items = [item for item in duty_items if item.get("status") != "Rostered but absent"]
+        actual_assignment_count += 1
         row["actualDuties"] += 1
-        if item.get("shift") in {"Morning", "Evening", "Night"}:
-            row[item["shift"]] += 1
-        row["deskCounts"][item.get("desk") or "Other"] = row["deskCounts"].get(item.get("desk") or "Other", 0) + 1
-        if item["status"] in {"Matched", "Replacement match", "Reassigned match"}:
+        if shift in {"Morning", "Evening", "Night"}:
+            row[shift] += 1
+        for desk in {item.get("desk") or "Other" for item in actual_items}:
+            row["deskCounts"][desk] = row["deskCounts"].get(desk, 0) + 1
+        duty_matched = bool(actual_items) and all(item.get("status") in matched_statuses for item in actual_items)
+        if duty_matched:
             row["matched"] += 1
+            matched_count += 1
         else:
             row["exceptions"] += 1
-        if item.get("replacementDuty"):
+            exception_count += 1
+        if any(item.get("replacementDuty") for item in actual_items):
             row["replacementDuties"] += 1
-
-    actual_details = [item for item in details if item["status"] != "Rostered but absent"]
-    matched_count = sum(item["status"] in {"Matched", "Replacement match", "Reassigned match"} for item in actual_details)
-    exception_count = sum(item["status"] not in {"Matched", "Replacement match", "Reassigned match"} for item in details)
+        if any(item.get("status") == "Unmapped employee" for item in actual_items):
+            unmapped_count += 1
     return {
         "startDate": startDate, "endDate": endDate, "source": source, "sourceUrl": CRMS_LOGBOOK_URL,
         "sourceWarning": source_error, "logCount": len(logs),
         "summary": {
-            "actualAssignments": len(actual_details), "matched": matched_count,
-            "matchPercent": round((matched_count / len(actual_details) * 100), 1) if actual_details else 0,
+            "actualAssignments": actual_assignment_count, "matched": matched_count,
+            "matchPercent": round((matched_count / actual_assignment_count * 100), 1) if actual_assignment_count else 0,
             "exceptions": exception_count,
-            "unmapped": sum(item["status"] == "Unmapped employee" for item in actual_details),
-            "rosteredButAbsent": sum(item["status"] == "Rostered but absent" for item in details),
+            "unmapped": unmapped_count,
+            "rosteredButAbsent": rostered_absent_count,
         },
         "deskRoles": [label for _, label in role_fields] + ["Additional employee"],
         "statuses": sorted({item["status"] for item in details}),

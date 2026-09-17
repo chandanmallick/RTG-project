@@ -246,6 +246,8 @@ MORNING_HEADERS = {
     "gazuwaka_jeypore_1": ("GAZUAKAJEPORE1",),
     "gazuwaka_jeypore_2": ("GAZUAKAJEYPORE2",),
     "bheramara": ("BANGLADESHDRAWLHVDC",),
+    "nepal_bihar_schedule": ("NEABIHARSTATESCHEDNET", "04245332"),
+    "nepal_bihar_actual": ("NEPALDRAWLFROMBIHAR", "04247883"),
     "india_demand": ("DEMAND",),
     "solar": ("SOLAR",),
     "wind": ("WIND",),
@@ -385,7 +387,7 @@ def series_extreme(rows, field, mode):
     return {"value": round(value, 3), "time": row["time"]}
 
 
-def psp_morning_values(report_date):
+def psp_morning_values(report_date, nepal_bihar=None):
     db = MongoService().db
     psp = db["psp_data"].find_one({"date": report_date}, {"_id": 0}) or {}
     curve = db["psp_curve_metrics"].find_one({"date": report_date}, {"_id": 0}) or {}
@@ -399,6 +401,13 @@ def psp_morning_values(report_date):
     states = {compact(row.get("STATE_NAME")): row for row in psp.get("pspTransnationalExchangeState", [])}
     lines = {compact(row.get("LINE_NAME")): row for row in psp.get("pspTransnationalExchangeLine", [])}
     nepal_line = next((row for key, row in lines.items() if "132KVBIHARNEPAL" in key), {})
+    nepal_bihar = nepal_bihar or {}
+    nepal_bihar_schedule = numeric(nepal_bihar.get("schedule_mu"))
+    nepal_bihar_actual = numeric(nepal_bihar.get("actual_mu"))
+    if nepal_bihar_actual is None:
+        # PSP ENERGY_EXCHANGE is the integrated actual for the Bihar-Nepal
+        # line. It must never be reused as the schedule.
+        nepal_bihar_actual = numeric(nepal_line.get("ENERGY_EXCHANGE"))
     return {
         "available": bool(psp),
         "demand_frequency": {
@@ -430,8 +439,8 @@ def psp_morning_values(report_date):
                 "actual_mu": numeric(states.get("BANGLADESH", {}).get("ACTUAL_EX")),
             },
             "NEPAL BIHAR": {
-                "schedule_mu": numeric(nepal_line.get("ENERGY_EXCHANGE")),
-                "actual_mu": numeric(nepal_line.get("ENERGY_EXCHANGE")),
+                "schedule_mu": nepal_bihar_schedule,
+                "actual_mu": nepal_bihar_actual,
             },
         },
         "source": {
@@ -439,6 +448,9 @@ def psp_morning_values(report_date):
             "curve_collection": "psp_curve_metrics",
             "date": report_date,
             "curve_source": (curve.get("meta") or {}).get("file"),
+            "nepal_bihar_schedule_point": "NEA_Bihar_State_SCHED_NET (04245332)",
+            "nepal_bihar_actual_point": "NEPAL_DRAWL_FROM_BIHAR (04247883)",
+            "nepal_bihar_actual_fallback": "pspTransnationalExchangeLine.ENERGY_EXCHANGE" if numeric(nepal_bihar.get("actual_mu")) is None else None,
         },
     }
 
@@ -475,7 +487,19 @@ def build_morning_results(rows, report_date):
     hvdc["AGRA_ALIPURDUAR"]["label"] = "+/- 800 kV Alipurduar - Agra"
     hvdc["AGRA_BNC"]["label"] = "+/- 800 kV BNC - Agra"
     hvdc["TALCHER_KOLAR"]["label"] = "+/- 500 kV Talcher-Kolar"
-    psp = psp_morning_values(report_date)
+    def daily_energy_mu(field):
+        values = [numeric(row.get(field)) for row in yesterday_rows]
+        values = [value for value in values if value is not None]
+        # A daily MU must not be calculated from a partial curve. The normal
+        # one-minute morning source supplies 1,440 samples for yesterday.
+        if len(values) < 1_400:
+            return None
+        return round(abs(sum(values)) / 60_000, 5)
+
+    psp = psp_morning_values(report_date, {
+        "schedule_mu": daily_energy_mu("nepal_bihar_schedule"),
+        "actual_mu": daily_energy_mu("nepal_bihar_actual"),
+    })
     # PSP curve metrics do not retain the min-demand timestamp; use the matching
     # uploaded yesterday curve time while retaining the PSP minimum value.
     if not psp["demand_frequency"].get("min_demand_time") and psp["demand_frequency"].get("min_demand_mw") is not None and yesterday_rows:

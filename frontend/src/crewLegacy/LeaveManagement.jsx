@@ -46,10 +46,17 @@ const statusColor = (status) => ({
   Pending: "warning",
 }[status] || "default");
 
-const compactDutyStyle = (duty = {}) => {
+const stationLeaveLabel = (record = {}) => {
+  if (record.stationLeaveOnly) return "Station Leave";
+  const leaveType = record.leaveType || "Leave";
+  return record.stationLeave ? `${leaveType} + Station Leave` : leaveType;
+};
+
+const compactDutyStyle = (duty = {}, employeeType = "Shift") => {
   const leave = String(duty.leaveStatus || "").toLowerCase();
   const shift = String(duty.shift || "").toUpperCase();
   const activeLeave = leave && !["rejected", "cancelled", "canceled", "withdrawn"].includes(leave);
+  if (duty.isHoliday && employeeType === "Non-shift") return { bg: "#E9D5FF", color: "#581C87", border: "#A855F7" };
   if (leave === "approved") return { bg: "#FEE2E2", color: "#B91C1C", border: "#F87171" };
   if (activeLeave) return { bg: "#FFEDD5", color: "#C2410C", border: "#FB923C" };
   if (duty.trainingName || shift.includes("TRAINING") || shift.includes("TOUR")) return { bg: "#F3E8FF", color: "#6B21A8", border: "#C4B5FD" };
@@ -129,6 +136,9 @@ export default function LeaveManagement({ embeddedApproval = false, initialAppro
   const [selectedTrainingApprovalIds, setSelectedTrainingApprovalIds] = useState([]);
   const [trainingOffChoices, setTrainingOffChoices] = useState({});
   const [expandedTrainingApprovalId, setExpandedTrainingApprovalId] = useState("");
+  const [delegations, setDelegations] = useState([]);
+  const [delegationEmployees, setDelegationEmployees] = useState([]);
+  const [delegationForm, setDelegationForm] = useState({ delegateEmployeeId: "", startDate: dayjs().format("YYYY-MM-DD"), endDate: dayjs().format("YYYY-MM-DD"), reason: "" });
 
   const openSection = (section) => {
     setActiveSection(section);
@@ -154,6 +164,20 @@ export default function LeaveManagement({ embeddedApproval = false, initialAppro
     setLeaves(data || []);
   };
 
+  const loadDelegations = async () => {
+    try {
+      const { data } = await api.get("/leave/delegations");
+      setDelegations(data || []);
+    } catch { setDelegations([]); }
+  };
+
+  const loadDelegationEmployees = async () => {
+    try {
+      const { data } = await api.get("/leave/delegation-employees");
+      setDelegationEmployees(data || []);
+    } catch { setDelegationEmployees([]); }
+  };
+
   const loadPage = async () => {
     setLoading(true);
     try {
@@ -169,6 +193,8 @@ export default function LeaveManagement({ embeddedApproval = false, initialAppro
       setLeaveTypes(typeResult.data || []);
       setRole(roleResult.data || {});
       setLeaves(leaveResult.data || []);
+      loadDelegations();
+      loadDelegationEmployees();
       setSelectedEmployee((current) => current || people.find((item) => employeeIdOf(item) === currentId) || people[0] || null);
     } catch (error) {
       setNotice({ severity: "error", text: error.response?.data?.detail || "Unable to load leave management." });
@@ -178,6 +204,27 @@ export default function LeaveManagement({ embeddedApproval = false, initialAppro
   };
 
   useEffect(() => { loadPage(); }, []);
+
+  const saveDelegation = async () => {
+    try {
+      setWorking(true);
+      await api.post("/leave/delegations", delegationForm);
+      setNotice({ severity: "success", text: "Temporary leave-approval delegation saved." });
+      setDelegationForm({ delegateEmployeeId: "", startDate: dayjs().format("YYYY-MM-DD"), endDate: dayjs().format("YYYY-MM-DD"), reason: "" });
+      await Promise.all([loadDelegations(), loadLeaves()]);
+    } catch (error) { setNotice({ severity: "error", text: error.response?.data?.detail || "Unable to save delegation." }); }
+    finally { setWorking(false); }
+  };
+
+  const revokeDelegation = async (id) => {
+    try {
+      setWorking(true);
+      await api.put(`/leave/delegations/${id}/revoke`);
+      setNotice({ severity: "success", text: "Leave-approval delegation revoked." });
+      await Promise.all([loadDelegations(), loadLeaves()]);
+    } catch (error) { setNotice({ severity: "error", text: error.response?.data?.detail || "Unable to revoke delegation." }); }
+    finally { setWorking(false); }
+  };
   const loadApprovedTraining = async () => {
     try {
       const { data } = await api.get("/training-assign/my-approved");
@@ -224,7 +271,13 @@ export default function LeaveManagement({ embeddedApproval = false, initialAppro
     setWorking(true);
     try {
       const { data } = await api.get("/leave/duty-detailed", { params: { employeeId: employeeIdOf(selectedEmployee), startDate, endDate } });
-      setRows((data || []).map((row) => ({ ...row, selected: true, leaveType: "", compOffId: "" })));
+      setRows((data || []).map((row) => ({
+        ...row,
+        selected: !row.stationLeaveOnlyAllowed,
+        leaveType: "",
+        compOffId: "",
+        stationLeave: false,
+      })));
       if (!data?.length) setNotice({ severity: "warning", text: "No roster or General duty rows exist in this range." });
     } catch (error) {
       setNotice({ severity: "error", text: error.response?.data?.detail || "Duty could not be loaded." });
@@ -234,25 +287,30 @@ export default function LeaveManagement({ embeddedApproval = false, initialAppro
   };
 
   const updateRow = (index, patch) => setRows((current) => current.map((row, rowIndex) => rowIndex === index ? { ...row, ...patch } : row));
-  const setLeaveType = (index, leaveType) => updateRow(index, { leaveType, compOffId: leaveType === "C-OFF" ? rows[index]?.compOffId || "" : "", selected: true });
+  const setLeaveType = (index, leaveType) => {
+    if (rows[index]?.stationLeaveOnlyAllowed) return;
+    updateRow(index, { leaveType, compOffId: leaveType === "C-OFF" ? rows[index]?.compOffId || "" : "", selected: true });
+  };
 
   const startFill = (event, index) => {
     const leaveType = rows[index]?.leaveType;
-    if (!leaveType || leaveType === "C-OFF") return;
+    if (!leaveType || leaveType === "C-OFF" || rows[index]?.stationLeaveOnlyAllowed) return;
     event.preventDefault();
     dragFill.current = { leaveType };
     updateRow(index, { selected: true });
   };
   const continueFill = (index) => {
-    if (!dragFill.current) return;
+    if (!dragFill.current || rows[index]?.stationLeaveOnlyAllowed) return;
     updateRow(index, { leaveType: dragFill.current.leaveType, compOffId: "", selected: true });
   };
 
   const submit = async () => {
     const selectedRows = rows.filter((row) => row.selected);
     if (!selectedRows.length) return setNotice({ severity: "warning", text: "Select at least one duty row." });
-    const missingType = selectedRows.find((row) => !row.leaveType);
-    if (missingType) return setNotice({ severity: "warning", text: `Select a leave type for ${missingType.date}.` });
+    const invalidNonWorkingType = selectedRows.find((row) => row.stationLeaveOnlyAllowed && row.leaveType);
+    if (invalidNonWorkingType) return setNotice({ severity: "warning", text: `Remove the leave type from ${invalidNonWorkingType.date}; only Station Leave is allowed.` });
+    const missingType = selectedRows.find((row) => !row.stationLeaveOnlyAllowed && !row.leaveType);
+    if (missingType) return setNotice({ severity: "warning", text: `Select a leave type for working day ${missingType.date}.` });
     const missingCompOff = selectedRows.find((row) => row.leaveType === "C-OFF" && !row.compOffId);
     if (missingCompOff) return setNotice({ severity: "warning", text: `Select a C-OFF credit for ${missingCompOff.date}.` });
     if (!reason.trim()) return setNotice({ severity: "warning", text: "Enter the reason for leave." });
@@ -261,7 +319,7 @@ export default function LeaveManagement({ embeddedApproval = false, initialAppro
       const { data } = await api.post("/leave/apply", {
         employeeId: employeeIdOf(selectedEmployee),
         reason: reason.trim(),
-        applications: selectedRows.map(({ date, leaveType, compOffId }) => ({ date, leaveType, compOffId: compOffId || null })),
+        applications: selectedRows.map(({ date, leaveType, compOffId, stationLeave }) => ({ date, leaveType, compOffId: compOffId || null, stationLeave: Boolean(stationLeave) })),
       });
       setNotice({ severity: "success", text: data.message });
       setRows([]);
@@ -497,6 +555,13 @@ export default function LeaveManagement({ embeddedApproval = false, initialAppro
       employees: (group.employees || []).filter((employee) => (employee.departments || []).includes(approvalDepartment)),
     })).filter((group) => group.employees.length);
   }, [approvalRoster, approvalDepartment]);
+  const approvalHolidayMap = useMemo(() => {
+    const result = {};
+    approvalRoster.forEach((group) => (group.employees || []).forEach((employee) => Object.entries(employee.duties || {}).forEach(([date, duty]) => {
+      if (duty?.isHoliday) result[date] = duty.holidayName || "Holiday";
+    })));
+    return result;
+  }, [approvalRoster]);
   const usedCompOffIds = rows.map((row) => row.compOffId).filter(Boolean);
 
   const toggleWorkflowSelection = (leaveId, checked) => {
@@ -632,7 +697,7 @@ export default function LeaveManagement({ embeddedApproval = false, initialAppro
                                   <Checkbox size="small" checked={selected} onChange={(event) => toggleWorkflowSelection(leave.id, event.target.checked)} sx={{ p: .25 }} />
                                   <Box sx={{ minWidth: 0, flex: 1 }}>
                                     <Typography noWrap title={leave.name} sx={{ color: "#0F172A", fontSize: 10.5, fontWeight: 950 }}>{leave.name}</Typography>
-                                    <Typography noWrap sx={{ color: "#64748B", fontSize: 9.2, fontWeight: 700 }}>{leave.dutyType || leave.assignedDuty || "-"} · {leave.leaveType} · {stage}</Typography>
+                                    <Typography noWrap sx={{ color: "#64748B", fontSize: 9.2, fontWeight: 700 }}>{leave.dutyType || leave.assignedDuty || "-"} · {stationLeaveLabel(leave)} · {stage}</Typography>
                                   </Box>
                                 </Stack>
                                 {leave.approvalMode !== "Organization" && <Stack direction="row" alignItems="center" spacing={.15} sx={{ pl: .3, mt: .15 }}>
@@ -703,6 +768,7 @@ export default function LeaveManagement({ embeddedApproval = false, initialAppro
           <Stack direction="row" alignItems="center" spacing={.25}><Checkbox size="small" disabled sx={{ p: 0, "& .MuiSvgIcon-root": { fontSize: 15 } }} /><Typography sx={{ fontSize: 10, color: "#475569" }}>Tick a leave cell, date heading, or employee checkbox to select visible leave for approval/rejection.</Typography></Stack>
           <Stack direction="row" alignItems="center" spacing={.45}><Box sx={{ width: 17, height: 17, borderRadius: .7, display: "grid", placeItems: "center", color: "#FFF", background: "#D97706", fontSize: 8, fontWeight: 950 }}>R</Box><Typography sx={{ fontSize: 10, color: "#475569" }}>Amber R = replacement required; grey R = not required. DIC may change SIC's choice.</Typography></Stack>
           <Stack direction="row" alignItems="center" spacing={.4}><CheckCircle2 size={15} color="#15803D" strokeWidth={3} /><Typography sx={{ fontSize: 10, color: "#475569" }}>Green tick = leave finally approved.</Typography></Stack>
+          <Stack direction="row" alignItems="center" spacing={.4}><Box sx={{ width: 17, height: 17, borderRadius: .7, display: "grid", placeItems: "center", background: "#E9D5FF", border: "1px solid #A855F7", color: "#6B21A8", fontSize: 8, fontWeight: 950 }}>H</Box><Typography sx={{ fontSize: 10, color: "#475569" }}>Purple block = non-shift holiday; purple H = shift holiday with duty continuing.</Typography></Stack>
         </Box>
 
         {approvalCalendarError && <Alert severity="error">{approvalCalendarError}</Alert>}
@@ -717,7 +783,8 @@ export default function LeaveManagement({ embeddedApproval = false, initialAppro
                   {approvalDates.map((date) => {
                     const ids = visibleCalendarLeaves.filter((leave) => leave.date === date).map((leave) => leave.id);
                     const selectedCount = ids.filter((id) => selectedWorkflowIds.includes(id)).length;
-                    return <TableCell key={date} align="center" sx={{ width: 92, p: .25, background: "#EAF2FF" }}><Stack direction="row" justifyContent="center" alignItems="center" spacing={0}><Checkbox size="small" disabled={!ids.length} checked={ids.length > 0 && selectedCount === ids.length} indeterminate={selectedCount > 0 && selectedCount < ids.length} onChange={(event) => toggleCalendarDate(date, event.target.checked)} sx={{ p: .2 }} /><Box><Typography sx={{ fontSize: 9.5, fontWeight: 950 }}>{dayjs(date).format("DD MMM")}</Typography><Typography sx={{ color: "#64748B", fontSize: 8 }}>{dayjs(date).format("ddd")}</Typography></Box></Stack></TableCell>;
+                    const holidayName = approvalHolidayMap[date];
+                    return <TableCell key={date} title={holidayName || undefined} align="center" sx={{ width: 92, p: .25, background: holidayName ? "#F3E8FF" : "#EAF2FF", borderBottom: holidayName ? "3px solid #A855F7" : undefined }}><Stack direction="row" justifyContent="center" alignItems="center" spacing={0}><Checkbox size="small" disabled={!ids.length} checked={ids.length > 0 && selectedCount === ids.length} indeterminate={selectedCount > 0 && selectedCount < ids.length} onChange={(event) => toggleCalendarDate(date, event.target.checked)} sx={{ p: .2 }} /><Box><Typography sx={{ fontSize: 9.5, fontWeight: 950, color: holidayName ? "#6B21A8" : undefined }}>{dayjs(date).format("DD MMM")}</Typography><Typography sx={{ color: holidayName ? "#7E22CE" : "#64748B", fontSize: 8 }}>{dayjs(date).format("ddd")}{holidayName ? " · Holiday" : ""}</Typography></Box></Stack></TableCell>;
                   })}
                 </TableRow>
               </TableHead>
@@ -742,7 +809,9 @@ export default function LeaveManagement({ embeddedApproval = false, initialAppro
                       </TableCell>
                       {approvalDates.map((date) => {
                         const duty = person.duties?.[date] || { shift: "-" };
-                        const palette = compactDutyStyle(duty);
+                        const palette = compactDutyStyle(duty, person.employeeType);
+                        const isHoliday = Boolean(duty.isHoliday);
+                        const isNonShiftHoliday = isHoliday && person.employeeType === "Non-shift";
                         const leave = leaveByEmployeeDate.get(`${person.employeeId}:${date}`);
                         const actionable = Boolean(leave?.canSICAct || leave?.canFinalAct);
                         const selected = actionable && selectedWorkflowIds.includes(leave.id);
@@ -756,7 +825,7 @@ export default function LeaveManagement({ embeddedApproval = false, initialAppro
                         const replacementChecked = actionable ? replacementChoice(leave, replacementStage) : false;
                         const timeline = leave ? (
                           <Box sx={{ p: .35 }}>
-                            <Typography sx={{ fontSize: 11, fontWeight: 950 }}>{leave.name} · {leave.leaveType}</Typography>
+                            <Typography sx={{ fontSize: 11, fontWeight: 950 }}>{leave.name} · {stationLeaveLabel(leave)}</Typography>
                             <Typography sx={{ mt: .45, fontSize: 10 }}>Applied: {leave.createdOn ? dayjs(leave.createdOn).format("DD MMM YYYY, HH:mm") : "Time not recorded"}</Typography>
                             {leave.approvalMode === "Organization" && <Typography sx={{ fontSize: 10 }}>Hierarchy: {(leave.approvalChain || []).map((step) => `${step.level}: ${step.status}`).join(" → ")} · {leave.approvalProgress}</Typography>}
                             <Typography sx={{ fontSize: 10, display: leave.approvalMode === "Organization" ? "none" : "block" }}>SIC: {sicForwarded ? "Approved & Forwarded" : leave.sicApprovalStatus || "Pending"}{sicDecision?.decidedOn ? ` · ${dayjs(sicDecision.decidedOn).format("DD MMM YYYY, HH:mm")}` : ""}</Typography>
@@ -767,9 +836,10 @@ export default function LeaveManagement({ embeddedApproval = false, initialAppro
                         return (
                           <TableCell key={`${person.employeeId}-${date}`} align="center" sx={{ p: .2 }}>
                             <Tooltip title={timeline} arrow placement="top">
-                              <Box sx={{ minHeight: 27, px: .18, py: .18, borderRadius: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: .05, background: selected ? "#DBEAFE" : palette.bg, color: palette.color, border: `1px solid ${actionable ? selected ? "#0057B7" : "#EF4444" : palette.border}` }}>
+                              <Box sx={{ position: "relative", minHeight: 27, px: .18, py: .18, borderRadius: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: .05, backgroundColor: selected ? "#DBEAFE" : palette.bg, backgroundImage: isHoliday && !isNonShiftHoliday ? "linear-gradient(90deg,#A855F7 0 3px,transparent 3px)" : "none", color: palette.color, border: `1px solid ${actionable ? selected ? "#0057B7" : "#EF4444" : isHoliday ? "#A855F7" : palette.border}` }}>
+                                {isHoliday && !isNonShiftHoliday && <Tooltip title={`${duty.holidayName || "Holiday"} · shift duty continues`} arrow><Box sx={{ position: "absolute", top: 1, right: 1, width: 12, height: 12, borderRadius: "50%", display: "grid", placeItems: "center", background: "#9333EA", color: "#FFF", fontSize: 6.5, fontWeight: 950 }}>H</Box></Tooltip>}
                                 {actionable && <Checkbox size="small" checked={Boolean(selected)} onChange={(event) => toggleWorkflowSelection(leave.id, event.target.checked)} sx={{ p: 0, color: "#DC2626", "&.Mui-checked": { color: "#0057B7" }, "& .MuiSvgIcon-root": { fontSize: 14 } }} />}
-                                <Box sx={{ minWidth: 0, flex: 1 }}><Typography sx={{ fontSize: 8.6, lineHeight: 1.05, fontWeight: 950 }}>{duty.shift || "-"}</Typography>{duty.leaveStatus && <Typography noWrap sx={{ maxWidth: 52, mx: "auto", fontSize: 6.5, lineHeight: 1.05, fontWeight: 900 }}>{duty.leaveType || "Leave"} · {sicForwarded ? "Approved & Forwarded" : duty.leaveStatus}</Typography>}</Box>
+                                <Box sx={{ minWidth: 0, flex: 1 }}><Typography sx={{ fontSize: 8.6, lineHeight: 1.05, fontWeight: 950 }}>{isNonShiftHoliday ? "Holiday" : duty.shift || "-"}</Typography>{isNonShiftHoliday && <Typography noWrap title={duty.holidayName} sx={{ maxWidth: 62, mx: "auto", fontSize: 6.5, lineHeight: 1.05, fontWeight: 800 }}>{duty.holidayName}</Typography>}{duty.leaveStatus && <Typography noWrap sx={{ maxWidth: 72, mx: "auto", fontSize: 6.5, lineHeight: 1.05, fontWeight: 900 }}>{stationLeaveLabel(duty)} · {sicForwarded ? "Approved & Forwarded" : duty.leaveStatus}</Typography>}</Box>
                                 {finallyApproved && <Tooltip title="Leave finally approved" arrow><CheckCircle2 size={15} color="#15803D" strokeWidth={3} aria-label="Leave finally approved" /></Tooltip>}
                                 {leave?.replacementAssigned ? <ReplacementFlag required assigned title={`Replacement assigned: ${leave.replacementEmployee?.name || leave.replacementEmployee?.employeeId || "Employee"}`} /> : actionable ? <Tooltip title={`Replacement required: ${replacementChecked ? "Yes" : "No"}`} arrow><Box component="button" type="button" aria-label="Toggle replacement required" aria-pressed={replacementChecked} onClick={(event) => { event.stopPropagation(); setReplacementChoice(leave, replacementStage, !replacementChecked); }} sx={{ width: 17, minWidth: 17, height: 17, p: 0, borderRadius: .7, border: `1px solid ${replacementChecked ? "#D97706" : "#94A3B8"}`, color: replacementChecked ? "#FFFFFF" : "#64748B", background: replacementChecked ? "#D97706" : "#FFFFFF", fontSize: 8, fontWeight: 950, cursor: "pointer", animation:replacementChecked ? "replacementPulse 1.05s ease-in-out infinite" : "none", "@keyframes replacementPulse": { "0%,100%":{opacity:1}, "50%":{opacity:.4} } }}>R</Box></Tooltip> : <ReplacementFlag required={leave?.replacementRequired} assigned={leave?.replacementAssigned} />}
                               </Box>
@@ -878,8 +948,21 @@ export default function LeaveManagement({ embeddedApproval = false, initialAppro
                       </Stack>
                     ) : <Typography sx={{ color: "#94A3B8", fontSize: 11 }}>None</Typography>}
                   </TableCell>
-                  <TableCell sx={{ fontWeight: 800 }}>{leave.leaveType}</TableCell>
-                  <TableCell>{leave.approvalMode === "Organization" ? <Stack spacing={.25}><StatusChip value={(leave.approvalChain || [])[0]?.status || "Pending"} /><Typography sx={{ fontSize: 9, color: "#64748B" }}>{(leave.approvalChain || [])[0]?.level || "Reporting Officer"}</Typography></Stack> : <StatusChip value={leave.sicApprovalStatus} />}</TableCell><TableCell>{leave.approvalMode === "Organization" ? <Stack spacing={.25}><StatusChip value={leave.finalStatus === "Approved" ? "Approved" : leave.organizationApprovalStatus || "Pending"} /><Typography sx={{ fontSize: 9, color: "#64748B" }}>{leave.currentApproverLevel ? `Awaiting ${leave.currentApproverLevel}` : `Hierarchy ${leave.approvalProgress || ""}`}</Typography></Stack> : <StatusChip value={leave.deptApprovalStatus} />}</TableCell>
+                  <TableCell sx={{ fontWeight: 800 }}>{leave.stationLeaveOnly ? "Station Leave" : `${leave.leaveType || "-"}${leave.stationLeave ? " + Station Leave" : ""}`}</TableCell>
+                  <TableCell>
+                    <Stack spacing={.2}>
+                      <StatusChip value={leave.approvalMode === "Organization" ? (leave.approvalChain || [])[0]?.status || "Pending" : leave.sicApprovalStatus} />
+                      <Typography sx={{ fontSize: 9, color: "#64748B" }}>{leave.approvalMode === "Organization" ? (leave.approvalChain || [])[0]?.level || "Reporting Officer" : "Group SIC / Reporting Officer"}</Typography>
+                      <Typography sx={{ fontSize: 9.5, lineHeight: 1.2, color: "#334155", fontWeight: 750 }}>{(leave.firstApproverNames || (leave.approvalChain || [])[0]?.names || []).join(", ") || "Approver not configured"}</Typography>
+                    </Stack>
+                  </TableCell>
+                  <TableCell>
+                    <Stack spacing={.2}>
+                      <StatusChip value={leave.approvalMode === "Organization" ? (leave.finalStatus === "Approved" ? "Approved" : leave.organizationApprovalStatus || "Pending") : leave.deptApprovalStatus} />
+                      <Typography sx={{ fontSize: 9, color: "#64748B" }}>{leave.approvalMode === "Organization" ? (leave.currentApproverLevel ? `Awaiting ${leave.currentApproverLevel}` : `Hierarchy ${leave.approvalProgress || ""}`) : "Final approving authority"}</Typography>
+                      <Typography sx={{ fontSize: 9.5, lineHeight: 1.2, color: "#334155", fontWeight: 750 }}>{(leave.finalApproverNames || []).join(", ") || (leave.currentApproverNames || []).join(", ") || "Final approver not configured"}</Typography>
+                    </Stack>
+                  </TableCell>
                   <TableCell sx={{ minWidth: 190 }}>
                     <Stack direction="row" spacing={.8} alignItems="center" sx={{ mb: .35 }}>
                       <ReplacementFlag required={leave.replacementRequired || leave.sicReplacementRequired || (leave.canSICAct && replacementChoice(leave, "sic")) || (leave.canFinalAct && replacementChoice(leave, "dic"))} assigned={leave.replacementAssigned} title={leave.replacementAssigned ? `Replacement assigned: ${leave.replacementEmployee?.name || leave.replacementEmployee?.employeeId || "Employee"}` : "Replacement required; assignment is pending"} />
@@ -970,13 +1053,14 @@ export default function LeaveManagement({ embeddedApproval = false, initialAppro
 
       {notice && <Alert severity={notice.severity} onClose={() => setNotice(null)}>{notice.text}</Alert>}
 
-      <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "repeat(2, minmax(0, 1fr))", lg: "repeat(5, minmax(0, 1fr))" }, gap: 2 }}>
+      <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "repeat(2, minmax(0, 1fr))", lg: "repeat(3, minmax(0, 1fr))" }, gap: 2 }}>
         {[
           { key: "apply", title: "Apply Leave", subtitle: "Select employee, dates and leave type", count: null, color: "#0057B7", tint: "#EAF2FF" },
           { key: "exchange", title: "Apply for Duty Exchange", subtitle: "Exchange duty through the approval workflow", count: null, color: "#0369A1", tint: "#F0F9FF" },
           { key: "training", title: "Training & Approval", subtitle: pendingTrainingApprovals.length ? `${pendingTrainingApprovals.length} nomination(s) awaiting your approval` : "Approved training and before/after OFF", count: pendingTrainingApprovals.length || approvedTraining.length, color: "#7C3AED", tint: "#F5F3FF" },
           { key: "pending", title: "Pending Leave Workflow", subtitle: "Review, approve, forward or reject", count: pending.length, color: "#17876D", tint: "#EAF8F3" },
           { key: "completed", title: "Completed Leave", subtitle: "Approved, rejected and cancelled records", count: completed.length, color: "#4338CA", tint: "#EEF2FF" },
+          { key: "delegation", title: "Delegate Approval", subtitle: "Temporarily authorize another officer during leave", count: delegations.filter((item) => item.status === "Active").length, color: "#B45309", tint: "#FFF7ED" },
         ].map((tile) => (
           <Paper key={tile.key} component="button" type="button" elevation={0} onClick={() => openSection(tile.key)} sx={{ width: "100%", minHeight: 118, p: 2.2, borderRadius: 3, textAlign: "left", cursor: "pointer", border: `1px solid ${activeSection === tile.key ? tile.color : "#D7E3F4"}`, background: activeSection === tile.key ? tile.tint : "#FFFFFF", boxShadow: activeSection === tile.key ? `0 12px 28px ${tile.color}22` : "0 5px 18px rgba(15,23,42,.06)", transition: "transform .22s ease, box-shadow .22s ease, border-color .22s ease, background .22s ease", "&:hover": { transform: "translateY(-3px)", borderColor: tile.color, boxShadow: `0 14px 30px ${tile.color}26` } }}>
             <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 2 }}>
@@ -1000,21 +1084,39 @@ export default function LeaveManagement({ embeddedApproval = false, initialAppro
       </Paper>
 
       {!!rows.length && <Paper sx={{ p: 2.5 }}>
-        <SectionTitle icon={CalendarDays} title="Leave Entry Grid" subtitle="Choose a leave type, then drag its blue handle across other rows to fill. C-OFF must be selected individually." count={rows.filter((row) => row.selected).length} />
+        <SectionTitle icon={CalendarDays} title="Leave Entry Grid" subtitle="For shift staff, Station Leave-only applies only on OFF. For General duty, it applies on holidays and weekends. Tick it only when required; working-day Station Leave is optional." count={rows.filter((row) => row.selected).length} />
         <TableContainer sx={{ border: "1px solid #CBD5E1", borderRadius: 2, maxHeight: 520 }}><Table size="small" stickyHeader>
-          <TableHead><TableRow><TableCell padding="checkbox"><Checkbox checked={rows.every((row) => row.selected)} indeterminate={rows.some((row) => row.selected) && !rows.every((row) => row.selected)} onChange={(event) => setRows((current) => current.map((row) => ({ ...row, selected: event.target.checked })))} /></TableCell><TableCell>Date</TableCell><TableCell>Duty</TableCell><TableCell>Group</TableCell><TableCell>Others on Leave</TableCell><TableCell sx={{ minWidth: 260 }}>Leave Type / C-OFF Credit</TableCell><TableCell width={48}>Fill</TableCell></TableRow></TableHead>
-          <TableBody>{rows.map((row, index) => <TableRow key={row.date} hover onPointerEnter={() => continueFill(index)} sx={{ background: row.selected ? "#F8FBFF" : "#fff" }}>
-            <TableCell padding="checkbox"><Checkbox checked={row.selected} onChange={(event) => updateRow(index, { selected: event.target.checked })} /></TableCell>
-            <TableCell sx={{ fontWeight: 850, whiteSpace: "nowrap" }}>{dayjs(row.date).format("ddd, DD MMM YYYY")}</TableCell><TableCell>{row.assignedDuty || "-"}</TableCell><TableCell>{row.groupName}</TableCell>
+          <TableHead><TableRow><TableCell padding="checkbox"><Checkbox checked={rows.some((row) => !row.stationLeaveOnlyAllowed) && rows.filter((row) => !row.stationLeaveOnlyAllowed).every((row) => row.selected)} indeterminate={rows.filter((row) => !row.stationLeaveOnlyAllowed).some((row) => row.selected) && !rows.filter((row) => !row.stationLeaveOnlyAllowed).every((row) => row.selected)} onChange={(event) => setRows((current) => current.map((row) => row.stationLeaveOnlyAllowed ? row : { ...row, selected: event.target.checked }))} /></TableCell><TableCell>Date</TableCell><TableCell>Duty</TableCell><TableCell>Group</TableCell><TableCell>Others on Leave</TableCell><TableCell sx={{ minWidth: 260 }}>Leave Type / C-OFF Credit</TableCell><TableCell sx={{ minWidth: 150 }}>Station Leave</TableCell><TableCell width={48}>Fill</TableCell></TableRow></TableHead>
+          <TableBody>{rows.map((row, index) => { const nonShiftHoliday = row.isHoliday && !row.isShiftEmployee; return <TableRow key={row.date} hover onPointerEnter={() => continueFill(index)} title={row.isHoliday ? row.holidayName || "Holiday" : undefined} sx={{ background: nonShiftHoliday ? "#E9D5FF" : row.selected ? "#F8FBFF" : "#fff", boxShadow: row.isHoliday && !nonShiftHoliday ? "inset 4px 0 #A855F7" : undefined }}>
+            <TableCell padding="checkbox"><Checkbox disabled={row.stationLeaveOnlyAllowed} checked={row.stationLeaveOnlyAllowed ? Boolean(row.stationLeave) : row.selected} onChange={(event) => updateRow(index, { selected: event.target.checked })} /></TableCell>
+            <TableCell sx={{ fontWeight: 850, whiteSpace: "nowrap", color: row.isHoliday ? "#6B21A8" : undefined }}>{dayjs(row.date).format("ddd, DD MMM YYYY")}{row.isHoliday && <Chip size="small" label={nonShiftHoliday ? "Holiday" : "H · duty continues"} sx={{ ml: .7, height: 19, background: "#F3E8FF", color: "#6B21A8", border: "1px solid #A855F7", fontSize: 8.5, fontWeight: 900 }} />}</TableCell><TableCell>{nonShiftHoliday ? "Holiday" : row.assignedDuty || "-"}</TableCell><TableCell>{row.groupName}</TableCell>
             <TableCell>{row.othersOnLeave?.length ? row.othersOnLeave.map((person) => <Chip key={person.employeeId} label={person.name} size="small" color="warning" variant="outlined" sx={{ mr: .5 }} />) : "-"}</TableCell>
-            <TableCell><Stack spacing={.8}><FormControl size="small" fullWidth><InputLabel>Leave type</InputLabel><Select value={row.leaveType} label="Leave type" onChange={(event) => setLeaveType(index, event.target.value)}>{leaveTypes.map((type) => <MenuItem key={type.value} value={type.value}>{type.label}</MenuItem>)}</Select></FormControl>{row.leaveType === "C-OFF" && <FormControl size="small" fullWidth><InputLabel>C-OFF credit</InputLabel><Select value={row.compOffId} label="C-OFF credit" onChange={(event) => updateRow(index, { compOffId: event.target.value })}>{compOffs.filter((credit) => !usedCompOffIds.includes(credit.id) || credit.id === row.compOffId).map((credit) => <MenuItem key={credit.id} value={credit.id}>{dayjs(credit.earnedDate).format("DD MMM YYYY")} · expires {dayjs(credit.expiryDate).format("DD MMM YYYY")}</MenuItem>)}</Select></FormControl>}</Stack></TableCell>
-            <TableCell><Box onPointerDown={(event) => startFill(event, index)} title={row.leaveType === "C-OFF" ? "C-OFF cannot be drag-filled" : "Drag to fill this leave type"} sx={{ width: 30, height: 30, borderRadius: 1.5, display: "grid", placeItems: "center", color: row.leaveType && row.leaveType !== "C-OFF" ? "#fff" : "#94A3B8", background: row.leaveType && row.leaveType !== "C-OFF" ? "#0057B7" : "#E2E8F0", cursor: row.leaveType && row.leaveType !== "C-OFF" ? "ns-resize" : "not-allowed", touchAction: "none" }}><GripVertical size={16} /></Box></TableCell>
-          </TableRow>)}</TableBody>
+            <TableCell><Stack spacing={.8}>{row.stationLeaveOnlyAllowed ? <TextField size="small" fullWidth disabled value="No leave required" helperText="Station Leave only" /> : <FormControl size="small" fullWidth><InputLabel>Leave type</InputLabel><Select value={row.leaveType} label="Leave type" onChange={(event) => setLeaveType(index, event.target.value)}>{leaveTypes.map((type) => <MenuItem key={type.value} value={type.value}>{type.label}</MenuItem>)}</Select></FormControl>}{row.leaveType === "C-OFF" && !row.stationLeaveOnlyAllowed && <FormControl size="small" fullWidth><InputLabel>C-OFF credit</InputLabel><Select value={row.compOffId} label="C-OFF credit" onChange={(event) => updateRow(index, { compOffId: event.target.value })}>{compOffs.filter((credit) => !usedCompOffIds.includes(credit.id) || credit.id === row.compOffId).map((credit) => <MenuItem key={credit.id} value={credit.id}>{dayjs(credit.earnedDate).format("DD MMM YYYY")} · expires {dayjs(credit.expiryDate).format("DD MMM YYYY")}</MenuItem>)}</Select></FormControl>}</Stack></TableCell>
+            <TableCell><FormControlLabel control={<Checkbox checked={Boolean(row.stationLeave)} onChange={(event) => { const checked = event.target.checked; updateRow(index, { stationLeave: checked, ...(row.stationLeaveOnlyAllowed ? { selected: checked, leaveType: "", compOffId: "" } : {}) }); }} />} label={row.stationLeaveOnlyAllowed ? "Required" : ""} sx={{ m: 0, "& .MuiFormControlLabel-label": { fontSize: 11, fontWeight: 800, color: "#B45309" } }} /></TableCell>
+            <TableCell><Box onPointerDown={(event) => startFill(event, index)} title={row.stationLeaveOnlyAllowed ? "Tick Station Leave to include this non-working day" : row.leaveType === "C-OFF" ? "C-OFF cannot be drag-filled" : "Drag to fill this leave type"} sx={{ width: 30, height: 30, borderRadius: 1.5, display: "grid", placeItems: "center", color: row.leaveType && row.leaveType !== "C-OFF" && !row.stationLeaveOnlyAllowed ? "#fff" : "#94A3B8", background: row.leaveType && row.leaveType !== "C-OFF" && !row.stationLeaveOnlyAllowed ? "#0057B7" : "#E2E8F0", cursor: row.leaveType && row.leaveType !== "C-OFF" && !row.stationLeaveOnlyAllowed ? "ns-resize" : "not-allowed", touchAction: "none" }}><GripVertical size={16} /></Box></TableCell>
+          </TableRow>})}</TableBody>
         </Table></TableContainer>
         <TextField fullWidth multiline minRows={2} label="Reason" value={reason} onChange={(event) => setReason(event.target.value)} sx={{ mt: 2 }} />
         <Box sx={{ display: "flex", justifyContent: "flex-end", mt: 1.5 }}><Button variant="contained" startIcon={<Send size={16} />} onClick={submit} disabled={working}>Submit for approval</Button></Box>
       </Paper>}
 
+      </Box>
+      </Collapse>
+
+      <Collapse in={activeSection === "delegation"} timeout={420} unmountOnExit>
+      <Box id="leave-workspace-delegation" sx={{ scrollMarginTop: 110 }}>
+        <Paper sx={{ p: 2.5 }}>
+          <SectionTitle icon={ShieldCheck} title="Temporary Leave-Approval Delegation" subtitle="The configured Reporting Officer/HOD remains the approver. The delegate may act only for the selected dates; every action is retained against the original approver." />
+          <Alert severity="info" sx={{ mb: 2 }}>Use this when you are unavailable. A second overlapping delegation is blocked to avoid two people approving the same leave.</Alert>
+          <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "2fr 1fr 1fr" }, gap: 1.5 }}>
+            <Autocomplete options={delegationEmployees} value={delegationEmployees.find((item) => employeeIdOf(item) === delegationForm.delegateEmployeeId) || null} onChange={(_, value) => setDelegationForm((current) => ({ ...current, delegateEmployeeId: employeeIdOf(value) }))} getOptionLabel={(item) => `${item.name || employeeIdOf(item)} (${employeeIdOf(item)})`} renderInput={(params) => <TextField {...params} label="Delegate approval to" helperText="Eligible employees from your reporting hierarchy" />} />
+            <TextField label="From" type="date" value={delegationForm.startDate} onChange={(event) => setDelegationForm((current) => ({ ...current, startDate: event.target.value }))} InputLabelProps={{ shrink: true }} />
+            <TextField label="To" type="date" value={delegationForm.endDate} onChange={(event) => setDelegationForm((current) => ({ ...current, endDate: event.target.value }))} InputLabelProps={{ shrink: true }} />
+          </Box>
+          <TextField fullWidth sx={{ mt: 1.5 }} label="Reason / absence note (optional)" value={delegationForm.reason} onChange={(event) => setDelegationForm((current) => ({ ...current, reason: event.target.value }))} inputProps={{ maxLength: 500 }} />
+          <Box sx={{ display: "flex", justifyContent: "flex-end", mt: 1.5 }}><Button variant="contained" color="warning" onClick={saveDelegation} disabled={working || !delegationForm.delegateEmployeeId}>Save delegation</Button></Box>
+          <TableContainer sx={{ mt: 2.5, border: "1px solid #CBD5E1", borderRadius: 2 }}><Table size="small"><TableHead><TableRow><TableCell>Delegated by</TableCell><TableCell>Delegate</TableCell><TableCell>Effective period</TableCell><TableCell>Reason</TableCell><TableCell>Status</TableCell><TableCell /></TableRow></TableHead><TableBody>{delegations.map((item) => <TableRow key={item.id}><TableCell>{item.delegatorName}</TableCell><TableCell>{item.delegateName}</TableCell><TableCell>{dayjs(item.startDate).format("DD MMM YYYY")} to {dayjs(item.endDate).format("DD MMM YYYY")}</TableCell><TableCell>{item.reason || "-"}</TableCell><TableCell><StatusChip value={item.status} /></TableCell><TableCell>{item.delegatorEmployeeId === role.employeeId && item.status === "Active" && <Button size="small" color="error" onClick={() => revokeDelegation(item.id)}>Revoke</Button>}</TableCell></TableRow>)}{!delegations.length && <TableRow><TableCell colSpan={6} align="center" sx={{ py: 3, color: "#94A3B8" }}>No leave-approval delegations.</TableCell></TableRow>}</TableBody></Table></TableContainer>
+        </Paper>
       </Box>
       </Collapse>
 

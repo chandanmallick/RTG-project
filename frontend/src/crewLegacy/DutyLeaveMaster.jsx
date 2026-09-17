@@ -53,11 +53,13 @@ export default function DutyLeaveMaster() {
     if (!masterType || !value.trim()) return;
 
     try {
-      await api.post(`admin/DutyLeaveType`, {
+      const payload = {
         dutyLeaveType_cat: masterType,
         value,
         status
-      });
+      };
+      if (editId) await api.put(`admin/DutyLeaveType/${editId}`, payload);
+      else await api.post(`admin/DutyLeaveType`, payload);
 
       setEditId(null);
       setValue("");

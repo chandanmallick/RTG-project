@@ -109,25 +109,33 @@ def resolve_employee_organization(function_ids=None, employee_id=None):
         if unit_id not in role_function_ids
     ]
 
-    # Shift crews are maintained in the roster-group master rather than as
-    # ordinary Function members. Include their dedicated organization mapping
-    # so unit heads (and any explicitly selected SO-II/DIC) become reporting
-    # officers without editing every crew member separately.
+    # Shift crews are maintained in the roster-group master. The group defines
+    # the member -> SIC relationship, while this attachment supplies the SIC's
+    # vertical and department hierarchy.
     shift_group_names = []
+    shift_group_sic_ids = []
+    employee_is_shift_group_sic = False
     if employee_id:
         for group in roster_group_collection.find(
             {"isActive": {"$ne": False}},
             {"groupName": 1, "shiftInCharge": 1, "members": 1},
         ):
-            people = [group.get("shiftInCharge") or {}, *(group.get("members") or [])]
+            sic = group.get("shiftInCharge") or {}
+            sic_id = str(sic.get("employeeId") or sic.get("userId") or sic.get("id") or "").strip()
             member_ids = {
                 str(person.get("employeeId") or person.get("userId") or person.get("id") or "").strip()
-                for person in people
+                for person in (group.get("members") or [])
             }
-            if employee_id in member_ids:
+            is_sic = bool(sic_id and employee_id == sic_id)
+            is_member = employee_id in member_ids
+            if is_sic or is_member:
                 group_name = str(group.get("groupName") or "").strip()
                 if group_name:
                     shift_group_names.append(group_name)
+                if is_sic:
+                    employee_is_shift_group_sic = True
+                elif sic_id and sic_id in active_employee_ids:
+                    shift_group_sic_ids.append(sic_id)
     shift_mappings = list(organization_shift_group_collection.find({
         "groupName": {"$in": shift_group_names}
     })) if shift_group_names else []
@@ -142,6 +150,22 @@ def resolve_employee_organization(function_ids=None, employee_id=None):
         for value in normalize_list(item.get("directSupervisorIds"))
         if value in active_employee_ids and value != employee_id
     ]
+    shift_vertical_head_ids = []
+    for unit_id in shift_unit_ids:
+        current = unit_by_id.get(unit_id)
+        visited = set()
+        while current and str(current.get("_id") or "") not in visited:
+            current_id = str(current.get("_id") or "")
+            visited.add(current_id)
+            if current.get("unitType") == "vertical":
+                shift_vertical_head_ids.extend(
+                    value for value in normalize_list(current.get("headEmployeeIds"))
+                    if value in active_employee_ids and value != employee_id
+                )
+                break
+            parent_id = str(current.get("parentId") or "")
+            current = unit_by_id.get(parent_id)
+    shift_vertical_head_ids = list(dict.fromkeys(shift_vertical_head_ids))
 
     selected_function_ids = list(dict.fromkeys(manual_function_ids + role_function_ids))
     seed_ids = list(dict.fromkeys(selected_function_ids + role_unit_ids + shift_unit_ids))
@@ -218,6 +242,23 @@ def resolve_employee_organization(function_ids=None, employee_id=None):
     ]
     hod_candidates = list(dict.fromkeys(hod_candidates))
 
+    # The roster group is authoritative for a shift employee's direct reporting
+    # relationship. A member reports only to the configured group SIC. The SIC
+    # reports to the head of the vertical to which the group is attached.
+    if shift_group_sic_ids:
+        reporting_ids = list(dict.fromkeys(shift_group_sic_ids))
+        intermediary_candidates = [
+            value for value in dict.fromkeys(shift_vertical_head_ids + intermediary_candidates)
+            if value not in reporting_ids
+        ]
+    elif employee_is_shift_group_sic:
+        reporting_ids = list(dict.fromkeys(
+            shift_vertical_head_ids or shift_supervisor_ids or reporting_ids
+        ))
+        intermediary_candidates = [
+            value for value in intermediary_candidates if value not in reporting_ids
+        ]
+
     return {
         "manualFunctionIds": manual_function_ids,
         "roleFunctionIds": role_function_ids,
@@ -234,6 +275,8 @@ def resolve_employee_organization(function_ids=None, employee_id=None):
         "intermediaryReportingId": intermediary_candidates[0] if intermediary_candidates else None,
         "hodId": hod_candidates[0] if hod_candidates else None,
         "shiftGroupNames": list(dict.fromkeys(shift_group_names)),
+        "shiftGroupSicIds": list(dict.fromkeys(shift_group_sic_ids)),
+        "isShiftGroupSic": employee_is_shift_group_sic,
         "organizationLeaveApprovalLevels": leave_approval_levels or 2,
     }
 
@@ -686,6 +729,41 @@ def get_dropdown(dropdown_type: str):
     ]
 
 
+@router.put("/dropdown/{item_id}")
+def update_dropdown(item_id: str, data: dict):
+    if not ObjectId.is_valid(item_id):
+        raise HTTPException(400, "Invalid dropdown item")
+    value = str(data.get("value") or "").strip()
+    dropdown_type = str(data.get("type") or "").strip()
+    if not value or not dropdown_type:
+        raise HTTPException(400, "Dropdown type and value are required")
+    existing = dropdown_collection.find_one({"_id": ObjectId(item_id)})
+    if not existing:
+        raise HTTPException(404, "Dropdown item not found")
+    duplicate = dropdown_collection.find_one({
+        "_id": {"$ne": ObjectId(item_id)},
+        "type": dropdown_type,
+        "value": {"$regex": f"^{re.escape(value)}$", "$options": "i"},
+    })
+    if duplicate:
+        raise HTTPException(409, "This dropdown value already exists")
+    dropdown_collection.update_one(
+        {"_id": ObjectId(item_id)},
+        {"$set": {"type": dropdown_type, "value": value}},
+    )
+    return {"message": "Dropdown value updated"}
+
+
+@router.delete("/dropdown/{item_id}")
+def delete_dropdown(item_id: str):
+    if not ObjectId.is_valid(item_id):
+        raise HTTPException(400, "Invalid dropdown item")
+    result = dropdown_collection.delete_one({"_id": ObjectId(item_id)})
+    if not result.deleted_count:
+        raise HTTPException(404, "Dropdown item not found")
+    return {"message": "Dropdown value deleted"}
+
+
 
 ORG_PARENT_TYPES = {
     "department": set(),
@@ -1099,7 +1177,11 @@ def update_employee(employee_id: str, data: dict):
         "intermediaryReportingId": organization["intermediaryReportingId"],
         "hodId": organization["hodId"],
         "organizationLeaveApprovalLevels": organization.get("organizationLeaveApprovalLevels", 2),
-        "leaveApprovalLevelsOverride": int(data["leaveApprovalLevelsOverride"]) if str(data.get("leaveApprovalLevelsOverride") or "") in {"2", "3"} else None,
+        "leaveApprovalLevelsOverride": (
+            "2_intermediary" if str(data.get("leaveApprovalLevelsOverride") or "") == "2_intermediary"
+            else int(data["leaveApprovalLevelsOverride"]) if str(data.get("leaveApprovalLevelsOverride") or "") in {"1", "2", "3"}
+            else None
+        ),
         "isActive": existing.get("isActive", True) is not False,
     }
 

@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState, memo, useCallback } from "react";
 import {
   Alert, Box, Button, Chip, CircularProgress, Dialog, DialogContent, DialogTitle,
-  IconButton, Paper, Stack, Table, TableBody, TableCell, TableHead, TableRow, Typography,
+  IconButton, Paper, Stack, Table, TableBody, TableCell, TableHead, TableRow, Tooltip, Typography,
 } from "@mui/material";
-import { ArrowLeftRight, CalendarDays, CheckCircle2, ChevronLeft, ChevronRight, RefreshCw, Users, X } from "lucide-react";
+import { ArrowLeftRight, CalendarDays, CheckCircle2, ChevronLeft, ChevronRight, RefreshCw, X } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
 import AppShell from "../../components/layout/AppShell";
@@ -43,20 +43,31 @@ const parseLocalDate = (dateStr) => {
 };
 const displayDate = (dateStr) => new Intl.DateTimeFormat("en-IN", { day: "2-digit", month: "short" }).format(parseLocalDate(dateStr));
 const weekday = (dateStr) => new Intl.DateTimeFormat("en-IN", { weekday: "short" }).format(parseLocalDate(dateStr));
+const compactShift = (value) => {
+  const duty = String(value || "").trim().toUpperCase();
+  if (["M", "M1", "M2", "MORNING"].includes(duty)) return "Morning";
+  if (["E", "E1", "E2", "EVENING"].includes(duty)) return "Evening";
+  if (["N", "N1", "N2", "NIGHT"].includes(duty)) return "Night";
+  if (["O", "O1", "O2", "OFF"].includes(duty)) return "OFF";
+  return duty || "-";
+};
 const replacementLabelSx = {
   alignSelf: "center",
-  mt: .25,
-  px: .65,
-  py: .2,
+  justifyContent: "center",
+  width: "100%",
+  mt: .15,
+  px: .5,
+  py: .1,
   borderRadius: 1,
   border: "1px solid #93C5FD",
   background: "#DBEAFE",
   color: "#1D4ED8",
-  fontSize: 9.5,
+  fontSize: 9,
   fontWeight: 950,
   lineHeight: 1.2,
   display: "flex",
   alignItems: "center",
+  textAlign: "center",
   gap: .4,
 };
 
@@ -78,11 +89,21 @@ const shiftStyle = (duty) => {
   return { background: "#F8FAFC", color: "#000000", border: "#D6DEE8" };
 };
 
-const EmployeeRow = memo(({ person, groupName, active, dates, selectedColumn, onSelectRow, onSelectDuty, canManageReplacement }) => {
+const leaveLabel = (duty) => {
+  if (duty?.stationLeaveOnly) return "Station Leave";
+  const leaveType = duty?.leaveType || "Leave";
+  return duty?.stationLeave ? `${leaveType} + Station Leave` : leaveType;
+};
+
+function PublicCalendarShell({ children }) {
+  return <Box sx={{ height: "100dvh", p: 1, boxSizing: "border-box", background: "#F8FAFC", overflow: "hidden" }}>{children}</Box>;
+}
+
+const EmployeeRow = memo(({ person, groupName, active, dates, selectedColumn, onSelectRow, onSelectDuty, canManageReplacement, readOnly = false }) => {
   return (
-    <TableRow hover onClick={() => onSelectRow(person.employeeId)} sx={{ cursor: "pointer", background: active ? "#F0FDFA" : person.IsSIC ? "#F8FFFC" : "#FFF" }}>
-      <TableCell sx={{ position: "sticky", left: 0, zIndex: 2, minWidth: 235, background: active ? "#D1FAE5" : person.IsSIC ? "#ECFDF5" : "#FFF", borderRight: "1px solid #E2E8F0" }}>
-        <Stack direction="row" spacing={1} alignItems="center"><Box><Typography sx={{ fontSize: 13.5, fontWeight: 900, color: "#0F172A" }}>{person.name || person.employeeId}</Typography><Typography sx={{ fontSize: 11.5, color: "#64748B" }}>{person.designation || "—"}</Typography></Box>{person.IsSIC && <Chip label="SIC" size="small" sx={{ height: 21, fontSize: 10, fontWeight: 900, background: "#D1FAE5", color: "#03624C" }} />}</Stack>
+    <TableRow hover={!readOnly} onClick={() => !readOnly && onSelectRow(person.employeeId)} sx={{ cursor: readOnly ? "default" : "pointer", background: active ? "#F0FDFA" : person.IsSIC ? "#F8FFFC" : "#FFF" }}>
+      <TableCell sx={{ position: "sticky", left: 0, zIndex: 2, minWidth: 210, py: .65, background: active ? "#D1FAE5" : person.IsSIC ? "#ECFDF5" : "#FFF", borderRight: "1px solid #E2E8F0" }}>
+        <Stack direction="row" spacing={.7} alignItems="center"><Box><Typography sx={{ fontSize: 12.5, fontWeight: 900, color: "#0F172A" }}>{person.name || person.employeeId}</Typography><Typography sx={{ fontSize: 10.5, color: "#64748B" }}>{person.designation || "—"}</Typography></Box>{person.IsSIC && <Chip label="SIC" size="small" sx={{ height: 18, fontSize: 9, fontWeight: 900, background: "#D1FAE5", color: "#03624C" }} />}</Stack>
       </TableCell>
       {dates.map((date) => {
         const duty = person.duties?.[date] || { shift: "-" };
@@ -90,32 +111,45 @@ const EmployeeRow = memo(({ person, groupName, active, dates, selectedColumn, on
         const columnActive = selectedColumn === date;
         const replacementPending = Boolean(duty.replacementRequired && !duty.replacementEmployee?.name);
         const leaveApproved = String(duty.leaveStatus || "").toLowerCase() === "approved";
-        return <TableCell key={date} align="center" sx={{ p: .7, background: active ? "#F0FDFA" : columnActive ? "#F0FDF4" : "#FFF" }}>
+        const hasLeave = Boolean(duty.leaveStatus);
+        const isHoliday = Boolean(duty.isHoliday);
+        const additionalDuties = duty.additionalDuties || [];
+        const leaveTip = duty.leaveStatus ? `${leaveLabel(duty)} · ${duty.leaveStatus}` : "";
+        return <TableCell key={date} align="center" sx={{ p: .4, background: active ? "#F0FDFA" : columnActive ? "#F0FDF4" : "#FFF" }}>
           <Box
-            role="button"
-            tabIndex={0}
+            role={readOnly ? undefined : "button"}
+            tabIndex={readOnly ? undefined : 0}
             aria-label={`${person.name || person.employeeId}, ${date}, ${duty.shift || "no duty"}`}
             onClick={(event) => {
-              event.stopPropagation();
-              onSelectDuty({ person, groupName, date, duty });
+              if (!readOnly) {
+                event.stopPropagation();
+                onSelectDuty({ person, groupName, date, duty });
+              }
             }}
             onKeyDown={(event) => {
-              if (event.key === "Enter" || event.key === " ") {
+              if (!readOnly && (event.key === "Enter" || event.key === " ")) {
                 event.preventDefault();
                 event.stopPropagation();
                 onSelectDuty({ person, groupName, date, duty });
               }
             }}
             className="crew-calendar-duty-cell"
-            sx={{ minHeight: 50, px: .7, py: .65, display: "flex", flexDirection: "column", justifyContent: "center", cursor: "pointer", borderRadius: 2, backgroundColor: palette.background, backgroundImage: "none", color: palette.color, border: `1px solid ${palette.border}`, boxShadow: "none", "& .MuiTypography-root": { color: "inherit" }, "&:hover": { boxShadow: "0 0 0 2px rgba(0,87,183,.18)" } }}
+            sx={{ position: "relative", minHeight: 42, width: "100%", boxSizing: "border-box", px: .5, py: .4, display: "grid", placeItems: "center", alignContent: "center", textAlign: "center", cursor: readOnly ? "default" : "pointer", borderRadius: 1.7, backgroundColor: palette.background, backgroundImage: isHoliday ? "linear-gradient(90deg,#A855F7 0 4px,transparent 4px)" : "none", color: palette.color, border: `1px solid ${isHoliday ? "#A855F7" : palette.border}`, boxShadow: "none", "& .MuiTypography-root": { color: "inherit", textAlign: "center" }, "&:hover": readOnly ? {} : { boxShadow: "0 0 0 2px rgba(0,87,183,.18)" } }}
           >
-            <Typography sx={{ fontSize: 12.5, fontWeight: 900 }}>{duty.shift || "-"}</Typography>
-            {duty.leaveStatus && <Typography sx={{ fontSize: 9.5, fontWeight: 800, lineHeight: 1.2 }}>{duty.leaveType || "Leave"} · {duty.leaveStatus}</Typography>}
-            {duty.trainingName && <Typography sx={{ fontSize: 9.5, fontWeight: 800 }}>{duty.trainingName}</Typography>}
-            {leaveApproved && <CheckCircle2 size={13} color="#15803D" strokeWidth={3} aria-label="Leave finally approved" style={{ alignSelf: "center" }} />}
-            {replacementPending && <Box sx={{ mt: .25, px: .6, py: .15, borderRadius: 1, background: "#F59E0B", color: "#FFFFFF", fontSize: 9.5, fontWeight: 950, animation: "calendarReplacementPulse 1s ease-in-out infinite", "@keyframes calendarReplacementPulse": { "50%": { opacity: .35, transform: "scale(.92)" } } }}>R · Replacement required</Box>}
-            {duty.replacementEmployee?.name && <Box sx={replacementLabelSx}><Box sx={{ width: 15, height: 15, borderRadius: .6, display: "grid", placeItems: "center", background: "#2563EB", color: "#FFF", fontSize: 8, flex: "0 0 auto" }}>R</Box><Box>Replacement: {duty.replacementEmployee.name}</Box></Box>}
-            {duty.replacementFor?.name && <Box sx={replacementLabelSx}><Box sx={{ width: 15, height: 15, borderRadius: .6, display: "grid", placeItems: "center", background: "#2563EB", color: "#FFF", fontSize: 8, flex: "0 0 auto" }}>R</Box><Box>For: {duty.replacementFor.name}</Box></Box>}
+            {isHoliday && <Tooltip title={`${duty.holidayName || "Holiday"} · shift duty continues`} arrow><Box aria-label={duty.holidayName || "Holiday"} sx={{ position: "absolute", top: 2, right: 2, width: 14, height: 14, borderRadius: "50%", display: "grid", placeItems: "center", background: "#9333EA", color: "#FFF", fontSize: 7.5, fontWeight: 950, lineHeight: 1 }}>H</Box></Tooltip>}
+            {hasLeave ? (
+              <Tooltip title={`${duty.shift || "Duty"} · ${leaveTip}`} arrow>
+                <Stack className="crew-calendar-duty-content" direction="row" spacing={.45} alignItems="center" justifyContent="center" sx={{ width: "100%", minWidth: 0, mx: "auto", cursor: "help", textAlign: "center" }}>
+                  <Typography component="span" sx={{ fontSize: 10.5, fontWeight: 950, lineHeight: 1 }}>{compactShift(duty.shift)}</Typography>
+                  <Typography component="span" sx={{ fontSize: 10.5, fontWeight: 950, lineHeight: 1 }}>{leaveLabel(duty)}</Typography>
+                  {leaveApproved ? <CheckCircle2 size={13} color="#15803D" strokeWidth={3} aria-label="Approved leave" /> : <Box aria-label="Pending leave" sx={{ width: 10, height: 10, borderRadius: "50%", background: "#FB923C", border: "1px solid #C2410C" }} />}
+                </Stack>
+              </Tooltip>
+            ) : <Stack className="crew-calendar-duty-content" direction="row" spacing={.45} alignItems="center" justifyContent="center" sx={{ width: "100%", minWidth: 0, textAlign: "center" }}><Typography sx={{ fontSize: 11.5, fontWeight: 900 }}>{compactShift(duty.shift)}</Typography>{additionalDuties.map((extra, index) => <Tooltip key={`${extra.shift}-${index}`} title={`Additional replacement duty: ${extra.shift}${extra.groupName ? ` · ${extra.groupName}` : ""}${extra.replacementFor?.name ? ` · for ${extra.replacementFor.name}` : ""}`} arrow><Stack direction="row" spacing={.3} alignItems="center" justifyContent="center"><Typography sx={{ fontSize: 10, fontWeight: 900 }}>+</Typography><Box sx={{ px: .5, py: .1, borderRadius: .7, color: "#1E3A8A", background: "#DBEAFE", border: "1px solid #93C5FD", fontSize: 9.5, fontWeight: 950, textAlign: "center" }}>{compactShift(extra.shift)}</Box></Stack></Tooltip>)}</Stack>}
+            {duty.trainingName && <Tooltip title={`Training: ${duty.trainingName}`} arrow><Typography component="span" sx={{ width: "100%", fontSize: 9, fontWeight: 800, textAlign: "center" }}>{duty.trainingName}</Typography></Tooltip>}
+            {replacementPending && <Tooltip title="Replacement required; assignment pending" arrow><Box sx={{ mt: .15, width: 17, height: 17, borderRadius: .7, display: "grid", placeItems: "center", alignSelf: "center", background: "#F59E0B", color: "#FFFFFF", fontSize: 9, fontWeight: 950, animation: "calendarReplacementPulse .9s ease-in-out infinite", "@keyframes calendarReplacementPulse": { "50%": { opacity: .3, transform: "scale(.84)" } } }}>R</Box></Tooltip>}
+            {duty.replacementEmployee?.name && <Tooltip title={`Replacement assigned: ${duty.replacementEmployee.name}${duty.replacementEmployee.employeeId ? ` (${duty.replacementEmployee.employeeId})` : ""}`} arrow><Box sx={replacementLabelSx}><Box sx={{ width: 15, height: 15, borderRadius: .6, display: "grid", placeItems: "center", background: "#2563EB", color: "#FFF", fontSize: 8.5, flex: "0 0 auto" }}>R</Box><Box>{duty.replacementEmployee.name}</Box></Box></Tooltip>}
+            {duty.replacementFor?.name && <Tooltip title={`Replacement duty for ${duty.replacementFor.name}${duty.replacementFor.employeeId ? ` (${duty.replacementFor.employeeId})` : ""}`} arrow><Box sx={replacementLabelSx}><Box sx={{ width: 15, height: 15, borderRadius: .6, display: "grid", placeItems: "center", background: "#2563EB", color: "#FFF", fontSize: 8.5, flex: "0 0 auto" }}>R</Box><Box>{duty.replacementFor.name}</Box></Box></Tooltip>}
             {duty.isActingSIC && <Typography sx={{ fontSize: 9.5, fontWeight: 900, color: "#6A1B9A" }}>Acting SIC · {duty.actingSICGroup || groupName}</Typography>}
           </Box>
         </TableCell>;
@@ -124,12 +158,12 @@ const EmployeeRow = memo(({ person, groupName, active, dates, selectedColumn, on
   );
 });
 
-export default function CrewCalendar() {
+export default function CrewCalendar({ publicView = false }) {
   const { user } = useAuth();
   const navigate = useNavigate();
   const today = iso(new Date());
-  const [startDate, setStartDate] = useState(addDays(today, -2));
-  const [endDate, setEndDate] = useState(addDays(today, 10));
+  const [startDate, setStartDate] = useState(publicView ? today : addDays(today, -2));
+  const [endDate, setEndDate] = useState(publicView ? addDays(today, 7) : addDays(today, 10));
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -189,15 +223,31 @@ export default function CrewCalendar() {
 
   useEffect(() => { load(); }, [startDate, endDate]);
 
+  useEffect(() => {
+    const previousBodyOverflow = document.body.style.overflow;
+    const previousHtmlOverflow = document.documentElement.style.overflow;
+    document.body.style.overflow = "hidden";
+    document.documentElement.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = previousBodyOverflow;
+      document.documentElement.style.overflow = previousHtmlOverflow;
+    };
+  }, []);
+
   const move = (days) => {
     setStartDate((value) => addDays(value, days));
     setEndDate((value) => addDays(value, days));
   };
 
-  const totalCrew = data.reduce((count, group) => count + group.employees.length, 0);
   const activeGroups = data;
-  const activeCrewCount = activeGroups.reduce((count, group) => count + group.employees.length, 0);
-  const canManageReplacement = Boolean(user?.role === "admin" || user?.permissions?.crew_replacement?.write || user?.permissions?.crew_leave?.write || user?.permissions?.crew_training?.write);
+  const holidayByDate = useMemo(() => {
+    const result = {};
+    data.forEach((group) => (group.employees || []).forEach((person) => Object.entries(person.duties || {}).forEach(([date, duty]) => {
+      if (duty?.isHoliday) result[date] = duty.holidayName || "Holiday";
+    })));
+    return result;
+  }, [data]);
+  const canManageReplacement = !publicView && Boolean(user?.role === "admin" || user?.permissions?.crew_replacement?.write || user?.permissions?.crew_leave?.write || user?.permissions?.crew_training?.write);
   const openLeaveWorkflow = () => {
     if (!selectedDuty) return;
     setLeaveApprovalPopup(selectedDuty);
@@ -286,66 +336,59 @@ export default function CrewCalendar() {
     setSelectedDuty(selection);
   }, [canManageReplacement, openReplacementCandidates]);
 
+  const CalendarPageShell = publicView ? PublicCalendarShell : AppShell;
   return (
-    <AppShell>
-      <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: { xs: "flex-start", md: "center" }, gap: 2, flexWrap: "wrap" }}>
-        <Box>
-          <Typography sx={{ fontSize: 12, fontWeight: 900, color: "#17876D", letterSpacing: ".12em", textTransform: "uppercase" }}>Crew Management</Typography>
-          <Typography variant="h4" sx={{ fontWeight: 900, color: "#0F172A", letterSpacing: "-.035em", mt: .5 }}>Daily Duty Calendar</Typography>
-          <Typography sx={{ color: "#64748B", mt: .5 }}>Group-wise shift, leave, training and replacement visibility.</Typography>
+    <CalendarPageShell>
+      <Box sx={{ height: publicView ? "calc(100dvh - 16px)" : { xs: "calc(100dvh - 112px)", md: "calc(100dvh - 140px)" }, minHeight: 0, overflow: "hidden", display: "flex", flexDirection: "column", gap: 1.15 }}>
+      <Box sx={{ px: { xs: 1.5, md: 2 }, py: 1.25, borderRadius: 3, background: "linear-gradient(105deg,#081F5C 0%,#075DB8 62%,#1678D4 100%)", color: "#FFF", display: "flex", alignItems: "center", gap: 1.2, flexWrap: { xs: "wrap", xl: "nowrap" } }}>
+        <Box sx={{ minWidth: { md: 220 }, mr: { xl: "auto" } }}>
+          <Typography sx={{ fontSize: 19, fontWeight: 950, lineHeight: 1.05 }}>Daily Duty Calendar</Typography>
+          <Typography sx={{ mt: .25, fontSize: 10.5, color: "rgba(255,255,255,.82)" }}>Shift, leave, training and replacement</Typography>
         </Box>
-        <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
-          <Chip icon={<Users size={16} />} label={`${totalCrew} crew`} sx={{ fontWeight: 800, background: "#ECFDF5", color: "#03624C" }} />
-          {!!activeCrewCount && <Chip label={`${activeCrewCount} visible`} sx={{ fontWeight: 800, background: "#EEF2FF", color: "#3730A3" }} />}
-          <Button variant="outlined" startIcon={<RefreshCw size={16} />} onClick={load} sx={{ borderRadius: 3, textTransform: "none", fontWeight: 800 }}>Refresh</Button>
-          <Button variant="contained" startIcon={<ArrowLeftRight size={16} />} onClick={() => setExchangeOpen(true)} sx={{ borderRadius: 3, textTransform: "none", fontWeight: 850, background: "#0057B7" }}>Duty exchange / reassignment</Button>
+        {!publicView && <><Stack direction="row" spacing={.35} alignItems="center">
+          <Tooltip title="Previous 7 days"><IconButton size="small" onClick={() => move(-7)} sx={{ color: "#FFF", border: "1px solid rgba(255,255,255,.35)" }}><ChevronLeft size={17} /></IconButton></Tooltip>
+          <Button onClick={() => { setStartDate(addDays(today, -7)); setEndDate(addDays(today, 7)); }} startIcon={<CalendarDays size={15} />} size="small" sx={{ minHeight: 32, color: "#073B75", background: "#FFF", borderRadius: 2, textTransform: "none", fontWeight: 900, "&:hover": { background: "#F1F5F9" } }}>Today</Button>
+          <Tooltip title="Next 7 days"><IconButton size="small" onClick={() => move(7)} sx={{ color: "#FFF", border: "1px solid rgba(255,255,255,.35)" }}><ChevronRight size={17} /></IconButton></Tooltip>
         </Stack>
+        <Stack direction="row" spacing={.55} alignItems="center">
+          <input aria-label="Start date" type="date" value={startDate} onChange={(event) => setStartDate(event.target.value)} style={{ width: 126, border: "1px solid rgba(255,255,255,.55)", borderRadius: 8, padding: "6px 8px", fontSize: 11, fontWeight: 750 }} />
+          <Typography sx={{ color: "rgba(255,255,255,.8)", fontSize: 11 }}>to</Typography>
+          <input aria-label="End date" type="date" min={startDate} value={endDate} onChange={(event) => setEndDate(event.target.value)} style={{ width: 126, border: "1px solid rgba(255,255,255,.55)", borderRadius: 8, padding: "6px 8px", fontSize: 11, fontWeight: 750 }} />
+        </Stack>
+        <Button size="small" startIcon={<RefreshCw size={15} />} onClick={load} sx={{ minHeight: 32, color: "#FFF", border: "1px solid rgba(255,255,255,.55)", borderRadius: 2, textTransform: "none", fontWeight: 850 }}>Refresh</Button>
+        <Button size="small" startIcon={<ArrowLeftRight size={15} />} onClick={() => setExchangeOpen(true)} sx={{ minHeight: 32, color: "#0755A5", background: "#FFF", borderRadius: 2, textTransform: "none", fontWeight: 900, whiteSpace: "nowrap", "&:hover": { background: "#F1F5F9" } }}>Duty exchange / reassignment</Button></>}
       </Box>
 
-      <GlassCard hover={false} padding={2}>
-        <Stack direction={{ xs: "column", md: "row" }} spacing={1.25} alignItems={{ md: "center" }} justifyContent="space-between">
-          <Stack direction="row" spacing={1}>
-            <Button onClick={() => move(-7)} startIcon={<ChevronLeft size={17} />} sx={{ borderRadius: 3, textTransform: "none", fontWeight: 800 }}>Previous 7 days</Button>
-            <Button onClick={() => { setStartDate(addDays(today, -7)); setEndDate(addDays(today, 7)); }} startIcon={<CalendarDays size={17} />} variant="contained" sx={{ borderRadius: 3, textTransform: "none", fontWeight: 800, background: "#03624C" }}>Today</Button>
-            <Button onClick={() => move(7)} endIcon={<ChevronRight size={17} />} sx={{ borderRadius: 3, textTransform: "none", fontWeight: 800 }}>Next 7 days</Button>
-          </Stack>
-          <Stack direction="row" spacing={1} alignItems="center">
-            <input aria-label="Start date" type="date" value={startDate} onChange={(event) => setStartDate(event.target.value)} style={{ border: "1px solid #CBD5E1", borderRadius: 10, padding: "9px 12px", fontWeight: 700 }} />
-            <Typography color="#94A3B8">to</Typography>
-            <input aria-label="End date" type="date" min={startDate} value={endDate} onChange={(event) => setEndDate(event.target.value)} style={{ border: "1px solid #CBD5E1", borderRadius: 10, padding: "9px 12px", fontWeight: 700 }} />
-          </Stack>
-        </Stack>
-      </GlassCard>
-
       {error && <Alert severity="error">{error}</Alert>}
-      <Box sx={{ px: 1.2, py: .8, display: "flex", alignItems: "center", gap: 1.3, flexWrap: "wrap", border: "1px solid #CBD5E1", borderRadius: 2, background: "#FFFFFF" }}>
+      <Box sx={{ px: 1, py: .45, display: "flex", alignItems: "center", gap: 1.05, flexWrap: "wrap", border: "1px solid #CBD5E1", borderRadius: 2, background: "#FFFFFF" }}>
         {[
           ["Morning", "#DCFCE7", "#86EFAC"],
           ["Evening", "#FEF3C7", "#FCD34D"],
           ["Night", "#DBEAFE", "#93C5FD"],
           ["OFF", "#E5E7EB", "#9CA3AF"],
-          ["Pending leave", "#FFEDD5", "#FB923C"],
         ].map(([label, background, border]) => <Stack key={label} direction="row" spacing={.45} alignItems="center"><Box sx={{ width: 18, height: 14, borderRadius: .7, background, border: `1px solid ${border}` }} /><Typography sx={{ color: "#475569", fontSize: 10, fontWeight: 800 }}>{label}</Typography></Stack>)}
+        <Stack direction="row" spacing={.4} alignItems="center"><Box sx={{ width: 24, height: 18, borderRadius: .7, display: "grid", placeItems: "center", background: "#FFEDD5", border: "1px solid #FB923C" }}><Box sx={{ width: 9, height: 9, borderRadius: "50%", background: "#FB923C", border: "1px solid #C2410C" }} /></Box><Typography sx={{ color: "#475569", fontSize: 10, fontWeight: 800 }}>Pending leave</Typography></Stack>
         <Stack direction="row" spacing={.4} alignItems="center"><Box sx={{ width: 24, height: 18, borderRadius: .7, display: "grid", placeItems: "center", background: "#FEE2E2", border: "1px solid #F87171" }}><CheckCircle2 size={12} color="#15803D" strokeWidth={3} /></Box><Typography sx={{ color: "#475569", fontSize: 10, fontWeight: 800 }}>Approved leave</Typography></Stack>
         <Stack direction="row" spacing={.4} alignItems="center"><Box sx={{ width: 18, height: 18, borderRadius: .7, display: "grid", placeItems: "center", background: "#F59E0B", color: "#FFF", fontSize: 9, fontWeight: 950, animation: "calendarReplacementPulse 1s ease-in-out infinite", "@keyframes calendarReplacementPulse": { "50%": { opacity: .35, transform: "scale(.86)" } } }}>R</Box><Typography sx={{ color: "#475569", fontSize: 10, fontWeight: 800 }}>Replacement required</Typography></Stack>
         <Stack direction="row" spacing={.4} alignItems="center"><Box sx={{ width: 18, height: 18, borderRadius: .7, display: "grid", placeItems: "center", background: "#2563EB", color: "#FFF", fontSize: 9, fontWeight: 950 }}>R</Box><Typography sx={{ color: "#475569", fontSize: 10, fontWeight: 800 }}>Replacement assigned</Typography></Stack>
+        <Stack direction="row" spacing={.4} alignItems="center"><Box sx={{ width: 18, height: 18, borderRadius: "50%", display: "grid", placeItems: "center", background: "#9333EA", color: "#FFF", fontSize: 9, fontWeight: 950 }}>H</Box><Typography sx={{ color: "#475569", fontSize: 10, fontWeight: 800 }}>Holiday (shift duty continues)</Typography></Stack>
       </Box>
-      <GlassCard hover={false} padding={0} sx={{ overflow: "hidden" }}>
+      <GlassCard hover={false} padding={0} sx={{ overflow: "hidden", flex: 1, minHeight: 0, display: "flex", flexDirection: "column", "& > .MuiBox-root:last-child": { flex: 1, minHeight: 0, display: "flex", flexDirection: "column" } }}>
         {loading ? (
           <Box sx={{ minHeight: 360, display: "grid", placeItems: "center" }}><CircularProgress sx={{ color: "#03624C" }} /></Box>
         ) : (
-          <Box sx={{ position: "relative", overflow: "auto", maxHeight: "calc(100vh - 265px)", overscrollBehavior: "contain" }}>
+          <Box sx={{ position: "relative", flex: 1, minHeight: 0, overflow: "auto", overscrollBehavior: "contain" }}>
             <Table stickyHeader size="small" sx={{ borderCollapse: "separate", borderSpacing: 0 }}>
               <TableHead>
                 <TableRow>
-                  <TableCell sx={{ position: "sticky !important", top: 0, left: 0, zIndex: 8, minWidth: 235, background: "#F8FAFC", fontWeight: 900, color: "#334155", borderRight: "1px solid #E2E8F0" }}>Name / designation</TableCell>
-                  {dates.map((date) => <TableCell key={date} align="center" onClick={() => setSelectedColumn(date)} sx={{ position: "sticky !important", top: 0, zIndex: 7, minWidth: 108, cursor: "pointer", fontWeight: 900, color: date === today ? "#03624C" : "#334155", background: selectedColumn === date ? "#D1FAE5" : date === today ? "#ECFDF5" : "#F8FAFC", borderBottom: date === today ? "3px solid #00A86B" : undefined }}><Box>{displayDate(date)}</Box><Typography variant="caption" sx={{ fontWeight: 800, color: "#94A3B8" }}>{weekday(date)}</Typography></TableCell>)}
+                  <TableCell sx={{ position: "sticky !important", top: 0, left: 0, zIndex: 8, minWidth: 210, py: .7, background: "#F8FAFC", fontWeight: 900, color: "#334155", borderRight: "1px solid #E2E8F0" }}>Name / designation</TableCell>
+                  {dates.map((date) => { const holidayName = holidayByDate[date]; return <TableCell key={date} title={holidayName || undefined} align="center" onClick={() => setSelectedColumn(date)} sx={{ position: "sticky !important", top: 0, zIndex: 7, minWidth: 96, py: .55, cursor: "pointer", fontWeight: 900, color: holidayName ? "#6B21A8" : date === today ? "#03624C" : "#334155", background: holidayName ? "#F3E8FF" : selectedColumn === date ? "#D1FAE5" : date === today ? "#ECFDF5" : "#F8FAFC", borderBottom: holidayName ? "3px solid #A855F7" : date === today ? "3px solid #00A86B" : undefined }}><Box>{displayDate(date)}</Box><Typography variant="caption" sx={{ fontWeight: 800, color: holidayName ? "#7E22CE" : "#94A3B8" }}>{weekday(date)}{holidayName ? " · Holiday" : ""}</Typography></TableCell>; })}
                 </TableRow>
               </TableHead>
               <TableBody>
                 {!data.length && <TableRow><TableCell colSpan={dates.length + 1} align="center" sx={{ py: 8, color: "#64748B", fontWeight: 700 }}>No calendar roster has been published yet.</TableCell></TableRow>}
                 {activeGroups.map((group) => [
-                  <TableRow key={`${group.groupName}-header`}><TableCell colSpan={dates.length + 1} sx={{ py: 1.2, background: "linear-gradient(90deg,#E8F5F1,#F8FAFC)", color: "#03624C", fontWeight: 900, letterSpacing: ".03em" }}>{group.groupName}</TableCell></TableRow>,
+                  <TableRow key={`${group.groupName}-header`}><TableCell colSpan={dates.length + 1} sx={{ py: .65, background: "linear-gradient(90deg,#E8F5F1,#F8FAFC)", color: "#03624C", fontWeight: 900, letterSpacing: ".03em" }}>{group.groupName}</TableCell></TableRow>,
                   ...group.employees.map((person) => (
                     <EmployeeRow
                       key={`${group.groupName}-${person.employeeId}`}
@@ -357,6 +400,7 @@ export default function CrewCalendar() {
                       onSelectRow={handleSelectRow}
                       onSelectDuty={handleSelectDuty}
                       canManageReplacement={canManageReplacement}
+                      readOnly={publicView}
                     />
                   ))
                 ])}
@@ -365,6 +409,7 @@ export default function CrewCalendar() {
           </Box>
         )}
       </GlassCard>
+      </Box>
 
       <Dialog open={Boolean(selectedDuty)} onClose={() => setSelectedDuty(null)} fullWidth maxWidth="xs">
         <DialogTitle sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", color: "#0F172A", fontWeight: 900 }}>
@@ -382,10 +427,11 @@ export default function CrewCalendar() {
                 <Chip label={displayDate(selectedDuty.date)} sx={{ fontWeight: 800 }} />
                 <Chip label={selectedDuty.groupName} sx={{ fontWeight: 800 }} />
                 <Chip label={selectedDuty.duty.shift || "No duty"} sx={{ fontWeight: 900, color: "#0057B7", background: "#E8F1FF" }} />
+                {selectedDuty.duty.isHoliday && <Chip label={`Holiday · ${selectedDuty.duty.holidayName || "Holiday"}`} sx={{ fontWeight: 900, color: "#6B21A8", background: "#F3E8FF", border: "1px solid #A855F7" }} />}
               </Stack>
               {selectedDuty.duty.leaveStatus && (
                 <Alert severity="info">
-                  {selectedDuty.duty.leaveType || "Leave"} · {selectedDuty.duty.leaveStatus}
+                  {leaveLabel(selectedDuty.duty)} · {selectedDuty.duty.leaveStatus}
                 </Alert>
               )}
               {(selectedDuty.duty.leaveStatus || selectedDuty.duty.trainingName) && (
@@ -502,6 +548,6 @@ export default function CrewCalendar() {
           />
         </DialogContent>
       </Dialog>
-    </AppShell>
+    </CalendarPageShell>
   );
 }

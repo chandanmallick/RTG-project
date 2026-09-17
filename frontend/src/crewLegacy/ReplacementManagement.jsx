@@ -855,8 +855,13 @@ export default function ReplacementManagement() {
                         {item.autoAccepted && <Typography display="block" variant="caption" color="success.main" fontWeight={800}>Auto-accepted at cutoff</Typography>}
                         {item.reason && <Typography display="block" variant="caption" color="error.main">{item.reason}</Typography>}
                         {item.mailDelivery?.status && (
-                          <Typography display="block" variant="caption" color={item.mailDelivery.status === "sent" ? "success.main" : "text.secondary"} fontWeight={700}>
+                          <Typography display="block" variant="caption" color={item.mailDelivery.status === "sent" ? "success.main" : item.mailDelivery.status === "failed" ? "error.main" : "text.secondary"} fontWeight={700}>
                             Mail: {item.mailDelivery.status} ({item.mailDelivery.recipientCount || 0} recipients)
+                          </Typography>
+                        )}
+                        {item.mailDelivery?.status === "failed" && item.mailDelivery?.error && (
+                          <Typography display="block" variant="caption" color="error.main" sx={{ maxWidth: 230, lineHeight: 1.25 }}>
+                            {item.mailDelivery.error}
                           </Typography>
                         )}
                       </TableCell>

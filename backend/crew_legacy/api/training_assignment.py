@@ -13,6 +13,7 @@ from crew_legacy.database.database_mongo import (
     organization_shift_group_collection,
     organization_unit_collection,
     roster_group_collection,
+    holiday_master_collection,
     training_nomination_history_collection,
 )
 
@@ -494,6 +495,14 @@ def get_training_calendar(startDate: str, endDate: str):
     window_end = (
         datetime.strptime(dates[-1], "%Y-%m-%d") + timedelta(days=1)
     ).strftime("%Y-%m-%d")
+    holiday_map = {
+        item.get("date"): item.get("holidayName") or "Holiday"
+        for item in holiday_master_collection.find({
+            "date": {"$gte": window_start, "$lte": window_end},
+            "status": {"$not": {"$regex": "^(inactive|deleted)$", "$options": "i"}},
+        }, {"date": 1, "holidayName": 1})
+        if item.get("date")
+    }
 
     records = list(employee_daily_collection.find({
         "date": {"$gte": window_start, "$lte": window_end},
@@ -565,6 +574,8 @@ def get_training_calendar(startDate: str, endDate: str):
         if emp_id not in active_shift_ids:
             non_shift_duties.setdefault(emp_id, {})[record.get("date")] = {
                 "shift": record.get("assignedDuty"),
+                "isHoliday": bool(record.get("date") in holiday_map or str(record.get("isHoliday") or "").upper() == "Y"),
+                "holidayName": holiday_map.get(record.get("date")) or record.get("holidayName"),
                 "leaveStatus": record.get("leaveStatus"),
                 "leaveType": record.get("leaveType"),
                 "trainingName": record.get("trainingName"),
@@ -586,6 +597,8 @@ def get_training_calendar(startDate: str, endDate: str):
         })
         person["duties"][record.get("date")] = {
             "shift": record.get("assignedDuty"),
+            "isHoliday": bool(record.get("date") in holiday_map or str(record.get("isHoliday") or "").upper() == "Y"),
+            "holidayName": holiday_map.get(record.get("date")) or record.get("holidayName"),
             "leaveStatus": record.get("leaveStatus"),
             "leaveType": record.get("leaveType"),
             "trainingName": record.get("trainingName"),
@@ -616,6 +629,15 @@ def get_training_calendar(startDate: str, endDate: str):
             "financialYearTrainingDays": training_days.get(emp_id, 0),
             "duties": non_shift_duties.get(emp_id, {}),
         }
+
+    for people in grouped.values():
+        for person in people.values():
+            for holiday_date, holiday_name in holiday_map.items():
+                duty = person["duties"].setdefault(holiday_date, {
+                    "shift": "Holiday" if person.get("employeeType") == "Non-shift" else "-",
+                })
+                duty["isHoliday"] = True
+                duty["holidayName"] = holiday_name
 
     return {
         group_name: sorted(people.values(), key=lambda item: (item.get("name") or "").lower())

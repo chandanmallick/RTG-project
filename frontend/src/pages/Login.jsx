@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Alert, Box, Button, IconButton, InputAdornment, Paper, TextField, Typography } from "@mui/material";
-import { Eye, EyeOff, LockKeyhole, Mail, RotateCcw, User } from "lucide-react";
+import { CalendarDays, Eye, EyeOff, LockKeyhole, Mail, RotateCcw, User } from "lucide-react";
 import { Navigate, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
 
@@ -127,6 +127,7 @@ export default function Login() {
           <Button fullWidth type="submit" variant="contained" disabled={submitting || (challenge && otp.length !== 6)} sx={{ mt: 3, minHeight: 44, fontWeight: 800, background: "#0057B7" }}>
             {submitting ? "Please wait..." : challenge ? "Verify & sign in" : "Sign in"}
           </Button>
+          {!challenge && <Button fullWidth type="button" variant="outlined" startIcon={<CalendarDays size={17} />} onClick={() => navigate("/public/crew-calendar")} sx={{ mt: 1.25, minHeight: 42, textTransform: "none", fontWeight: 850, borderColor: "#8FB8E8", color: "#0057B7" }}>View public duty calendar</Button>}
           {challenge && (
             <Box sx={{ mt: 1.5, display: "flex", justifyContent: "space-between", gap: 1 }}>
               <Button size="small" onClick={restart} disabled={submitting} sx={{ textTransform: "none" }}>Use another account</Button>

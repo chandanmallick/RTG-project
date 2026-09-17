@@ -78,6 +78,7 @@ export default function App() {
       <Routes>
 
         <Route path="/login" element={<Login />} />
+        <Route path="/public/crew-calendar" element={<CrewCalendar publicView />} />
 
         <Route
           path="/"

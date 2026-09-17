@@ -76,23 +76,31 @@ body {
 .group-table {
     width: 100%;
     border-collapse: collapse;
+    table-layout: fixed;
     margin-top: 6px;
-    font-size: 10px;
+    /* Use print units. Fixed layout prevents Chrome from shrinking the page. */
+    font-size: 14px !important;
+    line-height: 1.35;
+    color: #000000 !important;
 }
 
 .group-table td {
     width: 25%;
     vertical-align: top;
     border: 1px solid #ccc;
-    padding: 4px;
+    padding: 6px;
+    color: #000000 !important;
+    overflow-wrap: anywhere;
+    word-break: normal;
 }
 
 .group-title {
     background-color: #e8f5e9;
-    color: #14532d;
+    color: #000000;
     font-weight: bold;
-    padding: 3px;
-    margin-bottom: 4px;
+    font-size: 18px !important;
+    padding: 4px;
+    margin-bottom: 6px;
 }
 
 /* ================= SIGNATURE ================= */
@@ -117,6 +125,38 @@ body {
     font-size: 9.5px;
     color: #444;
     text-align: left;
+}
+
+.group-table b {
+    font-size: 16px !important;
+    color: #000000 !important;
+}
+
+.group-person-details,
+.group-person-details * {
+    font-size: 14px !important;
+    line-height: 1.35 !important;
+    color: #000000 !important;
+    font-weight: 400 !important;
+}
+
+.group-person-details b {
+    font-size: 16px !important;
+    font-weight: 800 !important;
+}
+
+.print-section {
+    margin-top: 10px;
+    color: #000000 !important;
+    font-size: 14px !important;
+    line-height: 1.4 !important;
+    font-weight: 400 !important;
+}
+
+.print-section-title {
+    color: #000000 !important;
+    font-size: 16px !important;
+    font-weight: 800 !important;
 }
 
 .title > h2,
@@ -202,6 +242,7 @@ body {
 Group {{ g.get('groupName','') }}
 </div>
 
+<div class="group-person-details">
 <b>Shift Incharge:</b><br>
 {{ g.get('shiftInCharge', {}).get('name','') }}
 -
@@ -218,6 +259,7 @@ Group {{ g.get('groupName','') }}
 {{ m.get('name','') }} ({{ m.get('designation','') }}) - {{ m.get('employeeId','') }}
 <br>
 {% endfor %}
+</div>
 
 </td>
 {% endfor %}
@@ -227,14 +269,15 @@ Group {{ g.get('groupName','') }}
 
 <!-- ================= INSTRUCTIONS ================= -->
 
-<br>
-<b>विशेष निर्देश / Special Instructions:</b><br>
+<div class="print-section">
+<div class="print-section-title">विशेष निर्देश / Special Instructions:</div>
 {{ instructions | safe }}
+</div>
 
-<br><br>
-
-<b>Distribution:</b><br>
+<div class="print-section">
+<div class="print-section-title">Distribution:</div>
 {{ distribution | safe }}
+</div>
 
 <!-- ================= SIGNATURE ================= -->
 

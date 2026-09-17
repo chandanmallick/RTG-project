@@ -13,8 +13,13 @@ import {
   TableCell,
   TableContainer,
   TableHead,
-  TableRow
+  TableRow,
+  IconButton,
+  Stack,
+  Alert
 } from "@mui/material";
+import EditIcon from "@mui/icons-material/Edit";
+import DeleteIcon from "@mui/icons-material/Delete";
 import DesignationMasterPanel from "./DesignationMasterPanel";
 
 export default function DropdownMaster() {
@@ -23,6 +28,8 @@ export default function DropdownMaster() {
   const [value, setValue] = useState("");
   const [status, setStatus] = useState("Active");
   const [dropdownList, setDropdownList] = useState([]);
+  const [editId, setEditId] = useState(null);
+  const [notice, setNotice] = useState(null);
 
   // Fetch values from backend
   const fetchDropdownValues = async (selectedType) => {
@@ -37,12 +44,15 @@ export default function DropdownMaster() {
         : await api.get(`/admin/dropdown/${selectedType}`);
       setDropdownList(res.data);
     } catch (error) {
-      console.error("Fetch error:", error);
+      setNotice({ severity: "error", text: error.response?.data?.detail || "Dropdown values could not be loaded." });
     }
   };
 
   // Fetch whenever dropdown type changes
   useEffect(() => {
+    setEditId(null);
+    setValue("");
+    setStatus("Active");
     fetchDropdownValues(type);
   }, [type]);
 
@@ -51,19 +61,47 @@ export default function DropdownMaster() {
 
     try {
       if (type === "leaveType") {
-        await api.post("/admin/DutyLeaveType", {
+        const payload = {
           dutyLeaveType_cat: "leaveType",
           value: value.trim(),
           status,
-        });
+        };
+        if (editId) await api.put(`/admin/DutyLeaveType/${editId}`, payload);
+        else await api.post("/admin/DutyLeaveType", payload);
       } else {
-        await api.post(`/admin/dropdown`, { type, value: value.trim() });
+        if (editId) await api.put(`/admin/dropdown/${editId}`, { type, value: value.trim() });
+        else await api.post(`/admin/dropdown`, { type, value: value.trim() });
       }
 
       setValue("");
+      setEditId(null);
+      setNotice({ severity: "success", text: editId ? "Dropdown value updated." : "Dropdown value added." });
       fetchDropdownValues(type); // Refresh from backend
     } catch (error) {
-      console.error("Insert error:", error);
+      setNotice({ severity: "error", text: error.response?.data?.detail || "Dropdown value could not be saved." });
+    }
+  };
+
+  const handleEdit = (item) => {
+    setEditId(item.id);
+    setValue(item.value || "");
+    setStatus(item.status || "Active");
+  };
+
+  const handleDelete = async (item) => {
+    if (!window.confirm(`Delete "${item.value}"?`)) return;
+    try {
+      if (type === "leaveType") await api.delete(`/admin/DutyLeaveType/${item.id}`);
+      else await api.delete(`/admin/dropdown/${item.id}`);
+      if (editId === item.id) {
+        setEditId(null);
+        setValue("");
+        setStatus("Active");
+      }
+      setNotice({ severity: "success", text: "Dropdown value deleted." });
+      fetchDropdownValues(type);
+    } catch (error) {
+      setNotice({ severity: "error", text: error.response?.data?.detail || "Dropdown value could not be deleted." });
     }
   };
 
@@ -72,6 +110,8 @@ export default function DropdownMaster() {
       <Typography variant="h5" gutterBottom>
         Dropdown Management
       </Typography>
+
+      {notice && <Alert severity={notice.severity} onClose={() => setNotice(null)} sx={{ mb: 2 }}>{notice.text}</Alert>}
 
       <DesignationMasterPanel />
 
@@ -112,8 +152,9 @@ export default function DropdownMaster() {
 
           <Grid item xs={12}>
             <Button variant="contained" onClick={handleSubmit}>
-              Add Value
+              {editId ? "Update Value" : "Add Value"}
             </Button>
+            {editId && <Button sx={{ ml: 1 }} variant="outlined" onClick={() => { setEditId(null); setValue(""); setStatus("Active"); }}>Cancel</Button>}
           </Grid>
 
         </Grid>
@@ -127,6 +168,7 @@ export default function DropdownMaster() {
             <TableRow sx={{backgroundColor: "#d9f2d9"}}>
               <TableCell><strong>Value</strong></TableCell>
               {type === "leaveType" && <TableCell><strong>Status</strong></TableCell>}
+              <TableCell align="right"><strong>Actions</strong></TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
@@ -134,12 +176,13 @@ export default function DropdownMaster() {
               <TableRow key={item.id}>
                 <TableCell>{item.value}</TableCell>
                 {type === "leaveType" && <TableCell>{item.status || "Active"}</TableCell>}
+                <TableCell align="right"><Stack direction="row" spacing={.5} justifyContent="flex-end"><IconButton size="small" color="primary" title="Edit" onClick={() => handleEdit(item)}><EditIcon fontSize="small" /></IconButton><IconButton size="small" color="error" title="Delete" onClick={() => handleDelete(item)}><DeleteIcon fontSize="small" /></IconButton></Stack></TableCell>
               </TableRow>
             ))}
 
             {dropdownList.length === 0 && (
               <TableRow>
-                <TableCell colSpan={type === "leaveType" ? 2 : 1} align="center">
+                <TableCell colSpan={type === "leaveType" ? 3 : 2} align="center">
                   No values available
                 </TableCell>
               </TableRow>

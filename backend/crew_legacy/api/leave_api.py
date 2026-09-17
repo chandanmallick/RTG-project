@@ -4,6 +4,7 @@ from bson import ObjectId
 
 from crew_legacy.database.database_mongo import (
     leave_request_collection,
+    leave_approval_delegation_collection,
     employee_daily_collection,
     employee_collection,
     DutyLeave_collection,
@@ -55,9 +56,9 @@ def leave_date_summary(leaves: list[dict]) -> str:
 
 def leave_type_summary(leaves: list[dict]) -> str:
     leave_types = list(dict.fromkeys(
-        clean_id(leave.get("leaveType"))
+        clean_id(leave.get("leaveType")) or ("Station Leave" if leave.get("stationLeave") else "")
         for leave in leaves
-        if clean_id(leave.get("leaveType"))
+        if clean_id(leave.get("leaveType")) or leave.get("stationLeave")
     ))
     return ", ".join(leave_types) or "-"
 
@@ -151,13 +152,19 @@ def organization_leave_approval_chain(employee: dict) -> tuple[list[dict], int]:
         employee.get("manualFunctionIds", employee.get("functionIds")), employee_id
     )
     override = employee.get("leaveApprovalLevelsOverride")
-    configured_levels = int(override) if str(override or "") in {"2", "3"} else int(resolved.get("organizationLeaveApprovalLevels") or 2)
-    level_values = [
+    override_value = str(override or "")
+    reporting_to_intermediary = override_value == "2_intermediary"
+    configured_levels = 2 if reporting_to_intermediary else (
+        int(override) if override_value in {"1", "2", "3"}
+        else int(resolved.get("organizationLeaveApprovalLevels") or 2)
+    )
+    level_values = [("Reporting Officer / HOD", resolved.get("reportingOfficerIds") or [resolved.get("hodId")])] if configured_levels == 1 else [
         ("Reporting Officer", resolved.get("reportingOfficerIds") or []),
     ]
-    if configured_levels == 3:
+    if reporting_to_intermediary or configured_levels == 3:
         level_values.append(("Intermediary Reporting Officer", [resolved.get("intermediaryReportingId")]))
-    level_values.append(("HOD", [resolved.get("hodId")]))
+    if configured_levels > 1 and not reporting_to_intermediary:
+        level_values.append(("HOD", [resolved.get("hodId")]))
 
     used = set()
     chain = []
@@ -205,6 +212,39 @@ def step_approver_ids(step: dict) -> list[str]:
     ]
 
 
+def active_leave_delegation(delegator_id: str, delegate_id: str, on_date: str = None) -> dict:
+    """Return a currently effective, non-revoked delegation for this approval actor."""
+    date_value = on_date or datetime.utcnow().strftime("%Y-%m-%d")
+    return leave_approval_delegation_collection.find_one({
+        "delegatorEmployeeId": clean_id(delegator_id),
+        "delegateEmployeeId": clean_id(delegate_id),
+        "status": "Active",
+        "startDate": {"$lte": date_value},
+        "endDate": {"$gte": date_value},
+    }) or {}
+
+
+def organization_step_actor(user: dict, step: dict) -> tuple[bool, str]:
+    """Whether user is the configured approver or is formally delegated by one."""
+    actor = clean_id(user.get("employeeId") or user.get("userId"))
+    if is_admin(user):
+        return True, ""
+    for approver_id in step_approver_ids(step):
+        if actor == approver_id:
+            return True, ""
+        if active_leave_delegation(approver_id, actor):
+            return True, approver_id
+    return False, ""
+
+
+def delegation_actor_metadata(user: dict, step: dict) -> dict:
+    allowed, delegator_id = organization_step_actor(user, step)
+    if not allowed or not delegator_id:
+        return {}
+    person = employee_by_id(delegator_id)
+    return {"delegatedBy": delegator_id, "delegatedByName": person.get("name") or delegator_id}
+
+
 def migrate_pending_nonshift_leave_workflows() -> int:
     """Lazily convert legacy General-duty requests that were incorrectly waiting for SIC."""
     migrated = 0
@@ -233,6 +273,59 @@ def migrate_pending_nonshift_leave_workflows() -> int:
         )
         migrated += result.modified_count
     return migrated
+
+
+def refresh_unacted_organization_leave_workflows() -> int:
+    """Refresh untouched pending chains after an employee hierarchy change.
+
+    Approval steps that have already been acted upon remain immutable audit
+    snapshots. Only requests still at their first, entirely pending step are
+    eligible to follow the employee's current configured approval route.
+    """
+    refreshed = 0
+    records = leave_request_collection.find({
+        "finalStatus": "Applied",
+        "approvalMode": "Organization",
+        "organizationApprovalStatus": "Pending",
+        "$or": [
+            {"currentApprovalIndex": 0},
+            {"currentApprovalIndex": None},
+            {"currentApprovalIndex": {"$exists": False}},
+        ],
+    })
+    for leave in records:
+        old_chain = leave.get("approvalChain") or []
+        if any(step.get("status") != "Pending" or step.get("actedBy") or step.get("actedOn") for step in old_chain):
+            continue
+        employee = employee_by_id(leave.get("employeeId"))
+        if not employee:
+            continue
+        try:
+            new_chain, configured_levels = organization_leave_approval_chain(employee)
+        except HTTPException:
+            continue
+
+        def signature(chain):
+            return [
+                (step.get("level"), tuple(step_approver_ids(step)))
+                for step in chain
+            ]
+
+        if signature(old_chain) == signature(new_chain):
+            continue
+        result = leave_request_collection.update_one(
+            {"_id": leave["_id"], "currentApprovalIndex": {"$in": [0, None]}},
+            {"$set": {
+                "approvalChain": new_chain,
+                "configuredApprovalLevels": configured_levels,
+                "currentApprovalIndex": 0,
+                "organizationApprovalStatus": "Pending",
+                "approvalHierarchyRefreshedOn": datetime.utcnow(),
+                "updatedOn": datetime.utcnow(),
+            }},
+        )
+        refreshed += result.modified_count
+    return refreshed
 
 
 def visible_leave_employee_ids(user: dict, employees: Optional[list[dict]] = None) -> set[str]:
@@ -334,14 +427,22 @@ def daily_record(employee_id: str, date_str: str):
 def shift_group_for_date(employee_id: str, date_str: str) -> dict:
     """Find an employee's roster group for the requested day, including historical groups."""
     employee_id = clean_id(employee_id)
-    return roster_group_collection.find_one({
+    published_rosters = roster_master_collection.find({
+        "calendarPushed": True,
         "startDate": {"$lte": date_str},
         "endDate": {"$gte": date_str},
+    }, {"groupDetails": 1}).sort("startDate", -1)
+    for roster in published_rosters:
+        for group in roster.get("groupDetails") or []:
+            if group_contains_employee(group, employee_id):
+                return group
+    return roster_group_collection.find_one({
+        "isActive": {"$ne": False},
         "$or": [
             {"shiftInCharge.employeeId": employee_id},
             {"members.employeeId": employee_id},
         ],
-    }, sort=[("startDate", -1)]) or {}
+    }) or {}
 
 
 def group_contains_employee(group: dict, employee_id: str) -> bool:
@@ -407,7 +508,8 @@ def general_duty_record(employee_id: str, date_str: str, *, persist: bool = Fals
         "date": date_str,
         "status": {"$not": {"$regex": "^(inactive|deleted)$", "$options": "i"}},
     })
-    assigned_duty = "Holiday" if holiday else "General"
+    is_weekend = datetime.strptime(date_str, "%Y-%m-%d").weekday() >= 5
+    assigned_duty = "Holiday" if holiday else ("OFF" if is_weekend else "General")
     record = {
         "employeeId": clean_id(employee.get("userId") or employee.get("employeeId") or employee_id),
         "name": employee.get("name"),
@@ -416,6 +518,7 @@ def general_duty_record(employee_id: str, date_str: str, *, persist: bool = Fals
         "assignedDuty": assigned_duty,
         "groupName": "General",
         "isHoliday": "Y" if holiday else "N",
+        "isWeekend": is_weekend,
         "holidayName": holiday.get("holidayName") if holiday else None,
         "isSIC": False,
         "flag": "Duty",
@@ -494,14 +597,16 @@ def can_apply_for(user: dict, employee_id: str, date_str: str = None) -> bool:
 def can_sic_act(user: dict, leave: dict) -> bool:
     if is_organization_leave(leave):
         index, step = current_organization_approval(leave)
-        return is_admin(user) or bool(index == 0 and step and clean_id(user.get("employeeId")) in step_approver_ids(step))
+        allowed, _delegator = organization_step_actor(user, step) if step else (False, "")
+        return bool(index == 0 and allowed)
     return is_admin(user) or bool(sic_record_for(user.get("employeeId"), leave.get("date"), leave.get("groupName")))
 
 
 def can_authority_act(user: dict, leave: dict) -> bool:
     if is_organization_leave(leave):
         index, step = current_organization_approval(leave)
-        return is_admin(user) or bool(index > 0 and step and clean_id(user.get("employeeId")) in step_approver_ids(step))
+        allowed, _delegator = organization_step_actor(user, step) if step else (False, "")
+        return bool(index > 0 and allowed)
     return is_admin(user) or clean_id(user.get("employeeId")) in leave_authority_ids(leave)
 
 
@@ -545,6 +650,7 @@ def clear_leave_operational_effects(leave: dict):
         {"employeeId": employee_id_filter(employee_id), "date": leave_date},
         {"$unset": {
             "leaveStatus": "", "leaveType": "", "leaveRequestId": "", "replacementAssigned": "",
+            "stationLeave": "", "stationLeaveOnly": "",
         }},
     )
 
@@ -756,6 +862,93 @@ def get_leave_employees(user=Depends(get_authenticated_user)):
     return employees
 
 
+# =========================================================
+# TEMPORARY LEAVE-APPROVAL DELEGATION
+# =========================================================
+
+@router.get("/delegations")
+def get_leave_delegations(user=Depends(get_authenticated_user)):
+    actor = clean_id(user.get("employeeId") or user.get("userId"))
+    records = list(leave_approval_delegation_collection.find({
+        "$or": [{"delegatorEmployeeId": actor}, {"delegateEmployeeId": actor}]
+    }).sort("createdOn", -1))
+    result = []
+    for record in records:
+        delegator = employee_by_id(record.get("delegatorEmployeeId"))
+        delegate = employee_by_id(record.get("delegateEmployeeId"))
+        result.append({
+            "id": str(record["_id"]), "delegatorEmployeeId": clean_id(record.get("delegatorEmployeeId")),
+            "delegatorName": delegator.get("name") or record.get("delegatorEmployeeId"),
+            "delegateEmployeeId": clean_id(record.get("delegateEmployeeId")),
+            "delegateName": delegate.get("name") or record.get("delegateEmployeeId"),
+            "startDate": record.get("startDate"), "endDate": record.get("endDate"),
+            "reason": record.get("reason") or "", "status": record.get("status") or "Active",
+        })
+    return result
+
+
+@router.get("/delegation-employees")
+def get_leave_delegation_employees(user=Depends(get_authenticated_user)):
+    """Active subordinates to whom this approver may temporarily delegate."""
+    actor = clean_id(user.get("employeeId") or user.get("userId"))
+    visible_ids = visible_leave_employee_ids(user)
+    visible_ids.discard(actor)
+    employees = list(employee_collection.find(
+        {"isActive": {"$ne": False}, "$or": [
+            {"userId": {"$in": sorted(visible_ids)}},
+            {"employeeId": {"$in": sorted(visible_ids)}},
+        ]},
+        {"_id": 0, "userId": 1, "employeeId": 1, "name": 1, "designation": 1},
+    ).sort("name", 1))
+    return [{**employee, "employeeId": clean_id(employee.get("userId") or employee.get("employeeId"))} for employee in employees]
+
+
+@router.post("/delegations")
+def create_leave_delegation(data: dict, user=Depends(get_authenticated_user)):
+    delegator_id = clean_id(user.get("employeeId") or user.get("userId"))
+    delegate_id = clean_id(data.get("delegateEmployeeId"))
+    start_date, end_date = clean_id(data.get("startDate")), clean_id(data.get("endDate"))
+    if not delegate_id or delegate_id == delegator_id:
+        raise HTTPException(400, "Choose another active employee as the delegated approver")
+    try:
+        datetime.strptime(start_date, "%Y-%m-%d")
+        datetime.strptime(end_date, "%Y-%m-%d")
+    except ValueError as exc:
+        raise HTTPException(400, "Delegation dates must use YYYY-MM-DD format") from exc
+    if end_date < start_date:
+        raise HTTPException(400, "Delegation end date cannot be before the start date")
+    if not employee_by_id(delegate_id) or employee_by_id(delegate_id).get("isActive") is False:
+        raise HTTPException(404, "Delegated employee is not active")
+    overlap = leave_approval_delegation_collection.find_one({
+        "delegatorEmployeeId": delegator_id, "status": "Active",
+        "startDate": {"$lte": end_date}, "endDate": {"$gte": start_date},
+    })
+    if overlap:
+        raise HTTPException(409, "An active leave-approval delegation already overlaps these dates. Revoke it first.")
+    now = datetime.utcnow()
+    item = {"delegatorEmployeeId": delegator_id, "delegateEmployeeId": delegate_id,
+            "startDate": start_date, "endDate": end_date, "reason": clean_id(data.get("reason"))[:500],
+            "status": "Active", "createdOn": now, "createdBy": delegator_id}
+    result = leave_approval_delegation_collection.insert_one(item)
+    return {"id": str(result.inserted_id), "message": "Leave-approval delegation saved"}
+
+
+@router.put("/delegations/{delegation_id}/revoke")
+def revoke_leave_delegation(delegation_id: str, user=Depends(get_authenticated_user)):
+    actor = clean_id(user.get("employeeId") or user.get("userId"))
+    try:
+        record_id = ObjectId(delegation_id)
+    except Exception as exc:
+        raise HTTPException(400, "Invalid delegation") from exc
+    result = leave_approval_delegation_collection.update_one(
+        {"_id": record_id, "delegatorEmployeeId": actor, "status": "Active"},
+        {"$set": {"status": "Revoked", "revokedOn": datetime.utcnow(), "revokedBy": actor}},
+    )
+    if not result.modified_count:
+        raise HTTPException(404, "Active delegation not found")
+    return {"message": "Leave-approval delegation revoked"}
+
+
 @router.get("/approval-calendar")
 def get_organization_approval_calendar(
     startDate: str = Query(...),
@@ -814,6 +1007,14 @@ def get_organization_approval_calendar(
     while cursor <= end:
         dates.append(cursor.strftime("%Y-%m-%d"))
         cursor += timedelta(days=1)
+    holiday_map = {
+        item.get("date"): item.get("holidayName") or "Holiday"
+        for item in holiday_master_collection.find({
+            "date": {"$gte": startDate, "$lte": endDate},
+            "status": {"$not": {"$regex": "^(inactive|deleted)$", "$options": "i"}},
+        }, {"date": 1, "holidayName": 1})
+        if item.get("date")
+    }
 
     groups = {}
     for employee in employees:
@@ -834,8 +1035,11 @@ def get_organization_approval_calendar(
             if not record:
                 record = general_duty_record(target_id, date) or {}
             leave = leave_map.get((target_id, date)) or {}
+            holiday_name = holiday_map.get(date) or record.get("holidayName")
             duties[date] = {
                 "shift": record.get("assignedDuty") or "General",
+                "isHoliday": bool(holiday_name or str(record.get("isHoliday") or "").upper() == "Y"),
+                "holidayName": holiday_name,
                 "leaveType": leave.get("leaveType") or record.get("leaveType"),
                 "leaveStatus": leave.get("finalStatus") or record.get("leaveStatus"),
                 "leaveRequestId": str(leave["_id"]) if leave.get("_id") else record.get("leaveRequestId"),
@@ -895,6 +1099,8 @@ def get_leave_types(user=Depends(get_authenticated_user)):
 
         if not name:
             continue  # skip bad records
+        if "".join(str(name).split()).upper() == "STATIONLEAVE":
+            continue
 
         result.append({
             "label": name,
@@ -1228,6 +1434,7 @@ def apply_leave_v2(data: dict, user=Depends(get_authenticated_user)):
             "date": date_str,
             "leaveType": data.get("leaveType"),
             "compOffId": data.get("compOffId"),
+            "stationLeave": data.get("stationLeave"),
         } for date_str in dates]
 
     if not applications:
@@ -1246,6 +1453,7 @@ def apply_leave_v2(data: dict, user=Depends(get_authenticated_user)):
         date_str = str(item.get("date") or "").strip()
         leave_type = str(item.get("leaveType") or "").strip()
         comp_off_id = str(item.get("compOffId") or "").strip() or None
+        station_leave = item.get("stationLeave") is True or str(item.get("stationLeave") or "").strip().lower() in {"1", "true", "yes", "y"}
         try:
             parsed_date = datetime.strptime(date_str, "%Y-%m-%d")
         except Exception as exc:
@@ -1255,8 +1463,6 @@ def apply_leave_v2(data: dict, user=Depends(get_authenticated_user)):
         if date_str in seen_dates:
             raise HTTPException(400, f"Duplicate leave date: {date_str}")
         seen_dates.add(date_str)
-        if not leave_type:
-            raise HTTPException(400, f"Leave type is required for {date_str}")
         if not can_apply_for(user, employee_id, date_str):
             raise HTTPException(403, f"You cannot apply leave for this employee on {date_str}")
 
@@ -1266,6 +1472,26 @@ def apply_leave_v2(data: dict, user=Depends(get_authenticated_user)):
         if not duty:
             raise HTTPException(404, f"Duty not found for {date_str}")
         group_name = duty.get("groupName")
+        is_shift_employee = bool(
+            shift_group_for_date(employee_id, date_str)
+            or (clean_id(group_name) and clean_id(group_name).lower() != "general")
+        )
+        duty_name = map_duty_type(duty.get("assignedDuty"))
+        is_holiday = bool(str(duty.get("isHoliday") or "").upper() == "Y" or duty.get("holidayName"))
+        is_weekend = parsed_date.weekday() >= 5
+        station_leave_only = bool(
+            (is_shift_employee and duty_name == "OFF")
+            or (not is_shift_employee and (is_holiday or is_weekend or duty_name in {"OFF", "Holiday"}))
+        )
+        if station_leave_only:
+            if not station_leave:
+                raise HTTPException(400, f"Tick Station Leave for the non-working day {date_str}")
+            if leave_type:
+                raise HTTPException(400, f"No leave type is permitted on OFF/holiday/weekend {date_str}; use Station Leave only")
+            if comp_off_id:
+                raise HTTPException(400, f"C-OFF cannot be used with Station Leave on {date_str}")
+        elif not leave_type:
+            raise HTTPException(400, f"Leave type is required for working day {date_str}")
 
         duplicate = leave_request_collection.find_one({
             "employeeId": employee_id,
@@ -1275,7 +1501,7 @@ def apply_leave_v2(data: dict, user=Depends(get_authenticated_user)):
         if duplicate:
             raise HTTPException(400, f"Leave already applied for {date_str}")
 
-        if group_rule and group_name != "General":
+        if group_rule and group_name != "General" and not station_leave_only:
             existing_leave = leave_request_collection.find_one({
                 "groupName": group_name,
                 "date": date_str,
@@ -1308,11 +1534,13 @@ def apply_leave_v2(data: dict, user=Depends(get_authenticated_user)):
 
         prepared.append({
             "date": date_str,
-            "leaveType": leave_type,
+            "leaveType": leave_type or "Station Leave",
+            "stationLeave": station_leave,
+            "stationLeaveOnly": station_leave_only,
             "compOffId": comp_off_id,
             "duty": duty,
             "groupName": group_name,
-            "isShiftEmployee": bool(shift_group_for_date(employee_id, date_str)),
+            "isShiftEmployee": is_shift_employee,
         })
 
     leave_group_id = str(uuid.uuid4())
@@ -1341,6 +1569,8 @@ def apply_leave_v2(data: dict, user=Depends(get_authenticated_user)):
             "isSIC": bool(duty.get("isSIC")),
             "date": item["date"],
             "leaveType": item["leaveType"],
+            "stationLeave": item["stationLeave"],
+            "stationLeaveOnly": item["stationLeaveOnly"],
             "reason": reason,
             "leaveGroupId": leave_group_id,
             "sicApprovalStatus": "Pending",
@@ -1364,7 +1594,10 @@ def apply_leave_v2(data: dict, user=Depends(get_authenticated_user)):
         inserted_ids.append(str(leave_id))
         employee_daily_collection.update_one(
             {"employeeId": employee_id_filter(employee_id), "date": item["date"]},
-            {"$set": {"leaveRequestId": str(leave_id), "leaveType": item["leaveType"], "leaveStatus": "Applied"}},
+            {"$set": {
+                "leaveRequestId": str(leave_id), "leaveType": item["leaveType"], "leaveStatus": "Applied",
+                "stationLeave": item["stationLeave"], "stationLeaveOnly": item["stationLeaveOnly"],
+            }},
         )
         if item["compOffId"]:
             reservation = compensatory_off_collection.update_one(
@@ -1378,7 +1611,10 @@ def apply_leave_v2(data: dict, user=Depends(get_authenticated_user)):
                 leave_request_collection.delete_one({"_id": leave_id})
                 employee_daily_collection.update_one(
                     {"employeeId": employee_id_filter(employee_id), "date": item["date"]},
-                    {"$unset": {"leaveRequestId": "", "leaveType": "", "leaveStatus": ""}},
+                    {"$unset": {
+                        "leaveRequestId": "", "leaveType": "", "leaveStatus": "",
+                        "stationLeave": "", "stationLeaveOnly": "",
+                    }},
                 )
                 raise HTTPException(409, f"The selected C-OFF credit was just used for another request on {item['date']}")
 
@@ -1477,6 +1713,8 @@ def get_all_leave(fromDate: str = Query(...), toDate: str = Query(...), user=Dep
             "name": r.get("name"),
             "date": r.get("date"),
             "leaveType": r.get("leaveType"),
+            "stationLeave": bool(r.get("stationLeave")),
+            "stationLeaveOnly": bool(r.get("stationLeaveOnly")),
             "finalStatus": r.get("finalStatus")
         })
 
@@ -1517,6 +1755,7 @@ def sic_forward_bulk(data: dict, user=Depends(get_authenticated_user)):
                     f"approvalChain.{index}.status": "Approved",
                     f"approvalChain.{index}.actedBy": clean_id(user.get("employeeId")),
                     f"approvalChain.{index}.actedOn": now,
+                    f"approvalChain.{index}.delegation": delegation_actor_metadata(user, step),
                     "currentApprovalIndex": next_index,
                     "organizationApprovalStatus": "In Progress",
                     "sicApprovalStatus": "Not Applicable",
@@ -1660,6 +1899,7 @@ def sic_reject_bulk(data: dict, user=Depends(get_authenticated_user)):
                 {"$set": {
                     f"approvalChain.{index}.status": "Rejected", f"approvalChain.{index}.actedBy": actor,
                     f"approvalChain.{index}.actedOn": rejected_on, "organizationApprovalStatus": "Rejected",
+                    f"approvalChain.{index}.delegation": delegation_actor_metadata(user, step),
                     "finalStatus": "Rejected", "rejectionComment": comment, "rejectedBy": actor,
                     "rejectedByRole": rejection["rejectedByRole"], "rejectedOn": rejected_on, "updatedOn": rejected_on,
                 }, "$push": {"rejectionHistory": rejection}},
@@ -1811,6 +2051,7 @@ def approve_leave_bulk(data: dict, user=Depends(get_authenticated_user)):
                     {"$set": {
                         f"approvalChain.{index}.status": "Approved", f"approvalChain.{index}.actedBy": clean_id(user.get("employeeId")),
                         f"approvalChain.{index}.actedOn": now, "currentApprovalIndex": next_index,
+                        f"approvalChain.{index}.delegation": delegation_actor_metadata(user, step),
                         "organizationApprovalStatus": "In Progress", "updatedOn": now,
                     }},
                 )
@@ -1873,6 +2114,7 @@ def approve_leave_bulk(data: dict, user=Depends(get_authenticated_user)):
                 f"approvalChain.{current_index}.status": "Approved",
                 f"approvalChain.{current_index}.actedBy": clean_id(user.get("employeeId")),
                 f"approvalChain.{current_index}.actedOn": datetime.utcnow(),
+                f"approvalChain.{current_index}.delegation": delegation_actor_metadata(user, current_step),
                 "currentApprovalIndex": len(leave.get("approvalChain") or []),
                 "organizationApprovalStatus": "Approved",
             })
@@ -2008,6 +2250,7 @@ def reject_bulk(data: dict, user=Depends(get_authenticated_user)):
                 f"approvalChain.{approval_index}.status": "Rejected",
                 f"approvalChain.{approval_index}.actedBy": clean_id(user.get("employeeId")),
                 f"approvalChain.{approval_index}.actedOn": rejected_on,
+                f"approvalChain.{approval_index}.delegation": delegation_actor_metadata(user, approval_step),
                 "organizationApprovalStatus": "Rejected",
             })
         leave_request_collection.update_one(
@@ -2078,6 +2321,7 @@ def get_leave_list(
     user=Depends(get_authenticated_user),
 ):
     migrate_pending_nonshift_leave_workflows()
+    refresh_unacted_organization_leave_workflows()
     actor = clean_id(user.get("employeeId"))
     visible_employee_ids = visible_leave_employee_ids(user)
     delete_allowed = can_delete_leave_master(user)
@@ -2138,6 +2382,30 @@ def get_leave_list(
         }) or {}
         organization_route = is_organization_leave(r)
         approval_index, approval_step = current_organization_approval(r) if organization_route else (None, None)
+        first_approver_ids = (
+            step_approver_ids((r.get("approvalChain") or [{}])[0])
+            if organization_route and (r.get("approvalChain") or [])
+            else group_sic_ids(r.get("date"), r.get("groupName"))
+        )
+        final_approver_ids = (
+            [
+                value
+                for step in (r.get("approvalChain") or [])[1:]
+                for value in step_approver_ids(step)
+            ]
+            if organization_route
+            else leave_authority_ids(r)
+        )
+        first_approver_names = [
+            employee_by_id(value).get("name") or value
+            for value in dict.fromkeys(first_approver_ids)
+            if value
+        ]
+        final_approver_names = [
+            employee_by_id(value).get("name") or value
+            for value in dict.fromkeys(final_approver_ids)
+            if value
+        ]
 
         result.append({
             "id": str(r["_id"]),
@@ -2149,6 +2417,8 @@ def get_leave_list(
             "isSIC": r.get("isSIC"),
             "date": r.get("date"),
             "leaveType": r.get("leaveType"),
+            "stationLeave": bool(r.get("stationLeave")),
+            "stationLeaveOnly": bool(r.get("stationLeaveOnly")),
             "assignedDuty": assigned_duty,
             "dutyType": map_duty_type(assigned_duty),
             "sicApprovalStatus": r.get("sicApprovalStatus"),
@@ -2160,6 +2430,8 @@ def get_leave_list(
             "currentApprovalIndex": approval_index,
             "currentApproverLevel": approval_step.get("level") if approval_step else None,
             "currentApproverNames": approval_step.get("names") if approval_step else [],
+            "firstApproverNames": first_approver_names,
+            "finalApproverNames": final_approver_names,
             "approvalProgress": f"{sum(1 for step in (r.get('approvalChain') or []) if step.get('status') == 'Approved')}/{len(r.get('approvalChain') or [])}" if organization_route else None,
             "finalStatus": r.get("finalStatus"),
             "replacementRequired": r.get("replacementRequired", False),
@@ -2250,11 +2522,32 @@ def get_duty_detailed(
                 "employeeId": {"$ne": employeeId}
             }))
 
+            shift_group = shift_group_for_date(employeeId, date_str)
+            group_name = clean_id(rec.get("groupName"))
+            is_shift_employee = bool(
+                shift_group or (group_name and group_name.lower() != "general")
+            )
+            mapped_duty = map_duty_type(rec.get("assignedDuty"))
+            station_leave_only_allowed = bool(
+                (is_shift_employee and mapped_duty == "OFF")
+                or (not is_shift_employee and (
+                    current.weekday() >= 5
+                    or str(rec.get("isHoliday") or "").upper() == "Y"
+                    or mapped_duty in {"OFF", "Holiday"}
+                ))
+            )
+
             result.append({
                 "date": date_str,
                 "assignedDuty": rec.get("assignedDuty"),
                 "groupName": rec.get("groupName"),
-                "isHoliday": rec.get("isHoliday"),
+                "isHoliday": bool(
+                    str(rec.get("isHoliday") or "").upper() == "Y"
+                    or rec.get("holidayName")
+                ),
+                "isWeekend": current.weekday() >= 5,
+                "isShiftEmployee": is_shift_employee,
+                "stationLeaveOnlyAllowed": station_leave_only_allowed,
                 "holidayName": rec.get("holidayName"),
                 "dataSource": rec.get("dataSource"),
                 "othersOnLeave": [
@@ -2425,6 +2718,8 @@ def super_revert_leave(leave_id: str, user=Depends(get_authenticated_user)):
                 "leaveStatus": "",
                 "leaveType": "",
                 "leaveRequestId": "",
+                "stationLeave": "",
+                "stationLeaveOnly": "",
                 "replacementAssigned": ""
             }
         }
@@ -2595,7 +2890,9 @@ def withdraw_leave(leave_id: str, user=Depends(get_authenticated_user)):
             "$unset": {
                 "leaveStatus": "",
                 "leaveType": "",
-                "leaveRequestId": ""
+                "leaveRequestId": "",
+                "stationLeave": "",
+                "stationLeaveOnly": ""
             }
         }
     )

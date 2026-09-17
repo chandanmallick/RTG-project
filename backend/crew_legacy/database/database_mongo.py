@@ -64,6 +64,7 @@ duty_leave_collection = operational_collection("DutyLeave_collection")
 holiday_master_collection = operational_collection("holiday_master_collection")
 training_master_collection = operational_collection("training_master_collection")
 leave_request_collection = operational_collection("leave_request_collection")
+leave_approval_delegation_collection = operational_collection("leave_approval_delegation")
 training_nomination_history_collection = operational_collection("training_nomination_history_collection")
 compensatory_off_collection = operational_collection("compensatory_off_collection")
 deleted_leave_collection = operational_collection("deleted_leave_collection")
@@ -90,7 +91,7 @@ ATLAS_PRIMARY_COLLECTIONS = {
     "morning_presentation_config", "morning_presentation_roster", "DutyLeaveTypes",
     "roster_group_history", "roster_master_collection", "roster_collection",
     "roster_base_config", "employee_daily_collection", "DutyLeave_collection",
-    "holiday_master_collection", "training_master_collection", "leave_request_collection",
+    "holiday_master_collection", "training_master_collection", "leave_request_collection", "leave_approval_delegation",
     "training_nomination_history_collection", "compensatory_off_collection",
     "deleted_leave_collection", "duty_denial_collection", "duty_notification_collection",
     "duty_switch_collection", "duty_balance_ledger", "duty_exchange_request_collection", "crew_threads",
