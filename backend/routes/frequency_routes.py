@@ -1063,6 +1063,36 @@ def normalize_crms_message(item, msg_dt):
     }
 
 
+async def fetch_crms_frequency_messages(start_dt: datetime, end_dt: datetime):
+    """Fetch and normalize CRMS Frequency/Deviation messages for one range."""
+    params = {
+        "startDate": start_dt.strftime("%Y-%m-%d"),
+        "endDate": end_dt.strftime("%Y-%m-%d"),
+    }
+    session = get_legacy_session_no_verify()
+    response = session.get(CRMS_MESSAGE_URL, params=params, timeout=30, verify=False)
+    response.raise_for_status()
+    payload = response.json()
+    raw_messages = payload.get("data") if isinstance(payload, dict) else payload
+    if not isinstance(raw_messages, list):
+        raw_messages = []
+
+    messages = []
+    skipped = 0
+    for item in raw_messages:
+        if not isinstance(item, dict):
+            skipped += 1
+            continue
+        violation_type = str(item.get("violationType") or item.get("violation_type") or "").strip()
+        if violation_type.lower() not in CRMS_VIOLATION_TYPES:
+            continue
+        msg_dt = parse_crms_message_datetime(item.get("messageDate") or item.get("message_date"))
+        if msg_dt is None or msg_dt < start_dt or msg_dt > end_dt:
+            continue
+        messages.append(normalize_crms_message(item, msg_dt))
+    return messages, skipped
+
+
 def crms_text_list(value):
     if isinstance(value, list):
         items = value
@@ -1312,32 +1342,7 @@ async def get_crms_frequency_messages(start_time: str = Query(...), end_time: st
         et = datetime.fromisoformat(end_time.replace("Z", ""))
         if et < st:
             return {"success": False, "error": "end_time must be after start_time", "messages": []}
-
-        params = {
-            "startDate": st.strftime("%Y-%m-%d"),
-            "endDate": et.strftime("%Y-%m-%d"),
-        }
-        session = get_legacy_session_no_verify()
-        response = session.get(CRMS_MESSAGE_URL, params=params, timeout=30, verify=False)
-        response.raise_for_status()
-        payload = response.json()
-        raw_messages = payload.get("data") if isinstance(payload, dict) else payload
-        if not isinstance(raw_messages, list):
-            raw_messages = []
-
-        messages = []
-        skipped = 0
-        for item in raw_messages:
-            if not isinstance(item, dict):
-                skipped += 1
-                continue
-            violation_type = str(item.get("violationType") or item.get("violation_type") or "").strip()
-            if violation_type.lower() not in CRMS_VIOLATION_TYPES:
-                continue
-            msg_dt = parse_crms_message_datetime(item.get("messageDate") or item.get("message_date"))
-            if msg_dt is None or msg_dt < st or msg_dt > et:
-                continue
-            messages.append(normalize_crms_message(item, msg_dt))
+        messages, skipped = await fetch_crms_frequency_messages(st, et)
 
         return {
             "success": True,
@@ -1348,6 +1353,228 @@ async def get_crms_frequency_messages(start_time: str = Query(...), end_time: st
         }
     except Exception as e:
         return {"success": False, "error": str(e), "messages": []}
+
+
+class FrequencyMessageRange(BaseModel):
+    start_time: str
+    end_time: str
+
+
+class FrequencyMessageTimelinePayload(BaseModel):
+    ranges: List[FrequencyMessageRange]
+
+
+CRMS_CONSTITUENT_DEFAULTS = {
+    "BSPTCL": "Bihar",
+    "DVC": "DVC",
+    "JUSNL": "Jharkhand",
+    "GRIDCO": "Odisha",
+    "WBSETCL": "West Bengal",
+    "SIKKIM": "Sikkim",
+}
+
+
+def _timeline_state_mappings(db):
+    """Build CRMS addressee -> state mapping from maintained Frequency Mapping."""
+    by_alias = {}
+    for alias, display in CRMS_CONSTITUENT_DEFAULTS.items():
+        by_alias[normalize_crms_lookup(alias)] = {"display_name": display}
+    for item in db.map_collection.find({"is_state": True}, {"_id": 0}):
+        display = str(item.get("plant_name") or item.get("state_name") or item.get("state") or "").strip()
+        aliases = crms_text_list(item.get("crms_utility_name"))
+        if not aliases:
+            aliases = [alias for alias, name in CRMS_CONSTITUENT_DEFAULTS.items() if normalize_crms_lookup(name) == normalize_crms_lookup(display)]
+        mapped = {**item, "display_name": display or str(item.get("crms_utility_name") or "").strip()}
+        for alias in aliases:
+            if normalize_crms_lookup(alias):
+                by_alias[normalize_crms_lookup(alias)] = mapped
+    return by_alias
+
+
+def _nearest_saved_event_values(db, message_dt: datetime, state_name: str):
+    """Read the nearest frequency/deviation point from a saved event."""
+    event = db.db[EVENT_COLLECTION].find_one(
+        {"start_time": {"$lte": message_dt.isoformat(timespec="minutes")}, "end_time": {"$gte": message_dt.isoformat(timespec="minutes")}},
+        {"_id": 0},
+        sort=[("updated_at", -1)],
+    )
+    if not event:
+        return None, None
+    wanted = normalize_crms_lookup(state_name)
+    for point in event.get("data_points") or []:
+        if str(point.get("type") or "").strip().lower() != "state":
+            continue
+        point_name = point.get("state") or point.get("state_name") or point.get("plant_name")
+        if normalize_crms_lookup(point_name) != wanted:
+            continue
+        series = point.get("series") or {}
+        timestamps = series.get("timestamps") or []
+        nearest_index = None
+        nearest_seconds = None
+        for index, value in enumerate(timestamps):
+            try:
+                parsed = pd.to_datetime(value).to_pydatetime()
+            except Exception:
+                continue
+            seconds = abs((parsed - message_dt).total_seconds())
+            if nearest_seconds is None or seconds < nearest_seconds:
+                nearest_index, nearest_seconds = index, seconds
+        if nearest_index is None or nearest_seconds is None or nearest_seconds > 15 * 60:
+            return None, None
+        frequency = safe_float((series.get("frequency") or [])[nearest_index]) if nearest_index < len(series.get("frequency") or []) else None
+        deviation = safe_float((series.get("deviation") or [])[nearest_index]) if nearest_index < len(series.get("deviation") or []) else None
+        return frequency, deviation
+    return None, None
+
+
+def _raw_timeline_values(db, message_dt: datetime, mapping: dict):
+    frequency = get_source_series_for_timestamp(
+        db, message_dt, "SYSTEM_FREQUENCY", "SYSTEM_FREQUENCY", "scada", "actual"
+    )
+    plant_id = str(mapping.get("plant_id") or "")
+    wbes_name = get_wbes_identifier(mapping)
+    actual = None
+    for source in ("scada", "scada_file"):
+        actual = get_source_series_for_timestamp(db, message_dt, plant_id, wbes_name, source, "actual")
+        if actual is not None:
+            break
+    schedule = None
+    preferred = str(mapping.get("schedule_source") or "RTG").strip().lower()
+    schedule_sources = [preferred, "wbes", "rtg", "scada_file"]
+    for source in dict.fromkeys(schedule_sources):
+        schedule = get_source_series_for_timestamp(db, message_dt, plant_id, wbes_name, source, "schedule")
+        if schedule is not None:
+            break
+    deviation = (safe_float(actual) - safe_float(schedule)) if safe_float(actual) is not None and safe_float(schedule) is not None else None
+    return safe_float(frequency), deviation
+
+
+def _schedule_page_fallback(db, message_dt: datetime, mapping: dict, cache: dict):
+    """Use the same WBES schedule + MIS state actual sources as Schedule Data."""
+    day = message_dt.strftime("%Y-%m-%d")
+    wbes_name = get_wbes_identifier(mapping)
+    mis_name = str(mapping.get("mis_name") or mapping.get("plant_name") or "").strip()
+    cache_key = (day, wbes_name, mis_name)
+    if cache_key not in cache:
+        schedule_series = []
+        if wbes_name:
+            try:
+                source = fetch_wbes_schedule_raw(message_dt.strftime("%d-%m-%Y"), [wbes_name])
+                payload = next((item for item in source if normalize_wbes_identifier(item.get("Acronym")) == wbes_name), {})
+                schedule_series = (payload.get("NetScheduleSummary") or {}).get("TotalNetSchdAmount") or []
+            except Exception:
+                schedule_series = []
+        actual_series = []
+        if mis_name:
+            params = {
+                "startDate": f"{day} 00:00",
+                "endDate": f"{day} 23:59",
+                "stationName": mis_name,
+                "time": 1,
+            }
+            try:
+                response = requests.get(SCHEDULE_DATA_STATE_ACTUAL_URL, params=params, timeout=180)
+                response.raise_for_status()
+                raw = response.json()
+                data = raw.get("data") or raw.get("rows") or raw.get("result") if isinstance(raw, dict) else raw
+                data = data if isinstance(data, list) else []
+                for item in data:
+                    if not isinstance(item, dict):
+                        continue
+                    values = _actual_value_list(item)
+                    if values:
+                        actual_series = values
+                        break
+                    if mis_name in item:
+                        actual_series.append(item.get(mis_name))
+            except Exception:
+                actual_series = []
+        cache[cache_key] = (schedule_series, actual_series)
+    schedule_series, actual_series = cache[cache_key]
+    schedule_index = min(message_dt.hour * 4 + message_dt.minute // 15, 95)
+    actual_index = message_dt.hour * 60 + message_dt.minute
+    schedule = safe_float(schedule_series[schedule_index]) if schedule_index < len(schedule_series) else None
+    actual = safe_float(actual_series[actual_index]) if actual_index < len(actual_series) else None
+    return (actual - schedule) if actual is not None and schedule is not None else None
+
+
+@router.post("/message-timeline")
+async def build_frequency_message_timeline(payload: FrequencyMessageTimelinePayload):
+    """Create a chronological, constituent-wise CRMS message timeline."""
+    if not 1 <= len(payload.ranges) <= 20:
+        raise HTTPException(400, "Select between 1 and 20 date-time ranges.")
+    parsed_ranges = []
+    for item in payload.ranges:
+        try:
+            start_dt = datetime.fromisoformat(item.start_time.replace("Z", ""))
+            end_dt = datetime.fromisoformat(item.end_time.replace("Z", ""))
+        except ValueError as exc:
+            raise HTTPException(400, "Every range must contain valid ISO date-time values.") from exc
+        if end_dt < start_dt:
+            raise HTTPException(400, "A range end time cannot be before its start time.")
+        if end_dt - start_dt > timedelta(days=31):
+            raise HTTPException(400, "A single message range cannot exceed 31 days.")
+        parsed_ranges.append((start_dt, end_dt))
+
+    messages_by_key = {}
+    skipped = 0
+    for start_dt, end_dt in parsed_ranges:
+        try:
+            messages, range_skipped = await fetch_crms_frequency_messages(start_dt, end_dt)
+        except Exception as exc:
+            raise HTTPException(502, f"CRMS message fetch failed: {exc}") from exc
+        skipped += range_skipped
+        for message in messages:
+            key = f"{message.get('message_no')}|{message.get('timestamp')}"
+            messages_by_key[key] = message
+
+    db = MongoService()
+    alias_map = _timeline_state_mappings(db)
+    schedule_cache = {}
+    rows = []
+    for message in messages_by_key.values():
+        message_dt = parse_crms_message_datetime(message.get("timestamp") or message.get("message_date"))
+        if not message_dt:
+            continue
+        for issued_to in message.get("issued_to") or []:
+            mapping = alias_map.get(normalize_crms_lookup(issued_to))
+            if not mapping:
+                continue
+            state_name = mapping.get("display_name") or issued_to
+            frequency, deviation = _nearest_saved_event_values(db, message_dt, state_name)
+            data_source = "Saved frequency event"
+            raw_frequency, raw_deviation = _raw_timeline_values(db, message_dt, mapping)
+            if frequency is None:
+                frequency = raw_frequency
+            if deviation is None:
+                deviation = raw_deviation
+                if deviation is not None:
+                    data_source = "Frequency raw data"
+            if deviation is None:
+                deviation = _schedule_page_fallback(db, message_dt, mapping, schedule_cache)
+                if deviation is not None:
+                    data_source = "Schedule Data fallback"
+            rows.append({
+                "timestamp": message_dt.isoformat(timespec="minutes"),
+                "time": message_dt.strftime("%H:%M"),
+                "frequency_hz": round(frequency, 3) if frequency is not None else None,
+                "state": state_name,
+                "deviation_mw": round(deviation) if deviation is not None else None,
+                "message_type": crms_message_category(message),
+                "message_no": message.get("message_no") or "",
+                "issued_to": issued_to,
+                "data_source": data_source if frequency is not None or deviation is not None else "Unavailable",
+            })
+    rows.sort(key=lambda row: (row["timestamp"], row["message_no"], row["state"]))
+    return {
+        "success": True,
+        "ranges": [{"start_time": start.isoformat(timespec="minutes"), "end_time": end.isoformat(timespec="minutes")} for start, end in parsed_ranges],
+        "message_count": len(messages_by_key),
+        "row_count": len(rows),
+        "skipped": skipped,
+        "rows": rows,
+        "source_url": CRMS_MESSAGE_URL,
+    }
 
 
 @router.get("/crms-transmission-lines")

@@ -967,6 +967,11 @@ const API = {
     return res.data;
   },
 
+  getFrequencyMessageTimeline: async (ranges) => {
+    const res = await axios.post(`${BASE_URL}/frequency/message-timeline`, { ranges });
+    return res.data;
+  },
+
   getFrequencyCrmsTransmissionLines: async (startTime, endTime) => {
     const res = await axios.get(`${BASE_URL}/frequency/crms-transmission-lines`, {
       params: { start_time: startTime, end_time: endTime, _t: Date.now() },

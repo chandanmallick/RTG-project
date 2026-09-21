@@ -19,7 +19,7 @@ import ExportBar from "./components/ExportBar";
 import ComplianceChart from "./components/ComplianceChart";
 import CapacityFrequencyChart from "./components/CapacityFrequencyChart";
 
-import { Table2, Settings2, FileUp, AlertTriangle, Terminal, X, Save, RefreshCw, Search, Download } from "lucide-react";
+import { Table2, Settings2, FileUp, AlertTriangle, Terminal, X, Save, RefreshCw, Search, Download, MessageSquare, Plus, Trash2, Clipboard } from "lucide-react";
 import toast, { Toaster } from "react-hot-toast";
 
 const today = () => new Date().toISOString().slice(0, 10);
@@ -498,6 +498,7 @@ export default function FrequencyReport() {
         setShowUploadDetailsModal(false);
         setRawEditorOpen(false);
         setStackedExportOpen(false);
+        setMessageTimelineOpen(false);
         setPendingExportType(null);
       }
     };
@@ -577,6 +578,11 @@ export default function FrequencyReport() {
   const [stackedExportStates, setStackedExportStates] = useState(["WEST BENGAL"]);
   const [stackedExportEventIds, setStackedExportEventIds] = useState([]);
   const [stackedExporting, setStackedExporting] = useState(false);
+  const [messageTimelineOpen, setMessageTimelineOpen] = useState(false);
+  const [messageRanges, setMessageRanges] = useState([]);
+  const [messageTimelineRows, setMessageTimelineRows] = useState([]);
+  const [messageTimelineMeta, setMessageTimelineMeta] = useState(null);
+  const [messageTimelineLoading, setMessageTimelineLoading] = useState(false);
 
   const eventDurationName = useCallback(() => {
     if (!startTime || !endTime) return eventType === "high" ? "High Freq" : "Low Freq";
@@ -3041,6 +3047,64 @@ export default function FrequencyReport() {
     }
   }, [buildStackedEventsHtml, saveBlobToFile, stackedExportEventIds, stackedExportStates]);
 
+  const openMessageTimeline = useCallback(() => {
+    setMessageRanges((current) => current.length ? current : [{ start_time: startTime, end_time: endTime }]);
+    setMessageTimelineOpen(true);
+  }, [endTime, startTime]);
+
+  const updateMessageRange = useCallback((index, field, value) => {
+    setMessageRanges((current) => current.map((item, itemIndex) => (
+      itemIndex === index ? { ...item, [field]: value } : item
+    )));
+  }, []);
+
+  const loadMessageTimeline = useCallback(async () => {
+    const invalid = messageRanges.some((item) => !item.start_time || !item.end_time || new Date(item.end_time) < new Date(item.start_time));
+    if (!messageRanges.length || invalid) {
+      toast.error("Please enter at least one valid date-time range.");
+      return;
+    }
+    setMessageTimelineLoading(true);
+    const loadingToast = toast.loading("Loading CRMS message chronology...");
+    try {
+      const response = await API.getFrequencyMessageTimeline(messageRanges);
+      setMessageTimelineRows(response.rows || []);
+      setMessageTimelineMeta(response);
+      toast.success(`${response.row_count || 0} constituent message row(s) prepared.`, { id: loadingToast });
+    } catch (error) {
+      toast.error(error?.response?.data?.detail || error?.message || "Message chronology could not be prepared.", { id: loadingToast });
+    } finally {
+      setMessageTimelineLoading(false);
+    }
+  }, [messageRanges]);
+
+  const messageTimelineMarkdown = useCallback(() => {
+    const cell = (value) => String(value ?? "—").replace(/\|/g, "\\|");
+    const lines = [
+      "| Time stamp | Frequency (Hz) | State / Control Area | Overdrawal / Deviation (MW) | Message type | Message No. |",
+      "| --- | ---: | --- | ---: | --- | --- |",
+      ...messageTimelineRows.map((row) => `| ${cell(row.time)} | ${cell(row.frequency_hz)} | ${cell(row.state)} | ${cell(row.deviation_mw)} | ${cell(row.message_type)} | ${cell(row.message_no)} |`),
+    ];
+    return lines.join("\n");
+  }, [messageTimelineRows]);
+
+  const copyMessageTimeline = useCallback(async () => {
+    if (!messageTimelineRows.length) return;
+    await navigator.clipboard.writeText(messageTimelineMarkdown());
+    toast.success("Message chronology copied as a formatted table.");
+  }, [messageTimelineMarkdown, messageTimelineRows.length]);
+
+  const exportMessageTimeline = useCallback(async () => {
+    if (!messageTimelineRows.length) return;
+    const quote = (value) => `"${String(value ?? "").replace(/"/g, '""')}"`;
+    const csv = [
+      ["Timestamp", "Frequency (Hz)", "State / Control Area", "Overdrawal / Deviation (MW)", "Message type", "Message No."],
+      ...messageTimelineRows.map((row) => [row.timestamp, row.frequency_hz, row.state, row.deviation_mw, row.message_type, row.message_no]),
+    ].map((row) => row.map(quote).join(",")).join("\r\n");
+    await saveBlobToFile(new Blob([`\uFEFF${csv}`], { type: "text/csv;charset=utf-8" }), "Frequency_Message_Chronology.csv");
+    toast.success("Message chronology downloaded.");
+  }, [messageTimelineRows, saveBlobToFile]);
+
   const rawEditorColumns = [
     { key: "actual", label: "RTG Actual", color: "#0F172A", values: rawEditorActual },
     { key: "scada_file_actual", label: "SCADA File Actual", color: "#C2410C", values: rawEditorScadaFileActual },
@@ -3096,7 +3160,15 @@ export default function FrequencyReport() {
         setIncludeGenerationComparison={setIncludeGenerationComparison}
       />
 
-      <div style={{ display: "flex", justifyContent: "flex-end", margin: "-8px 4px 10px" }}>
+      <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px", flexWrap: "wrap", margin: "-8px 4px 10px" }}>
+        <button
+          type="button"
+          onClick={openMessageTimeline}
+          title="Build a chronological constituent-wise table from one or more CRMS message ranges"
+          style={{ display: "inline-flex", alignItems: "center", gap: "7px", padding: "8px 13px", border: "1px solid #1D4ED8", borderRadius: "9px", background: "#EFF6FF", color: "#1D4ED8", fontSize: "0.76rem", fontWeight: 850, cursor: "pointer" }}
+        >
+          <MessageSquare size={15} /> Constituent message chronology
+        </button>
         <button
           type="button"
           onClick={() => {
@@ -3159,6 +3231,58 @@ export default function FrequencyReport() {
                   <Download size={15} /> {stackedExporting ? "Preparing..." : "Export stacked HTML"}
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {messageTimelineOpen && (
+        <div onClick={() => !messageTimelineLoading && setMessageTimelineOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 100000, display: "flex", alignItems: "center", justifyContent: "center", padding: "18px", background: "rgba(15,23,42,0.52)", backdropFilter: "blur(8px)" }}>
+          <div onClick={(event) => event.stopPropagation()} style={{ width: "min(1180px, 98vw)", maxHeight: "92vh", display: "flex", flexDirection: "column", overflow: "hidden", background: "#FFFFFF", border: "1px solid #BFDBFE", borderRadius: "18px", boxShadow: "0 28px 70px rgba(15,23,42,.32)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "16px", padding: "17px 20px", color: "#FFFFFF", background: "linear-gradient(105deg,#07194F 0%,#0754B8 62%,#1186D4 100%)" }}>
+              <div>
+                <h3 style={{ margin: 0, fontSize: "1.08rem", fontWeight: 900 }}>Constituent message chronology</h3>
+                <div style={{ marginTop: "3px", color: "rgba(255,255,255,.82)", fontSize: "0.74rem" }}>Select multiple date-time ranges. CRMS Frequency/Deviation messages are expanded constituent-wise and arranged chronologically.</div>
+              </div>
+              <button type="button" onClick={() => setMessageTimelineOpen(false)} disabled={messageTimelineLoading} style={{ border: 0, background: "transparent", cursor: "pointer", color: "#FFFFFF" }}><X size={20} /></button>
+            </div>
+
+            <div style={{ padding: "15px 20px 10px", borderBottom: "1px solid #E2E8F0", background: "#F8FAFC" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "12px", marginBottom: "9px" }}>
+                <div><strong style={{ color: "#0F172A", fontSize: "0.8rem" }}>Date-time ranges</strong><div style={{ color: "#64748B", fontSize: "0.68rem" }}>Overlapping ranges are allowed; duplicate CRMS messages are removed automatically.</div></div>
+                <button type="button" onClick={() => setMessageRanges((current) => [...current, { start_time: startTime, end_time: endTime }])} disabled={messageRanges.length >= 20} style={{ display: "inline-flex", alignItems: "center", gap: "5px", padding: "7px 11px", border: "1px solid #2563EB", borderRadius: "8px", background: "#EFF6FF", color: "#1D4ED8", fontSize: "0.72rem", fontWeight: 850 }}><Plus size={14} /> Add range</button>
+              </div>
+              <div style={{ maxHeight: "170px", overflowY: "auto", display: "grid", gap: "7px" }}>
+                {messageRanges.map((range, index) => (
+                  <div key={index} style={{ display: "grid", gridTemplateColumns: "30px minmax(210px,1fr) minmax(210px,1fr) 34px", gap: "8px", alignItems: "center" }}>
+                    <span style={{ color: "#64748B", fontSize: "0.7rem", fontWeight: 900 }}>{index + 1}.</span>
+                    <input type="datetime-local" value={range.start_time} onChange={(event) => updateMessageRange(index, "start_time", event.target.value)} style={{ width: "100%", padding: "8px 9px", border: "1px solid #CBD5E1", borderRadius: "8px", color: "#0F172A", fontSize: "0.76rem" }} />
+                    <input type="datetime-local" value={range.end_time} onChange={(event) => updateMessageRange(index, "end_time", event.target.value)} style={{ width: "100%", padding: "8px 9px", border: "1px solid #CBD5E1", borderRadius: "8px", color: "#0F172A", fontSize: "0.76rem" }} />
+                    <button type="button" aria-label={`Remove range ${index + 1}`} onClick={() => setMessageRanges((current) => current.filter((_, itemIndex) => itemIndex !== index))} disabled={messageRanges.length === 1} style={{ display: "grid", placeItems: "center", width: "32px", height: "32px", border: "1px solid #FCA5A5", borderRadius: "8px", background: "#FEF2F2", color: messageRanges.length === 1 ? "#CBD5E1" : "#B91C1C", cursor: messageRanges.length === 1 ? "not-allowed" : "pointer" }}><Trash2 size={14} /></button>
+                  </div>
+                ))}
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "10px", marginTop: "11px" }}>
+                <span style={{ color: "#64748B", fontSize: "0.7rem" }}>Missing deviation is calculated from state actual minus schedule using the Schedule Data sources.</span>
+                <button type="button" onClick={loadMessageTimeline} disabled={messageTimelineLoading || !messageRanges.length} style={{ display: "inline-flex", alignItems: "center", gap: "7px", padding: "9px 16px", border: 0, borderRadius: "9px", background: messageTimelineLoading ? "#94A3B8" : "linear-gradient(135deg,#0754B8,#1186D4)", color: "#FFFFFF", fontWeight: 850, cursor: messageTimelineLoading ? "wait" : "pointer" }}><RefreshCw size={15} /> {messageTimelineLoading ? "Fetching CRMS..." : "Generate chronology"}</button>
+              </div>
+            </div>
+
+            <div style={{ minHeight: "220px", overflow: "auto", padding: "14px 20px 18px" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "10px", marginBottom: "9px" }}>
+                <div style={{ color: "#475569", fontSize: "0.72rem", fontWeight: 800 }}>{messageTimelineMeta ? `${messageTimelineMeta.message_count || 0} unique CRMS message(s) · ${messageTimelineRows.length} constituent row(s) · ${messageTimelineRows.filter((row) => row.data_source === "Schedule Data fallback").length} Schedule Data fallback row(s)` : "Generate the chronology to view results."}</div>
+                <div style={{ display: "flex", gap: "7px" }}>
+                  <button type="button" onClick={copyMessageTimeline} disabled={!messageTimelineRows.length} style={{ display: "inline-flex", alignItems: "center", gap: "5px", padding: "6px 10px", border: "1px solid #CBD5E1", borderRadius: "8px", background: "#FFF", color: "#334155", fontSize: "0.69rem", fontWeight: 850 }}><Clipboard size={13} /> Copy table</button>
+                  <button type="button" onClick={exportMessageTimeline} disabled={!messageTimelineRows.length} style={{ display: "inline-flex", alignItems: "center", gap: "5px", padding: "6px 10px", border: "1px solid #0F766E", borderRadius: "8px", background: "#ECFDF5", color: "#065F46", fontSize: "0.69rem", fontWeight: 850 }}><Download size={13} /> CSV</button>
+                </div>
+              </div>
+              <table style={{ width: "100%", minWidth: "920px", borderCollapse: "separate", borderSpacing: 0, fontSize: "0.73rem" }}>
+                <thead><tr>{["Time stamp", "Frequency (Hz)", "State / Control Area", "Overdrawal / Deviation (MW)", "Message type", "Message No."].map((label) => <th key={label} style={{ position: "sticky", top: 0, padding: "9px 10px", border: "1px solid #CBD5E1", background: "#EAF2FF", color: "#003B82", textAlign: label.includes("Frequency") || label.includes("Deviation") ? "right" : "left", fontWeight: 900 }}>{label}</th>)}</tr></thead>
+                <tbody>
+                  {!messageTimelineRows.length && <tr><td colSpan={6} style={{ padding: "42px 12px", border: "1px solid #E2E8F0", color: "#64748B", textAlign: "center", fontWeight: 750 }}>No chronology generated yet.</td></tr>}
+                  {messageTimelineRows.map((row, index) => <tr key={`${row.timestamp}-${row.message_no}-${row.state}-${index}`} title={`Data source: ${row.data_source}`} style={{ background: index % 2 ? "#F8FAFC" : "#FFFFFF" }}><td style={{ padding: "8px 10px", border: "1px solid #E2E8F0", whiteSpace: "nowrap", fontWeight: 800 }}>{row.time}</td><td style={{ padding: "8px 10px", border: "1px solid #E2E8F0", textAlign: "right", color: row.frequency_hz == null ? "#B91C1C" : "inherit" }}>{row.frequency_hz ?? "—"}</td><td style={{ padding: "8px 10px", border: "1px solid #E2E8F0", fontWeight: 800 }}>{row.state}</td><td style={{ padding: "8px 10px", border: "1px solid #E2E8F0", textAlign: "right", color: row.deviation_mw == null ? "#B91C1C" : "inherit", fontWeight: 850 }}>{row.deviation_mw == null ? "—" : Number(row.deviation_mw).toLocaleString("en-IN")}</td><td style={{ padding: "8px 10px", border: "1px solid #E2E8F0" }}>{row.message_type}</td><td style={{ padding: "8px 10px", border: "1px solid #E2E8F0", whiteSpace: "nowrap" }}>{row.message_no}</td></tr>)}
+                </tbody>
+              </table>
             </div>
           </div>
         </div>

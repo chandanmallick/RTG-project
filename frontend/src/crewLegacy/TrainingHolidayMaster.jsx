@@ -34,6 +34,7 @@ Tooltip,
 
 import { ExpandLess, ExpandMore  } from "@mui/icons-material"
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
+import { CalendarDays, ChevronLeft, ChevronRight, MapPin, Users } from "lucide-react";
 import { useAuth } from "../auth/AuthContext";
 import WorkflowHeader from "../components/crew/WorkflowHeader";
 
@@ -100,6 +101,7 @@ const [holidayDate, setHolidayDate] = useState(null);
 /* ================= ASSIGN ================= */
 
 const [selectedTraining,setSelectedTraining]=useState("")
+const [assignCalendarMonth,setAssignCalendarMonth]=useState(()=>new Date().toISOString().slice(0,7))
 const [requestedTraining,setRequestedTraining]=useState("")
 const [requestSaving,setRequestSaving]=useState(false)
 const [calendarOpen,setCalendarOpen]=useState(false)
@@ -389,6 +391,42 @@ const textValue=String(value || "Training")
 const hash=Array.from(textValue).reduce((total,char)=>((total*31)+char.charCodeAt(0))>>>0,0)
 return palette[hash%palette.length]
 }
+
+const activeTrainingProgrammes=useMemo(()=>(trainingList || [])
+.filter((item)=>!["inactive","cancelled","deleted"].includes(String(item.status || "").toLowerCase()))
+.filter((item)=>item.startDate && (item.endDate || item.startDate)),[trainingList])
+
+const assignCalendarDays=useMemo(()=>{
+const [year,month]=assignCalendarMonth.split("-").map(Number)
+if(!year || !month) return []
+const firstDay=new Date(year,month-1,1)
+const gridStart=new Date(year,month-1,1-firstDay.getDay())
+return Array.from({length:42},(_,index)=>{
+const date=new Date(gridStart)
+date.setDate(gridStart.getDate()+index)
+const dateValue=`${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,"0")}-${String(date.getDate()).padStart(2,"0")}`
+return {
+date:dateValue,
+day:date.getDate(),
+currentMonth:date.getMonth()===month-1,
+today:dateValue===new Date().toISOString().slice(0,10),
+programmes:activeTrainingProgrammes.filter((item)=>dateValue>=item.startDate && dateValue<=(item.endDate || item.startDate)),
+}
+})
+},[activeTrainingProgrammes,assignCalendarMonth])
+
+const selectedTrainingProgramme=useMemo(()=>(trainingList || []).find((item)=>item.trainingName===selectedTraining) || null,[trainingList,selectedTraining])
+
+const moveAssignCalendarMonth=(offset)=>{
+const [year,month]=assignCalendarMonth.split("-").map(Number)
+const next=new Date(year,month-1+offset,1)
+setAssignCalendarMonth(`${next.getFullYear()}-${String(next.getMonth()+1).padStart(2,"0")}`)
+}
+
+const assignCalendarMonthLabel=useMemo(()=>{
+const [year,month]=assignCalendarMonth.split("-").map(Number)
+return new Intl.DateTimeFormat("en-IN",{month:"long",year:"numeric"}).format(new Date(year,month-1,1))
+},[assignCalendarMonth])
 
 /* ================= PENDING ================= */
 
@@ -1050,96 +1088,72 @@ return(
 <Collapse in={activeSection==="assign"} timeout={420} unmountOnExit>
 <Box id="training-workspace-assign" sx={{scrollMarginTop:110}}>
 {canAssignTraining && (
-<Accordion
-  defaultExpanded
+<Paper elevation={0} sx={{mb:4,borderRadius:3,border:"1px solid #D9E7F5",overflow:"hidden",boxShadow:"0 12px 34px rgba(15,23,42,.08)"}}>
+<Box
   sx={{
-    borderRadius: 3,
-    boxShadow: "0 4px 20px rgba(0,0,0,0.08)",
-    overflow: "hidden",
-    mb: 4
+    px:{xs:2,md:2.5},
+    py:2,
+    color:"#FFFFFF",
+    background:"linear-gradient(105deg,#064E3B 0%,#0F766E 62%,#10B981 100%)",
+    display:"flex",
+    justifyContent:"space-between",
+    alignItems:{xs:"flex-start",md:"center"},
+    gap:2,
+    flexDirection:{xs:"column",md:"row"},
   }}
 >
+  <Box sx={{display:"flex",alignItems:"center",gap:1.2}}>
+    <Box sx={{width:42,height:42,borderRadius:2.5,display:"grid",placeItems:"center",background:"rgba(255,255,255,.15)"}}>
+      <CalendarDays size={22}/>
+    </Box>
+    <Box>
+      <Typography sx={{fontSize:19,fontWeight:950}}>Training calendar</Typography>
+      <Typography sx={{fontSize:11.5,color:"rgba(255,255,255,.82)"}}>Select a programme directly from its date to assign employees.</Typography>
+    </Box>
+  </Box>
+  {canDelegateTraining && (
+    <Button
+      variant="outlined"
+      onClick={openTrainingDelegation}
+      sx={{color:"#FFF",borderColor:"rgba(255,255,255,.72)",textTransform:"none",fontWeight:850,"&:hover":{borderColor:"#FFF",background:"rgba(255,255,255,.08)"}}}
+    >
+      Delegate power
+    </Button>
+  )}
+</Box>
 
-  <AccordionSummary
-    expandIcon={<ExpandMoreIcon />}
-    sx={{
-      background: "linear-gradient(90deg,#10b981,#34d399)",
-      color: "white",
-      px: 3
-    }}
-  >
-    <Typography variant="h6" fontWeight={600}>
-      Assign Training
-    </Typography>
-  </AccordionSummary>
+<Box sx={{display:"grid",gridTemplateColumns:{xs:"1fr",lg:"minmax(0,1fr) 285px"},minHeight:650}}>
+<Box sx={{p:{xs:1.25,md:2},minWidth:0}}>
+<Box sx={{mb:1.5,display:"flex",alignItems:"center",justifyContent:"space-between",gap:1,flexWrap:"wrap"}}>
+<Stack direction="row" spacing={.6} alignItems="center"><IconButton size="small" onClick={()=>moveAssignCalendarMonth(-1)} sx={{border:"1px solid #CBD5E1",borderRadius:2}}><ChevronLeft size={18}/></IconButton><Typography sx={{minWidth:165,textAlign:"center",fontSize:16,fontWeight:950,color:"#0F172A"}}>{assignCalendarMonthLabel}</Typography><IconButton size="small" onClick={()=>moveAssignCalendarMonth(1)} sx={{border:"1px solid #CBD5E1",borderRadius:2}}><ChevronRight size={18}/></IconButton></Stack>
+<Stack direction="row" spacing={1} alignItems="center"><TextField size="small" type="month" value={assignCalendarMonth} onChange={(event)=>setAssignCalendarMonth(event.target.value)} sx={{width:155,"& .MuiOutlinedInput-root":{height:38}}}/><Button size="small" variant="outlined" onClick={()=>setAssignCalendarMonth(new Date().toISOString().slice(0,7))} sx={{height:38,textTransform:"none",fontWeight:850}}>Today</Button></Stack>
+</Box>
 
-  <AccordionDetails sx={{ backgroundColor: "#f7fffb" }}>
+<Box sx={{display:"grid",gridTemplateColumns:"repeat(7,minmax(0,1fr))",borderTop:"1px solid #D9E2EC",borderLeft:"1px solid #D9E2EC",borderRadius:2,overflow:"hidden"}}>
+{["Sun","Mon","Tue","Wed","Thu","Fri","Sat"].map((day)=><Box key={day} sx={{py:.8,borderRight:"1px solid #D9E2EC",borderBottom:"1px solid #D9E2EC",background:"#F1F5F9",textAlign:"center",color:"#475569",fontSize:10.5,fontWeight:950,textTransform:"uppercase",letterSpacing:.5}}>{day}</Box>)}
+{assignCalendarDays.map((day)=>{
+const overflow=day.programmes.length>3
+return <Box key={day.date} sx={{minHeight:{xs:94,md:116},p:.7,borderRight:"1px solid #D9E2EC",borderBottom:"1px solid #D9E2EC",background:day.today ? "#EFF6FF" : day.currentMonth ? "#FFFFFF" : "#F8FAFC",opacity:day.currentMonth ? 1 : .58,overflow:"hidden"}}>
+<Box sx={{mb:.45,display:"flex",justifyContent:"space-between",alignItems:"center"}}><Box sx={{width:24,height:24,borderRadius:"50%",display:"grid",placeItems:"center",background:day.today ? "#2563EB" : "transparent",color:day.today ? "#FFF" : "#334155",fontSize:11,fontWeight:950}}>{day.day}</Box>{day.programmes.length>0 && <Typography sx={{fontSize:8.5,color:"#64748B",fontWeight:850}}>{day.programmes.length}</Typography>}</Box>
+<Stack spacing={.4}>{day.programmes.slice(0,3).map((item)=>{
+const selected=selectedTraining===item.trainingName
+const color=trainingLineColor(item.trainingName)
+return <Tooltip key={`${day.date}-${item.id || item.trainingName}`} title={`${item.trainingName} · ${item.location || "Location not specified"} · ${item.startDate} to ${item.endDate || item.startDate}`} arrow><Box component="button" type="button" onClick={()=>setSelectedTraining(item.trainingName)} sx={{width:"100%",p:.55,border:selected ? `2px solid ${color}` : `1px solid ${color}33`,borderLeft:`4px solid ${color}`,borderRadius:1.2,background:selected ? `${color}18` : `${color}0D`,color:"#172033",textAlign:"left",cursor:"pointer",overflow:"hidden","&:hover":{background:`${color}20`,transform:"translateY(-1px)"},transition:"all .12s ease"}}><Typography sx={{fontSize:9.5,fontWeight:950,lineHeight:1.15,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{item.trainingName}</Typography><Typography sx={{mt:.2,fontSize:8.2,color:"#64748B",fontWeight:750,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{item.location || "Place not specified"}</Typography></Box></Tooltip>
+})}{overflow && <Typography sx={{pl:.5,fontSize:8.5,color:"#475569",fontWeight:900}}>+{day.programmes.length-3} more</Typography>}</Stack>
+</Box>
+})}
+</Box>
+</Box>
 
-    <Paper elevation={0} sx={{ p: 3, borderRadius: 2 }}>
+<Box sx={{p:2,borderLeft:{lg:"1px solid #D9E2EC"},borderTop:{xs:"1px solid #D9E2EC",lg:0},background:"linear-gradient(180deg,#F8FAFC,#FFFFFF)"}}>
+<Typography sx={{fontSize:12,fontWeight:950,color:"#334155",textTransform:"uppercase",letterSpacing:.5}}>Selected training</Typography>
+{selectedTrainingProgramme ? <Paper variant="outlined" sx={{mt:1.2,p:1.6,borderRadius:2.5,borderColor:`${trainingLineColor(selectedTrainingProgramme.trainingName)}55`,borderTop:`5px solid ${trainingLineColor(selectedTrainingProgramme.trainingName)}`}}><Typography sx={{fontSize:15,fontWeight:950,color:"#0F172A",lineHeight:1.25}}>{selectedTrainingProgramme.trainingName}</Typography><Stack spacing={.8} sx={{mt:1.3}}><Stack direction="row" spacing={.8} alignItems="flex-start"><CalendarDays size={15} color="#64748B"/><Typography sx={{fontSize:11.5,fontWeight:800,color:"#475569"}}>{selectedTrainingProgramme.startDate} to {selectedTrainingProgramme.endDate || selectedTrainingProgramme.startDate}</Typography></Stack><Stack direction="row" spacing={.8} alignItems="flex-start"><MapPin size={15} color="#64748B"/><Typography sx={{fontSize:11.5,fontWeight:800,color:"#475569"}}>{selectedTrainingProgramme.location || "Place not specified"}</Typography></Stack></Stack><Button fullWidth variant="contained" startIcon={<Users size={16}/>} onClick={()=>fetchCalendarDuty(selectedTrainingProgramme.trainingName,selectedTrainingProgramme.startDate,selectedTrainingProgramme.endDate)} sx={{mt:1.7,py:1,textTransform:"none",fontWeight:950,borderRadius:2,background:"#0F766E","&:hover":{background:"#065F46"}}}>Assign employees</Button></Paper> : <Box sx={{mt:1.2,p:2.2,border:"1px dashed #94A3B8",borderRadius:2.5,textAlign:"center",color:"#64748B"}}><CalendarDays size={30}/><Typography sx={{mt:.8,fontSize:12,fontWeight:900}}>Select a training on the calendar</Typography><Typography sx={{mt:.4,fontSize:10.5}}>Training name and place are displayed directly against the scheduled dates.</Typography></Box>}
 
-      <Grid container spacing={2} alignItems="center">
-
-        <Grid item xs={4}>
-
-          <TextField
-            select
-            label="Training Program"
-            fullWidth
-            value={selectedTraining}
-            onChange={(e) => setSelectedTraining(e.target.value)}
-          >
-
-            {trainingList.map((t) => (
-
-              <MenuItem key={t.id} value={t.trainingName}>
-                {t.trainingName}
-              </MenuItem>
-
-            ))}
-
-          </TextField>
-
-        </Grid>
-
-        <Grid item xs={2}>
-
-          <Button
-            variant="contained"
-            sx={{
-              height: 56,
-              borderRadius: 2,
-              fontWeight: 600
-            }}
-            onClick={() => fetchCalendarDuty(selectedTraining)}
-          >
-            View Duty
-          </Button>
-
-        </Grid>
-
-        {canDelegateTraining && <Grid item xs={12} md={2}>
-          <Button variant="outlined" fullWidth sx={{height:56,borderRadius:2,fontWeight:800}} onClick={openTrainingDelegation}>
-            Delegate power
-          </Button>
-        </Grid>}
-
-        {selectedTraining && (()=>{
-          const item=trainingList.find((entry)=>entry.trainingName===selectedTraining)
-          return item ? <Grid item xs={12} md={6}>
-            <Paper elevation={0} sx={{p:1.5,border:"1px solid #A7F3D0",background:"#ECFDF5",borderRadius:2,display:"flex",gap:3,flexWrap:"wrap"}}>
-              <Box><Typography variant="caption" color="text.secondary">Training dates</Typography><Typography sx={{fontWeight:900}}>{item.startDate} to {item.endDate}</Typography></Box>
-              <Box><Typography variant="caption" color="text.secondary">Location</Typography><Typography sx={{fontWeight:900}}>{item.location || "Not specified"}</Typography></Box>
-            </Paper>
-          </Grid> : null
-        })()}
-
-      </Grid>
-
-    </Paper>
-
-  </AccordionDetails>
-
-</Accordion>
+<Typography sx={{mt:2.2,mb:.8,fontSize:11,fontWeight:950,color:"#475569",textTransform:"uppercase",letterSpacing:.45}}>Programmes this month</Typography>
+<Stack spacing={.7} sx={{maxHeight:285,overflowY:"auto",pr:.3}}>{activeTrainingProgrammes.filter((item)=>item.startDate<=`${assignCalendarMonth}-31` && (item.endDate || item.startDate)>=`${assignCalendarMonth}-01`).sort((a,b)=>String(a.startDate).localeCompare(String(b.startDate))).map((item)=><Box component="button" type="button" key={item.id || item.trainingName} onClick={()=>setSelectedTraining(item.trainingName)} sx={{p:1,width:"100%",border:"1px solid #E2E8F0",borderLeft:`4px solid ${trainingLineColor(item.trainingName)}`,borderRadius:1.5,background:selectedTraining===item.trainingName ? "#ECFDF5" : "#FFF",textAlign:"left",cursor:"pointer"}}><Typography sx={{fontSize:10.5,fontWeight:950,color:"#1E293B"}}>{item.trainingName}</Typography><Typography sx={{mt:.15,fontSize:9.2,color:"#64748B",fontWeight:750}}>{item.startDate} · {item.location || "Place not specified"}</Typography></Box>)}{!activeTrainingProgrammes.some((item)=>item.startDate<=`${assignCalendarMonth}-31` && (item.endDate || item.startDate)>=`${assignCalendarMonth}-01`) && <Typography sx={{py:2,textAlign:"center",fontSize:11,color:"#94A3B8",fontWeight:750}}>No training scheduled this month.</Typography>}</Stack>
+</Box>
+</Box>
+</Paper>
 )}
 </Box>
 </Collapse>
