@@ -1,6 +1,5 @@
 ﻿import React, { useEffect, useState } from "react";
 import api from "./api";
-import { useEffect, useRef, useState } from "react";
 import dayjs from "dayjs";
 
 import {
@@ -81,7 +80,7 @@ export default function ReplacementManagement() {
   const [canSwitchDuty, setCanSwitchDuty] = useState(true);
   const [historyVisible, setHistoryVisible] = useState(false);
   const [showOlderAssignments, setShowOlderAssignments] = useState(false);
-  const sicShortcutHandled = useRef(false);
+  const sicShortcutHandled = React.useRef(false);
   const [activeWorkflow, setActiveWorkflow] = useState(() => {
     const params = new URLSearchParams(window.location.search);
     if (["duty", "leave", "board", "sic"].includes(params.get("section"))) return params.get("section");
