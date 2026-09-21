@@ -31,6 +31,7 @@ const stages = [
       { key: "leaveApproval", title: "Leave approvals", note: "Pending leave duty dates in your scope", icon: CheckCircle2, to: "/crew/leave?section=pending" },
       { key: "trainingAssignment", title: "Training assignment", note: "Nominate an eligible employee", icon: Users, to: "/crew/training?section=assign" },
       { key: "trainingApproval", title: "Training / OFF approvals", note: "Training and adjacent OFF requests", icon: GraduationCap, to: "/crew/training?section=pending" },
+      { key: "trainingHistory", title: "Training history & matrix", note: "Review employee attendance and nominations", icon: ClipboardList, to: "/crew/training?section=history" },
       { key: "sportsApproval", title: "Sports approvals", note: "Requests at your approval stage", icon: Medal, to: "/crew/sports?section=approval" },
       { key: "delegate", title: "Delegate approval", note: "Temporary authority during absence", icon: Settings2, to: "/crew/leave?section=delegation" },
     ],
@@ -56,7 +57,7 @@ function Stage({ stage, actions, onOpen, checking }) {
     {total > 0 && <Chip size="small" color="warning" label={total + " awaiting your action"} sx={{ mt: .8, fontWeight: 900 }} />}
     <Stack spacing={1} sx={{ mt: 1.5 }}>
       {stage.items.map((item) => {
-        const access = actions[item.key];
+        const access = actions[item.key] || (item.key === "trainingHistory" ? actions.trainingAssignment : undefined);
         const enabled = Boolean(access?.enabled);
         return <Tooltip key={item.key} title={enabled ? "" : checking ? "Checking your access…" : "Access has not been granted for this action."}>
           <span><Button fullWidth disabled={!enabled} onClick={() => enabled && onOpen(item.to)} aria-label={item.title + (access?.pending ? ", " + access.pending + " pending" : "")} sx={{ px: 1.1, py: 1, minHeight: 64, justifyContent: "flex-start", textAlign: "left", textTransform: "none", border: access?.pending ? "2px solid " + stage.color : "1px solid #CBD5E1", borderRadius: 2, color: "#0F172A", background: "#FFF", "&:hover": { borderColor: stage.color, background: stage.tint }, "&.Mui-disabled": { opacity: .48, filter: "grayscale(1)", color: "#64748B", background: "#F1F5F9", borderColor: "#CBD5E1" } }}>

@@ -80,6 +80,7 @@ export default function ReplacementManagement() {
   const [switchSaving, setSwitchSaving] = useState(false);
   const [canSwitchDuty, setCanSwitchDuty] = useState(true);
   const [historyVisible, setHistoryVisible] = useState(false);
+  const [showOlderAssignments, setShowOlderAssignments] = useState(false);
   const sicShortcutHandled = useRef(false);
   const [activeWorkflow, setActiveWorkflow] = useState(() => {
     const params = new URLSearchParams(window.location.search);
@@ -360,6 +361,10 @@ export default function ReplacementManagement() {
   // ===============================
 
   const assignSIC = async () => {
+    if (!selectedLeave?.id || !selectedSIC) {
+      setSwitchNotice({ severity: "warning", text: "Select an acting SIC employee before saving." });
+      return;
+    }
     try {
 
       await api.put(`/replacement/assign-sic/${selectedLeave.id}`, {
@@ -373,7 +378,7 @@ export default function ReplacementManagement() {
 
     } catch (err) {
       console.error(err);
-      alert("SIC assignment failed");
+      setSwitchNotice({ severity: "error", text: err.response?.data?.detail || "SIC assignment failed. Refresh the pending SIC list and try again." });
     }
   };
 
@@ -459,6 +464,9 @@ export default function ReplacementManagement() {
         currentAssignment: item,
       })),
   ];
+  const visibleReplacementRows = showOlderAssignments
+    ? mergedReplacementRows
+    : mergedReplacementRows.filter((item) => !item.date || item.date >= dayjs().format("YYYY-MM-DD"));
 
 
   const sourceLabel = (source) => ({
@@ -683,7 +691,7 @@ export default function ReplacementManagement() {
                     <TableCell sx={{ color: "white" }}>Group</TableCell>
                     <TableCell sx={{ color: "white" }}>Date</TableCell>
                     <TableCell sx={{ color: "white" }}>Leave Type</TableCell>
-                    <TableCell sx={{ color: "white" }}>Replacement</TableCell>
+                    <TableCell sx={{ color: "white" }}>Replacement required</TableCell>
                     <TableCell sx={{ color: "white" }}>Action</TableCell>
                   </TableRow>
                 </TableHead>
@@ -707,7 +715,7 @@ export default function ReplacementManagement() {
                       <TableCell>{l.leaveType}</TableCell>
 
                       <TableCell>
-                        <Chip label="Required" size="small" color="error" />
+                        <Chip label={l.replacementRequired ? "R · Mandatory" : "Optional"} size="small" color={l.replacementRequired ? "error" : "default"} variant={l.replacementRequired ? "filled" : "outlined"} />
                       </TableCell>
 
                       <TableCell>
@@ -768,7 +776,13 @@ export default function ReplacementManagement() {
             <TextField size="small" label="Replacement employee ID" value={employeeId} onChange={(e) => setEmployeeId(e.target.value)} />
             <Button variant="contained" onClick={fetchDecisionAudit}>Refresh Board</Button>
           </Box>
-          <TableContainer sx={{ maxHeight: 520, minHeight: mergedReplacementRows.length ? 180 : 72, border: "1px solid #D7E3F4", borderRadius: 2 }}>
+            <Box sx={{ mb: 1, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 1, flexWrap: "wrap" }}>
+              <Typography variant="caption" color="text.secondary">Showing active and upcoming assignments by default.</Typography>
+              <Button size="small" variant="outlined" onClick={() => setShowOlderAssignments((value) => !value)} sx={{ textTransform: "none", fontWeight: 850 }}>
+                {showOlderAssignments ? "Hide older assignments" : "Show older assignments"}
+              </Button>
+            </Box>
+            <TableContainer sx={{ maxHeight: 520, minHeight: visibleReplacementRows.length ? 180 : 72, border: "1px solid #D7E3F4", borderRadius: 2 }}>
             <Table size="small" stickyHeader>
               <TableHead>
                 <TableRow sx={{ background: "#EAF2FF" }}>
@@ -782,7 +796,7 @@ export default function ReplacementManagement() {
                 </TableRow>
               </TableHead>
               <TableBody>
-                {mergedReplacementRows.map((item) => {
+                {visibleReplacementRows.map((item) => {
                   const shownStatus = item.status === "Denied" ? "Declined" : item.status;
                   const statusColor = item.status === "Denied" ? "error" : item.status === "Accepted" ? "success" : item.status === "Pending" ? "warning" : "default";
                   const current = item.currentAssignment;
@@ -847,7 +861,7 @@ export default function ReplacementManagement() {
                     </TableRow>
                   );
                 })}
-                {!mergedReplacementRows.length && <TableRow><TableCell colSpan={7} align="center">No assigned replacement duties or decisions recorded.</TableCell></TableRow>}
+                {!visibleReplacementRows.length && <TableRow><TableCell colSpan={7} align="center">No active replacement assignments. Use “Show older assignments” to view history.</TableCell></TableRow>}
               </TableBody>
             </Table>
           </TableContainer>
