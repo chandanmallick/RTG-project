@@ -54,8 +54,7 @@ start "RTG Frontend" cmd /k ""%~f0" frontend"
 
 echo.
 echo Waiting for servers to start...
-timeout /t 5 /nobreak >nul
-start "" "http://127.0.0.1:%FRONTEND_PORT%"
+echo The browser will open automatically after the frontend build succeeds.
 
 echo.
 echo Servers started in separate windows.
@@ -78,6 +77,9 @@ if exist "%ROOT%.venv\Scripts\activate.bat" (
   call "%ROOT%.python313\Scripts\activate.bat"
 )
 
+echo Stopping any previous backend process on port %BACKEND_PORT%...
+for /f "tokens=5" %%P in ('netstat -ano ^| findstr /r /c:":%BACKEND_PORT% .*LISTENING"') do taskkill /PID %%P /F >nul 2>nul
+
 python -m uvicorn main:app --host 0.0.0.0 --port %BACKEND_PORT% --reload
 pause
 exit /b %errorlevel%
@@ -94,11 +96,16 @@ echo Building frontend (generating optimized production bundle)...
 call npm run build
 if errorlevel 1 (
   echo ERROR: Failed to build frontend.
+  echo The previous frontend process was not replaced because the new bundle is invalid.
   pause
   exit /b 1
 )
 
+echo Stopping any previous frontend process on port %FRONTEND_PORT%...
+for /f "tokens=5" %%P in ('netstat -ano ^| findstr /r /c:":%FRONTEND_PORT% .*LISTENING"') do taskkill /PID %%P /F >nul 2>nul
+
 echo Starting production server (node server.cjs)...
+start "" "http://127.0.0.1:%FRONTEND_PORT%"
 node server.cjs
 pause
 exit /b %errorlevel%
