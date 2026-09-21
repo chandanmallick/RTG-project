@@ -129,10 +129,16 @@ export default function RTGDashboard() {
     loadCurrentCrmsOutages();
     loadCurrentCrmsTransmissionOutages();
     loadTodayStateSchedules();
+    loadISGSScheduleCheck();
   }, []);
 
   useEffect(() => {
     const timer = window.setInterval(() => setScheduleNow(new Date()), 60 * 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    const timer = window.setInterval(loadISGSScheduleCheck, 60 * 1000);
     return () => window.clearInterval(timer);
   }, []);
 
@@ -165,6 +171,9 @@ export default function RTGDashboard() {
   const [stateScheduleError, setStateScheduleError] = useState("");
   const [scheduleNow, setScheduleNow] = useState(new Date());
   const [stateScheduleDate, setStateScheduleDate] = useState(getCurrentDateString());
+  const [isgsScheduleCheck, setIsgsScheduleCheck] = useState({ config: { interval_minutes: 15, tolerance_mw: 1 }, report: null });
+  const [isgsScheduleCheckLoading, setIsgsScheduleCheckLoading] = useState(false);
+  const [showISGSComparisonDialog, setShowISGSComparisonDialog] = useState(false);
 
   useEffect(() => {
     const currentDate = getCurrentDateString(scheduleNow);
@@ -394,6 +403,42 @@ export default function RTGDashboard() {
       if (res.success) setCrmsTransmissionOutages(res);
     } catch (err) {
       console.error("CRMS transmission outage fetch failed", err);
+    }
+  };
+
+  const loadISGSScheduleCheck = async () => {
+    try {
+      const res = await API.getISGSScheduleCheck();
+      if (res?.success) setIsgsScheduleCheck({ config: res.config, report: res.report });
+    } catch (err) {
+      console.error("ISGS schedule reconciliation load failed", err);
+    }
+  };
+
+  const runISGSScheduleCheckNow = async () => {
+    try {
+      setIsgsScheduleCheckLoading(true);
+      const res = await API.runISGSScheduleCheck();
+      if (!res?.success) throw new Error(res?.message || "Schedule comparison failed.");
+      setIsgsScheduleCheck((current) => ({ ...current, report: res.report }));
+    } catch (err) {
+      showModernPopup({ type: "error", title: "ISGS Schedule Check Failed", subtitle: err?.response?.data?.message || err.message });
+    } finally {
+      setIsgsScheduleCheckLoading(false);
+    }
+  };
+
+  const changeISGSCheckInterval = async (event) => {
+    const interval = Number(event.target.value);
+    try {
+      const res = await API.updateISGSScheduleCheckConfig({
+        interval_minutes: interval,
+        tolerance_mw: isgsScheduleCheck.config?.tolerance_mw ?? 1,
+      });
+      if (!res?.success) throw new Error(res?.message || "Unable to save interval.");
+      setIsgsScheduleCheck((current) => ({ ...current, config: res.config }));
+    } catch (err) {
+      showModernPopup({ type: "error", title: "Setting Not Saved", subtitle: err?.response?.data?.message || err.message });
     }
   };
 
@@ -1320,10 +1365,15 @@ export default function RTGDashboard() {
         sx={{
           mb: 2.5,
           display: "grid",
-          gridTemplateColumns: { xs: "1fr", lg: "minmax(0,1.9fr) minmax(300px,.72fr) minmax(230px,.48fr)" },
+          gridTemplateColumns: {
+            xs: "1fr",
+            lg: "minmax(0,1.9fr) minmax(300px,.72fr) minmax(230px,.48fr)",
+            xl: "minmax(0,1.7fr) minmax(270px,.65fr) minmax(210px,.45fr) minmax(286px,.6fr)",
+          },
           gridTemplateAreas: {
-            xs: '"generation" "scheduleStatus" "voltage" "crms" "wbes"',
-            lg: '"generation scheduleStatus voltage" "crms wbes wbes"',
+            xs: '"generation" "scheduleStatus" "voltage" "crms" "wbes" "reconciliation"',
+            lg: '"generation scheduleStatus voltage" "crms wbes wbes" "reconciliation reconciliation reconciliation"',
+            xl: '"generation scheduleStatus voltage reconciliation" "crms wbes wbes reconciliation"',
           },
           gap: 1.25,
           maxWidth: 1720,
@@ -1432,6 +1482,32 @@ export default function RTGDashboard() {
               </Box>
             </Box>
           )}
+        </Paper>
+
+        <Paper elevation={0} sx={{ gridArea: "reconciliation", minHeight: { xs: 430, xl: 742 }, height: "100%", borderRadius: "24px", overflow: "hidden", border: `1px solid ${isgsScheduleCheck.report?.mismatch_count ? "#FECACA" : "#BBF7D0"}`, bgcolor: "#FFFFFF", boxShadow: "0 18px 44px rgba(8,50,71,.10)", display: "flex", flexDirection: "column" }}>
+          <Box sx={{ p: 1.5, color: "#FFFFFF", background: isgsScheduleCheck.report?.mismatch_count ? "linear-gradient(145deg,#7F1D1D,#DC2626)" : "linear-gradient(145deg,#064E3B,#059669)" }}>
+            <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 1 }}>
+              <Box sx={{ minWidth: 0 }}><Typography sx={{ fontSize: 15, lineHeight: 1.15, fontWeight: 950 }}>ISGS Schedule Integrity</Typography><Typography sx={{ mt: .3, fontSize: 8.5, opacity: .84 }}>WBES ↔ RTG · current block</Typography></Box>
+              <Box sx={{ width: 38, height: 38, borderRadius: "13px", bgcolor: "rgba(255,255,255,.16)", display: "grid", placeItems: "center", flexShrink: 0 }}>{isgsScheduleCheck.report?.mismatch_count ? <AlertTriangle size={19} /> : <CheckCircle2 size={19} />}</Box>
+            </Box>
+            <Box sx={{ mt: 1.4, display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: .55 }}>
+              {[["Checked", isgsScheduleCheck.report?.total || 0], ["Matched", isgsScheduleCheck.report?.matched || 0], ["Flagged", isgsScheduleCheck.report?.mismatch_count || 0]].map(([label, value]) => <Box key={label} sx={{ px: .65, py: .75, borderRadius: "11px", bgcolor: "rgba(255,255,255,.12)", border: "1px solid rgba(255,255,255,.13)" }}><Typography sx={{ fontSize: 7.5, opacity: .78, fontWeight: 800 }}>{label}</Typography><Typography sx={{ mt: .1, fontSize: 17, lineHeight: 1, fontWeight: 950 }}>{value}</Typography></Box>)}
+            </Box>
+          </Box>
+
+          <Box sx={{ p: 1.2, borderBottom: "1px solid #E8EEF2" }}>
+            <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mb: .8 }}><Box sx={{ display: "flex", alignItems: "center", gap: .5, color: "#475569" }}><Clock3 size={13} /><Typography sx={{ fontSize: 9, fontWeight: 900 }}>Block {isgsScheduleCheck.report?.block || "—"} · {isgsScheduleCheck.report?.block_start || "—"}</Typography></Box><Typography sx={{ px: .65, py: .25, borderRadius: "999px", bgcolor: "#EFF6FF", color: "#1D4ED8", fontSize: 7.5, fontWeight: 950 }}>&gt; 1 MW</Typography></Box>
+            <Box component="select" aria-label="Schedule check frequency" value={isgsScheduleCheck.config?.interval_minutes ?? 15} onChange={changeISGSCheckInterval} sx={{ width: "100%", height: 32, px: .8, borderRadius: "9px", border: "1px solid #CBD5E1", bgcolor: "#F8FAFC", color: "#334155", fontSize: 9.5, fontWeight: 850, outline: "none" }}><option value={15}>Auto-check every 15 min</option><option value={30}>Auto-check every 30 min</option><option value={0}>Manual checking only</option></Box>
+            <Box sx={{ mt: .65, display: "grid", gridTemplateColumns: "1fr 1fr", gap: .55 }}><GradientButton disabled={isgsScheduleCheckLoading} startIcon={<RefreshRoundedIcon />} onClick={runISGSScheduleCheckNow} sx={{ minHeight: 31, px: .6, fontSize: 8.5 }}>{isgsScheduleCheckLoading ? "Checking…" : "Check now"}</GradientButton><Box component="button" type="button" onClick={() => setShowISGSComparisonDialog(true)} sx={{ minHeight: 31, px: .6, borderRadius: "9px", border: "1px solid #0057B7", bgcolor: "#FFFFFF", color: "#0057B7", fontSize: 8.5, fontWeight: 950, cursor: "pointer", "&:hover": { bgcolor: "#EFF6FF" } }}>View all</Box></Box>
+            <Typography sx={{ mt: .65, color: "#94A3B8", fontSize: 7.5, textAlign: "center" }}>{isgsScheduleCheck.report?.checked_at ? `Last checked ${new Date(isgsScheduleCheck.report.checked_at).toLocaleString("en-IN")}` : "Not checked yet"}</Typography>
+          </Box>
+
+          <Box sx={{ px: 1.2, pt: 1, pb: .45, display: "flex", justifyContent: "space-between", alignItems: "center" }}><Typography sx={{ color: "#334155", fontSize: 9.5, fontWeight: 950, letterSpacing: ".03em" }}>ACTIVE FLAGS</Typography><Typography sx={{ color: "#94A3B8", fontSize: 7.5 }}>Mismatch only</Typography></Box>
+          <Box sx={{ px: 1.05, pb: 1.05, flex: 1, minHeight: 0, overflowY: "auto", scrollbarWidth: "thin" }}>
+            {(isgsScheduleCheck.report?.mismatches || []).map((row) => <Box key={`${row.plant_id}-${row.wbes_name}`} sx={{ mb: .7, p: .9, borderRadius: "13px", bgcolor: "#FFF7F7", border: "1px solid #FECACA", boxShadow: "0 5px 14px rgba(185,28,28,.05)" }}><Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: .5 }}><Box sx={{ minWidth: 0 }}><Typography noWrap sx={{ color: "#111827", fontSize: 9.5, fontWeight: 950 }}>{row.plant_name}</Typography><Typography noWrap sx={{ color: "#94A3B8", fontSize: 7.5 }}>{row.wbes_name || "WBES mapping missing"}</Typography></Box><Box sx={{ width: 7, height: 7, mt: .35, borderRadius: "50%", bgcolor: "#EF4444", boxShadow: "0 0 0 4px #FEE2E2", flexShrink: 0 }} /></Box><Box sx={{ mt: .7, display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: .35 }}>{[["WBES", row.wbes_schedule_mw], ["RTG", row.rtg_schedule_mw], ["Δ MW", row.difference_mw]].map(([label, value]) => <Box key={label} sx={{ px: .45, py: .5, borderRadius: "8px", bgcolor: "#FFFFFF", border: "1px solid #FEE2E2" }}><Typography sx={{ color: "#94A3B8", fontSize: 6.8, fontWeight: 850 }}>{label}</Typography><Typography noWrap sx={{ color: label === "Δ MW" ? "#B42318" : "#334155", fontSize: 9, fontWeight: 950 }}>{value == null ? "—" : formatMW(value)}</Typography></Box>)}</Box><Typography sx={{ mt: .55, color: "#B42318", fontSize: 7.5, lineHeight: 1.25, fontWeight: 800 }}>{row.remark}</Typography></Box>)}
+            {isgsScheduleCheck.report && !(isgsScheduleCheck.report.mismatches || []).length && <Box sx={{ height: "100%", minHeight: 180, display: "grid", placeItems: "center", textAlign: "center", color: "#067647" }}><Box><CheckCircle2 size={30} /><Typography sx={{ mt: .6, fontSize: 11, fontWeight: 950 }}>All schedules aligned</Typography><Typography sx={{ mt: .25, color: "#64748B", fontSize: 8 }}>No difference above 1 MW.</Typography></Box></Box>}
+            {!isgsScheduleCheck.report && <Box sx={{ py: 5, textAlign: "center", color: "#64748B", fontSize: 9 }}>Run the first schedule check.</Box>}
+          </Box>
         </Paper>
       </Box>
 
@@ -2855,6 +2931,18 @@ export default function RTGDashboard() {
 
       </Dialog>
       )}
+
+      <Dialog open={showISGSComparisonDialog} onClose={() => setShowISGSComparisonDialog(false)} maxWidth="lg" fullWidth PaperProps={{ sx: { borderRadius: "24px", overflow: "hidden" } }}>
+        <DialogTitle sx={{ px: 2.5, py: 1.6, display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid #E2E8F0" }}>
+          <Box><Typography sx={{ color: "#083247", fontSize: 18, fontWeight: 950 }}>All ISGS Schedule Comparisons</Typography><Typography sx={{ color: "#64748B", fontSize: 10 }}>WBES generator injection is sign-normalised before comparison · flagged only when difference is more than {isgsScheduleCheck.report?.tolerance_mw ?? isgsScheduleCheck.config?.tolerance_mw ?? 1} MW</Typography></Box>
+          <IconButton onClick={() => setShowISGSComparisonDialog(false)}><CloseRoundedIcon /></IconButton>
+        </DialogTitle>
+        <DialogContent sx={{ p: 0 }}>
+          <TableContainer sx={{ maxHeight: "70vh" }}><Table stickyHeader size="small"><TableHead><TableRow>{["ISGS", "RTG plant ID", "WBES name", "Block", "WBES (MW)", "RTG (MW)", "Difference (MW)", "Status / remark"].map((label) => <TableCell key={label} sx={{ bgcolor: "#EAF2FF !important", color: "#0057B7", fontSize: 10.5, fontWeight: 950, whiteSpace: "nowrap" }}>{label}</TableCell>)}</TableRow></TableHead>
+            <TableBody>{(isgsScheduleCheck.report?.rows || []).map((row) => { const issue = row.status !== "MATCHED"; return <TableRow key={`${row.plant_id}-${row.wbes_name}`} sx={{ bgcolor: issue ? "#FFF1F2" : "#F0FDF4" }}><TableCell sx={{ fontSize: 10.5, fontWeight: 900 }}>{row.plant_name}<Typography sx={{ color: "#64748B", fontSize: 8 }}>{row.stage_name ? `Stage ${row.stage_name}` : ""}</Typography></TableCell><TableCell sx={{ fontSize: 10 }}>{row.plant_id || "—"}</TableCell><TableCell sx={{ fontSize: 10 }}>{row.wbes_name || "—"}</TableCell><TableCell sx={{ fontSize: 10 }}>{isgsScheduleCheck.report?.block} ({isgsScheduleCheck.report?.block_start})</TableCell><TableCell sx={{ fontSize: 10 }}>{row.wbes_schedule_mw == null ? "—" : formatMW(row.wbes_schedule_mw)}</TableCell><TableCell sx={{ fontSize: 10 }}>{row.rtg_schedule_mw == null ? "—" : formatMW(row.rtg_schedule_mw)}</TableCell><TableCell sx={{ color: issue ? "#B42318" : "#067647", fontSize: 10, fontWeight: 900 }}>{row.difference_mw == null ? "—" : formatMW(row.difference_mw)}</TableCell><TableCell><Chip size="small" label={row.status.replaceAll("_", " ")} sx={{ mr: .6, bgcolor: issue ? "#FEE2E2" : "#DCFCE7", color: issue ? "#B42318" : "#067647", fontSize: 8, fontWeight: 950 }} /><Typography component="span" sx={{ fontSize: 9, color: issue ? "#B42318" : "#475569" }}>{row.remark}</Typography></TableCell></TableRow>; })}</TableBody>
+          </Table></TableContainer>
+        </DialogContent>
+      </Dialog>
 
       {showUnreqDialog && (
       <Dialog

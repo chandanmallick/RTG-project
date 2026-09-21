@@ -117,9 +117,9 @@ class PSPConfigRequest(BaseModel):
     psp_password: str
     psp_login_url: str
     psp_data_url: str
-    nldc_demand_api_url: str = "https://reporting.nldc.in/Reporting_API/API/NLDCReport/GetMaxDemandMetTimeDataByDate/{date_text}"
+    nldc_demand_api_url: str = "https://reporting.grid-india.in/Reporting_API/API/NLDCReport/GetMaxDemandMetTimeDataByDate/{date_text}"
     india_15_min_demand_api_url: str = "https://report.erldc.in/posoco_api/api/StgHourlyStateData/GetStgHourlyStateDataNRByMonthNLDC/{date_from}/{date_to}/1"
-    all_state_demand_api_url: str = "https://reporting.nldc.in/Reporting_API/API/NLDCReport/GetPowerSupplyPositionStatesDataByDate/{date_text}"
+    all_state_demand_api_url: str = "https://reporting.grid-india.in/Reporting_API/API/NLDCReport/GetPowerSupplyPositionStatesDataByDate/{date_text}"
     loadshed_api_url: str = "https://report.erldc.in/posoco_api/api/StgHourlyStateData/GetStgHourlyStateDataNRByMonthNLDC/{date_from}/{date_to}/1"
     outage_api_url: str = "https://report.erldc.in/POSOCO_API/api/Outage/GetQueryNpmcReportData/{date}"
     wbes_url: str = "https://gateway.grid-india.in/POSOCO/reports/1.0/WebAccessAPI/GetUtilityExternalSharedData"
@@ -1198,9 +1198,97 @@ async def get_india_15_min_generation_breakup(date_str: str = None):
         return {"success": False, "message": str(e)}
 
 
+@router.get("/india-15-min-demand/generation-breakup-range")
+async def get_india_15_min_generation_breakup_range(start_date: str, end_date: str):
+    """Combine cached daily generation-breakup documents into one chart range."""
+    try:
+        start = date.fromisoformat(start_date)
+        end = date.fromisoformat(end_date)
+    except ValueError:
+        return {"success": False, "message": "Invalid date format. Use YYYY-MM-DD."}
+    if end < start:
+        return {"success": False, "message": "End date cannot be before start date."}
+    if (end - start).days > 366:
+        return {"success": False, "message": "Select a date range of 367 days or less."}
+
+    component_defs = [
+        ("AI_TH", "Thermal"), ("AI_HYD", "Hydro"), ("AI_WIND", "Wind"),
+        ("AI_SOLAR", "Solar"), ("AI_GAS", "Gas"), ("AI_NUC", "Nuclear"),
+        ("AI_OTHERS", "Others"), ("AI_PSP", "Pump"), ("AI_BESS", "BESS"),
+        ("NET_TRANSNATIONAL_EXCHANGE", "Transnational Exchange"),
+    ]
+    daily_results = []
+    current = start
+    while current <= end:
+        result = await get_india_15_min_generation_breakup(current.isoformat())
+        if result.get("success") and result.get("rows"):
+            daily_results.append(result)
+        current += timedelta(days=1)
+
+    rows = []
+    for daily in daily_results:
+        day = daily.get("date")
+        for row in daily.get("rows") or []:
+            rows.append({
+                **row,
+                "date": day,
+                "chart_timestamp": f'{day} {row.get("timestamp") or ""}',
+            })
+
+    totals = {key: sum(float(row.get(key) or 0) for row in rows) for key, _ in component_defs}
+    maxima = {key: max((float(row.get(key) or 0) for row in rows), default=0) for key, _ in component_defs}
+    total_energy = sum(abs(value) for value in totals.values())
+    components = [{
+        "key": key,
+        "label": label,
+        "total": round(totals[key], 3),
+        "max": round(maxima[key], 3),
+        "share": round(abs(totals[key]) / total_energy * 100, 3) if total_energy else 0,
+    } for key, label in component_defs]
+
+    modes = {}
+    for mode in ("peak_generation", "solar_max_demand", "non_solar_max_demand"):
+        candidates = [
+            {**candidate, "date": daily.get("date")}
+            for daily in daily_results
+            for candidate in [(daily.get("generation_mix_modes") or {}).get(mode) or {}]
+            if candidate
+        ]
+        score_key = "total_generation" if mode == "peak_generation" else "demand_value"
+        modes[mode] = max(candidates, key=lambda item: float(item.get(score_key) or 0), default={})
+    demand_candidates = [
+        {**(daily.get("all_india_demand") or {}), "date": daily.get("date")}
+        for daily in daily_results
+        if daily.get("all_india_demand")
+    ]
+    all_india_demand = max(demand_candidates, key=lambda item: float(item.get("value") or 0), default={})
+
+    return {
+        "success": True,
+        "start_date": start_date,
+        "end_date": end_date,
+        "date": end_date,
+        "date_text": f"{start_date} to {end_date}",
+        "source": "India_15_Min_Demand.raw_rows",
+        "rows": rows,
+        "components": components,
+        "record_count": len(rows),
+        "days_found": len(daily_results),
+        "all_india_demand": all_india_demand,
+        "maximum_generation_mix": modes.get("peak_generation") or {},
+        "generation_mix_modes": modes,
+        "max_total_generation": max((row.get("total_generation") or 0 for row in rows), default=0),
+        "min_total_generation": min((row.get("total_generation") or 0 for row in rows), default=0),
+    }
+
+
 @router.get("/india-15-min-demand/generation-breakup/export")
-async def export_india_15_min_generation_breakup(date_str: str = None):
-    result = await get_india_15_min_generation_breakup(date_str)
+async def export_india_15_min_generation_breakup(date_str: str = None, start_date: str = None, end_date: str = None):
+    result = (
+        await get_india_15_min_generation_breakup_range(start_date, end_date)
+        if start_date and end_date
+        else await get_india_15_min_generation_breakup(date_str)
+    )
     if not result.get("success"):
         return result
 
@@ -1223,7 +1311,7 @@ async def export_india_15_min_generation_breakup(date_str: str = None):
     summary["A1"].fill = title_fill
     summary["A1"].font = title_font
     summary["A1"].alignment = Alignment(horizontal="center")
-    summary.append(["Date", result.get("date") or date_str or "", "Source", result.get("source") or ""])
+    summary.append(["Date range", result.get("date_text") or result.get("date") or date_str or "", "Source", result.get("source") or ""])
     summary.append(["All India Maximum Demand", demand.get("value") or 0, "Time", demand.get("time") or "-"])
     summary.append([])
     summary.append(["Maximum Generation Mix", "MW", "Share (%)", "Time / Block"])
@@ -1254,7 +1342,7 @@ async def export_india_15_min_generation_breakup(date_str: str = None):
 
     detail = workbook.create_sheet("15-Minute Data")
     component_keys = [component.get("key") for component in components if component.get("key")]
-    headers = ["Block", "Timestamp", *component_keys, "Solar Generation", "Non-Solar Generation", "Total Generation"]
+    headers = ["Date", "Block", "Timestamp", *component_keys, "Solar Generation", "Non-Solar Generation", "Total Generation"]
     detail.append(headers)
     for cell in detail[1]:
         cell.fill = title_fill
@@ -1262,6 +1350,7 @@ async def export_india_15_min_generation_breakup(date_str: str = None):
         cell.alignment = Alignment(horizontal="center")
     for row in rows:
         detail.append([
+            row.get("date") or result.get("date"),
             row.get("block"),
             row.get("timestamp"),
             *[row.get(key, 0) for key in component_keys],
@@ -1277,7 +1366,7 @@ async def export_india_15_min_generation_breakup(date_str: str = None):
 
     demand_mix = workbook.create_sheet("Demand-Based Mix")
     demand_mix.append([
-        "Basis", "Demand (MW)", "Demand Time", "Nearest Generation Time", "Block",
+        "Basis", "Date", "Demand (MW)", "Demand Time", "Nearest Generation Time", "Block",
         "Total Generation (MW)", "Solar Generation (MW)", "Solar Share (%)",
         "Non-Solar Generation (MW)", "Non-Solar Share (%)",
     ])
@@ -1289,6 +1378,7 @@ async def export_india_15_min_generation_breakup(date_str: str = None):
         item = mix_modes.get(mode) or {}
         demand_mix.append([
             item.get("label") or mode,
+            item.get("date") or result.get("date"),
             item.get("demand_value"),
             item.get("demand_time") or "",
             item.get("timestamp") or "",
@@ -1475,9 +1565,9 @@ async def get_psp_config():
             "psp_data_url": "https://report.erldc.in/POSOCO/PSP/GetPSPData",
             "psp_username": "erldc",
             "psp_password": "erldc1",
-            "nldc_demand_api_url": "https://reporting.nldc.in/Reporting_API/API/NLDCReport/GetMaxDemandMetTimeDataByDate/{date_text}",
+            "nldc_demand_api_url": "https://reporting.grid-india.in/Reporting_API/API/NLDCReport/GetMaxDemandMetTimeDataByDate/{date_text}",
             "india_15_min_demand_api_url": "https://report.erldc.in/posoco_api/api/StgHourlyStateData/GetStgHourlyStateDataNRByMonthNLDC/{date_from}/{date_to}/1",
-            "all_state_demand_api_url": "https://reporting.nldc.in/Reporting_API/API/NLDCReport/GetPowerSupplyPositionStatesDataByDate/{date_text}",
+            "all_state_demand_api_url": "https://reporting.grid-india.in/Reporting_API/API/NLDCReport/GetPowerSupplyPositionStatesDataByDate/{date_text}",
             "loadshed_api_url": "https://report.erldc.in/posoco_api/api/StgHourlyStateData/GetStgHourlyStateDataNRByMonthNLDC/{date_from}/{date_to}/1",
             "outage_api_url": "https://report.erldc.in/POSOCO_API/api/Outage/GetQueryNpmcReportData/{date}",
             "wbes_url": "https://gateway.grid-india.in/POSOCO/reports/1.0/WebAccessAPI/GetUtilityExternalSharedData",
@@ -1505,11 +1595,11 @@ async def get_psp_config():
         if "loadshed_api_url" not in config:
             config["loadshed_api_url"] = "https://report.erldc.in/posoco_api/api/StgHourlyStateData/GetStgHourlyStateDataNRByMonthNLDC/{date_from}/{date_to}/1"
         if "nldc_demand_api_url" not in config:
-            config["nldc_demand_api_url"] = "https://reporting.nldc.in/Reporting_API/API/NLDCReport/GetMaxDemandMetTimeDataByDate/{date_text}"
+            config["nldc_demand_api_url"] = "https://reporting.grid-india.in/Reporting_API/API/NLDCReport/GetMaxDemandMetTimeDataByDate/{date_text}"
         if "india_15_min_demand_api_url" not in config:
             config["india_15_min_demand_api_url"] = config.get("loadshed_api_url") or "https://report.erldc.in/posoco_api/api/StgHourlyStateData/GetStgHourlyStateDataNRByMonthNLDC/{date_from}/{date_to}/1"
         if "all_state_demand_api_url" not in config:
-            config["all_state_demand_api_url"] = "https://reporting.nldc.in/Reporting_API/API/NLDCReport/GetPowerSupplyPositionStatesDataByDate/{date_text}"
+            config["all_state_demand_api_url"] = "https://reporting.grid-india.in/Reporting_API/API/NLDCReport/GetPowerSupplyPositionStatesDataByDate/{date_text}"
         if "outage_api_url" not in config:
             config["outage_api_url"] = "https://report.erldc.in/POSOCO_API/api/Outage/GetQueryNpmcReportData/{date}"
         if "curve_file_dir" not in config:

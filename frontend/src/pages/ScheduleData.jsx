@@ -5,6 +5,7 @@ import {
   Checkbox,
   CircularProgress,
   Dialog,
+  DialogActions,
   DialogContent,
   DialogTitle,
   FormControl,
@@ -21,9 +22,12 @@ import {
 } from "@mui/material";
 import {
   Download,
+  FileSpreadsheet,
   History,
   Maximize2,
   RefreshCw,
+  Save,
+  Send,
   Table2,
   X,
 } from "lucide-react";
@@ -168,11 +172,59 @@ export default function ScheduleData() {
   const [rawLoading, setRawLoading] = useState(false);
   const [chartOpen, setChartOpen] = useState(false);
   const [chartScope, setChartScope] = useState("combined");
+  const [secondaryAxisMetric, setSecondaryAxisMetric] = useState("deviation");
+  const [misMappingOpen, setMisMappingOpen] = useState(false);
+  const [misMappingRows, setMisMappingRows] = useState([]);
+  const [misMappingLoading, setMisMappingLoading] = useState(false);
+  const [misMappingSaving, setMisMappingSaving] = useState(false);
+  const [excelDownloading, setExcelDownloading] = useState(false);
+  const [chartMailSending, setChartMailSending] = useState(false);
+  const [chartMailMessage, setChartMailMessage] = useState("");
   useEffect(() => {
     API.getScheduleDataGenerators()
       .then((data) => setGenerators(data.data || []))
       .catch((err) => setError(err.message));
   }, []);
+
+  const openMisMapping = async () => {
+    setMisMappingOpen(true);
+    setMisMappingLoading(true);
+    try {
+      const response = await API.getFrequencyPlantMapping();
+      const rows = (response?.data || [])
+        .filter((row) => !row.is_frequency)
+        .filter((row) => {
+          if (kind === "state") return row.is_state;
+          if (kind === "generator") return !row.is_state;
+          return true;
+        })
+        .sort((a, b) => {
+          const missingOrder = Number(Boolean(a.mis_name)) - Number(Boolean(b.mis_name));
+          return missingOrder || String(a.plant_name || "").localeCompare(String(b.plant_name || ""));
+        });
+      setMisMappingRows(rows);
+    } catch (err) {
+      setError(err.response?.data?.detail || err.message || "Unable to load MIS mapping.");
+    } finally {
+      setMisMappingLoading(false);
+    }
+  };
+
+  const saveMisMapping = async () => {
+    setMisMappingSaving(true);
+    try {
+      const response = await API.saveFrequencyPlantMapping({ rows: misMappingRows });
+      if (!response?.success) throw new Error(response?.error || "MIS mapping could not be saved.");
+      const choices = await API.getScheduleDataGenerators();
+      setGenerators(choices?.data || []);
+      setError("");
+      setMisMappingOpen(false);
+    } catch (err) {
+      setError(err.response?.data?.detail || err.message || "MIS mapping could not be saved.");
+    } finally {
+      setMisMappingSaving(false);
+    }
+  };
   const visibleGenerators = useMemo(
     () => generators.filter((item) => kind === "all" || item.kind === kind),
     [generators, kind],
@@ -306,8 +358,7 @@ export default function ScheduleData() {
       return next;
     });
   }, [result, actual, selectedItems]);
-  const download = () => {
-    if (!result?.rows?.length) return;
+  const exportMatrix = () => {
     const rows = comparisonRows.length ? comparisonRows : result.rows;
     const headers = [
       "Date time",
@@ -317,9 +368,7 @@ export default function ScheduleData() {
         ),
       ),
     ];
-    const csv = [
-      headers,
-      ...rows.map((row) => [
+    const dataRows = rows.map((row) => [
         row.timestamp,
         ...columns.flatMap((item) =>
           metrics.map((metric) => {
@@ -332,8 +381,13 @@ export default function ScheduleData() {
             return value == null ? "" : roundOne(value);
           }),
         ),
-      ]),
-    ]
+      ]);
+    return { headers, dataRows };
+  };
+  const download = () => {
+    if (!result?.rows?.length) return;
+    const { headers, dataRows } = exportMatrix();
+    const csv = [headers, ...dataRows]
       .map((row) =>
         row
           .map((value) => `"${String(value).replaceAll('"', '""')}"`)
@@ -347,6 +401,29 @@ export default function ScheduleData() {
     link.download = `Schedule_Actual_Deviation_${startDate}_${endDate}.csv`;
     link.click();
     URL.revokeObjectURL(link.href);
+  };
+  const downloadExcel = async () => {
+    if (!result?.rows?.length) return;
+    setExcelDownloading(true);
+    setError("");
+    try {
+      const { headers, dataRows } = exportMatrix();
+      const blob = await API.exportScheduleDataExcel({
+        headers,
+        rows: dataRows,
+        start_date: startDate,
+        end_date: endDate,
+      });
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(blob);
+      link.download = `Schedule_Actual_Deviation_${startDate}_${endDate}.xlsx`;
+      link.click();
+      URL.revokeObjectURL(link.href);
+    } catch (err) {
+      setError(err.response?.data?.detail || err.message || "Unable to download Excel data.");
+    } finally {
+      setExcelDownloading(false);
+    }
   };
   const allZero =
     Boolean(result?.rows?.length) &&
@@ -374,13 +451,26 @@ export default function ScheduleData() {
           : current.filter((item) => item !== metric)
         : [...current, metric],
     );
-  const chartOption = useMemo(() => {
+  const chartOptions = useMemo(
+    () =>
+      chartItems.map((chartItem) => {
+    const scopedChartItems = [chartItem];
     const timestamps = comparisonRows.map((row) => row.timestamp);
     const scheduleColors = ["#2563EB", "#1D4ED8", "#0EA5E9", "#4F46E5"];
     const actualColors = ["#059669", "#0F766E", "#16A34A", "#0891B2"];
     const deviationColors = ["#EA580C", "#DC2626", "#D97706", "#DB2777"];
     const dcColors = ["#7C3AED", "#9333EA", "#A21CAF", "#C026D3"];
     const normativeDcColors = ["#64748B", "#475569", "#334155", "#0F172A"];
+    const secondaryAxisColor =
+      secondaryAxisMetric === "schedule"
+        ? scheduleColors[0]
+        : secondaryAxisMetric === "actual"
+          ? actualColors[0]
+          : secondaryAxisMetric === "deviation"
+            ? deviationColors[0]
+            : secondaryAxisMetric === "dc"
+              ? dcColors[0]
+              : normativeDcColors[0];
     const boundaries = timestamps.reduce((items, timestamp, index) => {
       const date = String(timestamp).slice(0, 10);
       const previousDate = index
@@ -405,7 +495,7 @@ export default function ScheduleData() {
       }
       return items;
     }, []);
-    const chartSeries = chartItems.flatMap((item, itemIndex) =>
+    const chartSeries = scopedChartItems.flatMap((item, itemIndex) =>
       metrics.map((metric) => {
         const color =
           metric === "schedule"
@@ -420,6 +510,10 @@ export default function ScheduleData() {
         return {
           name: `${item.mis_name || item.label} ${metricLabels[metric]}`,
           type: "line",
+          yAxisIndex:
+            secondaryAxisMetric !== "none" && metric === secondaryAxisMetric
+              ? 1
+              : 0,
           data: comparisonRows.map((row) => {
             const value = row[`${item.id}_${metric}`];
             return value == null ? null : Number(roundOne(value));
@@ -442,7 +536,12 @@ export default function ScheduleData() {
       }),
     );
     if (chartSeries.length) {
-      chartSeries[0].markLine = {
+      const secondarySeriesIndex = chartSeries.findIndex(
+        (series) => series.yAxisIndex === 1,
+      );
+      const markLineSeriesIndex =
+        secondarySeriesIndex >= 0 ? secondarySeriesIndex : 0;
+      chartSeries[markLineSeriesIndex].markLine = {
         silent: true,
         symbol: "none",
         animation: false,
@@ -462,8 +561,16 @@ export default function ScheduleData() {
       };
     }
     return {
+      id: String(chartItem.id),
+      title: chartItem.mis_name || chartItem.label || String(chartItem.id),
+      option: {
       animationDuration: 550,
-      grid: { top: 78, right: 30, bottom: 78, left: 68 },
+      grid: {
+        top: 78,
+        right: secondaryAxisMetric === "none" ? 30 : 78,
+        bottom: 78,
+        left: 68,
+      },
       legend: {
         type: "scroll",
         top: 4,
@@ -541,57 +648,168 @@ export default function ScheduleData() {
           hideOverlap: true,
         },
       },
-      yAxis: {
-        type: "value",
-        name: "MW",
-        nameTextStyle: { color: "#0F172A", fontWeight: 900, fontSize: 12 },
-        axisLabel: {
-          color: "#334155",
-          fontSize: 11,
-          fontWeight: 700,
-          formatter: (value) => Number(value).toFixed(1),
+      yAxis: [
+        {
+          type: "value",
+          name: "Primary · MW",
+          position: "left",
+          nameTextStyle: { color: "#0F172A", fontWeight: 900, fontSize: 12 },
+          axisLabel: {
+            color: "#334155",
+            fontSize: 11,
+            fontWeight: 700,
+            formatter: (value) => Number(value).toFixed(1),
+          },
+          splitLine: { lineStyle: { color: "#D7E1EA", width: 1 } },
         },
-        splitLine: { lineStyle: { color: "#D7E1EA", width: 1 } },
-      },
+        ...(secondaryAxisMetric === "none"
+          ? []
+          : [
+              {
+                type: "value",
+                name: `${metricLabels[secondaryAxisMetric]} · MW`,
+                position: "right",
+                alignTicks: true,
+                nameTextStyle: {
+                  color: secondaryAxisColor,
+                  fontWeight: 900,
+                  fontSize: 12,
+                },
+                axisLine: {
+                  show: true,
+                  lineStyle: { color: secondaryAxisColor, width: 1.5 },
+                },
+                axisTick: {
+                  show: true,
+                  lineStyle: { color: secondaryAxisColor },
+                },
+                axisLabel: {
+                  color: secondaryAxisColor,
+                  fontSize: 11,
+                  fontWeight: 800,
+                  formatter: (value) => Number(value).toFixed(1),
+                },
+                splitLine: { show: false },
+              },
+            ]),
+      ],
       series: chartSeries,
+      },
     };
-  }, [comparisonRows, chartItems, metrics, startDate, endDate]);
-  const renderChart = (height = 360) => (
-    <Box sx={{ width: "100%", minWidth: 0, pb: 0.5 }}>
-      <ReactECharts
-        option={chartOption}
-        style={{ width: "100%", height }}
-        opts={{ renderer: "canvas" }}
-        notMerge
-        lazyUpdate
-      />
-    </Box>
+      }),
+    [
+      comparisonRows,
+      chartItems,
+      metrics,
+      secondaryAxisMetric,
+      startDate,
+      endDate,
+    ],
   );
-  const downloadChartHtml = () => {
-    if (!comparisonRows.length) return;
-    const series = chartItems.flatMap((item) =>
-      metrics.map((metric) => ({
-        label: `${item.mis_name || item.label} ${metricLabels[metric]}`,
+  const renderCharts = (height = 360) => (
+    <Stack spacing={1.5} sx={{ width: "100%", minWidth: 0, pb: 0.5 }}>
+      {chartOptions.map((chart, index) => (
+        <Paper
+          key={chart.id}
+          variant="outlined"
+          sx={{
+            overflow: "hidden",
+            borderRadius: 2.5,
+            borderColor: "#D8E4EF",
+            bgcolor: "#FFFFFF",
+            boxShadow: "0 5px 18px rgba(15,42,67,.045)",
+          }}
+        >
+          <Stack
+            direction="row"
+            alignItems="center"
+            justifyContent="space-between"
+            sx={{ px: 1.5, pt: 1.15 }}
+          >
+            <Typography sx={{ color: "#0F2F4F", fontSize: 13, fontWeight: 950 }}>
+              {index + 1}. {chart.title}
+            </Typography>
+            <Typography sx={{ color: "#64748B", fontSize: 10.5, fontWeight: 750 }}>
+              {startDate} to {endDate}
+            </Typography>
+          </Stack>
+          <ReactECharts
+            option={chart.option}
+            style={{ width: "100%", height }}
+            opts={{ renderer: "canvas" }}
+            notMerge
+            lazyUpdate
+          />
+        </Paper>
+      ))}
+    </Stack>
+  );
+  const buildChartHtml = () => {
+    const chartModels = chartItems.map((item) => ({
+      id: String(item.id),
+      title: item.mis_name || item.label || String(item.id),
+      series: metrics.map((metric) => ({
+        label: metricLabels[metric],
         key: `${item.id}_${metric}`,
         borderColor:
           metric === "schedule"
             ? "#2563EB"
             : metric === "actual"
-              ? "#0B8F6A"
-              : "#EA580C",
+              ? "#059669"
+              : metric === "deviation"
+                ? "#EA580C"
+                : metric === "dc"
+                  ? "#7C3AED"
+                  : "#64748B",
         backgroundColor:
-          metric === "deviation" ? "rgba(249,115,22,.28)" : "transparent",
+          metric === "deviation" ? "rgba(249,115,22,.20)" : "transparent",
+        borderDash: metric === "normative_dc" ? [7, 5] : [],
         fill: metric === "deviation",
+        yAxisID:
+          secondaryAxisMetric !== "none" && metric === secondaryAxisMetric
+            ? "y1"
+            : "y",
       })),
-    );
+    }));
     const data = JSON.stringify(comparisonRows).replaceAll("<", "\\u003c");
-    const datasets = JSON.stringify(series).replaceAll("<", "\\u003c");
-    const html = `<!doctype html><html><head><meta charset="utf-8"><title>Schedule, Actual & Deviation</title><script src="https://cdn.jsdelivr.net/npm/chart.js"></script><style>body{font-family:Arial,sans-serif;margin:24px;color:#102a43}h1{color:#0754b8}#chart{max-height:72vh}</style></head><body><h1>Schedule, Actual & Deviation</h1><p>${startDate} to ${endDate} · ${frequency}-minute schedule</p><canvas id="chart"></canvas><script>const rows=${data};const series=${datasets};new Chart(document.getElementById('chart'),{type:'line',data:{labels:rows.map(r=>r.timestamp.replace('T',' ')),datasets:series.map(s=>({...s,data:rows.map(r=>r[s.key]??null),tension:.25,pointRadius:0,borderWidth:2}))},options:{responsive:true,interaction:{mode:'index',intersect:false},scales:{x:{ticks:{maxTicksLimit:16}},y:{ticks:{callback:v=>Number(v).toFixed(1)}}}}});</script></body></html>`;
+    const charts = JSON.stringify(chartModels).replaceAll("<", "\\u003c");
+    const secondary = JSON.stringify(secondaryAxisMetric);
+    const secondaryLabel = JSON.stringify(metricLabels[secondaryAxisMetric] || "Secondary");
+    return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Generator-wise Schedule, Actual & Deviation</title><script src="https://cdn.jsdelivr.net/npm/chart.js"></script><style>*{box-sizing:border-box}body{font-family:Inter,Arial,sans-serif;margin:0;padding:24px;background:#f4f8fc;color:#102a43}.report-head{max-width:1500px;margin:0 auto 18px;padding:20px 24px;border-radius:18px;color:#fff;background:linear-gradient(110deg,#07194f,#0754b8 65%,#1186d4)}h1{margin:0 0 6px;font-size:25px}.report-head p{margin:0;opacity:.9}.charts{max-width:1500px;margin:auto;display:grid;gap:18px}.chart-card{height:520px;padding:18px 22px 20px;border:1px solid #d8e4ef;border-radius:18px;background:#fff;box-shadow:0 8px 24px rgba(15,42,67,.07);break-inside:avoid}.chart-card h2{height:28px;margin:0;color:#0f2f4f;font-size:17px}.chart-wrap{position:relative;height:440px}@media print{body{padding:0;background:#fff}.report-head{border-radius:0}.chart-card{height:185mm;border:0;box-shadow:none;page-break-after:always}.chart-wrap{height:165mm}}@media(max-width:700px){body{padding:10px}.chart-card{padding:14px 10px;height:430px}.chart-wrap{height:365px}}</style></head><body><header class="report-head"><h1>Generator-wise Schedule, Actual &amp; Deviation</h1><p>${startDate} to ${endDate} · ${frequency}-minute schedule · ${chartModels.length} generator(s)</p></header><main class="charts" id="charts"></main><script>const rows=${data};const charts=${charts};const secondary=${secondary};const secondaryLabel=${secondaryLabel};const root=document.getElementById('charts');charts.forEach((item,index)=>{const section=document.createElement('section');section.className='chart-card';const heading=document.createElement('h2');heading.textContent=(index+1)+'. '+item.title;const wrap=document.createElement('div');wrap.className='chart-wrap';const canvas=document.createElement('canvas');wrap.appendChild(canvas);section.append(heading,wrap);root.appendChild(section);const scales={x:{ticks:{maxTicksLimit:18,color:'#334155'},grid:{color:'#eef2f7'}},y:{position:'left',ticks:{callback:v=>Number(v).toFixed(1),color:'#334155'},title:{display:true,text:'Primary · MW',color:'#0f172a'},grid:{color:'#d7e1ea'}}};if(secondary!=='none'){scales.y1={position:'right',grid:{drawOnChartArea:false},ticks:{color:'#6d28d9',callback:v=>Number(v).toFixed(1)},title:{display:true,text:secondaryLabel+' · MW',color:'#6d28d9'}}}new Chart(canvas,{type:'line',data:{labels:rows.map(r=>r.timestamp.replace('T',' ')),datasets:item.series.map(s=>({...s,data:rows.map(r=>r[s.key]??null),tension:.22,pointRadius:0,borderWidth:s.key.endsWith('_deviation')?2.5:2}))},options:{maintainAspectRatio:false,responsive:true,interaction:{mode:'index',intersect:false},plugins:{legend:{position:'top',align:'start',labels:{usePointStyle:true,boxWidth:8,font:{weight:'bold'}}}},scales}})});</script></body></html>`;
+  };
+  const downloadChartHtml = () => {
+    if (!comparisonRows.length) return;
+    const html = buildChartHtml();
     const link = document.createElement("a");
     link.href = URL.createObjectURL(new Blob([html], { type: "text/html" }));
-    link.download = `Schedule_Actual_Deviation_Chart_${startDate}_${endDate}.html`;
+    link.download = `Schedule_Actual_Deviation_Charts_${startDate}_${endDate}.html`;
     link.click();
     URL.revokeObjectURL(link.href);
+  };
+  const emailChartHtml = async () => {
+    if (!comparisonRows.length || chartMailSending) return;
+    setChartMailSending(true);
+    setChartMailMessage("");
+    setError("");
+    try {
+      const response = await API.sendScheduleDataChartMail({
+        html: buildChartHtml(),
+        startDate,
+        endDate,
+        generatorNames: chartItems.map(
+          (item) => item.mis_name || item.label || String(item.id),
+        ),
+      });
+      setChartMailMessage(response.message || "HTML chart report sent.");
+    } catch (requestError) {
+      setError(
+        requestError.response?.data?.detail ||
+          requestError.message ||
+          "The HTML chart report could not be sent.",
+      );
+    } finally {
+      setChartMailSending(false);
+    }
   };
   if (activeView === "rtg") {
     return (
@@ -628,12 +846,73 @@ export default function ScheduleData() {
         />
         <Paper
           elevation={0}
-          sx={{ p: 2, border: "1px solid #C8E6DE", borderRadius: 3, mb: 2 }}
+          sx={{
+            p: { xs: 1.25, md: 1.5 },
+            border: "1px solid #BFE2D9",
+            borderRadius: 4,
+            mb: 2,
+            background:
+              "linear-gradient(135deg,rgba(255,255,255,.98),rgba(244,251,249,.96))",
+            boxShadow: "0 10px 30px rgba(15,42,67,.06)",
+            "& .MuiOutlinedInput-root": {
+              minHeight: 42,
+              borderRadius: 2.5,
+              bgcolor: "#FFFFFF",
+              transition: "box-shadow .18s ease, border-color .18s ease",
+              "&:hover": { boxShadow: "0 4px 14px rgba(15,42,67,.07)" },
+              "&.Mui-focused": { boxShadow: "0 0 0 3px rgba(0,104,217,.10)" },
+            },
+          }}
         >
           <Stack
-            direction={{ xs: "column", md: "row" }}
-            spacing={1.2}
-            alignItems={{ md: "center" }}
+            direction={{ xs: "column", sm: "row" }}
+            alignItems={{ sm: "center" }}
+            justifyContent="space-between"
+            spacing={1}
+            sx={{ mb: 1.25 }}
+          >
+            <Box>
+              <Typography
+                sx={{
+                  color: "#0F2F4F",
+                  fontSize: 14,
+                  fontWeight: 900,
+                  letterSpacing: "-.01em",
+                }}
+              >
+                Build data query
+              </Typography>
+              <Typography sx={{ color: "#64748B", fontSize: 10.5 }}>
+                Choose the period, source and schedule resolution.
+              </Typography>
+            </Box>
+            <Box
+              sx={{
+                px: 1.25,
+                py: 0.55,
+                borderRadius: 99,
+                color: "#0754B8",
+                bgcolor: "#EAF3FF",
+                border: "1px solid #C9DDF8",
+                fontSize: 11,
+                fontWeight: 900,
+                whiteSpace: "nowrap",
+              }}
+            >
+              {selectedGenerators.length || visibleGenerators.length} source(s)
+            </Box>
+          </Stack>
+          <Box
+            sx={{
+              display: "grid",
+              gridTemplateColumns: {
+                xs: "1fr",
+                sm: "repeat(2,minmax(0,1fr))",
+                lg: "145px 145px 145px minmax(290px,1fr) 150px auto",
+              },
+              gap: 1,
+              alignItems: "center",
+            }}
           >
             <TextField
               label="From date"
@@ -642,6 +921,7 @@ export default function ScheduleData() {
               value={startDate}
               onChange={(e) => setStartDate(e.target.value)}
               InputLabelProps={{ shrink: true }}
+              fullWidth
             />
             <TextField
               label="To date"
@@ -650,6 +930,7 @@ export default function ScheduleData() {
               value={endDate}
               onChange={(e) => setEndDate(e.target.value)}
               InputLabelProps={{ shrink: true }}
+              fullWidth
             />
             <TextField
               select
@@ -660,13 +941,13 @@ export default function ScheduleData() {
                 setKind(e.target.value);
                 setSelectedGenerators([]);
               }}
-              sx={{ minWidth: 140 }}
+              fullWidth
             >
               <MenuItem value="generator">Generator</MenuItem>
               <MenuItem value="state">State</MenuItem>
               <MenuItem value="all">All mapped</MenuItem>
             </TextField>
-            <FormControl size="small" sx={{ minWidth: 320, maxWidth: 460 }}>
+            <FormControl size="small" fullWidth>
               <InputLabel id="schedule-mis-names-label">MIS name(s)</InputLabel>
               <Select
                 labelId="schedule-mis-names-label"
@@ -719,29 +1000,13 @@ export default function ScheduleData() {
                 })}
               </Select>
             </FormControl>
-            <Button
-              size="small"
-              variant="text"
-              onClick={() => setSelectedGenerators(visibleGeneratorIds)}
-              sx={{ fontWeight: 900, whiteSpace: "nowrap" }}
-            >
-              Select all
-            </Button>
-            <Button
-              size="small"
-              variant="text"
-              onClick={() => setSelectedGenerators([])}
-              sx={{ fontWeight: 900, whiteSpace: "nowrap" }}
-            >
-              Use all
-            </Button>
             <TextField
               select
               label="Schedule frequency"
               size="small"
               value={frequency}
               onChange={(e) => setFrequency(Number(e.target.value))}
-              sx={{ minWidth: 145 }}
+              fullWidth
             >
               {[15, 5, 1].map((value) => (
                 <MenuItem key={value} value={value}>
@@ -749,6 +1014,65 @@ export default function ScheduleData() {
                 </MenuItem>
               ))}
             </TextField>
+            <Stack
+              direction="row"
+              spacing={0.5}
+              sx={{
+                p: 0.4,
+                borderRadius: 2.5,
+                bgcolor: "#EDF3F8",
+                border: "1px solid #D7E2EC",
+              }}
+            >
+              <Button
+                size="small"
+                variant="text"
+                onClick={() => setSelectedGenerators(visibleGeneratorIds)}
+                sx={{
+                  minHeight: 32,
+                  px: 1.1,
+                  borderRadius: 2,
+                  bgcolor: selectedGenerators.length ? "#FFFFFF" : "transparent",
+                  boxShadow: selectedGenerators.length
+                    ? "0 2px 8px rgba(15,42,67,.08)"
+                    : "none",
+                  fontWeight: 900,
+                  whiteSpace: "nowrap",
+                }}
+              >
+                Select all
+              </Button>
+              <Button
+                size="small"
+                variant="text"
+                onClick={() => setSelectedGenerators([])}
+                sx={{
+                  minHeight: 32,
+                  px: 1.1,
+                  borderRadius: 2,
+                  bgcolor: !selectedGenerators.length ? "#FFFFFF" : "transparent",
+                  boxShadow: !selectedGenerators.length
+                    ? "0 2px 8px rgba(15,42,67,.08)"
+                    : "none",
+                  fontWeight: 900,
+                  whiteSpace: "nowrap",
+                }}
+              >
+                Use all
+              </Button>
+            </Stack>
+          </Box>
+          <Box
+            sx={{
+              mt: 1.15,
+              pt: 1.15,
+              borderTop: "1px solid #DCE9E5",
+              display: "flex",
+              flexWrap: "wrap",
+              gap: 0.8,
+              alignItems: "center",
+            }}
+          >
             <Button
               variant="contained"
               onClick={loadData}
@@ -760,11 +1084,26 @@ export default function ScheduleData() {
                   <RefreshCw size={16} />
                 )
               }
-              sx={{ bgcolor: "#0068D9", fontWeight: 900 }}
+              sx={{
+                minHeight: 42,
+                px: 2,
+                borderRadius: 2.5,
+                bgcolor: "#0068D9",
+                fontWeight: 900,
+                boxShadow: "0 7px 16px rgba(0,104,217,.22)",
+                "&:hover": { bgcolor: "#0057B8" },
+              }}
             >
               {loading || actualLoading
                 ? "Fetching data..."
                 : "Fetch selected data"}
+            </Button>
+            <Button
+              variant="outlined"
+              onClick={openMisMapping}
+              sx={{ minHeight: 42, borderRadius: 2.5, fontWeight: 900, whiteSpace: "nowrap" }}
+            >
+              MIS name mapping
             </Button>
             {false && (
               <Button
@@ -781,9 +1120,19 @@ export default function ScheduleData() {
               onClick={download}
               disabled={!result?.rows?.length}
               startIcon={<Download size={16} />}
-              sx={{ fontWeight: 900 }}
+              sx={{ minHeight: 42, borderRadius: 2.5, fontWeight: 900 }}
             >
               CSV
+            </Button>
+            <Button
+              variant="outlined"
+              color="success"
+              onClick={downloadExcel}
+              disabled={!result?.rows?.length || excelDownloading}
+              startIcon={excelDownloading ? <CircularProgress size={15} color="inherit" /> : <FileSpreadsheet size={16} />}
+              sx={{ minHeight: 42, borderRadius: 2.5, fontWeight: 900 }}
+            >
+              {excelDownloading ? "Preparing..." : "Excel"}
             </Button>
             {isAdmin && (
               <Button
@@ -791,26 +1140,47 @@ export default function ScheduleData() {
                 color="secondary"
                 onClick={inspectRaw}
                 disabled={rawLoading || !selectedItems.length}
-                sx={{ fontWeight: 900 }}
+                sx={{ minHeight: 42, borderRadius: 2.5, fontWeight: 900 }}
               >
                 {rawLoading ? "Inspecting…" : "Inspect WBES JSON"}
               </Button>
             )}
-            <Stack direction="row" spacing={0.5} sx={{ ml: { md: 1 } }}>
+            <Box sx={{ flex: 1, minWidth: { xs: 0, lg: 16 } }} />
+            <Stack
+              direction="row"
+              spacing={0.45}
+              sx={{
+                p: 0.4,
+                overflowX: "auto",
+                borderRadius: 2.5,
+                bgcolor: "#EDF3F8",
+                border: "1px solid #D7E2EC",
+              }}
+            >
               {Object.entries(metricLabels).map(([metric, label]) => (
                 <Button
                   key={metric}
                   size="small"
                   variant={metrics.includes(metric) ? "contained" : "outlined"}
                   onClick={() => toggleMetric(metric)}
-                  sx={{ minWidth: 92, fontWeight: 900 }}
+                  sx={{
+                    minWidth: 92,
+                    minHeight: 32,
+                    border: 0,
+                    borderRadius: 2,
+                    boxShadow: metrics.includes(metric)
+                      ? "0 3px 8px rgba(0,84,184,.16)"
+                      : "none",
+                    fontWeight: 900,
+                    whiteSpace: "nowrap",
+                  }}
                 >
                   {label}
                 </Button>
               ))}
             </Stack>
-          </Stack>
-          <Typography sx={{ mt: 1, color: "#64748B", fontSize: 11 }}>
+          </Box>
+          <Typography sx={{ mt: 1.1, color: "#64748B", fontSize: 11 }}>
             Actual data uses the MIS generator/state endpoint at one-minute
             interval. Generator schedule is multiplied by -1; deviation = Actual
             − Schedule.
@@ -825,7 +1195,29 @@ export default function ScheduleData() {
               border: "1px solid #FDA29B",
             }}
           >
-            {error}
+            <Stack direction={{ xs: "column", sm: "row" }} alignItems={{ sm: "center" }} justifyContent="space-between" spacing={1}>
+              <span>{error}</span>
+              {error.includes("MIS Name is not mapped") && (
+                <Button size="small" variant="contained" color="error" onClick={openMisMapping}>
+                  Map MIS names
+                </Button>
+              )}
+            </Stack>
+          </Paper>
+        )}
+        {chartMailMessage && (
+          <Paper
+            sx={{
+              p: 1.25,
+              mb: 2,
+              color: "#067647",
+              bgcolor: "#ECFDF3",
+              border: "1px solid #ABEFC6",
+              borderRadius: 2.5,
+              fontWeight: 800,
+            }}
+          >
+            {chartMailMessage}
           </Paper>
         )}
         {result?.diagnostics?.length > 0 && (
@@ -885,9 +1277,10 @@ export default function ScheduleData() {
             sx={{ p: 1.5, mb: 2, border: "1px solid #C8E6DE", borderRadius: 3 }}
           >
             <Stack
-              direction="row"
-              alignItems="center"
+              direction={{ xs: "column", md: "row" }}
+              alignItems={{ xs: "stretch", md: "center" }}
               justifyContent="space-between"
+              spacing={1}
               sx={{ mb: 1 }}
             >
               <Box>
@@ -899,7 +1292,24 @@ export default function ScheduleData() {
                   the selected date range.
                 </Typography>
               </Box>
-              <Stack direction="row" spacing={0.75} alignItems="center">
+              <Stack
+                direction={{ xs: "column", sm: "row" }}
+                spacing={0.75}
+                alignItems={{ sm: "center" }}
+                sx={{
+                  "& .MuiOutlinedInput-root": {
+                    minHeight: 40,
+                    borderRadius: 2.5,
+                    bgcolor: "#FFFFFF",
+                  },
+                  "& .MuiButton-root": {
+                    minHeight: 40,
+                    borderRadius: 2.5,
+                    fontWeight: 800,
+                    whiteSpace: "nowrap",
+                  },
+                }}
+              >
                 <TextField
                   select
                   size="small"
@@ -909,11 +1319,27 @@ export default function ScheduleData() {
                   sx={{ minWidth: 230 }}
                 >
                   <MenuItem value="combined">
-                    Combined · {selectedItems.length} selected
+                    Stacked charts · {selectedItems.length} selected
                   </MenuItem>
                   {selectedItems.map((item) => (
                     <MenuItem key={item.id} value={String(item.id)}>
                       {item.mis_name || item.label}
+                    </MenuItem>
+                  ))}
+                </TextField>
+                <TextField
+                  select
+                  size="small"
+                  label="Secondary axis"
+                  value={secondaryAxisMetric}
+                  onChange={(event) => setSecondaryAxisMetric(event.target.value)}
+                  sx={{ minWidth: 175 }}
+                >
+                  <MenuItem value="none">None · single scale</MenuItem>
+                  {Object.entries(metricLabels).map(([metric, label]) => (
+                    <MenuItem key={metric} value={metric}>
+                      {label}
+                      {!metrics.includes(metric) ? " (hidden)" : ""}
                     </MenuItem>
                   ))}
                 </TextField>
@@ -933,9 +1359,24 @@ export default function ScheduleData() {
                 >
                   HTML chart
                 </Button>
+                <Button
+                  size="small"
+                  variant="contained"
+                  startIcon={
+                    chartMailSending ? (
+                      <CircularProgress size={14} color="inherit" />
+                    ) : (
+                      <Send size={15} />
+                    )
+                  }
+                  onClick={emailChartHtml}
+                  disabled={chartMailSending}
+                >
+                  {chartMailSending ? "Sending..." : "Email HTML"}
+                </Button>
               </Stack>
             </Stack>
-            {renderChart()}
+            {renderCharts()}
           </Paper>
         )}
         {result && (
@@ -1003,6 +1444,69 @@ export default function ScheduleData() {
           </Paper>
         )}
         <Dialog
+          open={misMappingOpen}
+          onClose={() => !misMappingSaving && setMisMappingOpen(false)}
+          fullWidth
+          maxWidth="md"
+        >
+          <DialogTitle sx={{ fontWeight: 900, pr: 7 }}>
+            MIS stationName mapping
+            <IconButton
+              onClick={() => setMisMappingOpen(false)}
+              disabled={misMappingSaving}
+              sx={{ position: "absolute", right: 12, top: 10 }}
+            >
+              <X size={20} />
+            </IconButton>
+          </DialogTitle>
+          <DialogContent dividers>
+            <Typography sx={{ mb: 1.5, color: "#475569", fontSize: 12 }}>
+              Enter the exact stationName accepted by the MIS API. Example: BH_DRAWAL( ER END).
+              This is the same MIS Name stored under Frequency Report → Plant Mapping.
+            </Typography>
+            {misMappingLoading ? (
+              <Stack alignItems="center" sx={{ py: 5 }}><CircularProgress size={28} /></Stack>
+            ) : (
+              <Box sx={{ maxHeight: "55vh", overflow: "auto", border: "1px solid #D7E4F6", borderRadius: 1.5 }}>
+                <Box component="table" sx={{ ...tableSx, minWidth: 560 }}>
+                  <thead><tr><th>Plant / State</th><th>Type</th><th>MIS Name (API stationName)</th></tr></thead>
+                  <tbody>
+                    {misMappingRows.map((row, index) => (
+                      <tr key={`${row.plant_id}-${row.STAGE_ID || index}`}>
+                        <td>{row.plant_name || row.STAGE_NAME || row.plant_id}</td>
+                        <td>{row.is_state ? "State" : "Generator"}</td>
+                        <td>
+                          <TextField
+                            fullWidth
+                            size="small"
+                            value={row.mis_name || ""}
+                            placeholder={row.is_state ? "e.g. BH_DRAWAL( ER END)" : "Exact MIS stationName"}
+                            onChange={(event) => setMisMappingRows((current) => current.map((item, rowIndex) => (
+                              rowIndex === index ? { ...item, mis_name: event.target.value } : item
+                            )))}
+                            inputProps={{ style: { fontSize: 12 } }}
+                          />
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </Box>
+              </Box>
+            )}
+          </DialogContent>
+          <DialogActions sx={{ px: 3, py: 1.5 }}>
+            <Button onClick={() => setMisMappingOpen(false)} disabled={misMappingSaving}>Cancel</Button>
+            <Button
+              variant="contained"
+              onClick={saveMisMapping}
+              disabled={misMappingLoading || misMappingSaving || !misMappingRows.length}
+              startIcon={misMappingSaving ? <CircularProgress size={15} color="inherit" /> : <Save size={16} />}
+            >
+              {misMappingSaving ? "Saving..." : "Save MIS mapping"}
+            </Button>
+          </DialogActions>
+        </Dialog>
+        <Dialog
           open={chartOpen}
           onClose={() => setChartOpen(false)}
           fullWidth
@@ -1019,7 +1523,7 @@ export default function ScheduleData() {
             </IconButton>
           </DialogTitle>
           <DialogContent dividers>
-            <Stack direction="row" justifyContent="flex-end" sx={{ mb: 1 }}>
+            <Stack direction="row" spacing={0.75} justifyContent="flex-end" sx={{ mb: 1 }}>
               <Button
                 size="small"
                 startIcon={<Download size={15} />}
@@ -1027,8 +1531,17 @@ export default function ScheduleData() {
               >
                 Download HTML chart
               </Button>
+              <Button
+                size="small"
+                variant="contained"
+                startIcon={chartMailSending ? <CircularProgress size={14} color="inherit" /> : <Send size={15} />}
+                onClick={emailChartHtml}
+                disabled={chartMailSending}
+              >
+                {chartMailSending ? "Sending..." : "Email HTML report"}
+              </Button>
             </Stack>
-            {renderChart(520)}
+            {renderCharts(440)}
           </DialogContent>
         </Dialog>
       </Box>

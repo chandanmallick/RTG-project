@@ -29,20 +29,18 @@ import {
   Settings,
   LayoutGrid,
   Calendar,
-  UserX,
   Users,
-  Wrench,
   ArrowRight,
   ChevronDown,
   Search,
   Mail,
   PhoneCall,
   MapPin,
-  GraduationCap,
   BrainCircuit,
   UserCheck,
   Settings2,
   CalendarRange,
+  CalendarPlus,
   LogOut,
   MessageSquare,
   ClipboardList,
@@ -52,9 +50,9 @@ import { pageKeyForPath } from "../../auth/pageAccess";
 import { DutyNotificationBell } from "../crew/DutyNotifications";
 
 // Reusable premium Dropdown Item component
-function DropdownItem({ title, description, icon: Icon, iconColor, iconBg, path, active, onClick, allowWorkflowAccess = false }) {
+function DropdownItem({ title, description, icon: Icon, iconColor, iconBg, path, active, onClick, allowWorkflowAccess = false, alwaysVisible = false }) {
   const { user } = useAuth();
-  if (!allowWorkflowAccess && user?.permissions?.[pageKeyForPath(path)]?.view === false) return null;
+  if (!alwaysVisible && !allowWorkflowAccess && user?.permissions?.[pageKeyForPath(path)]?.view === false) return null;
   return (
     <Box
       onClick={() => onClick(path)}
@@ -177,7 +175,8 @@ export default function TopNavbar() {
     location.pathname === "/psp-admin" ||
     location.pathname === "/admin/user-access" ||
     location.pathname === "/admin/mail-settings" ||
-    location.pathname === "/admin/audit-trail";
+    location.pathname === "/admin/audit-trail" ||
+    location.pathname === "/admin/past-comp-off";
 
   // Reusable framer-motion properties
   const dropdownMotionProps = {
@@ -672,6 +671,16 @@ export default function TopNavbar() {
                       </Typography>
                       <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
                         <DropdownItem
+                          title="Application, Approval & Replacement"
+                          description="Events, applications and approvals"
+                          icon={ClipboardList}
+                          iconColor="#0057B7"
+                          iconBg="#EAF2FF"
+                          path="/crew/operations"
+                          active={location.pathname === "/crew/operations"}
+                          onClick={handleNavigate}
+                        />
+                        <DropdownItem
                           title="Dashboard"
                           icon={LayoutGrid}
                           iconColor="#03624C"
@@ -690,25 +699,6 @@ export default function TopNavbar() {
                           onClick={handleNavigate}
                         />
                         <DropdownItem
-                          title="Leave"
-                          icon={UserX}
-                          iconColor="#C0392B"
-                          iconBg="#FDEDEC"
-                          path="/crew/leave"
-                          active={location.pathname === "/crew/leave"}
-                          onClick={handleNavigate}
-                        />
-                        <DropdownItem
-                          title="Replacement"
-                          icon={Wrench}
-                          iconColor="#16A085"
-                          iconBg="#E8F8F5"
-                          path="/crew/replacement"
-                          active={location.pathname === "/crew/replacement"}
-                          onClick={handleNavigate}
-                          allowWorkflowAccess
-                        />
-                        <DropdownItem
                     title="Crew Notices"
                     description="Team announcements and file sharing"
                     icon={MessageSquare}
@@ -725,6 +715,7 @@ export default function TopNavbar() {
                           iconColor="#0057B7"
                           iconBg="#EAF2FF"
                           path="/crew/reports"
+                          alwaysVisible
                           active={location.pathname === "/crew/reports"}
                           onClick={handleNavigate}
                         />
@@ -777,17 +768,6 @@ export default function TopNavbar() {
                           path="/crew/organization-master"
                           active={location.pathname === "/crew/organization-master"}
                           onClick={handleNavigate}
-                        />
-                        <DropdownItem
-                          title="Holiday & Training"
-                          description="Training approval inbox and administration"
-                          icon={GraduationCap}
-                          iconColor="#9B59B6"
-                          iconBg="#F5EEF8"
-                          path="/crew/training"
-                          active={location.pathname === "/crew/training"}
-                          onClick={handleNavigate}
-                          allowWorkflowAccess
                         />
                         {(user?.permissions?.crew_roster?.view !== false
                           || user?.permissions?.crew_presentation?.view !== false) && (
@@ -962,6 +942,16 @@ export default function TopNavbar() {
                     active={location.pathname === "/admin/audit-trail"}
                     onClick={handleNavigate}
                   />
+                  {(String(user?.role || "").toLowerCase() === "admin" || String(user?.employeeId || "") === "50041") && <DropdownItem
+                    title="Past C-OFF Credit"
+                    description="Add old C-OFF manually or through Excel"
+                    icon={CalendarPlus}
+                    iconColor="#B45309"
+                    iconBg="#FEF3C7"
+                    path="/admin/past-comp-off"
+                    active={location.pathname === "/admin/past-comp-off"}
+                    onClick={handleNavigate}
+                  />}
                 </Box>
               </motion.div>
             )}

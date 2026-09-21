@@ -35,12 +35,15 @@ Tooltip,
 import { ExpandLess, ExpandMore  } from "@mui/icons-material"
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import { useAuth } from "../auth/AuthContext";
+import WorkflowHeader from "../components/crew/WorkflowHeader";
 
-export default function TrainingHolidayMaster(){
+export default function TrainingHolidayMaster({embeddedRequest=false,onRequestSubmitted,embeddedApproval=false,initialApprovalId="",onApprovalChanged,initialEmployeeId="",initialEmployeeName=""}={}){
 const { user } = useAuth()
 const trainingAccess = user?.permissions?.crew_training || {}
 const canViewTrainingPage = Boolean(trainingAccess.view)
 const canManageTraining = Boolean(trainingAccess.write)
+const canManageTrainingPrograms = Boolean(trainingAccess.approve)
+const isTrainingHR = Boolean(trainingAccess.approve)
 
 /* ================= BASIC VARIABLES ================= */
 
@@ -97,12 +100,19 @@ const [holidayDate, setHolidayDate] = useState(null);
 /* ================= ASSIGN ================= */
 
 const [selectedTraining,setSelectedTraining]=useState("")
+const [requestedTraining,setRequestedTraining]=useState("")
+const [requestSaving,setRequestSaving]=useState(false)
 const [calendarOpen,setCalendarOpen]=useState(false)
 const [calendarData,setCalendarData]=useState({})
 const [calendarDates,setCalendarDates]=useState([])
 
 const [selectedEmployees,setSelectedEmployees]=useState([])
 const [employeeTypeFilter,setEmployeeTypeFilter]=useState("All")
+const [delegationOpen,setDelegationOpen]=useState(false)
+const [delegationRows,setDelegationRows]=useState([])
+const [delegationLoading,setDelegationLoading]=useState(false)
+const [canAssignTraining,setCanAssignTraining]=useState(Boolean(trainingAccess.write || trainingAccess.approve))
+const [canDelegateTraining,setCanDelegateTraining]=useState(false)
 
 /* ================= APPROVAL ================= */
 
@@ -111,7 +121,7 @@ const [selectedRows,setSelectedRows]=useState([])
 const [replacementChoices,setReplacementChoices]=useState({})
 const [replacementCandidates,setReplacementCandidates]=useState({})
 const [candidateLoading,setCandidateLoading]=useState({})
-const [expandedApprovalId,setExpandedApprovalId]=useState("")
+const [expandedApprovalId,setExpandedApprovalId]=useState(()=>initialApprovalId || new URLSearchParams(window.location.search).get("requestId") || "")
 
 /* ================= HISTORY ================= */
 
@@ -131,15 +141,8 @@ if(duty?.isHoliday) result[date]=duty.holidayName || "Holiday"
 })))
 return result
 },[calendarData])
-const [activeSection,setActiveSection]=useState(()=>new URLSearchParams(window.location.search).get("section") || null)
+const [activeSection]=useState(()=>embeddedRequest ? "request" : embeddedApproval ? "pending" : new URLSearchParams(window.location.search).get("section") || (canViewTrainingPage ? "request" : "pending"))
 const selectedApprovalDetail = pendingList.find((row)=>row.id===expandedApprovalId)
-
-const openSection=(section)=>{
-setActiveSection(section)
-window.setTimeout(()=>{
-document.getElementById(`training-workspace-${section}`)?.scrollIntoView({behavior:"smooth",block:"start"})
-},180)
-}
 
 /* ================= FETCH HOLIDAY ================= */
 
@@ -194,8 +197,8 @@ console.error(err)
 }
 
 useEffect(()=>{
-if(canViewTrainingPage) fetchTraining()
-},[selectedFY,canViewTrainingPage])
+if(canViewTrainingPage || embeddedRequest) fetchTraining()
+},[selectedFY,canViewTrainingPage,embeddedRequest])
 
 /* ================= SAVE TRAINING ================= */
 
@@ -306,12 +309,13 @@ startDate:trainingObj.startDate,
 endDate:trainingObj.endDate,
 trainingName:selectedTraining,
 trainingLocation:trainingObj.location || "",
+requestType:"Assigned",
 employees:selectedEmployees
 })
 
 setCalendarOpen(false)
 setSelectedEmployees([])
-setNotice({severity:"success",text:"Training nomination sent through each employee's reporting hierarchy."})
+setNotice({severity:"success",text:"Training nomination sent directly to HR for final approval."})
 
 fetchPending()
 fetchHistory()
@@ -319,7 +323,71 @@ fetchHistory()
 }catch(err){
 setNotice({severity:"error",text:err?.response?.data?.detail || err?.message || "Training nomination could not be saved."})
 }
+}
 
+const openTrainingDelegation=async()=>{
+setDelegationOpen(true)
+setDelegationLoading(true)
+try{
+const res=await api.get("/training-assign/delegation")
+setDelegationRows(res.data || [])
+}catch(err){
+setNotice({severity:"error",text:err?.response?.data?.detail || "Delegation list could not be loaded."})
+}finally{
+setDelegationLoading(false)
+}
+}
+
+useEffect(()=>{
+if(!canViewTrainingPage) return
+api.get("/training-assign/nomination-access").then((res)=>{
+setCanAssignTraining(Boolean(res.data?.canAssign))
+setCanDelegateTraining(Boolean(res.data?.canDelegate))
+}).catch(()=>{})
+},[canViewTrainingPage])
+
+const toggleTrainingDelegation=async(row)=>{
+try{
+await api.post("/training-assign/delegation",{employeeId:row.employeeId,enabled:!row.delegated})
+setDelegationRows((current)=>current.map((item)=>item.employeeId===row.employeeId ? {...item,delegated:!row.delegated,hasNominationWrite:!row.delegated || item.hasNominationWrite} : item))
+setNotice({severity:"success",text:!row.delegated ? `Nomination power delegated to ${row.name}.` : `Delegation withdrawn from ${row.name}.`})
+}catch(err){
+setNotice({severity:"error",text:err?.response?.data?.detail || "Delegation could not be updated."})
+}
+}
+
+const requestOwnTraining = async()=>{
+const trainingObj=trainingList.find((item)=>item.trainingName===requestedTraining)
+const actorId=String(user?.employeeId || user?.userId || "").trim()
+const targetId=initialEmployeeId || actorId
+if(!trainingObj || !targetId || requestSaving) return
+setRequestSaving(true)
+try{
+await api.post("/training-assign/nominate",{
+date:trainingObj.startDate,
+startDate:trainingObj.startDate,
+endDate:trainingObj.endDate,
+trainingName:trainingObj.trainingName,
+trainingLocation:trainingObj.location || "",
+requestType:targetId===actorId ? "Self Request" : "Assigned",
+employees:[targetId]
+})
+setRequestedTraining("")
+setNotice({severity:"success",text:"Training request submitted for approval."})
+await Promise.all([fetchPending(),fetchHistory()])
+onRequestSubmitted?.()
+}catch(err){
+setNotice({severity:"error",text:err?.response?.data?.detail || err?.message || "Training request could not be submitted."})
+}finally{
+setRequestSaving(false)
+}
+}
+
+const trainingLineColor=(value)=>{
+const palette=["#7C3AED","#DB2777","#0284C7","#EA580C","#0F766E","#4F46E5","#B45309"]
+const textValue=String(value || "Training")
+const hash=Array.from(textValue).reduce((total,char)=>((total*31)+char.charCodeAt(0))>>>0,0)
+return palette[hash%palette.length]
 }
 
 /* ================= PENDING ================= */
@@ -330,8 +398,14 @@ try{
 
 const res = await api.get("/training-assign/pending")
 
-const rows=res.data || []
+const fetchedRows=res.data || []
+const rows=embeddedApproval && initialApprovalId
+? fetchedRows.filter((row)=>row.id===initialApprovalId)
+: fetchedRows
 setPendingList(rows)
+if(embeddedApproval){
+setSelectedRows(rows.length===1 && rows[0].canApprove ? [rows[0].id] : [])
+}
 setReplacementChoices((current)=>{
 const next={}
 rows.forEach((row)=>{
@@ -392,12 +466,26 @@ ids:selectedRows,
 replacementDecisions:selectedRows.map((id)=>({id,...(replacementChoices[id] || {})}))
 })
 setSelectedRows([])
-setNotice({severity:"success",text:"Selected nominations approved and forwarded to the next reporting authority."})
+setNotice({severity:"success",text:"Selected request approved and forwarded to the next stage, or completed if this was the final stage."})
 await Promise.all([fetchPending(),fetchHistory()])
+onApprovalChanged?.()
 }catch(err){
 setNotice({severity:"error",text:err?.response?.data?.detail || err?.message || "Training approval could not be completed."})
 }
+}
 
+const rejectTraining = async()=>{
+const reason=window.prompt("Reason for rejecting the selected training request(s):","")
+if(reason===null) return
+try{
+await api.post("/training-assign/reject",{ids:selectedRows,reason:reason.trim() || "Not approved"})
+setSelectedRows([])
+setNotice({severity:"success",text:"Selected training request(s) rejected."})
+await Promise.all([fetchPending(),fetchHistory()])
+onApprovalChanged?.()
+}catch(err){
+setNotice({severity:"error",text:err?.response?.data?.detail || err?.message || "Training rejection could not be completed."})
+}
 }
 
 /* ================= FINALIZE ================= */
@@ -455,6 +543,8 @@ const programmeDetails=Object.fromEntries(matrixTrainingList.map((programme)=>[p
 const employees=new Map()
 
 const duration=(row)=>{
+const importedDays=Number(row.trainingDays || 0)
+if(importedDays>0) return importedDays
 const start=new Date(`${row.startDate || row.trainingDate}T00:00:00Z`)
 const end=new Date(`${row.endDate || row.startDate || row.trainingDate}T00:00:00Z`)
 if(Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return 0
@@ -512,7 +602,7 @@ const columns=["Employee ID","Employee Name","Designation","Employee Type","Grou
 const lines=[columns.map(csvCell).join(",")]
 nominationMatrix.employees.forEach((employee)=>{
 const programmeCells=nominationMatrix.programmes.map((programme)=>(employee.cells[programme] || []).map((item)=>{
-const period=item.startDate===item.endDate || !item.endDate ? item.startDate || item.trainingDate : `${item.startDate} to ${item.endDate}`
+const period=item.startDate===item.endDate || !item.endDate ? item.startDate || item.trainingDate || item.financialYear || "FY only" : `${item.startDate} to ${item.endDate}`
 return `${item.status} (${period})`
 }).join("; "))
 lines.push([
@@ -558,45 +648,26 @@ setNotice({severity:"error",text:err?.response?.data?.detail || err?.message || 
 
 /* ================= UI ================= */
 
+const trainingSectionMeta={
+holiday:{title:"Holiday event master",subtitle:"Create and maintain the published holiday calendar.",accent:"#6D28D9"},
+training:{title:"Training event master",subtitle:"Create and maintain programmes available for nomination.",accent:"#0F766E"},
+request:{title:"Apply for training",subtitle:"Request an available programme through your configured approval route.",accent:"#7C3AED"},
+assign:{title:"Assign training",subtitle:"Nominate an eligible employee for an available programme.",accent:"#17876D"},
+mytraining:{title:"My approved training",subtitle:"Review approved programmes and request an adjacent roster OFF where applicable.",accent:"#047857"},
+pending:{title:isTrainingHR ? "Training final approval" : "Training approval inbox",subtitle:isTrainingHR ? "Complete HR review for nominations across departments." : "Review nominations currently assigned to you.",accent:"#D97706",count:pendingList.length},
+history:{title:"Training nomination history",subtitle:"Review nomination records and the training coverage matrix.",accent:"#4338CA"},
+}
+const currentTrainingSection=trainingSectionMeta[activeSection] || trainingSectionMeta.request
+
 return(
 
-<Box sx={{p:3,background:"#f4f6fb",minHeight:"100vh"}}>
+<Box sx={{p:embeddedRequest || embeddedApproval ? 0 : 3,background:embeddedRequest || embeddedApproval ? "transparent" : "#f4f6fb",minHeight:embeddedRequest || embeddedApproval ? 0 : "100vh"}}>
 
 {/* HEADER */}
 
-<Box sx={{p:3,mb:3,borderRadius:3,background:"linear-gradient(105deg,#08103A 0%,#0057B7 65%,#0F6FDB 100%)",color:"#FFFFFF"}}>
-<Typography variant="h5" sx={{fontWeight:900,color:"#FFFFFF"}}>
-{canViewTrainingPage ? "Training & Holiday Management" : "Training Approval Inbox"}
-</Typography>
-<Typography variant="body2" sx={{mt:.45,color:"rgba(255,255,255,.88)"}}>
-Manage holiday masters, training programmes, nominations and approval workflows.
-</Typography>
-</Box>
+{!embeddedRequest && !embeddedApproval && <Box sx={{mb:2}}><WorkflowHeader title={currentTrainingSection.title} subtitle={currentTrainingSection.subtitle} accent={currentTrainingSection.accent} count={currentTrainingSection.count} /></Box>}
 
 {notice && <Alert severity={notice.severity} onClose={()=>setNotice(null)} sx={{mb:2}}>{notice.text}</Alert>}
-
-<Grid container spacing={2} sx={{mb:3}}>
-{[
-...(canViewTrainingPage ? [
-{key:"holiday",title:"Holiday Master",subtitle:"Maintain yearly holiday records",count:holidayList.length,color:"#0057B7",tint:"#EAF2FF"},
-{key:"training",title:"Training Master",subtitle:"Maintain training programmes",count:trainingList.length,color:"#0F766E",tint:"#ECFDF5"},
-] : []),
-...(canManageTraining ? [{key:"assign",title:"Assign Training",subtitle:"Nominate eligible employees",count:null,color:"#17876D",tint:"#EAF8F3"}] : []),
-{key:"mytraining",title:"My Approved Training",subtitle:"Request adjacent OFF after approval",count:myApprovedTraining.length,color:"#047857",tint:"#ECFDF5"},
-{key:"pending",title:"Pending Approvals",subtitle:"Review and forward nominations",count:pendingList.length,color:"#D97706",tint:"#FFF7E8"},
-...(canViewTrainingPage ? [{key:"history",title:"Nomination History",subtitle:"View history and nomination matrix",count:history.length,color:"#4338CA",tint:"#EEF2FF"}] : []),
-].map((tile)=>(
-<Grid item xs={12} sm={6} md={4} lg={canViewTrainingPage ? 2.4 : 4} key={tile.key}>
-<Paper component="button" type="button" elevation={0} onClick={()=>openSection(tile.key)} sx={{width:"100%",minHeight:118,p:2.2,borderRadius:3,textAlign:"left",cursor:"pointer",border:`1px solid ${activeSection===tile.key ? tile.color : "#D7E3F4"}`,background:activeSection===tile.key ? tile.tint : "#FFFFFF",boxShadow:activeSection===tile.key ? `0 12px 28px ${tile.color}22` : "0 5px 18px rgba(15,23,42,.06)",transition:"transform .22s ease, box-shadow .22s ease, border-color .22s ease, background .22s ease","&:hover":{transform:"translateY(-3px)",borderColor:tile.color,boxShadow:`0 14px 30px ${tile.color}26`}}}>
-<Box sx={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:2}}>
-<Box><Typography sx={{color:"#0F172A",fontSize:16,fontWeight:950}}>{tile.title}</Typography><Typography sx={{mt:.65,color:"#64748B",fontSize:11.5,fontWeight:650}}>{tile.subtitle}</Typography></Box>
-{tile.count!==null && <Box sx={{minWidth:42,height:42,px:1,borderRadius:2.2,display:"grid",placeItems:"center",color:"#FFFFFF",background:tile.color,fontSize:18,fontWeight:950}}>{tile.count}</Box>}
-</Box>
-<Typography sx={{mt:1.4,color:tile.color,fontSize:11.5,fontWeight:900}}>{activeSection===tile.key ? "Workspace open" : "Click to open"}</Typography>
-</Paper>
-</Grid>
-))}
-</Grid>
 
 {/* ================= HOLIDAY ================= */}
 
@@ -839,7 +910,7 @@ Manage holiday masters, training programmes, nominations and approval workflows.
         <Grid item xs={3}>
           <TextField
             label="Training"
-            disabled={!canManageTraining}
+            disabled={!canManageTrainingPrograms}
             fullWidth
             value={training.trainingName}
             onChange={(e) =>
@@ -851,7 +922,7 @@ Manage holiday masters, training programmes, nominations and approval workflows.
         <Grid item xs={12} md={2.5}>
           <TextField
             label="Location"
-            disabled={!canManageTraining}
+            disabled={!canManageTrainingPrograms}
             fullWidth
             value={training.location}
             onChange={(e) => setTraining({ ...training, location: e.target.value })}
@@ -863,7 +934,7 @@ Manage holiday masters, training programmes, nominations and approval workflows.
             type="date"
             label="Start date"
             InputLabelProps={{shrink:true}}
-            disabled={!canManageTraining}
+            disabled={!canManageTrainingPrograms}
             fullWidth
             value={training.startDate}
             onChange={(e) =>
@@ -877,7 +948,7 @@ Manage holiday masters, training programmes, nominations and approval workflows.
             type="date"
             label="End date"
             InputLabelProps={{shrink:true}}
-            disabled={!canManageTraining}
+            disabled={!canManageTrainingPrograms}
             fullWidth
             value={training.endDate}
             onChange={(e) =>
@@ -889,7 +960,7 @@ Manage holiday masters, training programmes, nominations and approval workflows.
         <Grid item xs={12} md={1}>
           <Button
             variant="contained"
-            disabled={!canManageTraining}
+            disabled={!canManageTrainingPrograms}
             fullWidth
             sx={{
               height: 56,
@@ -925,17 +996,16 @@ Manage holiday masters, training programmes, nominations and approval workflows.
               key={t.id}
               hover
               sx={{
-                "&:nth-of-type(odd)": {
-                  backgroundColor: "#f9fcff"
-                }
+                backgroundColor:(t.unmatchedEmployees || []).length ? "#FFF1F2" : undefined,
+                "&:nth-of-type(odd)": {backgroundColor:(t.unmatchedEmployees || []).length ? "#FFE4E6" : "#f9fcff"}
               }}
             >
 
-              <TableCell>{t.trainingName}</TableCell>
+              <TableCell><Typography sx={{fontSize:13,fontWeight:750}}>{t.trainingName}</Typography>{(t.unmatchedEmployees || []).length>0 && <Tooltip title={`Employee not found: ${t.unmatchedEmployees.map((item)=>item.name || item.employeeName || item).join(", ")}`}><Chip size="small" label={`${t.unmatchedEmployees.length} employee assignment(s) pending`} sx={{mt:.6,height:22,background:"#DC2626",color:"#FFF",fontSize:10,fontWeight:900}}/></Tooltip>}</TableCell>
               <TableCell>{t.location || "-"}</TableCell>
-              <TableCell>{t.startDate}</TableCell>
-              <TableCell>{t.endDate}</TableCell>
-              <TableCell><Button size="small" variant="outlined" disabled={!canManageTraining} onClick={()=>editTraining(t)}>Edit dates/location</Button></TableCell>
+              <TableCell>{t.startDate || (t.historicalImport ? t.financialYear || "FY only" : "-")}</TableCell>
+              <TableCell>{t.endDate || (t.durationDays ? `${t.durationDays} day(s)` : "-")}</TableCell>
+              <TableCell><Button size="small" variant="outlined" disabled={!canManageTrainingPrograms} onClick={()=>editTraining(t)}>Edit dates/location</Button></TableCell>
 
             </TableRow>
 
@@ -954,11 +1024,32 @@ Manage holiday masters, training programmes, nominations and approval workflows.
 </Box>
 </Collapse>
 
+{/* ================= SELF REQUEST ================= */}
+
+<Collapse in={activeSection==="request"} timeout={420} unmountOnExit>
+<Box id="training-workspace-request" sx={{scrollMarginTop:110}}>
+<Paper elevation={0} sx={{p:3,mb:4,borderRadius:3,border:"1px solid #DDD6FE",background:"linear-gradient(135deg,#FFFFFF,#F5F3FF)"}}>
+<Typography variant="h6" sx={{fontWeight:900,color:"#5B21B6"}}>Request an available training</Typography>
+<Typography variant="body2" color="text.secondary" sx={{mt:.5,mb:2.5}}>For {initialEmployeeName || user?.name || "you"}{initialEmployeeId ? ` (${initialEmployeeId})` : ""}. Programme dates apply. Your request follows the configured approval route.</Typography>
+<Grid container spacing={2} alignItems="center">
+<Grid item xs={12} md={7}>
+<TextField select fullWidth label="Training programme" value={requestedTraining} onChange={(event)=>setRequestedTraining(event.target.value)}>
+{trainingList.filter((item)=>!["inactive","cancelled","deleted"].includes(String(item.status || "").toLowerCase()) && (!item.endDate || item.endDate>=new Date().toISOString().slice(0,10))).map((item)=><MenuItem key={item.id} value={item.trainingName}>
+{item.trainingName} · {item.startDate} to {item.endDate}{item.location ? ` · ${item.location}` : ""}
+</MenuItem>)}
+</TextField>
+</Grid>
+<Grid item xs={12} md={3}><Button fullWidth variant="contained" disabled={!requestedTraining || requestSaving} onClick={requestOwnTraining} sx={{height:56,borderRadius:2,background:"#6D28D9",fontWeight:900,"&:hover":{background:"#5B21B6"}}}>{requestSaving ? "Submitting…" : "Submit request"}</Button></Grid>
+</Grid>
+</Paper>
+</Box>
+</Collapse>
+
 {/* ================= ASSIGN ================= */}
 
 <Collapse in={activeSection==="assign"} timeout={420} unmountOnExit>
 <Box id="training-workspace-assign" sx={{scrollMarginTop:110}}>
-{canManageTraining && (
+{canAssignTraining && (
 <Accordion
   defaultExpanded
   sx={{
@@ -1026,6 +1117,12 @@ Manage holiday masters, training programmes, nominations and approval workflows.
 
         </Grid>
 
+        {canDelegateTraining && <Grid item xs={12} md={2}>
+          <Button variant="outlined" fullWidth sx={{height:56,borderRadius:2,fontWeight:800}} onClick={openTrainingDelegation}>
+            Delegate power
+          </Button>
+        </Grid>}
+
         {selectedTraining && (()=>{
           const item=trainingList.find((entry)=>entry.trainingName===selectedTraining)
           return item ? <Grid item xs={12} md={6}>
@@ -1046,6 +1143,22 @@ Manage holiday masters, training programmes, nominations and approval workflows.
 )}
 </Box>
 </Collapse>
+
+
+<Dialog open={delegationOpen} onClose={()=>setDelegationOpen(false)} maxWidth="sm" fullWidth>
+<DialogTitle sx={{fontWeight:900}}>Delegate training nomination power</DialogTitle>
+<DialogContent dividers>
+<Alert severity="info" sx={{mb:2}}>Only your mapped subordinates are listed. A delegated employee can nominate people within the same reporting department. HR remains the only approving authority.</Alert>
+{delegationLoading ? <Box sx={{display:"grid",placeItems:"center",py:5}}><CircularProgress /></Box> : <Stack spacing={1}>
+{delegationRows.length===0 && <Typography color="text.secondary" align="center" sx={{py:3}}>No mapped subordinate is available for delegation.</Typography>}
+{delegationRows.map((row)=><Paper key={row.employeeId} variant="outlined" sx={{p:1.4,display:"flex",alignItems:"center",justifyContent:"space-between",gap:2,borderRadius:2}}>
+<Box><Typography sx={{fontWeight:900}}>{row.name}</Typography><Typography variant="caption" color="text.secondary">{row.employeeId} · {row.designation || "Designation not set"}</Typography></Box>
+<Button size="small" color={row.delegated ? "error" : "primary"} variant={row.delegated ? "outlined" : "contained"} onClick={()=>toggleTrainingDelegation(row)}>{row.delegated ? "Withdraw" : "Delegate"}</Button>
+</Paper>)}
+</Stack>}
+</DialogContent>
+<DialogActions><Button onClick={()=>setDelegationOpen(false)}>Close</Button></DialogActions>
+</Dialog>
 
 
 {/* ############### Duty Matrix Popup (Full Section) */}
@@ -1117,6 +1230,9 @@ const isTrainingDate=Boolean(trainingObj && date>=trainingObj.startDate && date<
 const hasLeave=Boolean(duty?.leaveStatus && !["Rejected","Cancelled","Withdrawn"].includes(duty.leaveStatus))
 const isHoliday=Boolean(duty?.isHoliday)
 const isNonShiftHoliday=isHoliday && emp.employeeType==="Non-shift"
+const trainingLines=[...(duty?.trainingLines || [])]
+if(isTrainingDate) trainingLines.push({id:"proposed",trainingName:trainingObj?.trainingName || selectedTraining,status:"Proposed"})
+const uniqueTrainingLines=trainingLines.filter((line,index,list)=>list.findIndex((item)=>`${item.id}:${item.trainingName}`===`${line.id}:${line.trainingName}`)===index)
 
 return(
 
@@ -1145,9 +1261,12 @@ minWidth:118
 {isNonShiftHoliday ? "Holiday" : shift}
 </Typography>
 {isNonShiftHoliday && <Typography variant="caption" title={duty.holidayName} sx={{display:"block",color:"#6B21A8",fontWeight:900}}>{duty.holidayName}</Typography>}
-{isTrainingDate && <Typography variant="caption" sx={{display:"block",color:"#047857",fontWeight:900}}>Training date</Typography>}
+{uniqueTrainingLines.map((line)=><Tooltip key={`${line.id}-${line.trainingName}`} title={`${line.trainingName} · ${line.status || "Training"}`} arrow>
+<Box sx={{mt:.45,px:.65,py:.3,borderRadius:1,color:"#FFFFFF",background:trainingLineColor(line.trainingName),fontSize:9,fontWeight:900,lineHeight:1.2,whiteSpace:"normal"}}>{line.status==="Proposed" ? "Proposed · " : ""}{line.trainingName}</Box>
+</Tooltip>)}
+{uniqueTrainingLines.length>1 && <Chip size="small" label={`${uniqueTrainingLines.length} training overlap`} sx={{mt:.5,height:19,background:"#FEE2E2",color:"#991B1B",fontSize:9,fontWeight:950}} />}
 {hasLeave && <Typography variant="caption" sx={{display:"block",color:"#DC2626",fontWeight:900}}>Leave: {duty.stationLeaveOnly ? "Station Leave" : `${duty.leaveType || duty.leaveStatus}${duty.stationLeave ? " + Station Leave" : ""}`}</Typography>}
-{duty?.trainingName && (
+{duty?.trainingName && uniqueTrainingLines.length===0 && (
 <Typography variant="caption" sx={{display:"block",maxWidth:130,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",color:"#6A1B9A"}}>
 {duty.trainingName}
 </Typography>
@@ -1210,7 +1329,7 @@ Cancel
 <Button
 variant="contained"
 onClick={nominateTraining}
-disabled={!canManageTraining || selectedEmployees.length===0}
+disabled={!canAssignTraining || selectedEmployees.length===0}
 >
 Nominate Selected
 </Button>
@@ -1367,6 +1486,9 @@ selectedRows.filter(id=>id!==row.id)
 <TableCell>
 <Typography sx={{fontWeight:800}}>{row.employeeName || row.employeeId}</Typography>
 <Typography variant="caption" color="text.secondary">{row.employeeDesignation || row.employeeId}</Typography>
+<Typography variant="caption" sx={{display:"block",mt:.35,color:row.requestType==="Self Request" ? "#6D28D9" : "#03624C",fontWeight:850}}>
+{row.requestType || "Assigned"}{row.nominatedBy?.name ? ` by ${row.nominatedBy.name}` : ""}
+</Typography>
 </TableCell>
 
 <TableCell>
@@ -1377,7 +1499,7 @@ selectedRows.filter(id=>id!==row.id)
 
 <TableCell>
 <Typography sx={{fontSize:12,fontWeight:800}}>
-{row.currentApproverName ? `Awaiting ${row.currentApproverName}` : "Hierarchy completed"}
+{row.isHRFinalApproval ? "Awaiting authorized HR approver" : row.currentApproverName ? `Awaiting ${row.currentApproverName}` : "Hierarchy completed"}
 </Typography>
 <Typography variant="caption" color="text.secondary">
 {row.currentApproverLevel || "Final approval"} · {row.approvalProgress}
@@ -1535,7 +1657,11 @@ return (choice.replacementRequired && !choice.replacementEmployeeId) ||
 })
 }
 >
-Approve & Forward
+{selectedRows.length && selectedRows.every((id)=>pendingList.find((row)=>row.id===id)?.isHRFinalApproval) ? "HR Final Approve" : "Approve & Forward"}
+</Button>
+
+<Button variant="outlined" color="error" sx={{borderRadius:2,fontWeight:700}} onClick={rejectTraining} disabled={!selectedRows.length}>
+Reject Selected
 </Button>
 
 </Box>
@@ -1715,7 +1841,7 @@ return <TableCell key={programme} align="center" sx={{fontWeight:900,minWidth:23
 <TableCell sx={{position:"sticky",left:0,zIndex:2,background:"#FFFFFF"}}><Stack direction="row" spacing={.8} alignItems="center" justifyContent="space-between"><Typography sx={{fontWeight:900,fontSize:13}}>{employee.employeeName}</Typography><Chip size="small" label={`${employee.approvedDays} days / 7 days`} sx={{height:23,fontSize:10.5,fontWeight:950,...trainingDaysSx(employee.approvedDays)}}/></Stack><Typography variant="caption" color="text.secondary">{employee.employeeId} · {employee.employeeType}</Typography></TableCell>
 <TableCell><Typography sx={{fontSize:12,fontWeight:750}}>{employee.designation}</Typography><Typography variant="caption" color="text.secondary">{employee.groupName}</Typography></TableCell>
 {nominationMatrix.programmes.map((programme)=><TableCell key={programme} sx={{borderLeft:"1px solid #EEF2FF",verticalAlign:"top",background:nominationMatrix.zeroNominationUpcomingNames.includes(programme) ? "#FFF5F5" : undefined}}>
-<Stack spacing={.7}>{(employee.cells[programme] || []).map((item)=><Box key={item.id} sx={{p:.8,borderRadius:1.5,background:"#F8FAFC"}}><Chip size="small" label={item.status || "Unknown"} sx={{height:21,fontSize:10,fontWeight:850,...statusChipSx(item.status)}}/><Typography sx={{mt:.45,fontSize:10.5,color:"#475569"}}>{item.startDate || item.trainingDate}{item.endDate && item.endDate!==item.startDate ? ` to ${item.endDate}` : ""}</Typography></Box>)}</Stack>
+<Stack spacing={.7}>{(employee.cells[programme] || []).map((item)=><Box key={item.id} sx={{p:.8,borderRadius:1.5,background:"#F8FAFC"}}><Chip size="small" label={item.status || "Unknown"} sx={{height:21,fontSize:10,fontWeight:850,...statusChipSx(item.status)}}/><Typography sx={{mt:.45,fontSize:10.5,color:"#475569"}}>{item.startDate || item.trainingDate || item.financialYear || "FY only"}{item.endDate && item.endDate!==item.startDate ? ` to ${item.endDate}` : ""}{item.trainingDays ? ` · ${item.trainingDays} day(s)` : ""}</Typography></Box>)}</Stack>
 </TableCell>)}
 <TableCell align="center" sx={{fontWeight:900}}>{employee.total}</TableCell>
 <TableCell align="center" sx={{fontWeight:900,color:"#166534"}}>{employee.approved}</TableCell>
@@ -1726,7 +1852,7 @@ return <TableCell key={programme} align="center" sx={{fontWeight:900,minWidth:23
 </TableBody>
 </Table>
 </Box>
-<Typography sx={{mt:1.2,fontSize:11,color:"#64748B"}}>Each cell shows every nomination for that employee and training programme. Approved Days counts inclusive calendar days for approved nominations only.</Typography>
+<Typography sx={{mt:1.2,fontSize:11,color:"#64748B"}}>Each cell shows every nomination for that employee and training programme. Approved Days uses the imported duration when exact historical dates were not supplied.</Typography>
 </>}
 
 </Paper>

@@ -13,7 +13,8 @@ export default function ProtectedRoute({ pageKey, children, allowWorkflowAccess 
   if (loading) return <Box sx={{ minHeight: "100vh", display: "grid", placeItems: "center", background: "#F8FAFC" }}><CircularProgress size={28} sx={{ color: "#03624C" }} /></Box>;
   if (!user) return <Navigate to="/login" replace state={{ from: location.pathname }} />;
   const access = user.permissions?.[pageKey];
-  if (!access?.view) {
+  const availableToAllEmployees = pageKey === "crew_reports";
+  if (!access?.view && !availableToAllEmployees) {
     if (allowWorkflowAccess) {
       return (
         <Box className="permission-workflow-only">
@@ -85,6 +86,7 @@ export default function ProtectedRoute({ pageKey, children, allowWorkflowAccess 
       </Box>
     );
   }
+  if (availableToAllEmployees) return <Box className="permission-write">{children}</Box>;
   return (
     <Box className={access.write ? "permission-write" : "permission-read-only"}>
       {!access.write && <Alert severity="info" sx={{ borderRadius: 0 }}>Read-only access: viewing and exports are available; data-changing actions are blocked.</Alert>}

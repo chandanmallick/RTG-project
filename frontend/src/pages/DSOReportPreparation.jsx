@@ -438,6 +438,11 @@ export default function DSOReportPreparation({ reportType = "evening" }) {
     setEditDraft({
       demand_frequency: { ...metrics },
       frequency_distribution: { ...frequency },
+      generation_outage_summary: {
+        by_fuel: Object.fromEntries(
+          ["THERMAL", "HYDRO"].map((fuel) => [fuel, { ...generationOutage[fuel] }]),
+        ),
+      },
       thermal_availability: {
         revived_capacity_mw: thermal.revived_capacity_mw ?? "",
         outage_capacity_mw: thermal.outage_capacity_mw ?? "",
@@ -1479,6 +1484,51 @@ export default function DSOReportPreparation({ reportType = "evening" }) {
                     }
                   />
                 </Box>
+              </Card>
+
+              <Card>
+                <Typography sx={{ mb: 1.5, fontWeight: 900, color: "#0057B7" }}>
+                  Current generation under planned &amp; forced outage
+                </Typography>
+                <Typography sx={{ mb: 1.5 }} variant="body2">
+                  Edit capacity and unit counts below. Totals are calculated automatically; unit details remain available separately.
+                </Typography>
+                {["THERMAL", "HYDRO"].map((fuel) => {
+                  const item = editDraft.generation_outage_summary.by_fuel[fuel];
+                  return (
+                    <Box key={fuel} sx={{ mb: 2 }}>
+                      <Typography sx={{ mb: 1, fontWeight: 800 }}>{fuel}</Typography>
+                      <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "repeat(4,1fr)" }, gap: 1.3 }}>
+                        {[
+                          ["Planned outage (MW)", "planned_mw"],
+                          ["Planned units", "planned_units"],
+                          ["Forced outage (MW)", "forced_mw"],
+                          ["Forced units", "forced_units"],
+                        ].map(([label, key]) => (
+                          <TextField key={key} label={label} type="number" size="small"
+                            value={item[key] ?? 0}
+                            inputProps={{ min: 0, step: key.endsWith("units") ? 1 : "any", "aria-label": `${fuel} ${label}` }}
+                            onChange={(event) => {
+                              const value = event.target.value;
+                              setEditDraft((current) => ({
+                                ...current,
+                                generation_outage_summary: {
+                                  by_fuel: {
+                                    ...current.generation_outage_summary.by_fuel,
+                                    [fuel]: { ...current.generation_outage_summary.by_fuel[fuel], [key]: value },
+                                  },
+                                },
+                              }));
+                            }}
+                          />
+                        ))}
+                      </Box>
+                      <Typography sx={{ mt: 1 }} variant="body2">
+                        Total under outage: {number(Number(item.planned_mw || 0) + Number(item.forced_mw || 0), 0)} MW ({Number(item.planned_units || 0) + Number(item.forced_units || 0)} units)
+                      </Typography>
+                    </Box>
+                  );
+                })}
               </Card>
 
               <Card>

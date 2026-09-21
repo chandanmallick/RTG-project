@@ -14,13 +14,36 @@ TRUTHY = {"1", "true", "yes", "on"}
 logger = logging.getLogger(__name__)
 REPLACEMENT_MAIL_SETTINGS_ID = "replacement_duty_mail"
 MAIL_TEMPLATE_SETTINGS_ID = "workflow_mail_templates"
-DEFAULT_REPLACEMENT_SUBJECT = "Replacement Duty Request - {shift_name} - {date}"
-DEFAULT_REPLACEMENT_BODY = (
+LEGACY_REPLACEMENT_SUBJECT = "Replacement Duty Request - {shift_name} - {date}"
+LEGACY_REPLACEMENT_BODY = (
     "{replacement_person} is requested to perform {shift_name} duty on {date} "
     "in place of {leave_person}."
 )
+DEFAULT_REPLACEMENT_SUBJECT = "Replacement Duty Assigned - {shift_name} - {date}"
+DEFAULT_REPLACEMENT_BODY = (
+    "Dear Sir/Madam,\n\n"
+    "A replacement duty has been assigned.\n\n"
+    "Replacement employee: {replacement_person}\n"
+    "Duty: {shift_name}\n"
+    "Date / period: {date}\n"
+    "In place of: {leave_person}\n"
+    "Group: {group_name}\n\n"
+    "Please check the duty calendar for details."
+)
 
 WORKFLOW_MAIL_DEFAULTS = {
+    "schedule_data_charts": {
+        "label": "Schedule data chart report",
+        "enabled": False,
+        "recipients": "",
+        "ccRecipients": "",
+        "subjectTemplate": "Schedule, Actual & Deviation Charts - {report_date}",
+        "bodyTemplate": (
+            "Dear Sir/Madam,<br><br>"
+            "Please find attached the generator-wise Schedule, Actual and "
+            "Deviation chart report for <strong>{report_date}</strong>."
+        ),
+    },
     "psp_voltage_discrepancy": {
         "label": "PSP Voltage discrepancy report",
         "enabled": False,
@@ -136,11 +159,27 @@ def workflow_mail_templates():
     for key, defaults in WORKFLOW_MAIL_DEFAULTS.items():
         custom = stored_templates.get(key) or {}
         if key == "replacement_assigned" and not custom:
+            legacy_subject = legacy_replacement.get("subjectTemplate")
+            legacy_body = legacy_replacement.get("bodyTemplate")
             custom = {
                 "enabled": legacy_replacement.get("enabled", defaults["enabled"]),
-                "subjectTemplate": legacy_replacement.get("subjectTemplate"),
-                "bodyTemplate": legacy_replacement.get("bodyTemplate"),
+                "subjectTemplate": (
+                    defaults["subjectTemplate"]
+                    if legacy_subject == LEGACY_REPLACEMENT_SUBJECT
+                    else legacy_subject
+                ),
+                "bodyTemplate": (
+                    defaults["bodyTemplate"]
+                    if legacy_body == LEGACY_REPLACEMENT_BODY
+                    else legacy_body
+                ),
             }
+        if key == "replacement_assigned" and custom:
+            custom = dict(custom)
+            if custom.get("subjectTemplate") == LEGACY_REPLACEMENT_SUBJECT:
+                custom["subjectTemplate"] = defaults["subjectTemplate"]
+            if custom.get("bodyTemplate") == LEGACY_REPLACEMENT_BODY:
+                custom["bodyTemplate"] = defaults["bodyTemplate"]
         result[key] = {
             "key": key,
             "label": defaults["label"],
@@ -191,6 +230,8 @@ def replacement_mail_settings():
             os.getenv("CREW_EMAIL_ENABLED", "0").strip().lower() in TRUTHY,
         ),
         "sender": str(stored.get("sender") or os.getenv("CREW_GRAPH_SENDER", "")).strip(),
+        "reportMailbox": str(stored.get("reportMailbox") or os.getenv("CREW_GRAPH_REPORT_MAILBOX", "")).strip(),
+        "plantReportInboxEnabled": bool(stored.get("plantReportInboxEnabled", False)),
         "subjectTemplate": stored.get("subjectTemplate") or DEFAULT_REPLACEMENT_SUBJECT,
         "bodyTemplate": stored.get("bodyTemplate") or DEFAULT_REPLACEMENT_BODY,
     }

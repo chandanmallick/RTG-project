@@ -13,6 +13,7 @@ import {
   DialogContent,
   DialogTitle,
   Divider,
+  MenuItem,
   Paper,
   Stack,
   Table,
@@ -35,6 +36,7 @@ import {
   ShieldCheck,
   User,
 } from "lucide-react";
+import { availableLandingPages } from "../auth/landingPages";
 
 const currentEmployeeId = () =>
   localStorage.getItem("crewEmployeeId") ||
@@ -92,7 +94,7 @@ function MiniListCard({ title, items, emptyText, renderItem, action }) {
 }
 
 export default function Profile() {
-  const { refreshSession } = useAuth();
+  const { user, refreshSession } = useAuth();
   const employeeId = currentEmployeeId();
   const [profile, setProfile] = useState({});
   const [photo, setPhoto] = useState(null);
@@ -113,6 +115,7 @@ export default function Profile() {
   const [timelineData, setTimelineData] = useState([]);
   const [openLogin, setOpenLogin] = useState(false);
   const [savingProfile, setSavingProfile] = useState(false);
+  const [savingLandingPage, setSavingLandingPage] = useState(false);
   const [changingPassword, setChangingPassword] = useState(false);
   const [editingProfile, setEditingProfile] = useState(false);
   const [editingPassword, setEditingPassword] = useState(false);
@@ -131,6 +134,7 @@ export default function Profile() {
   const dutyTotal = useMemo(() => dutyStats.reduce((sum, item) => sum + Number(item.count || 0), 0), [dutyStats]);
   const leaveTotal = useMemo(() => leaveStats.reduce((sum, item) => sum + Number(item.count || 0), 0), [leaveStats]);
   const trainingTotal = useMemo(() => trainingStats.reduce((sum, item) => sum + Number(item.count || 0), 0), [trainingStats]);
+  const landingPageOptions = useMemo(() => availableLandingPages(user?.permissions || {}), [user?.permissions]);
 
   const fetchProfile = async () => {
     if (!employeeId) return;
@@ -271,6 +275,25 @@ export default function Profile() {
     }
   };
 
+  const handleLandingPageSave = async () => {
+    const landingPage = String(profile.landingPage || "").trim();
+    if (!landingPage) {
+      setNotice({ severity: "warning", text: "Select the page to open after login." });
+      return;
+    }
+    try {
+      setSavingLandingPage(true);
+      await api.post("/profile/landing-page", { landingPage });
+      await refreshSession();
+      setNotice({ severity: "success", text: "Your page after login has been saved." });
+    } catch (error) {
+      console.error(error);
+      setNotice({ severity: "error", text: error.response?.data?.detail || error.message || "Page preference could not be saved." });
+    } finally {
+      setSavingLandingPage(false);
+    }
+  };
+
   const beginProfileEdit = () => {
     setProfileBeforeEdit({ ...profile });
     setEditingProfile(true);
@@ -376,6 +399,38 @@ export default function Profile() {
                 </Button>
               </Stack>
             </>}
+          </Paper>
+
+          <Paper elevation={0} sx={{ p: 2.4, borderRadius: 5, background: "#FFFFFF", boxShadow: "0 18px 45px rgba(72, 83, 140, 0.08)" }}>
+            <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5} alignItems={{ xs: "stretch", sm: "center" }} justifyContent="space-between">
+              <Box sx={{ minWidth: 0 }}>
+                <Typography sx={{ fontSize: 16, color: "#24213F", fontWeight: 950 }}>Page after login</Typography>
+                <Typography sx={{ mt: 0.35, color: "#7B7F9E", fontSize: 12, fontWeight: 750 }}>
+                  Choose your personal starting page. Only pages available to your account are listed.
+                </Typography>
+              </Box>
+              <Stack direction={{ xs: "column", sm: "row" }} spacing={1} sx={{ width: { xs: "100%", sm: 440 }, flexShrink: 0 }}>
+                <TextField
+                  select
+                  size="small"
+                  label="Open after login"
+                  value={landingPageOptions.some((option) => option.value === profile.landingPage) ? profile.landingPage : ""}
+                  onChange={(event) => setProfile((current) => ({ ...current, landingPage: event.target.value }))}
+                  fullWidth
+                >
+                  <MenuItem value="" disabled>Select a page</MenuItem>
+                  {landingPageOptions.map((option) => <MenuItem key={option.value} value={option.value}>{option.label}</MenuItem>)}
+                </TextField>
+                <Button
+                  variant="contained"
+                  onClick={handleLandingPageSave}
+                  disabled={savingLandingPage || !profile.landingPage}
+                  sx={{ minWidth: 112, borderRadius: 2.5, background: "#0057B7", textTransform: "none", fontWeight: 950 }}
+                >
+                  {savingLandingPage ? "Saving..." : "Save"}
+                </Button>
+              </Stack>
+            </Stack>
           </Paper>
 
           <Paper elevation={0} sx={{ p: 2.4, borderRadius: 5, background: "#FFFFFF", boxShadow: "0 18px 45px rgba(72, 83, 140, 0.08)" }}>

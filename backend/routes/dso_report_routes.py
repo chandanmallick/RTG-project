@@ -1137,15 +1137,62 @@ async def update_report(report_type: str, report_date: str, payload: dict):
         if not isinstance(morning_results, dict):
             raise HTTPException(400, "Morning report values are required.")
         now = datetime.utcnow().isoformat()
+        updates = {
+            "morning_results": morning_results,
+            "important_events": str(payload.get("important_events") or "").strip(),
+            "signoff_regards": str(payload.get("signoff_regards") or "Regards").strip(),
+            "signoff_name": str(payload.get("signoff_name") or "").strip(),
+            "edited_at": now,
+        }
+        incoming_outages = payload.get("generation_outage_summary")
+        if isinstance(incoming_outages, dict):
+            normalized_units = []
+            for source in (incoming_outages.get("units") or [])[:1000]:
+                if not isinstance(source, dict):
+                    continue
+                fuel = compact(source.get("fuel"))
+                fuel = "HYDRO" if "HYDRO" in fuel else "THERMAL"
+                outage_type = compact(source.get("outage_type"))
+                outage_type = "Forced" if "FORCED" in outage_type else "Planned"
+                capacity = max(0.0, numeric(source.get("capacity_mw")) or 0.0)
+                normalized_units.append({
+                    "unit": str(source.get("unit") or "Unnamed unit").strip()[:250],
+                    "station": str(source.get("station") or "").strip()[:250],
+                    "fuel": fuel,
+                    "outage_type": outage_type,
+                    "capacity_mw": round(capacity, 3),
+                    "reason": str(source.get("reason") or "").strip()[:1000],
+                    "outage_date": str(source.get("outage_date") or "").strip()[:100],
+                    "outage_time": str(source.get("outage_time") or "").strip()[:100],
+                    "expected_revival": str(source.get("expected_revival") or "").strip()[:200],
+                    "mapped": bool(source.get("mapped", True)),
+                    "manual": bool(source.get("manual", False)),
+                })
+            totals = {
+                "THERMAL": {"planned_mw": 0.0, "forced_mw": 0.0, "planned_units": 0, "forced_units": 0},
+                "HYDRO": {"planned_mw": 0.0, "forced_mw": 0.0, "planned_units": 0, "forced_units": 0},
+            }
+            for unit in normalized_units:
+                bucket = totals[unit["fuel"]]
+                prefix = unit["outage_type"].lower()
+                bucket[f"{prefix}_mw"] += unit["capacity_mw"]
+                bucket[f"{prefix}_units"] += 1
+            for bucket in totals.values():
+                bucket["planned_mw"] = round(bucket["planned_mw"], 3)
+                bucket["forced_mw"] = round(bucket["forced_mw"], 3)
+                bucket["total_mw"] = round(bucket["planned_mw"] + bucket["forced_mw"], 3)
+                bucket["total_units"] = bucket["planned_units"] + bucket["forced_units"]
+            updates["generation_outage_summary"] = {
+                **(existing.get("generation_outage_summary") or {}),
+                "by_fuel": totals,
+                "units": normalized_units,
+                "included_row_count": len(normalized_units),
+                "manually_edited": True,
+                "edited_at": now,
+            }
         reports.update_one(
             {"_id": existing["_id"]},
-            {"$set": {
-                "morning_results": morning_results,
-                "important_events": str(payload.get("important_events") or "").strip(),
-                "signoff_regards": str(payload.get("signoff_regards") or "Regards").strip(),
-                "signoff_name": str(payload.get("signoff_name") or "").strip(),
-                "edited_at": now,
-            }},
+            {"$set": updates},
         )
         updated = reports.find_one({"_id": existing["_id"]}, {"_id": 0})
         return {"success": True, "report": updated, "edited_at": now}
@@ -1201,6 +1248,32 @@ async def update_report(report_type: str, report_date: str, payload: dict):
         "signoff_name": str(payload.get("signoff_name") or "").strip(),
         "edited_at": now,
     }
+    incoming_outages = payload.get("generation_outage_summary")
+    if isinstance(incoming_outages, dict):
+        incoming_fuels = incoming_outages.get("by_fuel") or {}
+        totals = {}
+        for fuel in ("THERMAL", "HYDRO"):
+            source = incoming_fuels.get(fuel) or {}
+            bucket = {}
+            for key in ("planned_mw", "forced_mw", "planned_units", "forced_units"):
+                value = numeric(source.get(key, 0))
+                if value is None or not (0 <= value < float("inf")):
+                    raise HTTPException(status_code=400, detail=f"{fuel} {key} must be a non-negative number.")
+                if key.endswith("units"):
+                    if value != int(value):
+                        raise HTTPException(status_code=400, detail=f"{fuel} {key} must be a whole number.")
+                    bucket[key] = int(value)
+                else:
+                    bucket[key] = round(value, 3)
+            bucket["total_mw"] = round(bucket["planned_mw"] + bucket["forced_mw"], 3)
+            bucket["total_units"] = bucket["planned_units"] + bucket["forced_units"]
+            totals[fuel] = bucket
+        updates["generation_outage_summary"] = {
+            **(existing.get("generation_outage_summary") or {}),
+            "by_fuel": totals,
+            "manually_edited": True,
+            "edited_at": now,
+        }
     reports.update_one({"_id": existing["_id"]}, {"$set": updates})
     updated = reports.find_one({"_id": existing["_id"]}, {"_id": 0})
     return {"success": True, "report": updated, "edited_at": now}

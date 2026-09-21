@@ -64,14 +64,35 @@ PAGE_CATALOG = [
     ("profile", "My Profile", "/crew/profile"),
 ]
 
+LANDING_PAGE_KEYS = {
+    **{path: key for key, _, path in PAGE_CATALOG if str(path).startswith("/")},
+    "/": "rtg_dashboard",
+    "/crew/operations": "crew_dashboard",
+}
+LANDING_WORKFLOW_PAGES = {"/crew/replacement", "/crew/training"}
+
+
+def _landing_page_for_user(employee: dict, permissions: dict) -> str:
+    preferred = str(employee.get("landingPage") or "").strip()
+    page_key = LANDING_PAGE_KEYS.get(preferred)
+    if page_key and (
+        preferred in LANDING_WORKFLOW_PAGES
+        or page_key in {"profile", "crew_reports"}
+        or bool((permissions.get(page_key) or {}).get("view"))
+    ):
+        return preferred
+    if bool((permissions.get("rtg_dashboard") or {}).get("view")):
+        return "/"
+    return "/crew/reports"
+
 
 def _default_access(user_id: str) -> dict:
     full_access = user_id == "50041"
     return {
         key: {
-            "view": full_access or key in {"profile", "crew_threads"},
+            "view": full_access or key in {"profile", "crew_threads", "crew_training"},
             "write": full_access or key == "crew_threads",
-            **({"approve": full_access} if key == "crew_threads" else {}),
+            **({"approve": full_access} if key in {"crew_threads", "crew_training"} else {}),
         }
         for key, _, _ in PAGE_CATALOG
     }
@@ -92,14 +113,14 @@ def _ensure_access(user_id: str) -> dict:
     merged = {}
     for key, _, _ in PAGE_CATALOG:
         source = pages.get(key) or defaults[key]
-        access = {"view": bool(source.get("view")), "write": bool(source.get("write"))}
-        if key == "crew_threads":
+        access = {"view": bool(source.get("view")) or key == "crew_training", "write": bool(source.get("write"))}
+        if key in {"crew_threads", "crew_training"}:
             access["approve"] = bool(source.get("approve"))
             if access["approve"]:
                 access["view"] = True
         merged[key] = access
     if user_id == "50041":
-        merged = {key: {"view": True, "write": True, **({"approve": True} if key == "crew_threads" else {})} for key, _, _ in PAGE_CATALOG}
+        merged = {key: {"view": True, "write": True, **({"approve": True} if key in {"crew_threads", "crew_training"} else {})} for key, _, _ in PAGE_CATALOG}
     if merged != pages:
         page_access_collection.update_one({"_id": existing["_id"]}, {"$set": {"pages": merged, "updatedOn": datetime.utcnow()}})
     return merged
@@ -182,13 +203,15 @@ def _complete_login(user: dict, request: Request):
         "twoFactorVerified": requires_two_factor(user),
         "createdOn": datetime.utcnow(),
     })
+    permissions = _ensure_access(str(user["userId"]))
     return {
         "access_token": token,
         "employeeId": user["userId"],
         "role": user.get("role", "user"),
         "name": user.get("name"),
         "profilePhoto": user.get("profilePhoto"),
-        "permissions": _ensure_access(str(user["userId"])),
+        "permissions": permissions,
+        "landingPage": _landing_page_for_user(user, permissions),
     }
 
 
@@ -252,6 +275,7 @@ def resend_login_otp(data: OtpResendRequest):
 def current_session(user=Depends(get_authenticated_user)):
     employee = employee_collection.find_one({"$or": [{"userId": user["employeeId"]}, {"employeeId": user["employeeId"]}]}) or {}
     normalized = _employee_payload(user["employeeId"])
+    permissions = _ensure_access(user["employeeId"])
     return {
         "employeeId": user["employeeId"],
         "userId": user["employeeId"],
@@ -263,7 +287,8 @@ def current_session(user=Depends(get_authenticated_user)):
         "phone": employee.get("phone"),
         "profilePhoto": normalized.get("profilePhoto") or employee.get("profilePhoto"),
         "role": user.get("role", "user"),
-        "permissions": _ensure_access(user["employeeId"]),
+        "permissions": permissions,
+        "landingPage": _landing_page_for_user(employee, permissions),
     }
 
 
@@ -297,15 +322,15 @@ class BulkPageAccessRequest(BaseModel):
 def update_user_access(user_id: str, data: AccessUpdateRequest, user=Depends(get_authenticated_user)):
     _require_access_admin(user)
     if user_id == "50041":
-        pages = {key: {"view": True, "write": True, **({"approve": True} if key == "crew_threads" else {})} for key, _, _ in PAGE_CATALOG}
+        pages = {key: {"view": True, "write": True, **({"approve": True} if key in {"crew_threads", "crew_training"} else {})} for key, _, _ in PAGE_CATALOG}
     else:
         pages = {}
         for key, _, _ in PAGE_CATALOG:
             requested = data.permissions.get(key) or {}
             write = bool(requested.get("write"))
-            approve = key == "crew_threads" and bool(requested.get("approve"))
-            pages[key] = {"view": bool(requested.get("view")) or write or approve, "write": write}
-            if key == "crew_threads":
+            approve = key in {"crew_threads", "crew_training"} and bool(requested.get("approve"))
+            pages[key] = {"view": bool(requested.get("view")) or write or approve or key == "crew_training", "write": write}
+            if key in {"crew_threads", "crew_training"}:
                 pages[key]["approve"] = approve
     page_access_collection.update_one(
         {"userId": user_id},

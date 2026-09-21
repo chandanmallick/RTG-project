@@ -5,15 +5,22 @@ import {
   Box,
   Button,
   Chip,
+  CircularProgress,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
   FormControlLabel,
   MenuItem,
   Paper,
   Stack,
   Switch,
+  Tab,
+  Tabs,
   TextField,
   Typography,
 } from "@mui/material";
-import { DatabaseZap, KeyRound, LockKeyhole, Mail, Save, ShieldCheck } from "lucide-react";
+import { DatabaseZap, ExternalLink, KeyRound, Link2, LockKeyhole, Mail, Save, ShieldCheck, Unlink } from "lucide-react";
 import AppShell from "../components/layout/AppShell";
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL || "/api";
@@ -28,6 +35,14 @@ export default function MailSettings() {
   const [credentials, setCredentials] = useState({ tenantId: "", clientId: "", clientSecret: "" });
   const [crmsCredentials, setCrmsCredentials] = useState({ username: "", password: "" });
   const [crmsSaving, setCrmsSaving] = useState(false);
+  const [normativeDcCredentials, setNormativeDcCredentials] = useState({ username: "", password: "" });
+  const [normativeDcSaving, setNormativeDcSaving] = useState(false);
+  const [settingsTab, setSettingsTab] = useState(0);
+  const [reportInbox, setReportInbox] = useState({ enabled: false, mailbox: "", tenantId: "", clientId: "", clientSecret: "", authMode: "delegated" });
+  const [reportInboxSaving, setReportInboxSaving] = useState(false);
+  const [deviceFlow, setDeviceFlow] = useState(null);
+  const [delegatedStarting, setDelegatedStarting] = useState(false);
+  const reportSecretIsId = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(reportInbox.clientSecret.trim());
 
   const load = async () => {
     setLoading(true);
@@ -35,6 +50,14 @@ export default function MailSettings() {
     try {
       const { data } = await axios.get(`${BASE_URL}/crew/admin/mail-settings`, { headers: headers() });
       setSettings(data);
+      setReportInbox({
+        enabled: Boolean(data.plantReportInbox?.enabled),
+        mailbox: data.plantReportInbox?.mailbox || "",
+        tenantId: "",
+        clientId: "",
+        clientSecret: "",
+        authMode: data.plantReportInbox?.authMode || "delegated",
+      });
     } catch (requestError) {
       setError(requestError.response?.data?.detail || "Mail settings could not be loaded.");
     } finally {
@@ -43,6 +66,39 @@ export default function MailSettings() {
   };
 
   useEffect(() => { load(); }, []);
+
+  useEffect(() => {
+    if (!deviceFlow?.deviceCode || deviceFlow.status !== "pending") return undefined;
+    let cancelled = false;
+    let timer;
+    const poll = async () => {
+      try {
+        const { data } = await axios.post(
+          `${BASE_URL}/crew/admin/mail-settings/plant-report-inbox/delegated/poll`,
+          { deviceCode: deviceFlow.deviceCode },
+          { headers: headers() },
+        );
+        if (cancelled) return;
+        if (data.status === "connected") {
+          setSettings((current) => ({ ...current, plantReportInbox: data.plantReportInbox }));
+          setReportInbox((current) => ({ ...current, enabled: true, mailbox: data.mailbox, authMode: "delegated" }));
+          setDeviceFlow((current) => ({ ...current, status: "connected", mailbox: data.mailbox }));
+          setMessage(data.message || "Microsoft mailbox connected.");
+          return;
+        }
+        timer = window.setTimeout(poll, (data.slowDown ? 10 : deviceFlow.interval || 5) * 1000);
+      } catch (requestError) {
+        if (cancelled) return;
+        setDeviceFlow((current) => ({ ...current, status: "error" }));
+        setError(requestError.response?.data?.detail || "Microsoft mailbox connection failed.");
+      }
+    };
+    timer = window.setTimeout(poll, (deviceFlow.interval || 5) * 1000);
+    return () => {
+      cancelled = true;
+      if (timer) window.clearTimeout(timer);
+    };
+  }, [deviceFlow?.deviceCode, deviceFlow?.status]);
 
   const update = (field, value) => setSettings((current) => ({ ...current, [field]: value }));
   const updateTwoFactorMode = async (mode) => {
@@ -129,6 +185,87 @@ export default function MailSettings() {
     }
   };
 
+  const saveNormativeDc = async () => {
+    setNormativeDcSaving(true);
+    setMessage("");
+    setError("");
+    try {
+      const { data } = await axios.put(
+        `${BASE_URL}/crew/admin/mail-settings/normative-dc`,
+        normativeDcCredentials,
+        { headers: headers() },
+      );
+      setSettings((current) => ({ ...current, normativeDc: data.normativeDc }));
+      setNormativeDcCredentials({ username: "", password: "" });
+      setMessage(data.message || "Normative DC credentials saved.");
+    } catch (requestError) {
+      setError(requestError.response?.data?.detail || "Normative DC credentials could not be saved.");
+    } finally {
+      setNormativeDcSaving(false);
+    }
+  };
+
+  const saveReportInbox = async () => {
+    setReportInboxSaving(true);
+    setMessage("");
+    setError("");
+    try {
+      const { data } = await axios.put(
+        `${BASE_URL}/crew/admin/mail-settings/plant-report-inbox`,
+        reportInbox,
+        { headers: headers() },
+      );
+      setSettings((current) => ({ ...current, plantReportInbox: data.plantReportInbox }));
+      setReportInbox((current) => ({ ...current, tenantId: "", clientId: "", clientSecret: "" }));
+      setMessage(data.message || "Consolidated report inbox settings saved.");
+    } catch (requestError) {
+      setError(requestError.response?.data?.detail || "Consolidated report inbox settings could not be saved.");
+    } finally {
+      setReportInboxSaving(false);
+    }
+  };
+
+  const startDelegatedConnection = async () => {
+    setDelegatedStarting(true);
+    setMessage("");
+    setError("");
+    try {
+      const saved = await axios.put(
+        `${BASE_URL}/crew/admin/mail-settings/plant-report-inbox`,
+        { ...reportInbox, enabled: false, authMode: "delegated" },
+        { headers: headers() },
+      );
+      setSettings((current) => ({ ...current, plantReportInbox: saved.data.plantReportInbox }));
+      setReportInbox((current) => ({ ...current, enabled: false, tenantId: "", clientId: "", clientSecret: "", authMode: "delegated" }));
+      const { data } = await axios.post(
+        `${BASE_URL}/crew/admin/mail-settings/plant-report-inbox/delegated/start`,
+        {},
+        { headers: headers() },
+      );
+      setDeviceFlow(data);
+    } catch (requestError) {
+      setError(requestError.response?.data?.detail || "Microsoft mailbox connection could not be started.");
+    } finally {
+      setDelegatedStarting(false);
+    }
+  };
+
+  const disconnectDelegatedConnection = async () => {
+    if (!window.confirm("Disconnect the Microsoft report mailbox?")) return;
+    setError("");
+    try {
+      const { data } = await axios.delete(
+        `${BASE_URL}/crew/admin/mail-settings/plant-report-inbox/delegated`,
+        { headers: headers() },
+      );
+      setSettings((current) => ({ ...current, plantReportInbox: data.plantReportInbox }));
+      setReportInbox((current) => ({ ...current, enabled: false, mailbox: "" }));
+      setMessage(data.message || "Microsoft mailbox disconnected.");
+    } catch (requestError) {
+      setError(requestError.response?.data?.detail || "Microsoft mailbox could not be disconnected.");
+    }
+  };
+
   return (
     <AppShell>
       <Box sx={{ width: "100%", p: { xs: 1.5, md: 2.5 } }}>
@@ -147,6 +284,14 @@ export default function MailSettings() {
         {message && <Alert severity="success" sx={{ mb: 2 }}>{message}</Alert>}
 
         {!loading && settings && (
+          <>
+            <Paper variant="outlined" sx={{ mb: 2, borderRadius: 3, overflow: "hidden", borderColor: "#B9D5F7" }}>
+              <Tabs value={settingsTab} onChange={(_, value) => setSettingsTab(value)} variant="scrollable" scrollButtons="auto" sx={{ bgcolor: "#F8FAFC", "& .MuiTab-root": { minHeight: 50, fontWeight: 900, textTransform: "none" } }}>
+                <Tab icon={<Mail size={17} />} iconPosition="start" label="Alert & workflow mail" />
+                <Tab icon={<DatabaseZap size={17} />} iconPosition="start" label="Consolidated Thermal/Hydro Report" />
+              </Tabs>
+            </Paper>
+            {settingsTab === 0 ? (
           <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", lg: "minmax(0,1.6fr) minmax(300px,.7fr)" }, gap: 2 }}>
             <Paper variant="outlined" sx={{ p: 2.2, borderRadius: 3, borderColor: "#B9D5F7", bgcolor: "#F7FAFF", gridColumn: "1 / -1" }}>
               <Stack direction={{ xs: "column", md: "row" }} spacing={2.5} alignItems={{ xs: "stretch", md: "center" }}>
@@ -238,6 +383,25 @@ export default function MailSettings() {
                     >
                       {crmsSaving ? "Testing..." : "Save & test CRMS login"}
                     </Button>
+                  </Box>
+                </Box>
+              </Stack>
+            </Paper>
+            <Paper variant="outlined" sx={{ p: 2.2, borderRadius: 3, borderColor: "#D8C4F1", bgcolor: "#FBF8FF", gridColumn: "1 / -1" }}>
+              <Stack direction={{ xs: "column", md: "row" }} spacing={2.5} alignItems={{ xs: "stretch", md: "flex-start" }}>
+                <Box sx={{ width: 46, height: 46, borderRadius: 2, display: "grid", placeItems: "center", color: "#6D28D9", bgcolor: "#EDE9FE", flexShrink: 0 }}><DatabaseZap size={23} /></Box>
+                <Box sx={{ flex: 1 }}>
+                  <Stack direction={{ xs: "column", sm: "row" }} justifyContent="space-between" alignItems={{ xs: "flex-start", sm: "center" }} gap={1}>
+                    <Box>
+                      <Typography sx={{ fontWeight: 950, color: "#0F172A" }}>Normative DC login</Typography>
+                      <Typography sx={{ mt: .35, fontSize: 12.5, color: "#64748B" }}>Protected credentials for Normative DC data access. The password is write-only and never returned to the browser.</Typography>
+                    </Box>
+                    <Chip size="small" color={settings.normativeDc?.credentialsConfigured ? "success" : "warning"} label={settings.normativeDc?.credentialsConfigured ? "Credentials configured" : "Configuration required"} />
+                  </Stack>
+                  <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "minmax(220px,.8fr) minmax(280px,1fr) auto" }, gap: 1.5, mt: 2, alignItems: "start" }}>
+                    <TextField size="small" fullWidth label="Normative DC username" value={normativeDcCredentials.username} onChange={(event) => setNormativeDcCredentials((current) => ({ ...current, username: event.target.value }))} placeholder={settings.normativeDc?.usernameConfigured ? "Leave blank to keep current username" : "Enter username"} helperText={settings.normativeDc?.usernameHint ? `Currently configured: ${settings.normativeDc.usernameHint}` : "Not configured"} autoComplete="off" />
+                    <TextField size="small" fullWidth type="password" label="Normative DC password" value={normativeDcCredentials.password} onChange={(event) => setNormativeDcCredentials((current) => ({ ...current, password: event.target.value }))} placeholder={settings.normativeDc?.passwordConfigured ? "Leave blank to keep current password" : "Enter password"} helperText={settings.normativeDc?.passwordConfigured ? "A password is saved; its value is never displayed." : "Not configured"} autoComplete="new-password" />
+                    <Button variant="contained" startIcon={<KeyRound size={16} />} onClick={saveNormativeDc} disabled={normativeDcSaving || (!normativeDcCredentials.username && !normativeDcCredentials.password)} sx={{ bgcolor: "#6D28D9", fontWeight: 900, textTransform: "none", minHeight: 40, whiteSpace: "nowrap", "&:hover": { bgcolor: "#5B21B6" } }}>{normativeDcSaving ? "Saving..." : "Save Normative DC login"}</Button>
                   </Box>
                 </Box>
               </Stack>
@@ -353,7 +517,94 @@ export default function MailSettings() {
               </Button>
             </Paper>
           </Box>
+            ) : (
+              <Paper variant="outlined" sx={{ p: { xs: 2, md: 3 }, borderRadius: 3, borderColor: "#C4B5FD", bgcolor: "#FCFAFF" }}>
+                <Stack direction={{ xs: "column", md: "row" }} justifyContent="space-between" alignItems={{ xs: "flex-start", md: "center" }} gap={1.5} sx={{ mb: 2.5 }}>
+                  <Box>
+                    <Typography sx={{ color: "#4C1D95", fontSize: 20, fontWeight: 950 }}>Consolidated Thermal/Hydro Report Inbox</Typography>
+                    <Typography sx={{ mt: .4, color: "#64748B", fontSize: 12.5 }}>Independent Microsoft Graph credentials used only to read the dated All India report attachment.</Typography>
+                  </Box>
+                  <Chip color={settings.plantReportInbox?.ready ? "success" : "warning"} label={settings.plantReportInbox?.ready ? "Inbox ready" : "Configuration required"} sx={{ fontWeight: 900 }} />
+                </Stack>
+
+                <FormControlLabel control={<Switch checked={Boolean(reportInbox.enabled)} onChange={(event) => setReportInbox((current) => ({ ...current, enabled: event.target.checked }))} />} label={<Typography fontWeight={900}>Enable consolidated report inbox</Typography>} />
+                <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "repeat(2,minmax(0,1fr))" }, gap: 1.7, mt: 2 }}>
+                  <TextField select fullWidth label="Mailbox authentication" value={reportInbox.authMode || "delegated"} onChange={(event) => setReportInbox((current) => ({ ...current, authMode: event.target.value }))} helperText="Delegated access reads only the mailbox you sign in with.">
+                    <MenuItem value="delegated">My mailbox (Delegated Mail.Read)</MenuItem>
+                    <MenuItem value="application">Service application (Application Mail.Read)</MenuItem>
+                  </TextField>
+                  <TextField fullWidth label="Microsoft 365 report mailbox" value={reportInbox.mailbox} disabled={reportInbox.authMode === "delegated" && settings.plantReportInbox?.delegatedConnected} onChange={(event) => setReportInbox((current) => ({ ...current, mailbox: event.target.value }))} placeholder="your.name@grid-india.in" helperText={reportInbox.authMode === "delegated" ? "Filled automatically from the Microsoft account you connect." : "Mailbox containing the consolidated report email."} />
+                  <TextField fullWidth label="Tenant ID" value={reportInbox.tenantId} onChange={(event) => setReportInbox((current) => ({ ...current, tenantId: event.target.value }))} placeholder={settings.plantReportInbox?.tenantConfigured ? "Leave blank to keep current Tenant ID" : "Enter Tenant ID"} helperText={settings.plantReportInbox?.tenantHint ? `Configured: ${settings.plantReportInbox.tenantHint}` : "Separate report-inbox credential"} autoComplete="off" />
+                  <TextField fullWidth label="Application (Client) ID" value={reportInbox.clientId} onChange={(event) => setReportInbox((current) => ({ ...current, clientId: event.target.value }))} placeholder={settings.plantReportInbox?.clientConfigured ? "Leave blank to keep current Client ID" : "Enter Application ID"} helperText={settings.plantReportInbox?.clientHint ? `Configured: ${settings.plantReportInbox.clientHint}` : "Application registered in your Microsoft Entra tenant"} autoComplete="off" />
+                  {reportInbox.authMode === "application" && (
+                  <TextField fullWidth type="password" label="Client Secret Value" value={reportInbox.clientSecret} onChange={(event) => setReportInbox((current) => ({ ...current, clientSecret: event.target.value }))} placeholder={settings.plantReportInbox?.secretConfigured ? "Paste a new Value, or leave blank to keep current" : "Paste the client secret Value"} error={reportSecretIsId} helperText={reportSecretIsId ? "This is UUID-shaped and appears to be the Secret ID. Paste the Value instead." : "Use the Value shown when the secret was created—not the Secret ID."} autoComplete="new-password" />
+                  )}
+                </Box>
+
+                {reportInbox.authMode === "delegated" && (
+                  <Paper variant="outlined" sx={{ mt: 2, p: 2, borderRadius: 2.5, borderColor: settings.plantReportInbox?.delegatedConnected ? "#86EFAC" : "#BFDBFE", bgcolor: settings.plantReportInbox?.delegatedConnected ? "#F0FDF4" : "#EFF6FF" }}>
+                    <Stack direction={{ xs: "column", sm: "row" }} alignItems={{ xs: "flex-start", sm: "center" }} justifyContent="space-between" gap={1.5}>
+                      <Box>
+                        <Typography sx={{ fontWeight: 950, color: "#0F172A" }}>Your Microsoft mailbox</Typography>
+                        <Typography sx={{ mt: .35, fontSize: 12.5, color: "#475569" }}>
+                          {settings.plantReportInbox?.delegatedConnected
+                            ? `Connected as ${settings.plantReportInbox?.delegatedMailbox || settings.plantReportInbox?.mailbox}`
+                            : "Connect once with Microsoft. COMPASS stores no Microsoft password and reads only your signed-in mailbox."}
+                        </Typography>
+                      </Box>
+                      {settings.plantReportInbox?.delegatedConnected ? (
+                        <Button variant="outlined" color="error" startIcon={<Unlink size={16} />} onClick={disconnectDelegatedConnection} sx={{ fontWeight: 900, textTransform: "none", whiteSpace: "nowrap" }}>Disconnect</Button>
+                      ) : (
+                        <Button variant="contained" startIcon={delegatedStarting ? <CircularProgress size={15} color="inherit" /> : <Link2 size={16} />} onClick={startDelegatedConnection} disabled={delegatedStarting} sx={{ bgcolor: "#0057B7", fontWeight: 900, textTransform: "none", whiteSpace: "nowrap" }}>{delegatedStarting ? "Starting..." : "Connect my Microsoft mailbox"}</Button>
+                      )}
+                    </Stack>
+                  </Paper>
+                )}
+
+                {reportInbox.authMode === "application" && settings.plantReportInbox?.secretLooksLikeId && (
+                  <Alert severity="error" sx={{ mt: 2 }}>
+                    The saved credential appears to be a <strong>Secret ID</strong>. Create or open a client secret in Microsoft Entra and save its one-time <strong>Value</strong> here.
+                  </Alert>
+                )}
+
+                <Paper variant="outlined" sx={{ mt: 2.2, p: 2, borderRadius: 2.5, borderColor: "#DDD6FE", bgcolor: "#F5F3FF" }}>
+                  <Typography sx={{ color: "#4C1D95", fontWeight: 950 }}>Expected incoming report</Typography>
+                  <Typography sx={{ mt: 1, fontSize: 12.5 }}><strong>Subject:</strong> {settings.plantReportInbox?.subjectPattern}</Typography>
+                  <Typography sx={{ mt: .6, fontSize: 12.5 }}><strong>Attachment:</strong> {settings.plantReportInbox?.attachmentPattern}</Typography>
+                  <Typography sx={{ mt: .6, fontSize: 12.5 }}><strong>Sheets:</strong> {(settings.plantReportInbox?.sheets || ["NR", "SR", "WR"]).join(", ")}</Typography>
+                </Paper>
+                <Alert severity="info" sx={{ mt: 2 }}>
+                  {reportInbox.authMode === "delegated"
+                    ? <>This mode uses delegated <strong>Mail.Read</strong> and Microsoft Graph <strong>/me</strong>. It cannot open another user's or shared mailbox.</>
+                    : <>This mode requires Microsoft Graph <strong>Application → Mail.Read</strong> with administrator consent.</>}
+                </Alert>
+                <Button variant="contained" startIcon={reportInboxSaving ? null : <Save size={16} />} onClick={saveReportInbox} disabled={reportInboxSaving || (reportInbox.authMode === "application" && reportSecretIsId)} sx={{ mt: 2, bgcolor: "#6D28D9", fontWeight: 900, textTransform: "none", "&:hover": { bgcolor: "#5B21B6" } }}>{reportInboxSaving ? "Saving..." : "Save consolidated report settings"}</Button>
+              </Paper>
+            )}
+          </>
         )}
+
+        <Dialog open={Boolean(deviceFlow)} onClose={() => deviceFlow?.status !== "pending" && setDeviceFlow(null)} maxWidth="sm" fullWidth>
+          <DialogTitle sx={{ fontWeight: 950 }}>Connect your Microsoft mailbox</DialogTitle>
+          <DialogContent>
+            {deviceFlow?.status === "connected" ? (
+              <Alert severity="success">Connected as <strong>{deviceFlow.mailbox}</strong>. Scheduled and manual report fetching will use this mailbox.</Alert>
+            ) : deviceFlow?.status === "error" ? (
+              <Alert severity="error">The Microsoft sign-in was not completed. Close this window and try Connect again.</Alert>
+            ) : (
+              <Stack spacing={2}>
+                <Typography sx={{ color: "#475569" }}>Open the Microsoft sign-in page and enter this one-time code. This page will detect completion automatically.</Typography>
+                <Paper variant="outlined" sx={{ p: 2, textAlign: "center", bgcolor: "#F8FAFC", borderColor: "#BFDBFE" }}>
+                  <Typography sx={{ fontSize: 11, fontWeight: 900, color: "#64748B", letterSpacing: 1 }}>ONE-TIME CODE</Typography>
+                  <Typography sx={{ mt: .5, fontSize: 30, fontWeight: 950, letterSpacing: 4, color: "#0B4FA2" }}>{deviceFlow?.userCode}</Typography>
+                </Paper>
+                <Button component="a" href={deviceFlow?.verificationUri || "https://microsoft.com/devicelogin"} target="_blank" rel="noreferrer" variant="contained" endIcon={<ExternalLink size={16} />} sx={{ fontWeight: 900, textTransform: "none" }}>Open Microsoft sign-in</Button>
+                <Stack direction="row" alignItems="center" gap={1}><CircularProgress size={17} /><Typography sx={{ fontSize: 12.5, color: "#64748B" }}>Waiting for Microsoft sign-in…</Typography></Stack>
+              </Stack>
+            )}
+          </DialogContent>
+          <DialogActions><Button onClick={() => setDeviceFlow(null)}>{deviceFlow?.status === "connected" ? "Done" : "Close"}</Button></DialogActions>
+        </Dialog>
       </Box>
     </AppShell>
   );

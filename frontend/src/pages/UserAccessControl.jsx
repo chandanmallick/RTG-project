@@ -74,8 +74,9 @@ export default function UserAccessControl() {
       data.pages.map((page) => {
         const sourceAccess = copySource.permissions?.[page.key] || {};
         const write = Boolean(sourceAccess.write);
-        const approve = page.key === "crew_threads" && Boolean(sourceAccess.approve);
-        return [page.key, { view: Boolean(sourceAccess.view) || write || approve, write, ...(page.key === "crew_threads" ? { approve } : {}) }];
+        const hasApprovalRight = ["crew_threads", "crew_training"].includes(page.key);
+        const approve = hasApprovalRight && Boolean(sourceAccess.approve);
+        return [page.key, { view: Boolean(sourceAccess.view) || write || approve, write, ...(hasApprovalRight ? { approve } : {}) }];
       }),
     );
     setDraft(permissions);
@@ -361,6 +362,7 @@ export default function UserAccessControl() {
                             <Typography sx={{ fontSize: 13, fontWeight: 700 }}>{page.label}</Typography>
                             <Typography sx={{ fontSize: 11, color: "#94A3B8" }}>{page.path}</Typography>
                             {page.key === "leave_calendar_all" && <Typography sx={{ fontSize: 10.5, color: "#B45309", mt: .25 }}>Keep this disabled for normal officers. 50041 has it permanently; enabled users can view every employee's leave calendar.</Typography>}
+                            {page.key === "crew_training" && <Typography sx={{ fontSize: 10.5, color: "#B45309", mt: .25 }}>Write = HOD/delegated nomination authority within the reporting department. Approve = HR final approval across every department.</Typography>}
                           </td>
                           <td style={{ textAlign: "center" }}>
                             <Checkbox checked={Boolean(access.view)} disabled={selectedId === "50041"} onChange={() => toggle(page.key, "view")} />
@@ -369,7 +371,7 @@ export default function UserAccessControl() {
                             <Checkbox checked={Boolean(access.write)} disabled={selectedId === "50041"} onChange={() => toggle(page.key, "write")} color="success" />
                           </td>
                           <td style={{ textAlign: "center" }}>
-                            {page.key === "crew_threads" ? <Checkbox checked={Boolean(access.approve)} disabled={selectedId === "50041"} onChange={() => toggle(page.key, "approve")} color="warning" /> : <Typography sx={{ color: "#CBD5E1" }}>—</Typography>}
+                            {["crew_threads", "crew_training"].includes(page.key) ? <Checkbox checked={Boolean(access.approve)} disabled={selectedId === "50041"} onChange={() => toggle(page.key, "approve")} color="warning" /> : <Typography sx={{ color: "#CBD5E1" }}>—</Typography>}
                           </td>
                         </tr>
                       );

@@ -486,6 +486,10 @@ export default function PSPDashboard({ highlightsOnly = false }) {
   const [nldcDemandUseSecondaryAxis, setNldcDemandUseSecondaryAxis] = useState(false);
   const [nldcDataModalOpen, setNldcDataModalOpen] = useState(false);
   const [nldcGenerationDate, setNldcGenerationDate] = useState(defaultNldcDemandEnd);
+  const [nldcGenerationEndDate, setNldcGenerationEndDate] = useState(defaultNldcDemandEnd);
+  const [selectedNldcGenerationKeys, setSelectedNldcGenerationKeys] = useState(
+    NLDC_GENERATION_COMPONENTS.map((component) => component.key)
+  );
   const [nldcGenerationRows, setNldcGenerationRows] = useState([]);
   const [nldcGenerationComponents, setNldcGenerationComponents] = useState([]);
   const [nldcMaximumGenerationMix, setNldcMaximumGenerationMix] = useState(null);
@@ -657,22 +661,29 @@ export default function PSPDashboard({ highlightsOnly = false }) {
     }
   };
 
-  const loadNldcGenerationBreakup = async (dateStr = nldcGenerationDate) => {
+  const loadNldcGenerationBreakup = async (
+    startDate = nldcGenerationDate,
+    endDate = nldcGenerationEndDate
+  ) => {
     try {
       setNldcGenerationLoading(true);
       setNldcGenerationError("");
-      const res = await API.getIndia15MinGenerationBreakup(dateStr);
+      if (!startDate || !endDate || startDate > endDate) {
+        throw new Error("Select a valid generation contribution date range.");
+      }
+      const res = startDate === endDate
+        ? await API.getIndia15MinGenerationBreakup(startDate)
+        : await API.getIndia15MinGenerationBreakupRange(startDate, endDate);
       if (!res.success) {
         throw new Error(res.message || "Unable to load NLDC generation breakup");
       }
-      setNldcGenerationRows(res.rows || []);
+      setNldcGenerationRows((res.rows || []).map((row) => ({ ...row, chart_timestamp: row.chart_timestamp || row.timestamp })));
       setNldcGenerationComponents(res.components || []);
       setNldcMaximumGenerationMix(res.maximum_generation_mix || null);
       setNldcGenerationMixModes(res.generation_mix_modes || {});
       setNldcAllIndiaDemand(res.all_india_demand || null);
-      if (res.date) {
-        setNldcGenerationDate(res.date);
-      }
+      setNldcGenerationDate(res.start_date || res.date || startDate);
+      setNldcGenerationEndDate(res.end_date || res.date || endDate);
     } catch (err) {
       console.error("Error loading NLDC generation breakup:", err);
       setNldcGenerationError(err.message || "NLDC generation breakup could not be loaded.");
@@ -689,11 +700,11 @@ export default function PSPDashboard({ highlightsOnly = false }) {
   const downloadNldcGenerationExcel = async () => {
     try {
       setNldcGenerationDownloading(true);
-      const blob = await API.downloadIndia15MinGenerationBreakup(nldcGenerationDate);
+      const blob = await API.downloadIndia15MinGenerationBreakup(nldcGenerationDate, nldcGenerationEndDate);
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
-      link.download = `all_india_demand_contribution_${nldcGenerationDate || "latest"}.xlsx`;
+      link.download = `all_india_demand_contribution_${nldcGenerationDate || "latest"}_to_${nldcGenerationEndDate || nldcGenerationDate || "latest"}.xlsx`;
       document.body.appendChild(link);
       link.click();
       link.remove();
@@ -709,7 +720,7 @@ export default function PSPDashboard({ highlightsOnly = false }) {
   const openNldcDataModal = () => {
     setNldcDataModalOpen(true);
     loadNldcDemandTrend(nldcDemandStartDate, nldcDemandEndDate);
-    loadNldcGenerationBreakup(nldcGenerationDate);
+    loadNldcGenerationBreakup(nldcGenerationDate, nldcGenerationEndDate);
   };
 
   const toggleNldcDemandLine = (key) => {
@@ -1184,9 +1195,17 @@ export default function PSPDashboard({ highlightsOnly = false }) {
   const nldcGenerationSummaryByKey = Object.fromEntries(
     (nldcGenerationComponents || []).map((component) => [component.key, component])
   );
-  const visibleNldcGenerationComponents = NLDC_GENERATION_COMPONENTS.filter((component) =>
+  const availableNldcGenerationComponents = NLDC_GENERATION_COMPONENTS.filter((component) =>
     nldcGenerationRows.some((row) => Number(row[component.key] || 0) !== 0)
   );
+  const visibleNldcGenerationComponents = availableNldcGenerationComponents.filter((component) =>
+    selectedNldcGenerationKeys.includes(component.key)
+  );
+  const toggleNldcGenerationComponent = (key) => {
+    setSelectedNldcGenerationKeys((current) => current.includes(key)
+      ? current.filter((item) => item !== key)
+      : [...current, key]);
+  };
   const selectedNldcGenerationMix = nldcGenerationMixModes[nldcGenerationMixMode] || nldcMaximumGenerationMix;
   const nldcMaximumGenerationMixData = [
     { name: "Solar", value: Number(selectedNldcGenerationMix?.solar_generation || 0), share: Number(selectedNldcGenerationMix?.solar_share || 0), color: "#F59E0B" },
@@ -3236,15 +3255,15 @@ export default function PSPDashboard({ highlightsOnly = false }) {
                           <span>All India Demand Contribution</span>
                         </h3>
                         <p className="small text-muted mb-0" style={{ fontSize: "0.72rem" }}>
-                          Block-wise generation breakup from India_15_Min_Demand for {formatDisplayDate(nldcGenerationDate)}.
+                          Block-wise generation breakup from India_15_Min_Demand for {formatDisplayDate(nldcGenerationDate)}{nldcGenerationEndDate !== nldcGenerationDate ? ` to ${formatDisplayDate(nldcGenerationEndDate)}` : ""}.
                         </p>
                       </div>
                       <div className="d-flex align-items-end gap-2">
                         <div>
-                          <label className="form-label small fw-bold text-secondary mb-1">Date</label>
-                          <CalendarInput className="form-control theme-input py-1" value={nldcGenerationDate} onChange={setNldcGenerationDate} style={{ fontSize: "0.75rem", width: "145px" }} />
+                          <label className="form-label small fw-bold text-secondary mb-1">Date range</label>
+                          <CalendarInput mode="range" className="form-control theme-input py-1" value={nldcGenerationDate} endValue={nldcGenerationEndDate} onRangeChange={(start, end) => { setNldcGenerationDate(start); setNldcGenerationEndDate(end); }} style={{ fontSize: "0.75rem", width: "210px" }} />
                         </div>
-                        <button className="btn theme-btn-outline theme-btn-mini d-flex align-items-center gap-2" onClick={() => loadNldcGenerationBreakup(nldcGenerationDate)} disabled={nldcGenerationLoading} style={{ height: "32px" }}>
+                        <button className="btn theme-btn-outline theme-btn-mini d-flex align-items-center gap-2" onClick={() => loadNldcGenerationBreakup(nldcGenerationDate, nldcGenerationEndDate)} disabled={nldcGenerationLoading} style={{ height: "32px" }}>
                           <RefreshCw size={12} className={nldcGenerationLoading ? "animate-spin-custom" : ""} />
                           <span>Load</span>
                         </button>
@@ -3255,19 +3274,28 @@ export default function PSPDashboard({ highlightsOnly = false }) {
                       </div>
                     </div>
 
+                    <div className="d-flex align-items-center justify-content-between gap-2 flex-wrap mb-2">
+                      <span className="small fw-bold text-secondary">Chart data points</span>
+                      <div className="d-flex gap-1">
+                        <button type="button" className="btn theme-btn-outline theme-btn-mini" onClick={() => setSelectedNldcGenerationKeys(availableNldcGenerationComponents.map((item) => item.key))}>Select all</button>
+                        <button type="button" className="btn theme-btn-outline theme-btn-mini" onClick={() => setSelectedNldcGenerationKeys([])}>Deselect all</button>
+                      </div>
+                    </div>
                     <div className="row g-2 mb-3">
-                      {visibleNldcGenerationComponents.map((component) => {
+                      {availableNldcGenerationComponents.map((component) => {
                         const summary = nldcGenerationSummaryByKey[component.key] || {};
+                        const selected = selectedNldcGenerationKeys.includes(component.key);
                         return (
                           <div className="col-6 col-md-4 col-xl-2" key={`gen-summary-${component.key}`}>
-                            <div className="rounded border border-light-subtle p-2 h-100" style={{ background: "#F8FAFC" }}>
+                            <button type="button" onClick={() => toggleNldcGenerationComponent(component.key)} className="rounded border p-2 h-100 w-100 text-start" style={{ background: selected ? "#F8FAFC" : "#F1F5F9", borderColor: selected ? component.color : "#CBD5E1", opacity: selected ? 1 : 0.55, cursor: "pointer" }} aria-pressed={selected}>
                               <div className="d-flex align-items-center gap-1 mb-1">
+                                <span className="d-inline-flex align-items-center justify-content-center rounded" style={{ width: 14, height: 14, border: `1px solid ${selected ? component.color : "#94A3B8"}`, color: "#FFFFFF", background: selected ? component.color : "transparent", fontSize: 10 }}>{selected ? "✓" : ""}</span>
                                 <span className="rounded-circle d-inline-block" style={{ width: "7px", height: "7px", backgroundColor: component.color }} />
                                 <span className="fw-bold text-dark" style={{ fontSize: "0.7rem" }}>{component.label}</span>
                               </div>
                               <div className="fw-bold text-success-emphasis" style={{ fontSize: "0.88rem" }}>{formatMw(summary.max)} MW</div>
                               <div className="text-muted" style={{ fontSize: "0.66rem" }}>Share {Number(summary.share || 0).toFixed(1)}%</div>
-                            </div>
+                            </button>
                           </div>
                         );
                       })}
@@ -3337,7 +3365,7 @@ export default function PSPDashboard({ highlightsOnly = false }) {
                         <ResponsiveContainer width="100%" height="100%">
                           <AreaChart data={nldcGenerationRows} margin={{ top: 12, right: 18, left: 0, bottom: 0 }}>
                             <CartesianGrid {...CHART_GRID_PROPS} />
-                            <XAxis dataKey="timestamp" stroke="#0B453A" style={{ fontSize: "0.7rem" }} minTickGap={18} />
+                            <XAxis dataKey="chart_timestamp" stroke="#0B453A" style={{ fontSize: "0.7rem" }} minTickGap={32} />
                             <YAxis stroke="#022726" style={{ fontSize: "0.7rem" }} tickFormatter={(value) => `${Math.round(value / 1000)}k`} />
                             <Tooltip
                               content={({ active, payload, label }) => {

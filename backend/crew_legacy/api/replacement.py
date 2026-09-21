@@ -159,6 +159,32 @@ def historical_shift_roles():
     return roles
 
 
+def active_shift_memberships():
+    """Return current active roster roles and groups, separate from history."""
+    memberships = {}
+    for group in roster_group_collection.find(
+        {"isActive": True},
+        {"groupName": 1, "shiftInCharge": 1, "members": 1},
+    ):
+        group_name = str(group.get("groupName") or "").strip()
+        sic = group.get("shiftInCharge") or {}
+        sic_id = str(sic.get("employeeId") or "").strip()
+        if sic_id:
+            entry = memberships.setdefault(sic_id, {"roles": set(), "groups": set()})
+            entry["roles"].add("sic")
+            if group_name:
+                entry["groups"].add(group_name)
+        for member in group.get("members") or []:
+            employee_id = str(member.get("employeeId") or "").strip()
+            if not employee_id:
+                continue
+            entry = memberships.setdefault(employee_id, {"roles": set(), "groups": set()})
+            entry["roles"].add("shift_engineer")
+            if group_name:
+                entry["groups"].add(group_name)
+    return memberships
+
+
 def replacement_authority_ids(leave: dict):
     group_context = group_organization_context(leave.get("groupName"))
     values = list(group_context.get("authorityIds") or [])
@@ -387,10 +413,13 @@ def display_shift_name(value):
 
 
 def replacement_mail_recipients(replacement_employee, leave, duty_date, group_name):
-    """Employee, organization reporting officers, leave employee and group SIC."""
+    """Replacement, affected employee, reporting chain, SIC and DIC/heads."""
     replacement_id = str(replacement_employee.get("userId") or replacement_employee.get("employeeId") or "")
     leave_id = str(leave.get("employeeId") or "")
-    reporting_ids = controlling_officer_ids(replacement_id)
+    reporting_ids = list(dict.fromkeys([
+        *controlling_officer_ids(replacement_id),
+        *replacement_authority_ids(leave),
+    ]))
     sic_ids = group_shift_in_charge_ids(duty_date, group_name)
 
     people = [replacement_employee, employee_by_id(leave_id)]
@@ -640,17 +669,345 @@ def duty_switch_options(
             "assignedDuty": 1,
             "leaveStatus": 1,
             "replacementDuty": 1,
+            "replacementRequired": 1,
+            "vacatedDuty": 1,
+            "vacancyReason": 1,
+            "vacancyReplacement": 1,
+            "isSIC": 1,
+            "isActingSIC": 1,
         },
     ).sort([("groupName", 1), ("name", 1)]))
+    memberships = active_shift_memberships()
     return [
         {
             **record,
             "employeeId": str(record.get("employeeId") or "").strip(),
             "onLeave": record.get("leaveStatus") in ACTIVE_LEAVE_STATUSES,
+            "isSIC": bool(
+                record.get("isSIC")
+                or "sic" in memberships.get(
+                    str(record.get("employeeId") or "").strip(), {}
+                ).get("roles", set())
+            ),
         }
         for record in records
         if str(record.get("employeeId") or "").strip()
     ]
+
+
+@router.put("/duty-switch/acting-sic")
+def assign_acting_sic_for_duty_move(
+    payload: dict,
+    user=Depends(get_authenticated_user),
+):
+    duty_date = str(payload.get("date") or "").strip()
+    group_name = str(payload.get("groupName") or "").strip()
+    moved_sic_id = str(payload.get("movedSICEmployeeId") or "").strip()
+    acting_sic_id = str(payload.get("actingSICEmployeeId") or "").strip()
+    reason = str(payload.get("reason") or "").strip()
+    try:
+        datetime.strptime(duty_date, "%Y-%m-%d")
+    except ValueError as exc:
+        raise HTTPException(400, "Date must use YYYY-MM-DD format") from exc
+    if not group_name or not moved_sic_id or not acting_sic_id or moved_sic_id == acting_sic_id:
+        raise HTTPException(400, "Moved SIC, replacement SIC, date and group are required")
+    actor = require_duty_switch_authority(user, duty_date)
+
+    moved_daily = employee_daily_collection.find_one({
+        "employeeId": employee_id_filter(moved_sic_id), "date": duty_date,
+    }) or {}
+    memberships = active_shift_memberships()
+    moved_roles = memberships.get(moved_sic_id, {}).get("roles", set())
+    if not moved_daily or not (moved_daily.get("isSIC") or "sic" in moved_roles):
+        raise HTTPException(409, "The selected employee is not the Shift In-Charge")
+
+    candidate_daily = employee_daily_collection.find_one({
+        "employeeId": employee_id_filter(acting_sic_id), "date": duty_date,
+    })
+    if not candidate_daily:
+        raise HTTPException(404, "Acting SIC must have a duty record on the selected date")
+    if str(candidate_daily.get("groupName") or "") != group_name:
+        raise HTTPException(409, "Acting SIC must be selected from the affected group")
+    if candidate_daily.get("leaveStatus") in ACTIVE_LEAVE_STATUSES:
+        raise HTTPException(409, "An employee on leave cannot be assigned as Acting SIC")
+    if normalized_duty(candidate_daily.get("assignedDuty")) not in SHIFT_DUTIES:
+        raise HTTPException(409, "Acting SIC must be rostered on an active shift duty")
+
+    candidate = employee_by_id(acting_sic_id) or candidate_daily
+    moved_employee = employee_by_id(moved_sic_id) or moved_daily
+    now = datetime.utcnow()
+    acting_sic = {
+        "employeeId": acting_sic_id,
+        "name": candidate.get("name") or candidate_daily.get("name"),
+        "designation": candidate.get("designation") or candidate_daily.get("designation"),
+        "type": "temporary",
+    }
+    employee_daily_collection.update_many(
+        {"date": duty_date, "groupName": group_name},
+        {"$set": {"sic": acting_sic}},
+    )
+    employee_daily_collection.update_one(
+        {"_id": candidate_daily["_id"]},
+        {"$set": {
+            "isActingSIC": True,
+            "actingSICGroup": group_name,
+            "actingSICFor": {
+                "employeeId": moved_sic_id,
+                "name": moved_employee.get("name") or moved_daily.get("name"),
+                "reason": "SIC duty/date reassigned",
+            },
+            "actingSICAssignedBy": actor,
+            "actingSICAssignedOn": now,
+        }},
+    )
+    duty_switch_collection.insert_one({
+        "date": duty_date,
+        "employeeId": acting_sic_id,
+        "employeeName": acting_sic["name"],
+        "designation": acting_sic["designation"],
+        "previous": {
+            "assignedDuty": candidate_daily.get("assignedDuty"),
+            "groupName": candidate_daily.get("groupName"),
+            "isActingSIC": bool(candidate_daily.get("isActingSIC")),
+        },
+        "updated": {
+            "assignedDuty": candidate_daily.get("assignedDuty"),
+            "groupName": group_name,
+            "isActingSIC": True,
+        },
+        "reason": reason or f"Acting SIC assigned because {moved_employee.get('name') or moved_sic_id} was moved",
+        "changedBy": actor,
+        "changedOn": now,
+        "source": "Acting SIC after duty/date reassignment",
+        "movedSICEmployeeId": moved_sic_id,
+    })
+    authority_ids = list(dict.fromkeys([
+        moved_sic_id,
+        acting_sic_id,
+        *replacement_authority_ids({"employeeId": moved_sic_id, "date": duty_date, "groupName": group_name}),
+    ]))
+    people = [employee_by_id(value) for value in authority_ids]
+    notify_all(
+        email_list=[mail_address(person) for person in people if mail_address(person)],
+        employee_ids=authority_ids,
+        subject="Acting SIC assigned after duty reassignment",
+        message=(
+            f"{acting_sic['name'] or acting_sic_id} has been assigned as Acting SIC for {group_name} "
+            f"on {duty_date} because {moved_employee.get('name') or moved_sic_id}'s duty/date was changed."
+        ),
+        ref_id=f"{duty_date}:{group_name}:{acting_sic_id}",
+        action="/crew/calendar",
+        type="ACTING_SIC",
+    )
+    return {"message": "Acting SIC assigned successfully", "actingSIC": acting_sic}
+
+
+@router.get("/duty-switch/vacancy/candidates")
+def vacated_duty_candidates(
+    date: str = Query(...),
+    user=Depends(get_authenticated_user),
+):
+    """Return every active employee, enriched with their duty on the vacancy date."""
+    try:
+        datetime.strptime(date, "%Y-%m-%d")
+    except ValueError as exc:
+        raise HTTPException(400, "Date must use YYYY-MM-DD format") from exc
+    require_duty_switch_authority(user, date)
+    daily_records = {
+        str(item.get("employeeId") or "").strip(): item
+        for item in employee_daily_collection.find({"date": date})
+        if str(item.get("employeeId") or "").strip()
+    }
+    active_leave_ids = {
+        str(item.get("employeeId") or "").strip()
+        for item in leave_request_collection.find({
+            "date": date,
+            "finalStatus": {"$in": list(ACTIVE_LEAVE_STATUSES)},
+        }, {"employeeId": 1})
+    }
+    result = []
+    seen = set()
+    for employee in employee_collection.find({"isActive": {"$ne": False}}).sort("name", 1):
+        employee_id = str(employee.get("userId") or employee.get("employeeId") or "").strip()
+        if not employee_id or employee_id in seen:
+            continue
+        seen.add(employee_id)
+        daily = daily_records.get(employee_id) or {}
+        result.append({
+            "employeeId": employee_id,
+            "name": employee.get("name") or daily.get("name") or employee_id,
+            "designation": employee.get("designation") or daily.get("designation") or "",
+            "assignedDuty": daily.get("assignedDuty") or "No duty",
+            "groupName": daily.get("groupName") or employee.get("groupName") or "Other Employees",
+            "onLeave": daily.get("leaveStatus") in ACTIVE_LEAVE_STATUSES or employee_id in active_leave_ids,
+            "replacementDuty": bool(daily.get("replacementDuty")),
+            "category": employee.get("category") or [],
+            "dutyType": employee.get("dutyType") or "",
+        })
+    # Preserve operational daily-only employees that may not yet exist in the
+    # current employee master, consistent with the leave replacement workflow.
+    for employee_id, daily in daily_records.items():
+        if employee_id in seen:
+            continue
+        result.append({
+            "employeeId": employee_id,
+            "name": daily.get("name") or employee_id,
+            "designation": daily.get("designation") or "",
+            "assignedDuty": daily.get("assignedDuty") or "No duty",
+            "groupName": daily.get("groupName") or "Other Employees",
+            "onLeave": daily.get("leaveStatus") in ACTIVE_LEAVE_STATUSES or employee_id in active_leave_ids,
+            "replacementDuty": bool(daily.get("replacementDuty")),
+            "category": [], "dutyType": "",
+        })
+    return sorted(result, key=lambda item: (str(item.get("name") or "").lower(), item["employeeId"]))
+
+
+@router.put("/duty-switch/vacancy/assign")
+def assign_vacated_duty(
+    payload: dict,
+    user=Depends(get_authenticated_user),
+):
+    """Assign additional manpower against a vacancy created by moving duty."""
+    duty_date = str(payload.get("date") or "").strip()
+    vacant_employee_id = str(payload.get("vacantEmployeeId") or "").strip()
+    replacement_id = str(payload.get("replacementEmployeeId") or "").strip()
+    reason = str(payload.get("reason") or "").strip()
+    try:
+        datetime.strptime(duty_date, "%Y-%m-%d")
+    except ValueError as exc:
+        raise HTTPException(400, "Date must use YYYY-MM-DD format") from exc
+    actor = require_duty_switch_authority(user, duty_date)
+    if not vacant_employee_id or not replacement_id or not reason:
+        raise HTTPException(400, "Vacant duty, replacement employee and reason are required")
+    if vacant_employee_id == replacement_id:
+        raise HTTPException(409, "The employee whose duty is vacant cannot fill the same vacancy")
+
+    vacancy = employee_daily_collection.find_one({
+        "employeeId": employee_id_filter(vacant_employee_id),
+        "date": duty_date,
+        "replacementRequired": True,
+        "vacatedDuty": {"$exists": True, "$nin": [None, ""]},
+    })
+    if not vacancy:
+        raise HTTPException(404, "No open moved-duty vacancy was found for this employee and date")
+    vacant_duty = vacancy.get("vacatedDuty")
+    if normalized_duty(vacant_duty) not in SHIFT_DUTIES:
+        raise HTTPException(409, "The vacancy does not contain a valid shift duty")
+
+    candidate_daily = employee_daily_collection.find_one({
+        "employeeId": employee_id_filter(replacement_id), "date": duty_date,
+    })
+    employee = employee_by_id(replacement_id) or {}
+    if not employee and not candidate_daily:
+        raise HTTPException(404, "The selected replacement employee was not found")
+    candidate = candidate_daily or {
+        "employeeId": replacement_id,
+        "date": duty_date,
+        "name": employee.get("name") or replacement_id,
+        "designation": employee.get("designation") or "",
+        "assignedDuty": None,
+        "groupName": employee.get("groupName") or "Other Employees",
+    }
+    active_candidate_leave = leave_request_collection.find_one({
+        "employeeId": employee_id_filter(replacement_id), "date": duty_date,
+        "finalStatus": {"$in": list(ACTIVE_LEAVE_STATUSES)},
+    })
+    if candidate.get("leaveStatus") in ACTIVE_LEAVE_STATUSES or active_candidate_leave:
+        raise HTTPException(409, "The selected replacement employee is on leave")
+    if candidate.get("replacementDuty"):
+        replacement_for = candidate.get("replacementFor") or {}
+        if str(replacement_for.get("employeeId") or "") != vacant_employee_id:
+            raise HTTPException(409, "The selected employee already has another replacement duty on this date")
+
+    existing_assignment = vacancy.get("vacancyReplacement") or {}
+    existing_id = str(existing_assignment.get("employeeId") or "").strip()
+    if existing_id and existing_id != replacement_id:
+        old_daily = employee_daily_collection.find_one({
+            "employeeId": employee_id_filter(existing_id), "date": duty_date,
+            "replacementMode": "duty-date-move-vacancy",
+            "replacementFor.employeeId": vacant_employee_id,
+        })
+        if old_daily:
+            original = old_daily.get("replacementOriginal") or {}
+            if old_daily.get("replacementCreatedDaily"):
+                employee_daily_collection.delete_one({"_id": old_daily["_id"]})
+            else:
+                employee_daily_collection.update_one(
+                    {"_id": old_daily["_id"]},
+                    {"$set": {
+                        "assignedDuty": original.get("assignedDuty") or "OFF",
+                        "groupName": original.get("groupName") or old_daily.get("groupName"),
+                    }, "$unset": {
+                        "replacementDuty": "", "replacementMode": "", "replacementFor": "",
+                        "replacementOriginal": "", "replacementCreatedDaily": "",
+                    }},
+                )
+
+    now = datetime.utcnow()
+    previous = {
+        "assignedDuty": candidate.get("assignedDuty"),
+        "groupName": candidate.get("groupName"),
+        "replacementDuty": bool(candidate.get("replacementDuty")),
+    }
+    replacement_name = candidate.get("name") or employee.get("name") or replacement_id
+    vacant_name = vacancy.get("name") or (employee_by_id(vacant_employee_id) or {}).get("name") or vacant_employee_id
+    switch_id = str(uuid.uuid4())
+    audit = {
+        "switchId": switch_id, "date": duty_date, "direction": "vacancy-replacement",
+        "employeeId": replacement_id, "employeeName": replacement_name,
+        "designation": candidate.get("designation") or employee.get("designation"),
+        "previous": previous,
+        "updated": {"assignedDuty": vacant_duty, "groupName": vacancy.get("groupName"), "replacementDuty": True},
+        "reason": reason, "changedBy": actor, "changedOn": now,
+        "source": "Vacated source duty replacement",
+        "replacedEmployeeId": vacant_employee_id, "replacedEmployeeName": vacant_name,
+    }
+    inserted_audit = duty_switch_collection.insert_one(audit)
+    employee_daily_collection.update_one(
+        ({"_id": candidate_daily["_id"]} if candidate_daily else {"employeeId": replacement_id, "date": duty_date}),
+        {"$set": {
+            "employeeId": replacement_id,
+            "date": duty_date,
+            "name": replacement_name,
+            "designation": candidate.get("designation") or employee.get("designation"),
+            "assignedDuty": vacant_duty,
+            "groupName": vacancy.get("groupName"),
+            "replacementDuty": True,
+            "replacementMode": "duty-date-move-vacancy",
+            "replacementFor": {"employeeId": vacant_employee_id, "name": vacant_name},
+            "replacementCreatedDaily": candidate_daily is None,
+            "replacementOriginal": {
+                field: candidate.get(field)
+                for field in ("assignedDuty", "groupName", "rosterId") if candidate_daily and field in candidate
+            },
+            "lastDutySwitch": {"auditId": str(inserted_audit.inserted_id), "changedBy": actor,
+                               "changedOn": now, "reason": reason, "previous": previous},
+        }},
+        upsert=candidate_daily is None,
+    )
+    vacancy_replacement = {"employeeId": replacement_id, "name": replacement_name, "assignedOn": now}
+    employee_daily_collection.update_one(
+        {"_id": vacancy["_id"]},
+        {"$set": {"vacancyReplacement": vacancy_replacement}},
+    )
+    comp_off_id = award_off_day_comp_off(
+        employee_id=replacement_id, duty_date=duty_date,
+        previous_duty=candidate.get("assignedDuty"), assigned_duty=vacant_duty,
+        group_name=vacancy.get("groupName"), switch_id=switch_id,
+        source="Vacated source duty replacement", reference_type="Replacement",
+        reference_extra={"vacantEmployeeId": vacant_employee_id},
+    )
+    notify_all(
+        employee_ids=[replacement_id], subject="Additional replacement duty assigned",
+        message=(f"You were assigned {vacant_duty} duty on {duty_date} in place of "
+                 f"{vacant_name}. Reason: {reason}"),
+        ref_id=switch_id, action="VIEW_CALENDAR", type="DUTY",
+    )
+    return {
+        "message": "Vacant duty assigned successfully", "switchId": switch_id,
+        "vacantEmployeeId": vacant_employee_id, "vacatedDuty": vacant_duty,
+        "replacement": vacancy_replacement, "compOffAwarded": bool(comp_off_id), "compOffId": comp_off_id,
+    }
 
 
 @router.put("/duty-switch")
@@ -1550,6 +1907,7 @@ def move_employee_duty_to_another_date(
     requested_destination_duty = str(payload.get("destinationDuty") or "").strip()
     leave_id = str(payload.get("leaveId") or "").strip()
     reason = str(payload.get("reason") or "").strip()
+    vacancy_replacement_id = str(payload.get("vacancyReplacementEmployeeId") or "").strip()
 
     for value, label in ((source_date, "Source date"), (destination_date, "Destination date")):
         try:
@@ -1828,6 +2186,137 @@ def move_employee_duty_to_another_date(
         "leaveId": leave_id or None,
     }
 
+    # A cross-date move linked to approved leave is an additional destination
+    # duty, not a two-way swap. The employee keeps their normal destination-day
+    # duty and the source-day assignment becomes a visible vacancy.
+    if linked_leave and transfer_from_working_day:
+        vacancy_daily = None
+        vacancy_employee = {}
+        if vacancy_replacement_id:
+            if vacancy_replacement_id == employee_id:
+                raise HTTPException(409, "The employee whose duty moved cannot fill the vacated source duty")
+            vacancy_daily = employee_daily_collection.find_one({
+                "employeeId": employee_id_filter(vacancy_replacement_id), "date": source_date,
+            })
+            vacancy_employee = employee_by_id(vacancy_replacement_id) or {}
+            if not vacancy_daily:
+                raise HTTPException(404, "The selected source-duty replacement has no duty record on that date")
+            if vacancy_daily.get("leaveStatus") in ACTIVE_LEAVE_STATUSES:
+                raise HTTPException(409, "The selected source-duty replacement is on leave")
+        source_updated = {
+            "assignedDuty": "OFF",
+            "groupName": source_record.get("groupName"),
+            "replacementRequired": True,
+            "vacatedDuty": source_duty,
+            "vacancyReason": "Duty moved to cover leave replacement",
+        }
+        source_result = employee_daily_collection.update_one(
+            {"_id": source_record["_id"], "assignedDuty": source_duty},
+            {
+                "$set": {
+                    **source_updated,
+                    "lastDutySwitch": {**common_switch, "previous": source_previous, "direction": "source"},
+                },
+                "$unset": {"replacementDuty": "", "replacementFor": "", "replacementOriginal": ""},
+            },
+        )
+        if source_result.modified_count != 1:
+            raise HTTPException(409, "The source duty changed before this transfer could be saved")
+
+        replacement_result = assign_replacement(
+            leave_id,
+            {"replacementEmployeeId": employee_id, "mode": "normal", "halfDuty": False, "reason": reason},
+            user=user,
+        )
+
+        vacancy_replacement = None
+        if vacancy_replacement_id:
+            vacancy_previous = {
+                "assignedDuty": vacancy_daily.get("assignedDuty"),
+                "groupName": vacancy_daily.get("groupName"),
+                "replacementDuty": bool(vacancy_daily.get("replacementDuty")),
+            }
+            vacancy_updated = {
+                "assignedDuty": source_duty,
+                "groupName": source_record.get("groupName"),
+                "replacementDuty": True,
+            }
+            vacancy_audit = {
+                **common_switch,
+                "date": source_date,
+                "direction": "source-replacement",
+                "employeeId": vacancy_replacement_id,
+                "employeeName": vacancy_daily.get("name") or vacancy_employee.get("name"),
+                "designation": vacancy_daily.get("designation") or vacancy_employee.get("designation"),
+                "previous": vacancy_previous,
+                "updated": vacancy_updated,
+                "source": "Vacated source duty replacement",
+                "replacedEmployeeId": employee_id,
+                "replacedEmployeeName": source_record.get("name") or (employee_by_id(employee_id) or {}).get("name"),
+            }
+            inserted_vacancy_audit = duty_switch_collection.insert_one(vacancy_audit)
+            employee_daily_collection.update_one(
+                {"_id": vacancy_daily["_id"]},
+                {"$set": {
+                    **vacancy_updated,
+                    "replacementMode": "duty-date-move-vacancy",
+                    "replacementFor": {
+                        "employeeId": employee_id,
+                        "name": source_record.get("name") or (employee_by_id(employee_id) or {}).get("name"),
+                    },
+                    "replacementOriginal": {
+                        field: vacancy_daily.get(field)
+                        for field in ("assignedDuty", "groupName", "rosterId") if field in vacancy_daily
+                    },
+                    "lastDutySwitch": {
+                        "auditId": str(inserted_vacancy_audit.inserted_id), "changedBy": actor,
+                        "changedOn": changed_on, "reason": reason, "previous": vacancy_previous,
+                    },
+                }},
+            )
+            vacancy_replacement = {
+                "employeeId": vacancy_replacement_id, "name": vacancy_audit.get("employeeName"),
+            }
+            notify_all(
+                employee_ids=[vacancy_replacement_id], subject="Replacement duty assigned",
+                message=(f"You were assigned {source_duty} duty on {source_date} in place of "
+                         f"{source_record.get('name') or employee_id}. Reason: {reason}"),
+                ref_id=switch_id, action="VIEW_CALENDAR", type="DUTY",
+            )
+
+        destination_updated = {
+            "assignedDuty": moved_duty, "groupName": linked_leave.get("groupName"), "replacementDuty": True,
+        }
+        duty_switch_collection.insert_many([
+            {**common_switch, "date": source_date, "direction": "source", "employeeId": employee_id,
+             "employeeName": source_record.get("name") or (employee_by_id(employee_id) or {}).get("name"),
+             "designation": source_record.get("designation"), "previous": source_previous, "updated": source_updated},
+            {**common_switch, "date": destination_date, "direction": "destination-additional", "employeeId": employee_id,
+             "employeeName": destination_record.get("name") or (employee_by_id(employee_id) or {}).get("name"),
+             "designation": destination_record.get("designation"), "previous": destination_previous, "updated": destination_updated},
+        ])
+        if vacancy_replacement:
+            employee_daily_collection.update_one(
+                {"_id": source_record["_id"]}, {"$set": {"vacancyReplacement": vacancy_replacement}},
+            )
+        notify_all(
+            employee_ids=[employee_id], subject="Duty moved to cover leave",
+            message=(f"Your {source_duty or '-'} duty on {source_date} was moved as an additional "
+                     f"{moved_duty or '-'} duty on {destination_date}. The original source slot is vacant. Reason: {reason}"),
+            ref_id=switch_id, action="VIEW_CALENDAR", type="DUTY",
+        )
+        return {
+            "message": "Duty moved as an additional replacement duty; source duty marked vacant",
+            "switchId": switch_id,
+            "source": {"date": source_date, "previous": source_previous, "updated": source_updated},
+            "destination": {"date": destination_date, "previous": destination_previous, "updated": destination_updated},
+            "vacancyReplacement": vacancy_replacement, "compOffAwarded": False,
+            "linkedLeave": {"id": leave_id, "employeeId": linked_leave.get("employeeId"),
+                            "name": linked_leave.get("name"), "assignedDuty": linked_leave.get("assignedDuty"),
+                            "groupName": linked_leave.get("groupName")},
+            "replacementResult": replacement_result,
+        }
+
     source_result = employee_daily_collection.update_one(
         {"_id": source_record["_id"], "assignedDuty": source_duty},
         {"$set": {
@@ -2062,7 +2551,6 @@ def pending_replacements(user=Depends(get_authenticated_user)):
     leaves = list(
         leave_request_collection.find({
             "finalStatus": "Approved",
-            "replacementRequired": True,
             "replacement": None
         })
     )
@@ -2082,6 +2570,15 @@ def pending_replacements(user=Depends(get_authenticated_user)):
             "employeeId": l["employeeId"],
             "date": leave_date
         })
+
+        # An approved leave on a rostered shift must remain available for an
+        # optional operational replacement even when the approvers originally
+        # marked replacementRequired=false. That flag means a replacement was
+        # not mandatory during approval; it must not prevent a later duty
+        # reassignment when operational conditions require one.
+        assigned_duty = (duty or {}).get("assignedDuty") or l.get("assignedDuty")
+        if not l.get("replacementRequired") and normalized_duty(assigned_duty) not in SHIFT_DUTIES:
+            continue
 
         is_sic_flag = duty.get("isSIC", False) if duty else False
 
@@ -2114,7 +2611,8 @@ def pending_replacements(user=Depends(get_authenticated_user)):
             "groupName": l.get("groupName"),
             "leaveType": l.get("leaveType"),
             "date": leave_date,
-            "assignedDuty": (duty or {}).get("assignedDuty") or l.get("assignedDuty"),
+            "assignedDuty": assigned_duty,
+            "replacementRequired": bool(l.get("replacementRequired")),
             "isSIC": is_sic_flag,
             "organization": group_organization_context(l.get("groupName")),
             "authorityIds": replacement_authority_ids(l),
@@ -2311,6 +2809,7 @@ def replacement_candidates(
     # ==========================================
     group_context = group_organization_context(leave.get("groupName"))
     past_shift_roles = historical_shift_roles()
+    current_shift_memberships = active_shift_memberships()
     candidates = list(employee_collection.find({"isActive": {"$ne": False}}))
 
     for c in candidates:
@@ -2329,7 +2828,12 @@ def replacement_candidates(
             and group_context["departmentName"] in current_organization["departments"]
         )
         historical_roles = past_shift_roles.get(str(candidate_id), set())
-        organization_eligible = bool(same_department and historical_roles)
+        active_membership = current_shift_memberships.get(
+            str(candidate_id), {"roles": set(), "groups": set()}
+        )
+        active_shift_roles = active_membership.get("roles", set())
+        active_shift_groups = sorted(active_membership.get("groups", set()))
+        organization_eligible = bool(same_department and (historical_roles or active_shift_roles))
         configured_replacement = (
             str(c.get("dutyType") or "").strip().lower() == "replacement"
             or bool(c.get("isIC"))
@@ -2343,10 +2847,12 @@ def replacement_candidates(
         is_sic_candidate = (
             category_matches(category, "sic")
             or bool(c.get("isIC"))
+            or "sic" in active_shift_roles
             or "sic" in historical_roles
         )
         is_shift_engineer_candidate = (
             category_matches(category, "shift engineer")
+            or "shift_engineer" in active_shift_roles
             or "shift_engineer" in historical_roles
         )
         if effective_role_filter == "sic" and not is_sic_candidate:
@@ -2398,6 +2904,23 @@ def replacement_candidates(
         days_since_matching_duty = date_difference_days(
             leave_date, last_matching_duty_date
         )
+        last_shift_duty = last_matching_duty or employee_daily_collection.find_one({
+            "employeeId": candidate_id,
+            "assignedDuty": {"$in": ["Morning", "Evening", "Night"]},
+            "date": {"$lt": leave_date},
+        }, sort=[("date", -1)])
+        last_duty_date = last_shift_duty.get("date") if last_shift_duty else ""
+        last_duty_type = last_shift_duty.get("assignedDuty") if last_shift_duty else ""
+        days_since_last_duty = date_difference_days(leave_date, last_duty_date)
+        next_day_record = employee_daily_collection.find_one({
+            "employeeId": candidate_id,
+            "date": next_date,
+        }) or {}
+        duty_on_date = duty.get("assignedDuty") if duty else ""
+        if active_shift_groups:
+            candidate_source = "shift" if duty_on_date == required_duty else "otherShift"
+        else:
+            candidate_source = "replacement" if configured_replacement else "organization"
 
         # ==========================================
         # APPEND RESULT
@@ -2418,11 +2941,18 @@ def replacement_candidates(
             "requiredDuty": required_duty,
             "lastMatchingDutyDate": last_matching_duty_date,
             "daysSinceMatchingDuty": days_since_matching_duty,
+            "lastDutyDate": last_duty_date,
+            "lastDutyType": last_duty_type,
+            "daysSinceLastDuty": days_since_last_duty,
+            "assignedDuty": duty_on_date or "-",
+            "nextDayDuty": next_day_record.get("assignedDuty") or "-",
             "isSIC": is_sic,
-            "source": "replacement" if configured_replacement else "organization",
+            "source": candidate_source,
             "organization": current_organization,
             "eligibility": (
-                "Replacement tagged"
+                f"Active shift member · {', '.join(active_shift_groups)}"
+                if active_shift_groups
+                else "Replacement tagged"
                 if configured_replacement
                 else f"Past shift member; currently in {group_context.get('departmentName') or 'mapped department'}"
             ),
@@ -2525,6 +3055,13 @@ def replacement_candidates(
 @router.put("/assign/{leave_id}")
 def assign_replacement(leave_id: str, payload: dict, user=Depends(get_authenticated_user)):
 
+    if not ObjectId.is_valid(leave_id):
+        raise HTTPException(400, "Invalid leave request")
+    if payload.get("mode", "normal") not in {"normal", "double"}:
+        raise HTTPException(400, "Invalid replacement mode")
+    if not str(payload.get("replacementEmployeeId") or "").strip():
+        raise HTTPException(400, "Select a replacement employee")
+
     replacement_id = payload.get("replacementEmployeeId")
     mode = payload.get("mode", "normal")
     half_duty = payload.get("halfDuty", False)   # âœ… FIXED
@@ -2536,6 +3073,33 @@ def assign_replacement(leave_id: str, payload: dict, user=Depends(get_authentica
     if not leave:
         raise HTTPException(404, "Leave not found")
     require_replacement_authority(user, leave)
+    if leave.get("finalStatus") != "Approved":
+        raise HTTPException(409, "Replacement can only be assigned after leave approval")
+    if str(payload.get("replacementEmployeeId")) == str(leave.get("employeeId")):
+        raise HTTPException(400, "An employee cannot replace their own leave duty")
+
+
+    # =============================
+    # GET REPLACEMENT EMPLOYEE
+    # =============================
+    replacement_emp = employee_collection.find_one({
+        "userId": replacement_id
+    })
+
+    if not replacement_emp:
+        daily_emp = employee_daily_collection.find_one({
+            "employeeId": replacement_id,
+            "date": leave["date"]
+        })
+
+        if not daily_emp:
+            raise HTTPException(404, "Employee not found")
+
+        replacement_emp = {
+            "userId": daily_emp["employeeId"],
+            "name": daily_emp["name"],
+            "designation": daily_emp["designation"]
+        }
 
     existing_replacement = leave.get("replacement") or {}
     if existing_replacement.get("employeeId"):
@@ -2560,27 +3124,6 @@ def assign_replacement(leave_id: str, payload: dict, user=Depends(get_authentica
         )
         leave = leave_request_collection.find_one({"_id": ObjectId(leave_id)})
 
-    # =============================
-    # GET REPLACEMENT EMPLOYEE
-    # =============================
-    replacement_emp = employee_collection.find_one({
-        "userId": replacement_id
-    })
-
-    if not replacement_emp:
-        daily_emp = employee_daily_collection.find_one({
-            "employeeId": replacement_id,
-            "date": leave["date"]
-        })
-
-        if not daily_emp:
-            raise HTTPException(404, "Employee not found")
-
-        replacement_emp = {
-            "userId": daily_emp["employeeId"],
-            "name": daily_emp["name"],
-            "designation": daily_emp["designation"]
-        }
 
     leave_date = leave["date"]
 
@@ -3038,7 +3581,7 @@ def replacement_history(
     if employeeId:
         query["replacement.employeeId"] = employeeId
 
-    leaves = leave_request_collection.find(query)
+    leaves = leave_request_collection.find(query).sort("date", -1)
 
     results = []
 
@@ -3049,6 +3592,14 @@ def replacement_history(
         replacement_emp = employee_collection.find_one(
             {"userId": replacement_emp_id}
         )
+        replacement_daily = employee_daily_collection.find_one({
+            "employeeId": replacement_emp_id,
+            "date": leave.get("date"),
+        }) or {}
+        replaced_daily = employee_daily_collection.find_one({
+            "employeeId": leave.get("employeeId"),
+            "date": leave.get("date"),
+        }) or {}
 
         results.append({
 
@@ -3056,7 +3607,9 @@ def replacement_history(
             "employeeName": replacement_emp.get("name") if replacement_emp else "",
             "replacedEmployee": leave.get("name"),
             "groupName": leave.get("groupName"),
-            "leaveType": leave.get("leaveType")
+            "leaveType": leave.get("leaveType"),
+            "assignedDuty": leave.get("assignedDuty") or replacement_daily.get("assignedDuty") or replaced_daily.get("assignedDuty"),
+            "status": (leave.get("replacement") or {}).get("status") or leave.get("status"),
 
         })
 

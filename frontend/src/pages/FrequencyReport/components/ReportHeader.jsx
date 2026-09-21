@@ -43,6 +43,9 @@ export default function ReportHeader({
   onDeleteEvent = () => {},
   useDatabase = false,
   setUseDatabase = () => {},
+  onNewEvent = () => {},
+  includeGenerationComparison = true,
+  setIncludeGenerationComparison = () => {},
 }) {
   const isHistorical = useDatabase;
   const isHigh = eventType === "high";
@@ -51,7 +54,10 @@ export default function ReportHeader({
 
   const switchMode = (historical) => {
     setUseDatabase(historical);
-    if (!historical) onSelectEvent("");
+    if (!historical) {
+      onSelectEvent("");
+      onNewEvent();
+    }
   };
 
   const fieldStyle = {
@@ -92,11 +98,9 @@ export default function ReportHeader({
     cursor: "pointer",
   });
 
-  const status = [
-    ["WBES", wbesLoaded],
-    ["RTG", rtgLoaded],
-    [rtgStatusOk ? "Frequency" : "SCADA", scadaLoaded],
-  ];
+  const status = useDatabase
+    ? [["WBES", wbesLoaded], ["RTG", rtgLoaded], [rtgStatusOk ? "Frequency" : "SCADA", scadaLoaded]]
+    : [["SCADA workbook", scadaLoaded]];
 
   return (
     <div style={{ marginBottom: "14px" }}>
@@ -204,6 +208,18 @@ export default function ReportHeader({
                 >
                   <Trash2 size={16} />
                 </button>
+                <label
+                  title="Refresh Purulia PSP generation + pumping comparison from the dated source workbook"
+                  style={{ ...iconFieldStyle, cursor: "pointer", flex: "0 0 auto", color: "#075985", fontWeight: 800, fontSize: "0.7rem" }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={includeGenerationComparison}
+                    onChange={(event) => setIncludeGenerationComparison(event.target.checked)}
+                    style={{ width: "15px", height: "15px", accentColor: "#0284C7" }}
+                  />
+                  Fetch generation comparison
+                </label>
               </>
             ) : (
               <>
@@ -311,7 +327,7 @@ export default function ReportHeader({
               {label}
             </span>
           ))}
-          {rtgStatusMsg && (
+          {rtgStatusMsg && useDatabase && (
             <span style={{ color: rtgStatusOk ? "#065F46" : "#92400E", fontSize: "0.7rem", fontWeight: 700 }}>
               {rtgStatusLoading ? "Checking RTG..." : rtgStatusMsg}
             </span>

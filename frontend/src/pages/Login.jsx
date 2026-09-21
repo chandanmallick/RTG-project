@@ -3,6 +3,7 @@ import { Alert, Box, Button, IconButton, InputAdornment, Paper, TextField, Typog
 import { CalendarDays, Eye, EyeOff, LockKeyhole, Mail, RotateCcw, User } from "lucide-react";
 import { Navigate, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
+import { landingPageForSession } from "../auth/landingPages";
 
 export default function Login() {
   const { user, login, verifyOtp, resendOtp } = useAuth();
@@ -26,7 +27,7 @@ export default function Login() {
     return () => window.clearInterval(timer);
   }, [resendSeconds]);
 
-  if (user) return <Navigate to="/" replace />;
+  if (user) return <Navigate to={location.state?.from || landingPageForSession(user)} replace />;
 
   const submit = async (event) => {
     event.preventDefault();
@@ -34,8 +35,9 @@ export default function Login() {
     setError("");
     setMessage("");
     try {
+      let session;
       if (challenge) {
-        await verifyOtp(challenge.id, otp);
+        session = await verifyOtp(challenge.id, otp);
       } else {
         const result = await login(userId.trim(), password);
         if (result?.requires_otp) {
@@ -49,8 +51,9 @@ export default function Login() {
           setMessage(`Verification code sent to ${result.masked_email}.`);
           return;
         }
+        session = result;
       }
-      navigate(location.state?.from || "/", { replace: true });
+      navigate(location.state?.from || landingPageForSession(session), { replace: true });
     } catch (err) {
       setError(err.response?.data?.detail || "Unable to sign in with these credentials.");
     } finally {

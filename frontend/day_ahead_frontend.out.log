@@ -1,0 +1,229 @@
+
+> rtg-portal-frontend@1.0.0 dev
+> vite --port 3001 --host 0.0.0.0 --port 3001
+
+
+  VITE v4.5.14  ready in 295 ms
+
+  ➜  Local:   http://localhost:3001/
+  ➜  Network: http://10.3.230.60:3001/
+4:21:49 pm [vite] ✨ new dependencies optimized: @mui/material/Tooltip
+4:21:49 pm [vite] ✨ optimized dependencies changed. reloading
+4:26:56 pm [vite] hmr update /src/pages/PlantDeviationMOP.jsx
+5:42:40 pm [vite] hmr update /src/pages/HomePage.jsx, /src/pages/DataValidation.jsx, /src/pages/PlantDeviationMOP.jsx, /src/pages/PSPDashboard.jsx, /src/components/VoltageProfileMap.jsx, /src/components/PowerExchangeGraphic.jsx, /src/pages/PSPAdmin.jsx, /src/pages/OldLogbook.jsx, /src/pages/ViolationMessageHistory.jsx, /src/pages/FrequencyReport/index.jsx
+5:42:56 pm [vite] hmr update /src/pages/PlantDeviationMOP.jsx
+5:43:08 pm [vite] hmr update /src/pages/PlantDeviationMOP.jsx
+5:43:50 pm [vite] hmr update /src/pages/PlantDeviationMOP.jsx
+5:44:49 pm [vite] hmr update /src/pages/PlantDeviationMOP.jsx
+5:45:40 pm [vite] hmr update /src/pages/HomePage.jsx, /src/pages/DataValidation.jsx, /src/pages/PlantDeviationMOP.jsx, /src/pages/PSPDashboard.jsx, /src/components/VoltageProfileMap.jsx, /src/components/PowerExchangeGraphic.jsx, /src/pages/PSPAdmin.jsx, /src/pages/OldLogbook.jsx, /src/pages/ViolationMessageHistory.jsx, /src/pages/FrequencyReport/index.jsx
+5:45:54 pm [vite] hmr update /src/pages/PlantDeviationMOP.jsx
+5:46:06 pm [vite] hmr update /src/pages/PlantDeviationMOP.jsx
+5:50:25 pm [vite] hmr update /src/pages/FrequencyReport/components/ReportHeader.jsx
+5:50:45 pm [vite] hmr update /src/pages/FrequencyReport/index.jsx
+5:51:01 pm [vite] hmr update /src/pages/FrequencyReport/index.jsx
+10:15:11 am [vite] hmr update /src/pages/MailSettings.jsx
+10:15:21 am [vite] hmr update /src/pages/MailSettings.jsx
+10:16:17 am [vite] hmr update /src/pages/MailSettings.jsx
+10:16:47 am [vite] hmr update /src/pages/MailSettings.jsx
+11:23:08 am [vite] ✨ new dependencies optimized: @mui/icons-material/DownloadRounded, @mui/icons-material/PreviewRounded, @mui/icons-material/TableChartRounded
+11:23:08 am [vite] ✨ optimized dependencies changed. reloading
+11:58:01 am [vite] hmr update /src/pages/FrequencyReport/index.jsx
+11:58:14 am [vite] hmr update /src/pages/FrequencyReport/index.jsx
+12:03:50 pm [vite] hmr update /src/pages/FrequencyReport/index.jsx
+12:03:50 pm [vite] hmr update /src/pages/FrequencyReport/components/ReportHeader.jsx
+5:43:41 pm [vite] hmr update /src/components/PlantMappingGrid.jsx
+5:43:41 pm [vite] hmr update /src/pages/FrequencyReport/index.jsx
+5:43:41 pm [vite] hmr update /src/pages/ScheduleData.jsx
+5:53:48 pm [vite] hmr update /src/pages/HomePage.jsx, /src/pages/DataValidation.jsx, /src/pages/PlantDeviationMOP.jsx, /src/pages/PSPDashboard.jsx, /src/components/VoltageProfileMap.jsx, /src/components/PowerExchangeGraphic.jsx, /src/pages/PSPAdmin.jsx, /src/pages/OldLogbook.jsx, /src/pages/ViolationMessageHistory.jsx, /src/pages/FrequencyReport/index.jsx, /src/pages/DSOMorningReport.jsx, /src/pages/DSOReportPreparation.jsx, /src/pages/PSPReportChecking.jsx, /src/pages/RTGDashboard.jsx, /src/components/rtg/RTGHistoricalDownload.jsx, /src/pages/ScheduleData.jsx
+5:53:48 pm [vite] hmr update /src/pages/ScheduleData.jsx
+10:12:33 am [vite] hmr update /src/pages/crew/CrewCalendar.jsx
+10:14:08 am [vite] hmr update /src/App.jsx
+10:14:08 am [vite] hmr update /src/components/layout/TopNavbar.jsx, /src/pages/HomePage.jsx, /src/pages/DataValidation.jsx, /src/pages/PlantDeviationMOP.jsx, /src/pages/PSPDashboard.jsx, /src/components/VoltageProfileMap.jsx, /src/components/PowerExchangeGraphic.jsx, /src/pages/PSPAdmin.jsx, /src/pages/OldLogbook.jsx, /src/pages/ViolationMessageHistory.jsx, /src/pages/FrequencyReport/index.jsx, /src/pages/DSOMorningReport.jsx, /src/pages/DSOReportPreparation.jsx, /src/pages/PSPReportChecking.jsx, /src/pages/RTGDashboard.jsx, /src/components/rtg/RTGHistoricalDownload.jsx, /src/pages/ScheduleData.jsx, /src/pages/SRIReport.jsx, /src/crewLegacy/LeaveManagement.jsx, /src/components/crew/DutyReassignmentPanel.jsx, /src/crewLegacy/TrainingHolidayMaster.jsx, /src/crewLegacy/Profile.jsx, /src/crewLegacy/Dashboard.jsx, /src/pages/crew/CrewCalendar.jsx
+10:14:08 am [vite] hmr update /src/components/layout/TopNavbar.jsx
+10:14:34 am [vite] hmr update /src/components/layout/TopNavbar.jsx
+10:16:14 am [vite] hmr update /src/components/layout/TopNavbar.jsx
+10:18:43 am [vite] ✨ new dependencies optimized: @mui/icons-material/Delete
+10:18:43 am [vite] ✨ optimized dependencies changed. reloading
+1:03:27 pm [vite] hmr update /src/pages/crew/CrewCalendar.jsx, /src/pages/PastCompOffAdmin.jsx
+1:04:44 pm [vite] hmr update /src/pages/PastCompOffAdmin.jsx
+1:05:32 pm [vite] hmr update /src/pages/PastCompOffAdmin.jsx
+1:06:42 pm [vite] hmr update /src/pages/PastCompOffAdmin.jsx
+1:17:48 pm [vite] hmr update /src/pages/HomePage.jsx, /src/pages/DataValidation.jsx, /src/pages/PlantDeviationMOP.jsx, /src/pages/PSPDashboard.jsx, /src/components/VoltageProfileMap.jsx, /src/components/PowerExchangeGraphic.jsx, /src/pages/PSPAdmin.jsx, /src/pages/OldLogbook.jsx, /src/pages/ViolationMessageHistory.jsx, /src/pages/FrequencyReport/index.jsx, /src/pages/DSOMorningReport.jsx, /src/pages/DSOReportPreparation.jsx, /src/pages/PSPReportChecking.jsx, /src/pages/RTGDashboard.jsx, /src/components/rtg/RTGHistoricalDownload.jsx, /src/pages/ScheduleData.jsx, /src/pages/SRIReport.jsx
+1:18:03 pm [vite] hmr update /src/pages/PSPDashboard.jsx
+1:18:27 pm [vite] hmr update /src/pages/PSPDashboard.jsx
+1:18:45 pm [vite] hmr update /src/pages/PSPDashboard.jsx
+1:19:05 pm [vite] hmr update /src/pages/PSPDashboard.jsx
+1:19:36 pm [vite] hmr update /src/pages/PSPDashboard.jsx
+1:19:49 pm [vite] hmr update /src/pages/PSPDashboard.jsx
+1:20:15 pm [vite] hmr update /src/pages/PSPDashboard.jsx
+2:52:25 pm [vite] hmr update /src/pages/FrequencyReport/index.jsx
+2:57:29 pm [vite] hmr update /src/pages/FrequencyReport/index.jsx
+3:02:06 pm [vite] hmr update /src/pages/FrequencyReport/index.jsx
+3:05:13 pm [vite] hmr update /src/pages/FrequencyReport/index.jsx
+11:21:14 am [vite] hmr update /src/crewLegacy/ReplacementManagement.jsx
+11:21:14 am [vite] hmr update /src/pages/crew/CrewCalendar.jsx
+11:35:14 am [vite] hmr update /src/pages/crew/CrewCalendar.jsx, /src/pages/PastCompOffAdmin.jsx
+11:35:57 am [vite] hmr update /src/crewLegacy/ReplacementManagement.jsx
+11:36:34 am [vite] hmr update /src/pages/crew/CrewCalendar.jsx
+11:38:27 am [vite] hmr update /src/pages/crew/CrewCalendar.jsx
+12:37:12 pm [vite] hmr update /src/pages/HomePage.jsx, /src/pages/DataValidation.jsx, /src/pages/PlantDeviationMOP.jsx, /src/pages/PSPDashboard.jsx, /src/components/VoltageProfileMap.jsx, /src/components/PowerExchangeGraphic.jsx, /src/pages/PSPAdmin.jsx, /src/pages/OldLogbook.jsx, /src/pages/ViolationMessageHistory.jsx, /src/pages/FrequencyReport/index.jsx, /src/pages/DSOMorningReport.jsx, /src/pages/DSOReportPreparation.jsx, /src/pages/PSPReportChecking.jsx, /src/pages/RTGDashboard.jsx, /src/components/rtg/RTGHistoricalDownload.jsx, /src/pages/ScheduleData.jsx, /src/pages/SRIReport.jsx
+12:37:12 pm [vite] hmr update /src/pages/RTGDashboard.jsx
+12:37:47 pm [vite] hmr update /src/pages/RTGDashboard.jsx
+12:45:37 pm [vite] hmr update /src/pages/RTGDashboard.jsx
+12:47:34 pm [vite] hmr update /src/pages/RTGDashboard.jsx
+4:42:59 pm [vite] hmr update /src/pages/RTGDashboard.jsx
+4:45:08 pm [vite] hmr update /src/pages/RTGDashboard.jsx
+4:45:28 pm [vite] hmr update /src/pages/RTGDashboard.jsx
+2:40:28 pm [vite] hmr update /src/pages/ScheduleData.jsx
+2:42:07 pm [vite] hmr update /src/pages/ScheduleData.jsx
+2:42:39 pm [vite] hmr update /src/pages/ScheduleData.jsx
+2:44:06 pm [vite] hmr update /src/pages/ScheduleData.jsx
+2:44:18 pm [vite] hmr update /src/pages/ScheduleData.jsx
+2:51:16 pm [vite] hmr update /src/pages/MailSettings.jsx
+2:54:30 pm [vite] hmr update /src/pages/ScheduleData.jsx
+2:54:36 pm [vite] hmr update /src/pages/ScheduleData.jsx
+2:56:19 pm [vite] hmr update /src/pages/HomePage.jsx, /src/pages/DataValidation.jsx, /src/pages/PlantDeviationMOP.jsx, /src/pages/PSPDashboard.jsx, /src/components/VoltageProfileMap.jsx, /src/components/PowerExchangeGraphic.jsx, /src/pages/PSPAdmin.jsx, /src/pages/OldLogbook.jsx, /src/pages/ViolationMessageHistory.jsx, /src/pages/FrequencyReport/index.jsx, /src/pages/DSOMorningReport.jsx, /src/pages/DSOReportPreparation.jsx, /src/pages/PSPReportChecking.jsx, /src/pages/RTGDashboard.jsx, /src/components/rtg/RTGHistoricalDownload.jsx, /src/pages/ScheduleData.jsx, /src/pages/SRIReport.jsx, /src/pages/DatabaseSync.jsx, /src/pages/MISReport.jsx
+2:57:58 pm [vite] hmr update /src/pages/ScheduleData.jsx
+2:58:22 pm [vite] hmr update /src/pages/ScheduleData.jsx
+3:04:49 pm [vite] hmr update /src/pages/DSOMorningReport.jsx
+3:05:09 pm [vite] hmr update /src/pages/DSOMorningReport.jsx
+3:06:17 pm [vite] hmr update /src/pages/DSOMorningReport.jsx
+3:06:24 pm [vite] hmr update /src/pages/DSOMorningReport.jsx
+3:31:10 pm [vite] hmr update /src/pages/MailSettings.jsx
+3:33:16 pm [vite] hmr update /src/pages/MailSettings.jsx
+3:34:16 pm [vite] hmr update /src/pages/MailSettings.jsx
+3:35:10 pm [vite] hmr update /src/pages/MailSettings.jsx
+3:35:34 pm [vite] hmr update /src/pages/MailSettings.jsx
+3:40:55 pm [vite] hmr update /src/pages/MailSettings.jsx
+3:43:50 pm [vite] hmr update /src/pages/DataValidation.jsx
+10:51:46 am [vite] hmr update /src/pages/FrequencyReport/index.jsx
+10:52:02 am [vite] hmr update /src/pages/FrequencyReport/index.jsx
+10:52:37 am [vite] hmr update /src/pages/FrequencyReport/components/ComplianceChart.jsx
+10:53:04 am [vite] hmr update /src/pages/FrequencyReport/index.jsx
+10:56:40 am [vite] hmr update /src/pages/HomePage.jsx, /src/pages/DataValidation.jsx, /src/pages/PlantDeviationMOP.jsx, /src/pages/PSPDashboard.jsx, /src/components/VoltageProfileMap.jsx, /src/components/PowerExchangeGraphic.jsx, /src/pages/PSPAdmin.jsx, /src/pages/OldLogbook.jsx, /src/pages/ViolationMessageHistory.jsx, /src/pages/FrequencyReport/index.jsx, /src/pages/DSOMorningReport.jsx, /src/pages/DSOReportPreparation.jsx, /src/pages/PSPReportChecking.jsx, /src/pages/RTGDashboard.jsx, /src/components/rtg/RTGHistoricalDownload.jsx, /src/pages/ScheduleData.jsx, /src/pages/SRIReport.jsx, /src/pages/DatabaseSync.jsx, /src/pages/MISReport.jsx
+10:56:40 am [vite] hmr update /src/pages/FrequencyReport/index.jsx
+10:56:55 am [vite] hmr update /src/pages/FrequencyReport/index.jsx
+10:58:09 am [vite] hmr update /src/pages/FrequencyReport/index.jsx
+11:00:31 am [vite] hmr update /src/pages/FrequencyReport/index.jsx
+11:15:30 am [vite] hmr update /src/pages/HomePage.jsx, /src/pages/DataValidation.jsx, /src/pages/PlantDeviationMOP.jsx, /src/pages/PSPDashboard.jsx, /src/components/VoltageProfileMap.jsx, /src/components/PowerExchangeGraphic.jsx, /src/pages/PSPAdmin.jsx, /src/pages/OldLogbook.jsx, /src/pages/ViolationMessageHistory.jsx, /src/pages/FrequencyReport/index.jsx, /src/pages/DSOMorningReport.jsx, /src/pages/DSOReportPreparation.jsx, /src/pages/PSPReportChecking.jsx, /src/pages/RTGDashboard.jsx, /src/components/rtg/RTGHistoricalDownload.jsx, /src/pages/ScheduleData.jsx, /src/pages/SRIReport.jsx, /src/pages/DatabaseSync.jsx, /src/pages/MISReport.jsx
+11:15:30 am [vite] hmr update /src/pages/FrequencyReport/components/ReportHeader.jsx
+11:15:30 am [vite] hmr update /src/pages/FrequencyReport/index.jsx
+11:15:42 am [vite] hmr update /src/pages/FrequencyReport/index.jsx
+11:17:46 am [vite] hmr update /src/pages/FrequencyReport/index.jsx
+11:22:18 am [vite] hmr update /src/pages/FrequencyReport/components/StateComplianceTable.jsx
+11:23:06 am [vite] hmr update /src/pages/FrequencyReport/index.jsx
+11:24:09 am [vite] hmr update /src/pages/FrequencyReport/index.jsx
+11:25:02 am [vite] hmr update /src/pages/FrequencyReport/index.jsx
+11:29:03 am [vite] hmr update /src/pages/FrequencyReport/index.jsx
+11:29:38 am [vite] hmr update /src/pages/FrequencyReport/components/GenerationDeviationChart.jsx
+11:30:19 am [vite] hmr update /src/pages/FrequencyReport/index.jsx
+11:31:23 am [vite] hmr update /src/pages/FrequencyReport/index.jsx
+11:46:07 am [vite] hmr update /src/pages/FrequencyReport/components/GenerationDeviationChart.jsx
+11:46:07 am [vite] hmr update /src/pages/FrequencyReport/components/ComplianceChart.jsx
+11:49:02 am [vite] hmr update /src/pages/FrequencyReport/index.jsx
+11:50:12 am [vite] hmr update /src/pages/FrequencyReport/index.jsx
+11:52:05 am [vite] hmr update /src/pages/FrequencyReport/components/GenerationDeviationChart.jsx
+11:53:11 am [vite] hmr update /src/pages/FrequencyReport/index.jsx
+11:53:31 am [vite] hmr update /src/pages/FrequencyReport/index.jsx
+12:10:29 pm [vite] hmr update /src/pages/FrequencyReport/index.jsx
+12:52:25 pm [vite] hmr update /src/pages/FrequencyReport/index.jsx
+12:53:57 pm [vite] hmr update /src/pages/FrequencyReport/index.jsx
+12:54:05 pm [vite] hmr update /src/pages/FrequencyReport/index.jsx
+12:54:39 pm [vite] hmr update /src/pages/FrequencyReport/index.jsx
+12:55:45 pm [vite] hmr update /src/pages/FrequencyReport/index.jsx
+3:54:24 pm [vite] hmr update /src/pages/HomePage.jsx, /src/crewLegacy/LeaveManagement.jsx, /src/components/crew/DutyReassignmentPanel.jsx, /src/crewLegacy/TrainingHolidayMaster.jsx, /src/crewLegacy/Profile.jsx, /src/crewLegacy/Dashboard.jsx, /src/crewLegacy/EmployeeMaster.jsx, /src/crewLegacy/dropdownmaster.jsx, /src/crewLegacy/DesignationMasterPanel.jsx, /src/pages/crew/CrewActivityReport.jsx, /src/crewLegacy/ReplacementManagement.jsx, /src/pages/crew/CrewThreads.jsx, /src/crewLegacy/OrganizationMaster.jsx, /src/crewLegacy/DepartmentChart.jsx
+3:55:03 pm [vite] hmr update /src/pages/UserAccessControl.jsx
+3:55:43 pm [vite] hmr update /src/pages/UserAccessControl.jsx
+3:58:29 pm [vite] hmr update /src/crewLegacy/TrainingHolidayMaster.jsx
+3:58:42 pm [vite] hmr update /src/crewLegacy/TrainingHolidayMaster.jsx
+3:59:17 pm [vite] hmr update /src/crewLegacy/TrainingHolidayMaster.jsx
+3:59:34 pm [vite] hmr update /src/crewLegacy/TrainingHolidayMaster.jsx
+3:59:54 pm [vite] hmr update /src/crewLegacy/TrainingHolidayMaster.jsx
+4:00:14 pm [vite] hmr update /src/crewLegacy/TrainingHolidayMaster.jsx
+4:00:38 pm [vite] hmr update /src/crewLegacy/TrainingHolidayMaster.jsx
+4:03:08 pm [vite] hmr update /src/pages/HomePage.jsx, /src/crewLegacy/LeaveManagement.jsx, /src/components/crew/DutyReassignmentPanel.jsx, /src/crewLegacy/TrainingHolidayMaster.jsx, /src/crewLegacy/Profile.jsx, /src/crewLegacy/Dashboard.jsx, /src/crewLegacy/EmployeeMaster.jsx, /src/crewLegacy/dropdownmaster.jsx, /src/crewLegacy/DesignationMasterPanel.jsx, /src/pages/crew/CrewActivityReport.jsx, /src/crewLegacy/ReplacementManagement.jsx, /src/pages/crew/CrewThreads.jsx, /src/crewLegacy/OrganizationMaster.jsx, /src/crewLegacy/DepartmentChart.jsx
+4:03:22 pm [vite] hmr update /src/crewLegacy/TrainingHolidayMaster.jsx
+4:06:11 pm [vite] hmr update /src/crewLegacy/TrainingHolidayMaster.jsx
+5:54:40 pm [vite] hmr update /src/crewLegacy/TrainingHolidayMaster.jsx
+12:25:17 pm [vite] hmr update /src/crewLegacy/TrainingHolidayMaster.jsx
+12:25:17 pm [vite] hmr update /src/pages/UserAccessControl.jsx
+12:26:52 pm [vite] hmr update /src/crewLegacy/TrainingHolidayMaster.jsx
+12:27:45 pm [vite] hmr update /src/crewLegacy/TrainingHolidayMaster.jsx
+12:28:17 pm [vite] hmr update /src/crewLegacy/TrainingHolidayMaster.jsx
+12:29:06 pm [vite] hmr update /src/crewLegacy/TrainingHolidayMaster.jsx
+12:29:23 pm [vite] hmr update /src/crewLegacy/TrainingHolidayMaster.jsx
+12:29:35 pm [vite] hmr update /src/pages/HomePage.jsx, /src/crewLegacy/LeaveManagement.jsx, /src/components/crew/DutyReassignmentPanel.jsx, /src/crewLegacy/TrainingHolidayMaster.jsx, /src/crewLegacy/Profile.jsx, /src/crewLegacy/Dashboard.jsx, /src/crewLegacy/EmployeeMaster.jsx, /src/crewLegacy/dropdownmaster.jsx, /src/crewLegacy/DesignationMasterPanel.jsx, /src/pages/crew/CrewActivityReport.jsx, /src/crewLegacy/ReplacementManagement.jsx, /src/pages/crew/CrewThreads.jsx, /src/crewLegacy/OrganizationMaster.jsx, /src/crewLegacy/DepartmentChart.jsx
+12:30:05 pm [vite] hmr update /src/crewLegacy/TrainingHolidayMaster.jsx
+3:24:12 pm [vite] hmr update /src/pages/FrequencyReport/index.jsx
+3:24:25 pm [vite] hmr update /src/pages/FrequencyReport/index.jsx
+3:24:57 pm [vite] hmr update /src/pages/FrequencyReport/index.jsx
+3:25:11 pm [vite] hmr update /src/pages/FrequencyReport/index.jsx
+3:29:16 pm [vite] hmr update /src/pages/FrequencyReport/index.jsx
+3:29:41 pm [vite] hmr update /src/pages/FrequencyReport/index.jsx
+3:30:06 pm [vite] hmr update /src/pages/FrequencyReport/index.jsx
+3:30:18 pm [vite] hmr update /src/pages/FrequencyReport/index.jsx
+10:32:06 am [vite] hmr update /src/crewLegacy/TrainingHolidayMaster.jsx
+10:32:24 am [vite] hmr update /src/crewLegacy/TrainingHolidayMaster.jsx
+4:37:38 pm [vite] hmr update /src/components/crew/DutyReassignmentPanel.jsx
+4:38:08 pm [vite] hmr update /src/components/crew/DutyReassignmentPanel.jsx
+4:38:35 pm [vite] hmr update /src/pages/crew/CrewCalendar.jsx
+4:42:41 pm [vite] hmr update /src/components/crew/DutyReassignmentPanel.jsx
+4:42:49 pm [vite] hmr update /src/components/crew/DutyReassignmentPanel.jsx
+4:43:51 pm [vite] hmr update /src/components/crew/DutyReassignmentPanel.jsx
+4:46:21 pm [vite] hmr update /src/pages/crew/CrewActivityReport.jsx
+4:46:49 pm [vite] hmr update /src/pages/crew/CrewActivityReport.jsx
+4:58:45 pm [vite] hmr update /src/components/crew/DutyReassignmentPanel.jsx
+5:00:23 pm [vite] hmr update /src/components/crew/DutyReassignmentPanel.jsx
+5:00:23 pm [vite] hmr update /src/pages/crew/CrewCalendar.jsx
+5:00:40 pm [vite] hmr update /src/pages/crew/CrewCalendar.jsx
+5:10:39 pm [vite] hmr update /src/components/crew/DutyReassignmentPanel.jsx
+10:30:58 am [vite] hmr update /src/App.jsx
+10:30:58 am [vite] hmr update /src/components/layout/TopNavbar.jsx
+10:34:50 am [vite] hmr update /src/App.jsx
+10:36:11 am [vite] hmr update /src/pages/crew/CrewCalendar.jsx
+10:36:27 am [vite] hmr update /src/pages/crew/CrewCalendar.jsx
+10:36:44 am [vite] hmr update /src/pages/crew/CrewCalendar.jsx
+10:36:55 am [vite] hmr update /src/crewLegacy/LeaveManagement.jsx
+10:37:31 am [vite] hmr update /src/components/crew/DutyReassignmentPanel.jsx
+10:37:53 am [vite] hmr update /src/crewLegacy/ReplacementManagement.jsx
+10:38:19 am [vite] hmr update /src/crewLegacy/ReplacementManagement.jsx
+10:38:34 am [vite] hmr update /src/components/layout/TopNavbar.jsx, /src/pages/HomePage.jsx, /src/pages/DataValidation.jsx, /src/pages/PlantDeviationMOP.jsx, /src/pages/PSPDashboard.jsx, /src/components/VoltageProfileMap.jsx, /src/components/PowerExchangeGraphic.jsx, /src/pages/PSPAdmin.jsx, /src/pages/OldLogbook.jsx, /src/pages/ViolationMessageHistory.jsx, /src/pages/FrequencyReport/index.jsx, /src/pages/DSOMorningReport.jsx, /src/pages/DSOReportPreparation.jsx, /src/pages/PSPReportChecking.jsx, /src/pages/RTGDashboard.jsx, /src/components/rtg/RTGHistoricalDownload.jsx, /src/pages/ScheduleData.jsx, /src/pages/SRIReport.jsx, /src/pages/DatabaseSync.jsx, /src/pages/MISReport.jsx, /src/pages/OutageMLTraining.jsx, /src/crewLegacy/LeaveManagement.jsx, /src/components/crew/DutyReassignmentPanel.jsx, /src/crewLegacy/TrainingHolidayMaster.jsx, /src/crewLegacy/Profile.jsx, /src/crewLegacy/Dashboard.jsx, /src/crewLegacy/EmployeeMaster.jsx, /src/crewLegacy/dropdownmaster.jsx, /src/crewLegacy/DesignationMasterPanel.jsx, /src/pages/crew/CrewActivityReport.jsx, /src/crewLegacy/ReplacementManagement.jsx, /src/pages/crew/CrewThreads.jsx, /src/crewLegacy/OrganizationMaster.jsx, /src/crewLegacy/DepartmentChart.jsx, /src/pages/crew/MorningPresentationRoster.jsx, /src/pages/crew/CrewCalendar.jsx, /src/pages/PastCompOffAdmin.jsx, /src/pages/crew/CrewDutyRoster.jsx, /src/pages/crew/CrewSetup.jsx
+10:41:21 am [vite] hmr update /src/App.jsx
+10:47:19 am [vite] hmr update /src/pages/HomePage.jsx
+11:05:42 am [vite] hmr update /src/crewLegacy/LeaveManagement.jsx
+11:05:42 am [vite] hmr update /src/crewLegacy/TrainingHolidayMaster.jsx
+11:05:42 am [vite] hmr update /src/pages/crew/SportsManagement.jsx
+11:05:42 am [vite] hmr update /src/crewLegacy/ReplacementManagement.jsx
+11:05:58 am [vite] hmr update /src/crewLegacy/LeaveManagement.jsx
+11:06:20 am [vite] hmr update /src/crewLegacy/LeaveManagement.jsx
+11:06:49 am [vite] hmr update /src/crewLegacy/TrainingHolidayMaster.jsx
+11:07:17 am [vite] hmr update /src/crewLegacy/ReplacementManagement.jsx
+11:07:43 am [vite] hmr update /src/pages/crew/SportsManagement.jsx
+11:07:54 am [vite] hmr update /src/components/layout/TopNavbar.jsx
+11:09:06 am [vite] page reload dist/index.html
+11:09:54 am [vite] hmr update /src/pages/crew/CrewOperations.jsx
+11:10:44 am [vite] hmr update /src/components/layout/TopNavbar.jsx
+11:10:44 am [vite] hmr update /src/crewLegacy/LeaveManagement.jsx
+11:10:44 am [vite] hmr update /src/pages/crew/SportsManagement.jsx
+11:10:44 am [vite] hmr update /src/crewLegacy/TrainingHolidayMaster.jsx
+11:10:44 am [vite] hmr update /src/crewLegacy/ReplacementManagement.jsx
+11:11:03 am [vite] hmr update /src/crewLegacy/LeaveManagement.jsx
+11:11:04 am [vite] hmr update /src/crewLegacy/TrainingHolidayMaster.jsx
+11:12:37 am [vite] hmr update /src/crewLegacy/TrainingHolidayMaster.jsx
+11:12:37 am [vite] hmr update /src/crewLegacy/ReplacementManagement.jsx
+11:58:56 am [vite] hmr update /src/components/layout/AppShell.jsx
+11:58:56 am [vite] hmr update /src/pages/crew/CrewCalendar.jsx
+11:58:56 am [vite] hmr update /src/components/layout/TopNavbar.jsx
+11:58:56 am [vite] hmr update /src/pages/crew/CrewOperations.jsx
+12:06:51 pm [vite] hmr update /src/crewLegacy/LeaveManagement.jsx
+12:07:02 pm [vite] hmr update /src/crewLegacy/TrainingHolidayMaster.jsx
+12:07:17 pm [vite] hmr update /src/pages/crew/SportsManagement.jsx
+12:08:33 pm [vite] hmr update /src/pages/crew/CrewCalendar.jsx
+12:14:08 pm [vite] hmr update /src/pages/crew/CrewCalendar.jsx
+12:14:48 pm [vite] hmr update /src/pages/crew/CrewCalendar.jsx
+12:14:48 pm [vite] hmr update /src/crewLegacy/LeaveManagement.jsx
+12:26:29 pm [vite] hmr update /src/crewLegacy/LeaveManagement.jsx
+12:27:24 pm [vite] hmr update /src/pages/Login.jsx
+12:28:45 pm [vite] hmr update /src/pages/HomePage.jsx, /src/crewLegacy/LeaveManagement.jsx, /src/components/crew/DutyReassignmentPanel.jsx, /src/crewLegacy/TrainingHolidayMaster.jsx, /src/crewLegacy/Profile.jsx, /src/crewLegacy/Dashboard.jsx, /src/crewLegacy/EmployeeMaster.jsx, /src/crewLegacy/dropdownmaster.jsx, /src/crewLegacy/DesignationMasterPanel.jsx, /src/pages/crew/CrewActivityReport.jsx, /src/crewLegacy/ReplacementManagement.jsx, /src/pages/crew/CrewThreads.jsx, /src/crewLegacy/OrganizationMaster.jsx, /src/crewLegacy/DepartmentChart.jsx, /src/pages/crew/MorningPresentationRoster.jsx, /src/pages/crew/SportsManagement.jsx
+12:29:11 pm [vite] hmr update /src/crewLegacy/Profile.jsx
+11:18:53 am [vite] hmr update /src/pages/DSOReportPreparation.jsx

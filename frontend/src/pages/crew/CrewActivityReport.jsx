@@ -63,6 +63,7 @@ export default function CrewActivityReport() {
   const [crmsShiftDetails, setCrmsShiftDetails] = useState(null);
   const [crmsOnly, setCrmsOnly] = useState(false);
   const [trainingDetails, setTrainingDetails] = useState(null);
+  const [compOffDetails, setCompOffDetails] = useState(null);
   const [reportMode, setReportMode] = useState("detail");
   const [report, setReport] = useState({ summary: {}, rows: [], employees: [], canViewAll: false });
   const [matrix, setMatrix] = useState({ dutyCategories: [], shiftDutyCategories: [], leaveCategories: [], otherCategories: [], departments: [], subDepartments: [], departmentSubDepartments: {}, subDepartmentGroups: {}, groupNames: [], rows: [] });
@@ -150,8 +151,8 @@ export default function CrewActivityReport() {
       || (matrixKind === "Leave" && (matrixActivitySubtype === "All" ? row.leaveTotal > 0 : (row.leaveByType?.[matrixActivitySubtype] || 0) > 0))
       || (matrixKind === "Other" && (
         matrixActivitySubtype === "All"
-          ? row.trainingDays > 0 || row.compOffDays > 0
-          : matrixActivitySubtype === "Training" ? row.trainingDays > 0 : row.compOffDays > 0
+          ? row.trainingDays > 0 || row.compOffDays > 0 || row.compOffNonExpired > 0
+          : matrixActivitySubtype === "Training" ? row.trainingDays > 0 : row.compOffDays > 0 || row.compOffNonExpired > 0
       ));
     return matchesActivity
       && matchesMatrixOrganization(row)
@@ -179,11 +180,13 @@ export default function CrewActivityReport() {
     totals.replacementDutyDays += row.replacementDutyDays || 0;
     totals.trainingDays += row.trainingDays || 0;
     totals.compOffDays += row.compOffDays || 0;
+    totals.compOffUsable += row.compOffUsable || 0;
+    totals.compOffNonExpired += row.compOffNonExpired || 0;
     totals.leaveTotal += row.leaveTotal || 0;
     (matrix.dutyCategories || []).forEach((category) => { totals.dutyCounts[category] = (totals.dutyCounts[category] || 0) + (row.dutyCounts?.[category] || 0); });
     (matrix.leaveCategories || []).forEach((category) => { totals.leaveByType[category] = (totals.leaveByType[category] || 0) + (row.leaveByType?.[category] || 0); });
     return totals;
-  }, { assignedDutyDays: 0, replacementDutyDays: 0, trainingDays: 0, compOffDays: 0, leaveTotal: 0, dutyCounts: {}, leaveByType: {} }), [matrixRows, matrix.dutyCategories, matrix.leaveCategories]);
+  }, { assignedDutyDays: 0, replacementDutyDays: 0, trainingDays: 0, compOffDays: 0, compOffUsable: 0, compOffNonExpired: 0, leaveTotal: 0, dutyCounts: {}, leaveByType: {} }), [matrixRows, matrix.dutyCategories, matrix.leaveCategories]);
   const crmsRows = useMemo(() => (crms.rows || []).filter((row) => {
     const text = `${row.employeeName || ""} ${row.employeeId || ""}`.toLowerCase();
     return (!crmsSearch || text.includes(crmsSearch.toLowerCase()))
@@ -348,7 +351,7 @@ export default function CrewActivityReport() {
         {showDuties && <><TableCell align="right" sx={{ fontWeight: 900 }}>Shift duty total</TableCell>{visibleDutyCategories.map((category) => <TableCell key={category} align="right" sx={{ fontWeight: 900 }}>{category}</TableCell>)}</>}
         {showReplacement && <TableCell align="right" sx={{ fontWeight: 900 }}>Replacement duties</TableCell>}
         {showTraining && <TableCell align="right" sx={{ fontWeight: 900 }}>Training days (of 7)</TableCell>}
-        {showCompOff && <TableCell align="right" sx={{ fontWeight: 900 }}>C-OFF</TableCell>}
+        {showCompOff && <TableCell align="right" sx={{ fontWeight: 900 }}>C-OFF<Typography component="span" sx={{ display: "block", fontSize: 9.5, color: "#64748B", fontWeight: 750 }}>Usable / non-expired</Typography></TableCell>}
         {showLeave && <><TableCell align="right" sx={{ fontWeight: 900 }}>Total leave days</TableCell>{visibleLeaveCategories.map((category) => <TableCell key={category} align="right" sx={{ fontWeight: 900 }}>{category}</TableCell>)}</>}
       </TableRow></TableHead><TableBody>
         {!matrixRows.length && <TableRow><TableCell colSpan={matrixColumnCount} align="center" sx={{ py: 7, color: "#64748B" }}>No {matrixKind === "All" ? "employee activity" : matrixKind.toLowerCase()} found for the selected filters.</TableCell></TableRow>}
@@ -357,7 +360,7 @@ export default function CrewActivityReport() {
           {showDuties && <><TableCell align="right" sx={{ fontWeight: 850 }}>{row.shiftDutyDays || 0}</TableCell>{visibleDutyCategories.map((category) => <TableCell key={category} align="right">{row.dutyCounts?.[category] || 0}</TableCell>)}</>}
           {showReplacement && <TableCell align="right" sx={{ fontWeight: 850, color: row.replacementDutyDays ? "#15803D" : "inherit" }}>{row.replacementDutyDays || 0}</TableCell>}
           {showTraining && <TableCell align="right"><Button size="small" variant="outlined" disabled={!(row.trainings || []).length} onClick={() => setTrainingDetails(row)} sx={{ minWidth: 72, textTransform: "none", fontWeight: 900, color: "#6A1B9A", borderColor: "#CDB4EA" }}>{row.trainingDays || 0} / {row.trainingTargetDays || matrix.trainingTargetDays || 7}</Button></TableCell>}
-          {showCompOff && <TableCell align="right" sx={{ fontWeight: 850, color: row.compOffDays ? "#9A6700" : "inherit" }}>{row.compOffDays || 0}</TableCell>}
+          {showCompOff && <TableCell align="right"><Button size="small" variant="text" disabled={!(row.compOffCredits || []).length} onClick={() => setCompOffDetails(row)} sx={{ minWidth: 54, px: .6, textTransform: "none", fontWeight: 950, color: row.compOffNonExpired ? "#9A6700" : "#64748B" }}>{row.compOffUsable || 0} / {row.compOffNonExpired || 0}</Button></TableCell>}
           {showLeave && <><TableCell align="right" sx={{ fontWeight: 850 }}>{row.leaveTotal || 0}</TableCell>{visibleLeaveCategories.map((category) => <TableCell key={category} align="right">{row.leaveByType?.[category] || 0}</TableCell>)}</>}
         </TableRow>)}
         {!!matrixRows.length && <TableRow sx={{ "& td": { position: "sticky", bottom: 0, background: "#E8F5F1", fontWeight: 950, borderTop: "2px solid #9FD8C8" } }}>
@@ -365,7 +368,7 @@ export default function CrewActivityReport() {
           {showDuties && <><TableCell align="right">{matrixTotals.assignedDutyDays}</TableCell>{visibleDutyCategories.map((category) => <TableCell key={category} align="right">{matrixTotals.dutyCounts[category] || 0}</TableCell>)}</>}
           {showReplacement && <TableCell align="right">{matrixTotals.replacementDutyDays}</TableCell>}
           {showTraining && <TableCell align="right">{matrixTotals.trainingDays}</TableCell>}
-          {showCompOff && <TableCell align="right">{matrixTotals.compOffDays}</TableCell>}
+          {showCompOff && <TableCell align="right">{matrixTotals.compOffUsable} / {matrixTotals.compOffNonExpired}</TableCell>}
           {showLeave && <><TableCell align="right">{matrixTotals.leaveTotal}</TableCell>{visibleLeaveCategories.map((category) => <TableCell key={category} align="right">{matrixTotals.leaveByType[category] || 0}</TableCell>)}</>}
         </TableRow>}
       </TableBody></Table></Box>}
@@ -414,6 +417,45 @@ export default function CrewActivityReport() {
               <Chip size="small" label={`${training.days || 0} day(s)`} sx={{ fontWeight: 850, background: "#F0E7FA", color: "#6A1B9A" }} />
             </Stack>
           </Paper>)}
+        </Stack>}
+      </DialogContent>
+    </Dialog>
+    <Dialog open={Boolean(compOffDetails)} onClose={() => setCompOffDetails(null)} fullWidth maxWidth="md">
+      <DialogTitle sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontWeight: 950 }}>
+        C-OFF details
+        <IconButton onClick={() => setCompOffDetails(null)}><X size={19} /></IconButton>
+      </DialogTitle>
+      <DialogContent dividers>
+        {compOffDetails && <Stack spacing={1.5}>
+          <Box>
+            <Typography sx={{ fontWeight: 950, fontSize: 17 }}>{compOffDetails.employeeName || compOffDetails.employeeId}</Typography>
+            <Typography sx={{ color: "#64748B", fontSize: 12 }}>{compOffDetails.employeeId} · Current C-OFF credit position</Typography>
+          </Box>
+          <Stack direction={{ xs: "column", sm: "row" }} spacing={1}>
+            <Paper variant="outlined" sx={{ flex: 1, p: 1.4, borderColor: "#86EFAC", background: "#F0FDF4" }}><Typography sx={{ color: "#64748B", fontSize: 10.5, fontWeight: 850, textTransform: "uppercase" }}>Usable</Typography><Typography sx={{ color: "#15803D", fontSize: 25, fontWeight: 950 }}>{compOffDetails.compOffUsable || 0}</Typography></Paper>
+            <Paper variant="outlined" sx={{ flex: 1, p: 1.4, borderColor: "#FCD34D", background: "#FFFBEB" }}><Typography sx={{ color: "#64748B", fontSize: 10.5, fontWeight: 850, textTransform: "uppercase" }}>Total non-expired</Typography><Typography sx={{ color: "#9A6700", fontSize: 25, fontWeight: 950 }}>{compOffDetails.compOffNonExpired || 0}</Typography></Paper>
+            <Paper variant="outlined" sx={{ flex: 1, p: 1.4, borderColor: "#CBD5E1", background: "#F8FAFC" }}><Typography sx={{ color: "#64748B", fontSize: 10.5, fontWeight: 850, textTransform: "uppercase" }}>All credits</Typography><Typography sx={{ color: "#334155", fontSize: 25, fontWeight: 950 }}>{(compOffDetails.compOffCredits || []).length}</Typography></Paper>
+          </Stack>
+          <Box sx={{ maxHeight: 430, overflow: "auto", border: "1px solid #E2E8F0", borderRadius: 2 }}>
+            <Table stickyHeader size="small">
+              <TableHead><TableRow><TableCell sx={{ fontWeight: 900 }}>Earned date</TableCell><TableCell sx={{ fontWeight: 900 }}>Expiry</TableCell><TableCell sx={{ fontWeight: 900 }}>Status</TableCell><TableCell sx={{ fontWeight: 900 }}>Reason / source</TableCell><TableCell sx={{ fontWeight: 900 }}>Used date</TableCell></TableRow></TableHead>
+              <TableBody>
+                {(compOffDetails.compOffCredits || []).map((credit) => {
+                  const status = String(credit.status || "Available");
+                  const available = Boolean(credit.usable);
+                  const expired = status.toLowerCase() === "expired";
+                  return <TableRow key={credit.id} hover sx={!credit.nonExpired ? { opacity: .65, background: "#F8FAFC" } : undefined}>
+                    <TableCell sx={{ whiteSpace: "nowrap", fontWeight: 800 }}>{displayDate(credit.earnedDate)}</TableCell>
+                    <TableCell sx={{ whiteSpace: "nowrap" }}>{displayDate(credit.expiryDate)}</TableCell>
+                    <TableCell><Chip size="small" label={status} sx={{ fontWeight: 850, background: available ? "#DCFCE7" : expired ? "#E2E8F0" : "#FFF4CC", color: available ? "#15803D" : expired ? "#475569" : "#9A6700" }} /></TableCell>
+                    <TableCell><Typography sx={{ fontSize: 12, fontWeight: 800 }}>{credit.reason || "—"}</Typography><Typography sx={{ fontSize: 10.5, color: "#64748B" }}>{credit.source || "System"}{credit.groupName ? ` · ${credit.groupName}` : ""}</Typography></TableCell>
+                    <TableCell sx={{ whiteSpace: "nowrap" }}>{credit.usedDate ? displayDate(credit.usedDate) : "—"}</TableCell>
+                  </TableRow>;
+                })}
+              </TableBody>
+            </Table>
+          </Box>
+          <Typography sx={{ color: "#64748B", fontSize: 10.5 }}>Usable means an Available credit whose expiry date has not passed. Total non-expired includes every credit that has not reached its expiry date, including reserved or used credits.</Typography>
         </Stack>}
       </DialogContent>
     </Dialog>

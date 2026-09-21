@@ -218,24 +218,48 @@ def validate_voltage_dump(contents: bytes, filename: str):
 
     def add_issue(station, code, title, remark, start_index=None, end_index=None, severity="error"):
         nonlocal issue_serial
-        issue_serial += 1
         sample_count = 0 if start_index is None else end_index - start_index + 1
-        issue = {
-            "id": f"issue-{issue_serial}",
-            "stationId": station["id"],
-            "stationName": station["name"],
-            "code": code,
-            "title": title,
-            "remark": remark,
-            "severity": severity,
+        block = {
             "startIndex": start_index,
             "endIndex": end_index,
             "startTime": date_times[start_index] if start_index is not None else None,
             "endTime": date_times[end_index] if end_index is not None else None,
             "sampleCount": sample_count,
+            "remark": remark,
         }
-        issue_blocks.append(issue)
-        station["issues"].append(issue)
+        existing = next((item for item in station["issues"] if item["code"] == code), None)
+        if existing:
+            existing["blocks"].append(block)
+            existing["instanceCount"] = len(existing["blocks"])
+            existing["sampleCount"] += sample_count
+            if start_index is not None:
+                existing["sampleIndices"].extend(range(start_index, end_index + 1))
+                existing["startIndex"] = min(existing["startIndex"], start_index)
+                existing["endIndex"] = max(existing["endIndex"], end_index)
+                existing["startTime"] = date_times[existing["startIndex"]]
+                existing["endTime"] = date_times[existing["endIndex"]]
+            issue = existing
+        else:
+            issue_serial += 1
+            issue = {
+                "id": f"issue-{issue_serial}",
+                "stationId": station["id"],
+                "stationName": station["name"],
+                "code": code,
+                "title": title,
+                "remark": remark,
+                "severity": severity,
+                "startIndex": start_index,
+                "endIndex": end_index,
+                "startTime": block["startTime"],
+                "endTime": block["endTime"],
+                "sampleCount": sample_count,
+                "instanceCount": 1,
+                "sampleIndices": list(range(start_index, end_index + 1)) if start_index is not None else [],
+                "blocks": [block],
+            }
+            issue_blocks.append(issue)
+            station["issues"].append(issue)
         if start_index is not None:
             for row_index in range(start_index, end_index + 1):
                 flags_by_station[station["id"]][row_index].append({"code": code, "remark": remark})
@@ -392,7 +416,7 @@ def make_marked_workbook(report):
         summary_sheet.column_dimensions[get_column_letter(column)].width = 16
 
     issues_sheet = workbook.create_sheet("Issue Blocks")
-    issue_headers = ["Substation", "Level", "Rule", "Start", "End", "Samples", "Remark"]
+    issue_headers = ["Substation", "Level", "Rule", "Instances", "Affected periods", "Samples", "Remark"]
     issues_sheet.append(issue_headers)
     for cell in issues_sheet[1]:
         cell.fill = navy_fill
@@ -400,13 +424,26 @@ def make_marked_workbook(report):
     station_map = {station["id"]: station for station in report["stations"]}
     for issue in report["issues"]:
         station = station_map[issue["stationId"]]
-        issues_sheet.append([station["name"], station["voltageLevel"], issue["title"], issue["startTime"], issue["endTime"], issue["sampleCount"], issue["remark"]])
+        periods = []
+        for block in issue.get("blocks") or []:
+            if not block.get("startTime"):
+                continue
+            period = str(block["startTime"])
+            if block.get("endTime") and block["endTime"] != block["startTime"]:
+                period += f" to {block['endTime']}"
+            periods.append(period)
+        issues_sheet.append([
+            station["name"], station["voltageLevel"], issue["title"],
+            issue.get("instanceCount") or len(issue.get("blocks") or []) or 1,
+            "; ".join(periods) or "Station-level", issue["sampleCount"], issue["remark"],
+        ])
         for cell in issues_sheet[issues_sheet.max_row]:
             cell.fill = red_fill if issue["severity"] == "error" else amber_fill
     issues_sheet.freeze_panes = "A2"
     issues_sheet.auto_filter.ref = issues_sheet.dimensions
     issues_sheet.column_dimensions["A"].width = 34
     issues_sheet.column_dimensions["C"].width = 40
+    issues_sheet.column_dimensions["E"].width = 70
     issues_sheet.column_dimensions["G"].width = 80
 
     data_sheet = workbook.create_sheet("Marked Data")
@@ -498,16 +535,21 @@ def discrepancy_mail(report):
     for station in [item for item in report.get("stations") or [] if item.get("status") != "Healthy"]:
         observations = []
         for issue in station.get("issues") or []:
-            period = "Station-level"
-            if issue.get("startTime"):
-                period = str(issue["startTime"])
-                if issue.get("endTime") and issue["endTime"] != issue["startTime"]:
-                    period += f" to {issue['endTime']}"
+            periods = []
+            for block in issue.get("blocks") or []:
+                if not block.get("startTime"):
+                    continue
+                period = str(block["startTime"])
+                if block.get("endTime") and block["endTime"] != block["startTime"]:
+                    period += f" to {block['endTime']}"
+                periods.append(period)
+            period = "; ".join(periods) or "Station-level"
+            instance_count = int(issue.get("instanceCount") or len(issue.get("blocks") or []) or 1)
             sample_text = f"; {int(issue.get('sampleCount') or 0)} sample(s)" if issue.get("sampleCount") else ""
             observations.append(
                 f"<li><strong>{html.escape(str(issue.get('title') or 'Issue'))}</strong> — "
                 f"{html.escape(str(issue.get('remark') or ''))} "
-                f"<span style=\"color:#64748b\">({html.escape(period)}{sample_text})</span></li>"
+                f"<span style=\"color:#64748b\">({instance_count} instance(s); {html.escape(period)}{sample_text})</span></li>"
             )
         nominal_min = station.get("nominal_min")
         nominal_max = station.get("nominal_max")

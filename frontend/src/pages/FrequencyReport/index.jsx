@@ -31,7 +31,7 @@ const TABS = [
   { id: "mapping", label: "Plant Mapping", icon: Settings2 },
 ];
 
-const SOURCE_OPTIONS = ["RTG", "WBES", "SCADA", "Manual"];
+const SOURCE_OPTIONS = ["SCADA"];
 
 const normalizeScadaKey = (value) => {
   if (value === null || value === undefined || value === "") return "";
@@ -69,6 +69,42 @@ const normalizeMappingRow = (row) => ({
   scada_dc_key: normalizeScadaKey(row.scada_dc_key),
 });
 
+const reportRowsFromMapping = (mappingRows = []) => mappingRows.map((m) => ({
+  plant_id: m.plant_id,
+  stage_id: m.STAGE_ID,
+  stage_name: m.STAGE_NAME || "",
+  plant_name: formatPlantStageName(m),
+  state: m.state_name || "",
+  state_name: m.state_name || "",
+  fuel: m.fuel_type || "",
+  owner: m.owner_name || "",
+  capacity: m.stage_installed_capacity || m.installed_capacity || 0,
+  schedule: 0.0,
+  dc: 0.0,
+  actual: null,
+  deviation: null,
+  pct_dc: null,
+  // An uploaded event is intentionally SCADA-file only. The backend will use
+  // mapped workbook columns and will not contact RTG/WBES for this run.
+  sched_src: "SCADA",
+  dc_src: "SCADA",
+  actual_source: "SCADA",
+  type: m.type || (m.is_state ? "State" : "IPP"),
+  wbes_name: m.wbes_name || "",
+  crms_utility_name: m.crms_utility_name || "",
+  rtg_plant_id: m.rtg_plant_id || "",
+  scada_key: m.scada_key || "",
+  scada_header: m.scada_header || "",
+  scada_schedule_key: m.scada_schedule_key || "",
+  scada_schedule_header: m.scada_schedule_header || "",
+  scada_dc_key: m.scada_dc_key || "",
+  scada_dc_header: m.scada_dc_header || "",
+  is_state: m.is_state || false,
+  is_frequency: m.is_frequency || false,
+  reason: "",
+  chart_note: "",
+}));
+
 const toNumberOrNull = (value) => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
@@ -81,6 +117,13 @@ const normalizeSeries = (series = {}) => ({
   schedule: Array.isArray(series.schedule) ? series.schedule.map(toNumberOrNull) : [],
   dc: Array.isArray(series.dc) ? series.dc.map(toNumberOrNull) : [],
   deviation: Array.isArray(series.deviation) ? series.deviation.map(toNumberOrNull) : [],
+  purulia_psp_net: Array.isArray(series.purulia_psp_net) ? series.purulia_psp_net.map(toNumberOrNull) : [],
+  generation_categories: Object.fromEntries(
+    Object.entries(series.generation_categories || {}).map(([label, values]) => [
+      label,
+      Array.isArray(values) ? values.map(toNumberOrNull) : [],
+    ])
+  ),
 });
 
 const normalizeReportRow = (row = {}) => {
@@ -225,7 +268,14 @@ const crmsExecutiveCategorySummary = (messages = []) => {
   const counts = new Map();
   messages.forEach((message) => {
     const category = crmsMessageCategory(message);
-    counts.set(category, (counts.get(category) || 0) + 1);
+    // CRMS stores one message with every addressed constituent in `issued_to`.
+    // The report count is a constituent-delivery count: one message addressed
+    // to five constituents must therefore contribute five, not one.
+    const recipients = new Set(
+      (message.issued_to || []).map(normalizeCrmsToken).filter(Boolean)
+    );
+    const deliveryCount = Math.max(1, recipients.size);
+    counts.set(category, (counts.get(category) || 0) + deliveryCount);
   });
   const parts = Array.from(counts.entries())
     .sort(([a], [b]) => {
@@ -447,6 +497,7 @@ export default function FrequencyReport() {
         setShowLogsModal(false);
         setShowUploadDetailsModal(false);
         setRawEditorOpen(false);
+        setStackedExportOpen(false);
         setPendingExportType(null);
       }
     };
@@ -521,13 +572,20 @@ export default function FrequencyReport() {
   const [eventNameDraft, setEventNameDraft] = useState("");
   const [useDatabase, setUseDatabase] = useState(false);
   const [selectedDbDate, setSelectedDbDate] = useState("");
+  const [includeGenerationComparison, setIncludeGenerationComparison] = useState(true);
+  const [stackedExportOpen, setStackedExportOpen] = useState(false);
+  const [stackedExportStates, setStackedExportStates] = useState(["WEST BENGAL"]);
+  const [stackedExportEventIds, setStackedExportEventIds] = useState([]);
+  const [stackedExporting, setStackedExporting] = useState(false);
 
   const eventDurationName = useCallback(() => {
-    const clean = (value) => String(value || "")
-      .replace("T", "_")
-      .replace(/:/g, "-")
-      .replace(/\s+/g, "_");
-    return `${eventType === "high" ? "High" : "Low"}_Frequency_${clean(startTime)}_to_${clean(endTime)}`;
+    if (!startTime || !endTime) return eventType === "high" ? "High Freq" : "Low Freq";
+    const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    const start = new Date(startTime);
+    const pad = (value) => String(value).padStart(2, "0");
+    const date = `${pad(start.getDate())}-${months[start.getMonth()]}-${String(start.getFullYear()).slice(-2)}`;
+    const time = (value) => String(value).split("T")[1]?.slice(0, 5) || "";
+    return `${eventType === "high" ? "High Freq" : "Low Freq"} ${date} (${time(startTime)}-${time(endTime)})`;
   }, [endTime, eventType, startTime]);
 
   const handleEventTypeChange = useCallback((nextType) => {
@@ -545,6 +603,35 @@ export default function FrequencyReport() {
       setStateDesc("State Module: Over drawal (gold shade) and grid helping (cyan shade) compliance durations, along with Maximum Over Drawal (Max OD) magnitude and timestamps during low frequency grid states.");
     }
   }, []);
+
+  const handleNewEvent = useCallback(() => {
+    const freshDate = today();
+    setUseDatabase(false);
+    setSelectedEventId("");
+    setSelectedDbDate("");
+    setEventNameDraft("");
+    setStartTime(`${freshDate}T00:00`);
+    setEndTime(`${freshDate}T23:59`);
+    setScadaFile(null);
+    setRows(reportRowsFromMapping(mapData));
+    setWbesLoaded(false);
+    setRtgLoaded(false);
+    setScadaLoaded(false);
+    setDataLoading(false);
+    setSyncLogs([]);
+    setCrmsMessages([]);
+    setTransmissionLineEvents([]);
+    setCrmsStatus({ loading: false, error: "", fetched: false });
+    setExpandedRowIds([]);
+    setSelectedExportStateIds([]);
+    setSelectedExportGeneratorIds([]);
+    setShowUploadDetailsModal(false);
+    setUploadDetailRows([]);
+    setRawEditorOpen(false);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+    setTab("report");
+    toast.success("New event workspace ready. Select the event period and upload SCADA data.");
+  }, [mapData]);
 
   const loadAvailableDates = useCallback(async () => {
     try {
@@ -592,7 +679,7 @@ export default function FrequencyReport() {
 
   const handleCreateEvent = useCallback(async (details = null) => {
     const eventDetails = Array.isArray(details) ? details : null;
-    const name = eventNameDraft.trim() || eventDurationName();
+    const name = eventDurationName();
     if (!startTime || !endTime || new Date(endTime) < new Date(startTime)) {
       toast.error("Please select a valid event range.");
       return;
@@ -635,6 +722,8 @@ export default function FrequencyReport() {
             schedule: row.series?.schedule || [],
             dc: row.series?.dc || [],
             deviation: row.series?.deviation || [],
+            purulia_psp_net: row.series?.purulia_psp_net || [],
+            generation_categories: row.series?.generation_categories || {},
           },
           summary: {
             actual: row.actual,
@@ -1016,39 +1105,7 @@ export default function FrequencyReport() {
     if (mapData.length > 0) {
       setRows((prev) => {
         if (prev.length === 0) {
-          return mapData.map((m) => ({
-            plant_id: m.plant_id,
-            stage_id: m.STAGE_ID,
-            stage_name: m.STAGE_NAME || "",
-            plant_name: formatPlantStageName(m),
-            state: m.state_name || "",
-            state_name: m.state_name || "",
-            fuel: m.fuel_type || "",
-            owner: m.owner_name || "",
-            capacity: m.stage_installed_capacity || m.installed_capacity || 0,
-            schedule: 0.0,
-            dc: 0.0,
-            actual: null,
-            deviation: null,
-            pct_dc: null,
-            sched_src: m.schedule_source || "RTG",
-            dc_src: m.dc_source || "RTG",
-            actual_source: m.actual_source || "RTG",
-            type: m.type || (m.is_state ? "State" : "IPP"),
-            wbes_name: m.wbes_name || "",
-            crms_utility_name: m.crms_utility_name || "",
-            rtg_plant_id: m.rtg_plant_id || "",
-            scada_key: m.scada_key || "",
-            scada_header: m.scada_header || "",
-            scada_schedule_key: m.scada_schedule_key || "",
-            scada_schedule_header: m.scada_schedule_header || "",
-            scada_dc_key: m.scada_dc_key || "",
-            scada_dc_header: m.scada_dc_header || "",
-            is_state: m.is_state || false,
-            is_frequency: m.is_frequency || false,
-            reason: "",
-            chart_note: "",
-          }));
+          return reportRowsFromMapping(mapData);
         } else {
           return prev.map((r) => {
             const m = mapData.find((item) => String(item.plant_id ?? "") === String(r.plant_id ?? "") && String(item.STAGE_ID ?? "") === String(r.stage_id ?? ""));
@@ -1088,6 +1145,12 @@ export default function FrequencyReport() {
   useEffect(() => {
     let active = true;
     const checkStatus = async () => {
+      if (!useDatabase) {
+        setRtgStatusLoading(false);
+        setRtgStatusOk(false);
+        setRtgStatusMsg("Uploaded events use the SCADA workbook only.");
+        return;
+      }
       setRtgStatusLoading(true);
       try {
         const res = await API.checkRtgStatus(startTime, endTime);
@@ -1113,7 +1176,7 @@ export default function FrequencyReport() {
     return () => {
       active = false;
     };
-  }, [startTime, endTime]);
+  }, [startTime, endTime, useDatabase]);
 
   /* ── Handle inline field changes ── */
   const updateRowField = (plantId, field, value) => {
@@ -1159,9 +1222,9 @@ export default function FrequencyReport() {
       scada_key: row.scada_key || "",
       scada_schedule_key: row.scada_schedule_key || "",
       scada_dc_key: row.scada_dc_key || "",
-      actual_source: row.actual_source || "RTG",
-      sched_src: row.sched_src || row.schedule_source || "RTG",
-      dc_src: row.dc_src || row.dc_source || "RTG",
+      actual_source: String(row.actual_source || "SCADA").startsWith("SCADA") ? "SCADA" : row.actual_source,
+      sched_src: String(row.sched_src || row.schedule_source || "SCADA").startsWith("SCADA") ? "SCADA" : (row.sched_src || row.schedule_source),
+      dc_src: String(row.dc_src || row.dc_source || "SCADA").startsWith("SCADA") ? "SCADA" : (row.dc_src || row.dc_source),
       update_actual: true,
       update_schedule: true,
       update_dc: true,
@@ -1241,13 +1304,23 @@ export default function FrequencyReport() {
         "[MONGO] Preparing saved historical event load...",
         "[MONGO] Event: " + (selectedEvent?.name || selectedEventId),
         "[MONGO] Saved period: " + startTime + " to " + endTime,
-        "[MONGO] No upload or remote data pull will run unless source data is missing."
+        includeGenerationComparison
+          ? "[SOURCE] Dated generation workbook comparison will be refreshed."
+          : "[MONGO] Loading stored event series only."
       ]);
     }
 
     let jobRes;
     try {
-      jobRes = await API.createFrequencyReportJob(fileId, startTime, endTime, overrideRows, fileId === "database" ? selectedEventId : "", eventType);
+      jobRes = await API.createFrequencyReportJob(
+        fileId,
+        startTime,
+        endTime,
+        overrideRows,
+        fileId === "database" ? selectedEventId : "",
+        eventType,
+        isHistoricalRun && includeGenerationComparison,
+      );
     } catch (err) {
       console.error("SSE job creation failed:", err);
       setSyncLogs((prev) => [...prev, "❌ [ERROR] Could not create backend report job."]);
@@ -1284,6 +1357,12 @@ export default function FrequencyReport() {
           if (result.success) {
             const normalizedRows = (result.rows || []).map(normalizeReportRow);
             setRows(normalizedRows);
+            if (result.generation_comparison_refreshed) {
+              const westBengalRow = normalizedRows.find((row) => row.is_state && /WEST\s*BENGAL|^WB$/i.test(String(row.state || row.state_name || row.plant_name || "")));
+              if (westBengalRow?.plant_id) {
+                setExpandedRowIds((current) => current.includes(westBengalRow.plant_id) ? current : [...current, westBengalRow.plant_id]);
+              }
+            }
             if (result.report_notes) {
               setIntroDesc(result.report_notes.executive_summary || "");
               setStateDesc(result.report_notes.state_drawal_compliance || "");
@@ -1296,8 +1375,8 @@ export default function FrequencyReport() {
               setEventType(result.event_type);
             }
             setUploadDetailRows(buildUploadDetails(normalizedRows));
-            setWbesLoaded(true);
-            setRtgLoaded(true);
+            setWbesLoaded(fileId === "database");
+            setRtgLoaded(fileId === "database");
             setScadaLoaded(true);
             if (!result.from_saved_event) {
               setScadaFile(fileObject);
@@ -1315,7 +1394,11 @@ export default function FrequencyReport() {
             if (result.from_saved_event && (result.missing_sources || []).length > 0) {
               toast.error(`Loaded from Mongo. Missing source data for ${result.missing_sources.length} plant/source groups.`);
             } else {
-              toast.success(result.from_saved_event ? "Historical event loaded from Mongo." : "Report compiled successfully!");
+              toast.success(
+                result.from_saved_event
+                  ? (result.generation_comparison_refreshed ? "Historical event loaded with generation comparison." : "Historical event loaded from Mongo.")
+                  : "Report compiled successfully!"
+              );
             }
             showModernPopup({
               type: result.missing_sources?.length ? "warning" : "success",
@@ -1323,7 +1406,7 @@ export default function FrequencyReport() {
               subtitle: `${result.rows?.length || 0} Entities Loaded`,
               description: result.missing_sources?.length
                 ? "Some saved source data is missing. Use the details table to decide what to fetch."
-                : "Data loaded successfully.",
+                : (result.generation_comparison_refreshed ? "Saved data and dated generation comparison loaded successfully." : "Data loaded successfully."),
             });
             setDataLoading(false);
           } else {
@@ -1369,7 +1452,21 @@ export default function FrequencyReport() {
       const uploadRes = await API.uploadTempFile(file);
       if (uploadRes?.success && uploadRes.file_id) {
         toast.success("File uploaded! Starting processing...", { id: loadingToast });
-        await runSSEReport(uploadRes.file_id, file);
+        const uploadRows = (rows.length ? rows : reportRowsFromMapping(mapData)).map((row) => ({
+          ...row,
+          actual_source: "SCADA",
+          sched_src: "SCADA",
+          schedule_source: "SCADA",
+          dc_src: "SCADA",
+          dc_source: "SCADA",
+        }));
+        if (!uploadRows.length) {
+          toast.error("Plant mapping is still loading. Please upload the file again.", { id: loadingToast });
+          setDataLoading(false);
+          return;
+        }
+        setRows(uploadRows);
+        await runSSEReport(uploadRes.file_id, file, uploadRows);
       } else {
         toast.error("File upload failed: " + (uploadRes?.error || "Unknown error"), { id: loadingToast });
         setDataLoading(false);
@@ -1569,6 +1666,8 @@ export default function FrequencyReport() {
           timestamps: row.series?.timestamps || [],
           frequency: row.series?.frequency || [],
           deviation: row.series?.deviation || [],
+          purulia_psp_net: row.series?.purulia_psp_net || [],
+          generation_categories: row.series?.generation_categories || {},
           schedule: row.series?.schedule || [],
           actual: row.series?.actual || [],
           dc: row.series?.dc || [],
@@ -1621,6 +1720,10 @@ export default function FrequencyReport() {
     details.card[open] > summary::before { transform: rotate(90deg); }
     details.card[open] > summary { border-bottom: 1px solid #d8e4ef; }
     details.card .chart-wrap { padding: 10px 12px 12px; }
+    .axis-controls { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; padding: 2px 2px 8px; color: #475569; font-size: 11px; }
+    .axis-controls strong { color: #0f172a; }
+    .axis-controls button { border: 1px solid #93c5fd; border-radius: 999px; padding: 3px 8px; background: #eff6ff; color: #1d4ed8; font-weight: 800; cursor: pointer; }
+    .axis-controls button.secondary { border-color: #059669; background: #ecfdf5; color: #047857; }
     .badge { border-radius: 999px; padding: 3px 8px; font-size: 11px; font-weight: 900; background: #eef2ff; color: #4338ca; }
     .chart { width: 100%; height: 520px; }
     .small { height: 380px; }
@@ -1835,8 +1938,10 @@ export default function FrequencyReport() {
       const timestamps = row.series.timestamps || [];
       const freq = clean(row.series.frequency);
       const dev = clean(row.series.deviation);
+      const puruliaNet = clean(row.series.purulia_psp_net || []);
       const actual = clean(row.series.actual);
-      const maxAbs = Math.max(50, ...dev.filter((v) => v !== null).map((v) => Math.abs(v)));
+      const hasPuruliaNet = row.is_state && puruliaNet.some((v) => v !== null);
+      const maxAbs = Math.max(50, ...dev.filter((v) => v !== null).map((v) => Math.abs(v)), ...puruliaNet.filter((v) => v !== null).map((v) => Math.abs(v)));
       const shaded = shadedDeviationData(row, freq, dev);
       const threshold = shaded.meta.threshold;
       const freqLineColor = row.is_state ? "#7C3AED" : "#1D4ED8";
@@ -1896,10 +2001,12 @@ export default function FrequencyReport() {
           itemHeight: 14,
           pageIconSize: SMALL_FONT,
           pageTextStyle: { fontSize: SMALL_FONT, fontWeight: 800 },
+          selected: hasPuruliaNet ? { "Purulia PSP Net (G + P)": false } : undefined,
           data: [
             shaded.meta.helping.label,
             shaded.meta.adverse.label,
             "Deviation (MW)",
+            ...(hasPuruliaNet ? ["Purulia PSP Net (G + P)"] : []),
             "Frequency (Hz)",
             ...markerSeries.map((series) => ({ name: series.name, icon: messageSymbol })),
             ...(lineSeries.length ? [{ name: "Physical Regulation — Transmission Line", icon: towerSymbol }] : []),
@@ -1916,10 +2023,51 @@ export default function FrequencyReport() {
           { name: shaded.meta.helping.label, type: "line", data: shaded.helping, yAxisIndex: 0, symbol: "none", lineStyle: { width: 0 }, itemStyle: { color: shaded.meta.helping.color }, areaStyle: { color: shaded.meta.helping.color }, emphasis: { disabled: true }, z: 1 },
           { name: shaded.meta.adverse.label, type: "line", data: shaded.adverse, yAxisIndex: 0, symbol: "none", lineStyle: { width: 0 }, itemStyle: { color: shaded.meta.adverse.color }, areaStyle: { color: shaded.meta.adverse.color }, emphasis: { disabled: true }, z: 1 },
           { name: "Deviation (MW)", type: "line", data: dev, yAxisIndex: 0, symbol: "none", lineStyle: { width: 3.2, color: row.is_state ? "#059669" : "#DC2626" }, itemStyle: { color: row.is_state ? "#059669" : "#DC2626" } },
+          ...(hasPuruliaNet ? [{ name: "Purulia PSP Net (G + P)", type: "line", data: puruliaNet, yAxisIndex: 0, symbol: "none", connectNulls: false, lineStyle: { width: 3, color: "#0284C7" }, itemStyle: { color: "#0284C7" } }] : []),
           { name: "Frequency (Hz)", type: "line", data: freq, yAxisIndex: 1, symbol: "none", lineStyle: { width: 2.8, color: freqLineColor }, itemStyle: { color: freqLineColor }, markLine: { silent: true, symbol: "none", data: [{ yAxis: threshold }], lineStyle: { color: "#EF4444", type: "dashed", width: 1.4 }, label: { formatter: threshold + " Hz", color: "#DC2626", fontSize: SMALL_FONT, fontWeight: 900 } } },
           { name: "Frequency violation area", type: "line", data: freq.map((value) => value !== null && (row.event_type === "high" ? value > 50.05 : value < 49.9) ? value : null), yAxisIndex: 1, symbol: "none", connectNulls: false, silent: true, lineStyle: { width: 0, opacity: 0 }, itemStyle: { color: "rgba(239,68,68,0.18)" }, areaStyle: { color: "rgba(239,68,68,0.18)", origin: threshold }, tooltip: { show: false }, z: 2 },
           ...markerSeries,
           ...lineSeries,
+        ],
+      };
+    };
+    const makeGenerationComparisonOption = (row) => {
+      const timestamps = row.series.timestamps || [];
+      const deviation = clean(row.series.deviation);
+      const frequency = clean(row.series.frequency);
+      const configuredCategories = Object.entries(row.series.generation_categories || {}).map(([label, values]) => [label, clean(values)]).filter(([, values]) => values.some((value) => value !== null));
+      const generationCategories = configuredCategories.length ? configuredCategories : [["Purulia PSP Net (G + P)", clean(row.series.purulia_psp_net || [])]];
+      const generationColors = ["#0284C7", "#F59E0B", "#7C3AED", "#DB2777", "#475569", "#0EA5E9", "#84CC16"];
+      const extent = (values) => {
+        const peak = Math.max(10, ...values.filter((value) => value !== null).map((value) => Math.abs(value)));
+        const step = peak < 100 ? 20 : peak < 1000 ? 100 : 500;
+        return Math.ceil(peak / step) * step;
+      };
+      const deviationExtent = extent(deviation);
+      const generationExtent = extent(generationCategories.flatMap(([, values]) => values));
+      const highFrequency = row.event_type === "high";
+      const inEvent = (value) => value !== null && (highFrequency ? value > 50.05 : value < 49.9);
+      const positiveShade = deviation.map((value, index) => inEvent(frequency[index]) && value !== null && value > 0 ? value : 0);
+      const negativeShade = deviation.map((value, index) => inEvent(frequency[index]) && value !== null && value < 0 ? value : 0);
+      const positiveLabel = highFrequency ? "Helping Grid (+Ve deviation)" : "Over Drawal (Gold Shade)";
+      const negativeLabel = highFrequency ? "Under Drawal (-Ve deviation)" : "Helping Grid (Cyan Shade)";
+      return {
+        animation: false,
+        tooltip: { trigger: "axis", axisPointer: { type: "cross" }, textStyle: { fontSize: CHART_FONT, fontWeight: 700 }, valueFormatter: (value) => value == null ? "-" : Number(value).toFixed(1) + " MW" },
+        title: { text: (row.plant_name || row.name || row.state || "State") + " Deviation vs State Generation", subtext: "Configured generation categories and Purulia PSP Net", left: 8, top: TITLE_TOP, textStyle: { fontSize: TITLE_FONT, fontWeight: 900, color: "#0F172A" }, subtextStyle: { fontSize: SMALL_FONT, fontWeight: 800, color: "#475569" } },
+        legend: { top: LEGEND_TOP, type: "scroll", textStyle: { fontSize: CHART_FONT, fontWeight: 800 } },
+        grid: { top: GRID_TOP, left: 82, right: 92, bottom: GRID_BOTTOM },
+        dataZoom: [{ type: "inside" }, { type: "slider", height: ZOOM_HEIGHT, bottom: 24, textStyle: { fontSize: SMALL_FONT } }],
+        xAxis: { type: "category", data: timestamps, boundaryGap: false, axisLabel: { fontSize: SMALL_FONT, fontWeight: 700, interval: Math.max(Math.floor(timestamps.length / 7) - 1, 0), formatter: fmtAxisTime } },
+        yAxis: [
+          { type: "value", name: "Generation (MW)", min: -generationExtent, max: generationExtent, axisLabel: { color: "#0369A1", fontSize: SMALL_FONT, fontWeight: 800 }, nameTextStyle: { color: "#0369A1", fontSize: CHART_FONT, fontWeight: 900 } },
+          { type: "value", name: "Deviation (MW)", min: -deviationExtent, max: deviationExtent, position: "right", axisLabel: { color: "#047857", fontSize: SMALL_FONT, fontWeight: 800 }, nameTextStyle: { color: "#047857", fontSize: CHART_FONT, fontWeight: 900 }, splitLine: { show: false } },
+        ],
+        series: [
+          { name: positiveLabel, type: "line", data: positiveShade, yAxisIndex: 1, symbol: "none", lineStyle: { width: 0 }, itemStyle: { color: "rgba(234,179,8,0.30)" }, areaStyle: { color: "rgba(234,179,8,0.30)", origin: 0 }, emphasis: { disabled: true }, z: 1 },
+          { name: negativeLabel, type: "line", data: negativeShade, yAxisIndex: 1, symbol: "none", lineStyle: { width: 0 }, itemStyle: { color: "rgba(6,182,212,0.30)" }, areaStyle: { color: "rgba(6,182,212,0.30)", origin: 0 }, emphasis: { disabled: true }, z: 1 },
+          { name: (row.plant_name || row.name || row.state || "State") + " Deviation", type: "line", data: deviation, yAxisIndex: 1, symbol: "none", lineStyle: { width: 3.2, color: "#059669" }, itemStyle: { color: "#059669" }, markLine: { silent: true, symbol: "none", data: [{ yAxis: 0 }], lineStyle: { color: "#94A3B8", type: "dashed" }, label: { formatter: "0 MW" } } },
+          ...generationCategories.map(([label, values], index) => ({ name: label, type: "line", data: values, yAxisIndex: 0, symbol: "none", connectNulls: false, lineStyle: { width: label.includes("Total") ? 3.3 : 2.6, color: generationColors[index % generationColors.length] }, itemStyle: { color: generationColors[index % generationColors.length] } })),
         ],
       };
     };
@@ -1963,11 +2111,13 @@ export default function FrequencyReport() {
       const card = document.createElement(collapsible ? "details" : "section");
       card.className = "card";
       if (collapsible) card.open = open;
+      const isGenerationComparison = kind === "Generation comparison";
+      const axisControls = isGenerationComparison ? '<div class="axis-controls"><strong>Generation axis:</strong><span class="axis-buttons"></span><span>Deviation always remains on Secondary.</span></div>' : '';
       const annexureLabel = row.is_state ? "Annexure 1" : "Annexure 2";
       const heading = '<h2>' + annexureLabel + ': ' + esc(row.plant_name) + '</h2><span class="badge">' + esc(kind) + '</span>';
       card.innerHTML = collapsible
-        ? '<summary>' + heading + '</summary><div class="chart-wrap"><div class="chart ' + (kind.includes("Schedule") ? "small" : "") + '"></div></div>'
-        : '<div class="card-title">' + heading + '</div><div class="chart ' + (kind.includes("Schedule") ? "small" : "") + '"></div>';
+        ? '<summary>' + heading + '</summary><div class="chart-wrap">' + axisControls + '<div class="chart ' + (kind.includes("Schedule") ? "small" : "") + '"></div></div>'
+        : '<div class="card-title">' + heading + '</div>' + axisControls + '<div class="chart ' + (kind.includes("Schedule") ? "small" : "") + '"></div>';
       root.appendChild(card);
       let chart = null;
       const renderChart = () => {
@@ -1979,6 +2129,43 @@ export default function FrequencyReport() {
           chart.resize();
         }
       };
+      if (isGenerationComparison) {
+        const controls = card.querySelector(".axis-buttons");
+        const categoryLabels = Object.keys(row.series.generation_categories || {});
+        if (!categoryLabels.length && (row.series.purulia_psp_net || []).some((value) => value !== null)) categoryLabels.push("Purulia PSP Net (G + P)");
+        const axisExtent = (values) => {
+          const peak = Math.max(10, ...values.filter((value) => value !== null && Number.isFinite(Number(value))).map((value) => Math.abs(Number(value))));
+          const step = peak < 100 ? 20 : peak < 1000 ? 100 : 500;
+          return Math.ceil(peak / step) * step;
+        };
+        categoryLabels.forEach((label) => {
+          const button = document.createElement("button");
+          button.type = "button";
+          button.textContent = label + " | Primary";
+          button.addEventListener("click", () => {
+            const secondary = button.classList.toggle("secondary");
+            button.textContent = label + " | " + (secondary ? "Secondary" : "Primary");
+            const secondaryLabels = categoryLabels.filter((categoryLabel) => {
+              const match = Array.from(controls.querySelectorAll("button")).find((item) => item.textContent.startsWith(categoryLabel + " |"));
+              return match && match.classList.contains("secondary");
+            });
+            option.series.forEach((item) => {
+              if (categoryLabels.includes(item.name)) item.yAxisIndex = secondaryLabels.includes(item.name) ? 1 : 0;
+            });
+            const categorySeries = option.series.filter((item) => categoryLabels.includes(item.name));
+            const primaryValues = categorySeries.filter((item) => !secondaryLabels.includes(item.name)).flatMap((item) => item.data || []);
+            const deviationValues = option.series.find((item) => String(item.name).includes("Deviation"))?.data || [];
+            const secondaryValues = deviationValues.concat(categorySeries.filter((item) => secondaryLabels.includes(item.name)).flatMap((item) => item.data || []));
+            const primaryExtent = axisExtent(primaryValues);
+            const secondaryExtent = axisExtent(secondaryValues);
+            option.yAxis[0].min = -primaryExtent; option.yAxis[0].max = primaryExtent;
+            option.yAxis[1].min = -secondaryExtent; option.yAxis[1].max = secondaryExtent;
+            renderChart();
+            chart.setOption(option, true);
+          });
+          controls.appendChild(button);
+        });
+      }
       if (!collapsible || open) requestAnimationFrame(renderChart);
       if (collapsible) card.addEventListener("toggle", () => { if (card.open) requestAnimationFrame(renderChart); });
     };
@@ -1990,6 +2177,7 @@ export default function FrequencyReport() {
       }
       report.rows.forEach((row) => {
         if (report.includeDeviation) addCard(row, "Annexure - Deviation / Frequency", makeDeviationOption(row), { collapsible: true, open: true });
+        if (Object.values(row.series.generation_categories || {}).some((values) => (values || []).some((value) => value !== null && value !== undefined && value !== "")) || (row.series.purulia_psp_net || []).some((value) => value !== null && value !== undefined && value !== "")) addCard(row, "Generation comparison", makeGenerationComparisonOption(row), { collapsible: true, open: true });
         if (row.is_state && report.includeStateScheduleActual) addCard(row, "Annexure - State Schedule / Actual", makeScheduleOption(row), { collapsible: true, open: false });
         if (!row.is_state && report.includeGeneratorScheduleActual) addCard(row, "Annexure - Generator Schedule / Actual", makeScheduleOption(row));
       });
@@ -2288,12 +2476,53 @@ export default function FrequencyReport() {
     label: row.plant_name || row.state || row.plant_id,
   })), [stateRows]);
 
-  const exportGeneratorOptions = useMemo(() => generatorRows.map((row) => ({
-    id: row.plant_id,
-    label: row.plant_name || row.entity || row.plant_id,
-    state: row.state || "ER",
-    fuel: row.fuel || "-",
-  })), [generatorRows]);
+  const exportGeneratorOptions = useMemo(() => generatorRows.map((row) => {
+    const mapping = mapData.find((item) => (
+      String(item.plant_id ?? "") === String(row.plant_id ?? "") &&
+      (!row.stage_id || !item.STAGE_ID || String(item.STAGE_ID) === String(row.stage_id))
+    ));
+    const rowType = String(row.type || "").trim().toUpperCase();
+    const type = ["GENERATOR", ""].includes(rowType)
+      ? String(mapping?.type || "").trim().toUpperCase()
+      : rowType;
+    const state = String(row.state || mapping?.state_name || "").trim().toUpperCase();
+    const owner = String(row.owner || mapping?.owner_name || "").trim().toUpperCase();
+    return {
+      id: row.plant_id,
+      label: row.plant_name || row.entity || row.plant_id,
+      state: row.state || mapping?.state_name || "ER",
+      fuel: row.fuel || mapping?.fuel_type || "-",
+      group: (() => {
+        if (type === "ISGS") return "ISGS";
+        if (type === "STATE" || type === "STATE_IPP") {
+          return `STATE::${state}`;
+        }
+        const stateOwners = {
+          BIHAR: ["BIHAR", "BSPGCL", "BSPHCL"],
+          JHARKHAND: ["JHARKHAND", "JUUNL", "JUVNL"],
+          ODISHA: ["ODISHA", "OHPC", "OPGC"],
+          "WEST BENGAL": ["WBPDCL", "WBSEDCL", "WBSEDCL", "DPL"],
+        };
+        const stateOwner = Object.entries(stateOwners).find(([, aliases]) => aliases.includes(owner));
+        if (stateOwner) return `STATE::${stateOwner[0]}`;
+        if (type === "IPP") return "IPP";
+        return "IPP";
+      })(),
+    };
+  }), [generatorRows, mapData]);
+
+  const exportGeneratorGroups = useMemo(() => {
+    const preferred = ["ISGS", "IPP", "STATE::BIHAR", "STATE::JHARKHAND", "STATE::ODISHA", "STATE::WEST BENGAL"];
+    return preferred
+      .map((key) => ({
+        key,
+        label: key.startsWith("STATE::")
+          ? `${key.slice(7).toLowerCase().replace(/\b\w/g, (char) => char.toUpperCase())} State`
+          : key,
+        ids: exportGeneratorOptions.filter((item) => item.group === key).map((item) => item.id),
+      }))
+      ;
+  }, [exportGeneratorOptions]);
 
   const exportFuelOptions = useMemo(() => {
     const fuels = Array.from(new Set(exportGeneratorOptions.map((item) => item.fuel).filter(Boolean))).sort();
@@ -2380,6 +2609,18 @@ export default function FrequencyReport() {
     setSelectedExportGeneratorIds((prev) => (
       prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]
     ));
+  };
+
+  const toggleExportGeneratorGroup = (ids = []) => {
+    setSelectedExportGeneratorIds((prev) => {
+      const selected = new Set(prev);
+      const allSelected = ids.length > 0 && ids.every((id) => selected.has(id));
+      ids.forEach((id) => {
+        if (allSelected) selected.delete(id);
+        else selected.add(id);
+      });
+      return Array.from(selected);
+    });
   };
 
   const openExportSelection = (type) => {
@@ -2555,6 +2796,251 @@ export default function FrequencyReport() {
     );
   };
 
+  const toggleStackedExportEvent = useCallback((eventId) => {
+    setStackedExportEventIds((current) => {
+      if (current.includes(eventId)) return current.filter((id) => id !== eventId);
+      if (current.length >= 10) {
+        toast.error("A maximum of 10 event-days can be stacked in one HTML file.");
+        return current;
+      }
+      return [...current, eventId];
+    });
+  }, []);
+
+  const toggleStackedExportState = useCallback((stateName) => {
+    setStackedExportStates((current) => current.includes(stateName)
+      ? (current.length > 1 ? current.filter((state) => state !== stateName) : current)
+      : [...current, stateName]);
+  }, []);
+
+  const buildStackedEventsHtml = useCallback((response) => {
+    const safeJson = JSON.stringify({
+      state: response.state,
+      states: response.states || [response.state],
+      events: response.events || [],
+    }).replace(/<\/script/gi, "<\\/script");
+    return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>${String(response.state || "State").replace(/[<>&]/g, "")} · stacked frequency events</title>
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+  <style>
+    *{box-sizing:border-box} body{margin:0;background:#f3f8f7;color:#0f172a;font-family:Inter,Segoe UI,Arial,sans-serif}
+    header{position:sticky;top:0;z-index:4;padding:14px 22px;background:#fff;color:#0f172a;border-bottom:1px solid #d8e4ef;box-shadow:0 8px 20px #0f172a0d}
+    header h1{margin:0 0 4px;font-size:20px} header p{margin:0;color:#64748b;font-size:12px;font-weight:700}
+    main{max-width:1900px;margin:0 auto;padding:6px}.card{margin-bottom:12px;background:#fff;border:1px solid #cbd5e1;border-radius:8px;box-shadow:0 5px 18px #0f172a0a;break-inside:avoid;overflow:hidden}.card summary{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:11px 14px;cursor:pointer;background:#fff;border-bottom:1px solid #dbe5ef;font-size:13px;font-weight:900}.card summary span:before{content:'▾';margin-right:10px;color:#03624c}.card summary em{padding:3px 9px;border-radius:999px;background:#eef2ff;color:#4338ca;font-size:10px;font-style:normal}.card-body{padding:12px 18px 16px}
+    .event-identity{display:grid;grid-template-columns:minmax(180px,260px) 1fr;gap:14px;align-items:stretch;margin:0 0 12px;border:1px solid #bae6fd;border-left:8px solid #075985;border-radius:10px;background:linear-gradient(90deg,#ecfeff 0,#f8fafc 62%,#fff 100%);overflow:hidden}.event-state{display:flex;align-items:center;padding:12px 14px;background:#075985;color:#fff;font-size:17px;font-weight:950;letter-spacing:.04em}.event-period{padding:10px 14px}.event-period strong{display:block;color:#0f172a;font-size:14px}.event-period span{display:block;margin-top:4px;color:#475569;font-size:12px;font-weight:800}.chart-title{margin:0 8px 2px;font-size:18px}
+    .chart{height:560px;width:100%}.comparison-heading{margin:20px 8px 0;padding-top:18px;border-top:1px solid #dbe7e3;font-size:15px;font-weight:900;color:#0f172a}.axis-controls{display:flex;align-items:center;flex-wrap:wrap;gap:6px;margin:8px 8px 0;font-size:11px;color:#475569}.axis-controls strong{color:#0f172a}.axis-controls button{border:1px solid #93c5fd;border-radius:999px;padding:3px 8px;background:#eff6ff;color:#1d4ed8;font-weight:800;cursor:pointer}.axis-controls button.secondary{border-color:#059669;background:#ecfdf5;color:#047857}.notice{margin:0 0 16px;padding:10px 14px;border-radius:10px;background:#fff7ed;border:1px solid #fed7aa;color:#9a3412;font-weight:700}
+    .event-results{display:grid;grid-template-columns:repeat(4,minmax(150px,1fr));gap:10px;margin:4px 8px 16px}.result-tile{padding:11px 12px;border:1px solid #dbe5ef;border-radius:10px;background:#f8fafc}.result-tile b{display:block;margin-bottom:5px;color:#64748b;font-size:10px;letter-spacing:.05em;text-transform:uppercase}.result-tile strong{color:#0f172a;font-size:17px}.result-tile small{display:block;margin-top:3px;color:#64748b;font-weight:700}.message-breakup{display:flex;flex-wrap:wrap;gap:5px;margin-top:8px}.message-chip{display:inline-flex;align-items:center;gap:5px;padding:3px 7px;border:1px solid #cbd5e1;border-radius:999px;background:#fff;color:#334155;font-size:10px;font-weight:900}.message-chip i{width:7px;height:7px;border-radius:50%}.regulatory-details{grid-column:1/-1;border-left:5px solid #111827;background:#fffbeb}.regulatory-details ul{margin:6px 0 0;padding-left:18px;color:#334155;font-size:12px;font-weight:700}.regulatory-details li+li{margin-top:4px}
+    @media(max-width:800px){main{padding:10px}.chart{height:440px}.event-identity{grid-template-columns:1fr}.event-results{grid-template-columns:1fr 1fr}}
+    @media print{header{position:static}.card{box-shadow:none;page-break-after:always}.chart{height:500px}}
+  </style>
+</head>
+<body>
+  <header><h1 id="heading"></h1><p>Saved frequency events shown chronologically as separate interactive charts.</p></header>
+  <main id="root"></main>
+  <script>
+    const report=${safeJson};
+    const root=document.getElementById('root');
+    document.getElementById('heading').textContent=(report.states||[report.state]).join(', ')+' | stacked frequency event comparison';
+    const numberSeries=(values)=>Array.isArray(values)?values.map(v=>v===null||v===''||!Number.isFinite(Number(v))?null:Number(v)):[];
+    const esc=(v)=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    const parseTimestamp=(value)=>{const parsed=new Date(String(value||'').replace(' ','T'));return Number.isNaN(parsed.getTime())?null:parsed};
+    const crmsColors={'alert':'#facc15','emergency':'#f97316','extreme emergency':'#dc2626','non-compliance':'#111827','noncompliance':'#111827'};
+    const crmsOrder=['Alert','Emergency','Extreme Emergency','Non-compliance'];
+    const crmsCategory=(message)=>{const raw=Array.isArray(message.category)?message.category[0]:message.category;return String(raw||message.violation_type||'CRMS Message').trim()};
+    const crmsLegend=(message)=>crmsOrder.find(item=>item.toLowerCase()===crmsCategory(message).toLowerCase())||crmsCategory(message);
+    const crmsColor=(message)=>crmsColors[crmsCategory(message).toLowerCase()]||'#2563eb';
+    const crmsSymbol='path://M4 4h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H9l-5 4v-4H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z';
+    const towerSymbol='path://M11 1h2l1.4 5H18v2h-3l1 4H20v2h-3.4L19 23h-3l-.8-3H8.8L8 23H5l2.4-9H4v-2h4l1-4H6V6h3.6L11 1zm-.4 7-1 4h4.8l-1-4h-2.8zm-1.5 6-1 4h5.8l-1-4H9.1z';
+    const crmsTooltip=(message)=>{
+      let html='<div style="min-width:240px;font-size:12px;line-height:1.45"><div style="font-weight:900;color:'+crmsColor(message)+';margin-bottom:5px">'+esc(crmsCategory(message))+'</div>';
+      const issued=message.message_date||message.timestamp||'';
+      if(issued) html+='<div><span style="color:#64748b">Issue time:</span> '+esc(String(issued).replace('T',' '))+'</div>';
+      if(message.message_no) html+='<div><span style="color:#64748b">Message no:</span> '+esc(message.message_no)+'</div>';
+      if(Array.isArray(message.issued_to)&&message.issued_to.length) html+='<div><span style="color:#64748b">Issued to:</span> '+esc(message.issued_to.join(', '))+'</div>';
+      if(message.issued_by) html+='<div><span style="color:#64748b">Issued by:</span> '+esc(message.issued_by)+'</div>';
+      if(message.remarks) html+='<div style="margin-top:5px;font-weight:800;color:#334155">'+esc(message.remarks)+'</div>';
+      return html+'</div>';
+    };
+    const transmissionTooltip=(event)=>{
+      let html='<div style="min-width:260px;font-size:12px;line-height:1.45"><div style="font-weight:900;color:#050505;margin-bottom:5px">Physical Regulation - Transmission Line</div>';
+      html+='<div style="font-weight:900">'+esc(event.line_name||'Transmission line')+'</div>';
+      html+='<div><span style="color:#64748b">Time:</span> '+esc(event.timestamp||event.outage_date_time||'-')+'</div>';
+      if(Array.isArray(event.owners)&&event.owners.length)html+='<div><span style="color:#64748b">Owner(s):</span> '+esc(event.owners.join(', '))+'</div>';
+      if(event.agency_name)html+='<div><span style="color:#64748b">Agency:</span> '+esc(event.agency_name)+'</div>';
+      if(event.remarks)html+='<div><span style="color:#64748b">Details:</span> '+esc(event.remarks)+'</div>';
+      return html+'</div>';
+    };
+    report.events.forEach((event,index)=>{
+      const eventState=event.state||report.state;
+      const series=event.series||{};
+      const times=series.timestamps||[];
+      const deviation=numberSeries(series.deviation);
+      const frequency=numberSeries(series.frequency);
+      const crmsMessages=Array.isArray(event.crms_messages)?event.crms_messages:[];
+      const transmissionEvents=Array.isArray(event.transmission_line_events)?event.transmission_line_events:[];
+      const purulia=numberSeries(series.purulia_psp_net);
+      const hasPurulia=purulia.some(v=>v!==null);
+      const configuredGeneration=Object.entries(series.generation_categories||{}).map(([label,values])=>[label,numberSeries(values)]).filter(([,values])=>values.some(v=>v!==null));
+      const generationCategories=configuredGeneration.length?configuredGeneration:(hasPurulia?[["Purulia PSP Net (G + P)",purulia]]:[]);
+      const hasGeneration=generationCategories.length>0;
+      const generationColors=['#0284c7','#f59e0b','#7c3aed','#db2777','#475569','#0ea5e9','#84cc16'];
+      const values=deviation.concat(hasPurulia?purulia:[]).filter(v=>v!==null);
+      const maxAbs=Math.max(10,...values.map(v=>Math.abs(v)));
+      const extent=Math.ceil(maxAbs/50)*50;
+      const scaleExtent=(values)=>{const peak=Math.max(10,...values.filter(v=>v!==null).map(v=>Math.abs(v)));const step=peak<100?20:peak<1000?100:500;return Math.ceil(peak/step)*step};
+      const deviationExtent=scaleExtent(deviation);
+      const generationExtent=scaleExtent(generationCategories.flatMap(([,categoryValues])=>categoryValues));
+      const threshold=event.event_type==='high'?50.05:49.9;
+      const inFrequencyEvent=(value)=>value!==null&&(event.event_type==='high'?value>50.05:value<49.9);
+      const positiveShade=deviation.map((value,i)=>inFrequencyEvent(frequency[i])&&value!==null&&value>0?value:0);
+      const negativeShade=deviation.map((value,i)=>inFrequencyEvent(frequency[i])&&value!==null&&value<0?value:0);
+      const positiveShadeLabel=event.event_type==='high'?'Helping Grid (+Ve deviation)':'Over Drawal (Freq < 49.9 Hz)';
+      const negativeShadeLabel=event.event_type==='high'?'Under Drawal (-Ve deviation)':'Helping Grid (Freq < 49.9 Hz)';
+      const parsedTimes=times.map(parseTimestamp);
+      const crmsGroups=new Map();
+      crmsMessages.forEach((message,messageIndex)=>{
+        const messageTime=parseTimestamp(message.timestamp||message.message_date);
+        if(!messageTime||!parsedTimes.length)return;
+        let nearest=-1; let nearestDiff=Infinity;
+        parsedTimes.forEach((timestamp,timeIndex)=>{if(!timestamp)return;const diff=Math.abs(timestamp.getTime()-messageTime.getTime());if(diff<nearestDiff){nearestDiff=diff;nearest=timeIndex}});
+        if(nearest<0)return;
+        const name=crmsLegend(message);
+        if(!crmsGroups.has(name))crmsGroups.set(name,[]);
+        crmsGroups.get(name).push({value:[times[nearest],(deviation[nearest]??0)+((messageIndex%5)-2)*Math.max(extent*.018,6)],crms:message});
+      });
+      const crmsSeries=Array.from(crmsGroups.entries()).sort(([left],[right])=>{const li=crmsOrder.indexOf(left);const ri=crmsOrder.indexOf(right);return(li<0?999:li)-(ri<0?999:ri)||left.localeCompare(right)}).map(([name,data])=>({name,type:'scatter',data,yAxisIndex:0,symbol:crmsSymbol,symbolSize:28,itemStyle:{color:crmsColor({category:name}),borderColor:'#fff',borderWidth:2,shadowColor:'rgba(15,23,42,.35)',shadowBlur:8},emphasis:{scale:1.45,itemStyle:{borderColor:'#facc15',borderWidth:3}},tooltip:{trigger:'item',formatter:params=>crmsTooltip(params.data&&params.data.crms||{})},z:20}));
+      const transmissionMarkers=[];
+      transmissionEvents.forEach((physicalEvent,eventIndex)=>{
+        const eventTime=parseTimestamp(physicalEvent.timestamp||physicalEvent.outage_date_time);
+        if(!eventTime||!parsedTimes.length)return;
+        let nearest=-1; let nearestDiff=Infinity;
+        parsedTimes.forEach((timestamp,timeIndex)=>{if(!timestamp)return;const diff=Math.abs(timestamp.getTime()-eventTime.getTime());if(diff<nearestDiff){nearestDiff=diff;nearest=timeIndex}});
+        if(nearest<0)return;
+        transmissionMarkers.push({value:[times[nearest],(deviation[nearest]??0)+((eventIndex%4)-1.5)*Math.max(extent*.022,8)],transmission:physicalEvent});
+      });
+      const transmissionSeries=transmissionMarkers.length?[{name:'Physical Regulation - Transmission Line',type:'scatter',data:transmissionMarkers,yAxisIndex:0,symbol:towerSymbol,symbolSize:31,itemStyle:{color:'#050505',borderColor:'#facc15',borderWidth:2,shadowColor:'rgba(250,204,21,.9)',shadowBlur:12},emphasis:{scale:1.5},tooltip:{trigger:'item',formatter:params=>transmissionTooltip(params.data&&params.data.transmission||{})},z:22}]:[];
+      const validFrequencyIndexes=frequency.map((value,i)=>value===null?-1:i).filter(i=>i>=0);
+      const lowestFrequencyIndex=validFrequencyIndexes.reduce((best,i)=>best<0||frequency[i]<frequency[best]?i:best,-1);
+      const maxOdIndex=deviation.reduce((best,value,i)=>value!==null&&(best<0||value>deviation[best])?i:best,-1);
+      const maxOd=maxOdIndex>=0?deviation[maxOdIndex]:null;
+      const odAtLowestFrequency=lowestFrequencyIndex>=0?deviation[lowestFrequencyIndex]:null;
+      const differentMessageCount=new Set(crmsMessages.map(message=>String(message.message_no||'')+'|'+String(message.timestamp||message.message_date||'')+'|'+crmsCategory(message))).size;
+      const messageBreakup=new Map();
+      crmsMessages.forEach(message=>{const category=crmsLegend(message);messageBreakup.set(category,(messageBreakup.get(category)||0)+1)});
+      const messageBreakupHtml=messageBreakup.size?'<div class="message-breakup">'+Array.from(messageBreakup.entries()).sort(([left],[right])=>{const li=crmsOrder.indexOf(left);const ri=crmsOrder.indexOf(right);return(li<0?999:li)-(ri<0?999:ri)||left.localeCompare(right)}).map(([category,count])=>'<span class="message-chip"><i style="background:'+crmsColor({category})+'"></i>'+esc(category)+': '+count+'</span>').join('')+'</div>':'<small>No mapped message.</small>';
+      const regulatoryList=transmissionEvents.length?'<ul>'+transmissionEvents.map(item=>'<li><strong>'+esc(item.line_name||'Transmission line')+'</strong> - '+esc(item.timestamp||item.outage_date_time||'-')+(Array.isArray(item.owners)&&item.owners.length?' | '+esc(item.owners.join(', ')):'')+'</li>').join('')+'</ul>':'<small>No physical-regulation record for this state and event period.</small>';
+      const resultsHtml='<div class="event-results"><div class="result-tile"><b>Maximum OD</b><strong>'+(maxOd===null?'-':Number(maxOd).toFixed(0)+' MW')+'</strong><small>'+(maxOdIndex<0?'-':esc(times[maxOdIndex]||''))+'</small></div><div class="result-tile"><b>OD at lowest frequency</b><strong>'+(odAtLowestFrequency===null?'-':Number(odAtLowestFrequency).toFixed(0)+' MW')+'</strong><small>'+(lowestFrequencyIndex<0?'-':Number(frequency[lowestFrequencyIndex]).toFixed(3)+' Hz | '+esc(times[lowestFrequencyIndex]||''))+'</small></div><div class="result-tile"><b>Different messages</b><strong>'+differentMessageCount+'</strong><small>'+crmsMessages.length+' mapped message record(s)</small>'+messageBreakupHtml+'</div><div class="result-tile"><b>Physical regulations</b><strong>'+transmissionEvents.length+'</strong><small>Transmission-line action(s)</small></div><div class="result-tile regulatory-details"><b>Physical regulatory details</b>'+regulatoryList+'</div></div>';
+      const card=document.createElement('details'); card.className='card'; card.open=true;
+      card.innerHTML='<summary><span>Annexure '+(index+1)+': '+esc(eventState)+'</span><em>Annexure - Deviation / Frequency</em></summary><div class="card-body"><div class="event-identity"><div class="event-state">'+esc(eventState)+'</div><div class="event-period"><strong>'+esc(event.event_name||event.event_id)+'</strong><span>'+esc(event.start_time||'')+' to '+esc(event.end_time||'')+'</span></div></div><h2 class="chart-title">Frequency (Hz) vs Deviation (MW)</h2><div class="chart frequency-chart"></div>'+resultsHtml+(hasGeneration?'<div class="comparison-heading">'+esc(eventState)+' Deviation vs State Generation</div><div class="axis-controls"><strong>Generation axis:</strong><span class="axis-buttons"></span><span>Deviation always remains on Secondary.</span></div><div class="chart generation-chart"></div>':'')+'</div>';
+      root.appendChild(card);
+      const chart=echarts.init(card.querySelector('.frequency-chart'));
+      chart.setOption({
+        animation:false,
+        color:['#059669','#0284c7','#7c3aed'],
+        tooltip:{trigger:'axis',axisPointer:{type:'cross'},formatter:params=>{const list=Array.isArray(params)?params:[params];const messageParam=list.find(item=>item.data&&item.data.crms);if(messageParam)return crmsTooltip(messageParam.data.crms);const transmissionParam=list.find(item=>item.data&&item.data.transmission);if(transmissionParam)return transmissionTooltip(transmissionParam.data.transmission);let html='<div style="font-size:12px;font-weight:800;margin-bottom:5px">'+esc(list[0]&&list[0].axisValue||'')+'</div>';list.forEach(item=>{if(item.value==null||item.seriesName===positiveShadeLabel||item.seriesName===negativeShadeLabel)return;const value=Array.isArray(item.value)?item.value[1]:item.value;html+='<div>'+item.marker+esc(item.seriesName)+': <strong>'+Number(value).toFixed(item.seriesName==='Frequency'?3:1)+'</strong></div>'});return html}},
+        legend:{top:8,textStyle:{fontSize:13,fontWeight:700},selected:hasPurulia?{'Purulia PSP Net (G + P)':false}:{}},
+        grid:{top:58,left:76,right:78,bottom:78},
+        dataZoom:[{type:'inside'},{type:'slider',height:24,bottom:24}],
+        xAxis:{type:'category',boundaryGap:false,data:times,axisLabel:{fontSize:11,formatter:v=>String(v).replace('T',' ').slice(5,16)}},
+        yAxis:[
+          {type:'value',name:'MW',min:-extent,max:extent,axisLine:{show:true},splitLine:{lineStyle:{color:'#e2e8f0'}}},
+          {type:'value',name:'Frequency (Hz)',min:49.4,max:50.6,position:'right',axisLabel:{color:'#7c3aed',formatter:v=>Number(v).toFixed(2)},nameTextStyle:{color:'#7c3aed'}}
+        ],
+        series:[
+          {name:positiveShadeLabel,type:'line',data:positiveShade,yAxisIndex:0,symbol:'none',lineStyle:{width:0},itemStyle:{color:'rgba(234,179,8,.32)'},areaStyle:{color:'rgba(234,179,8,.32)',origin:0},emphasis:{disabled:true},z:1},
+          {name:negativeShadeLabel,type:'line',data:negativeShade,yAxisIndex:0,symbol:'none',lineStyle:{width:0},itemStyle:{color:'rgba(6,182,212,.27)'},areaStyle:{color:'rgba(6,182,212,.27)',origin:0},emphasis:{disabled:true},z:1},
+          {name:eventState+' Deviation',type:'line',data:deviation,yAxisIndex:0,symbol:'none',lineStyle:{width:2.8,color:'#059669'},itemStyle:{color:'#059669'}},
+          ...(hasPurulia?[{name:'Purulia PSP Net (G + P)',type:'line',data:purulia,yAxisIndex:0,symbol:'none',connectNulls:false,lineStyle:{width:2.8,color:'#0284c7'},itemStyle:{color:'#0284c7'}}]:[]),
+          {name:'Frequency',type:'line',data:frequency,yAxisIndex:1,symbol:'none',lineStyle:{width:2.4,color:'#7c3aed'},itemStyle:{color:'#7c3aed'},markLine:{silent:true,symbol:'none',data:[{yAxis:threshold}],lineStyle:{color:'#dc2626',type:'dashed'},label:{formatter:threshold+' Hz'}}},
+          ...crmsSeries,
+          ...transmissionSeries
+        ]
+      });
+      window.addEventListener('resize',()=>chart.resize());
+      if(hasGeneration){
+        const comparisonChart=echarts.init(card.querySelector('.generation-chart'));
+        comparisonChart.setOption({
+          animation:false,
+          tooltip:{trigger:'axis',axisPointer:{type:'cross'},valueFormatter:v=>v==null?'-':Number(v).toFixed(1)+' MW'},
+          title:{text:eventState+' Deviation vs State Generation',subtext:'Configured generation categories'+(hasPurulia?' including Purulia PSP Net (G + P)':''),left:8,top:8,textStyle:{fontSize:17,fontWeight:900},subtextStyle:{fontSize:12,color:'#64748b',fontWeight:700}},
+          legend:{top:62,type:'scroll',textStyle:{fontSize:13,fontWeight:700}},
+          grid:{top:106,left:82,right:92,bottom:78},
+          dataZoom:[{type:'inside'},{type:'slider',height:24,bottom:24}],
+          xAxis:{type:'category',boundaryGap:false,data:times,axisLabel:{fontSize:11,formatter:v=>String(v).replace('T',' ').slice(5,16)}},
+          yAxis:[
+            {type:'value',name:'Generation (MW)',min:-generationExtent,max:generationExtent,axisLabel:{color:'#0369a1',fontWeight:700},nameTextStyle:{color:'#0369a1',fontWeight:900}},
+            {type:'value',name:'Deviation / selected generation (MW)',min:-deviationExtent,max:deviationExtent,position:'right',axisLabel:{color:'#047857',fontWeight:700},nameTextStyle:{color:'#047857',fontWeight:900},splitLine:{show:false}}
+          ],
+          series:[
+            {name:positiveShadeLabel,type:'line',data:positiveShade,yAxisIndex:1,symbol:'none',lineStyle:{width:0},itemStyle:{color:'rgba(234,179,8,.32)'},areaStyle:{color:'rgba(234,179,8,.32)',origin:0},emphasis:{disabled:true},z:1},
+            {name:negativeShadeLabel,type:'line',data:negativeShade,yAxisIndex:1,symbol:'none',lineStyle:{width:0},itemStyle:{color:'rgba(6,182,212,.27)'},areaStyle:{color:'rgba(6,182,212,.27)',origin:0},emphasis:{disabled:true},z:1},
+            {name:eventState+' Deviation',type:'line',data:deviation,yAxisIndex:1,symbol:'none',lineStyle:{width:3,color:'#059669'},itemStyle:{color:'#059669'},markLine:{silent:true,symbol:'none',data:[{yAxis:0}],lineStyle:{color:'#94a3b8',type:'dashed'},label:{formatter:'0 MW'}}},
+            ...generationCategories.map(([label,categoryValues],categoryIndex)=>({name:label,type:'line',data:categoryValues,yAxisIndex:0,symbol:'none',connectNulls:false,lineStyle:{width:label.includes('Total')?3.3:2.5,color:generationColors[categoryIndex%generationColors.length]},itemStyle:{color:generationColors[categoryIndex%generationColors.length]}}))
+          ]
+        });
+        const axisButtons=card.querySelector('.axis-buttons');
+        generationCategories.forEach(([label])=>{
+          const button=document.createElement('button');
+          button.type='button';
+          button.textContent=label+' · Primary';
+          button.addEventListener('click',()=>{
+            const secondary=button.classList.toggle('secondary');
+            button.textContent=label+' · '+(secondary?'Secondary':'Primary');
+            const current=comparisonChart.getOption();
+            const moved=current.series.find(item=>item.name===label);
+            if(moved) moved.yAxisIndex=secondary?1:0;
+            const secondaryLabels=generationCategories.filter(([categoryLabel])=>{
+              const match=Array.from(axisButtons.querySelectorAll('button')).find(item=>item.textContent.startsWith(categoryLabel+' ·'));
+              return match&&match.classList.contains('secondary');
+            }).map(([categoryLabel])=>categoryLabel);
+            const primaryValues=generationCategories.filter(([categoryLabel])=>!secondaryLabels.includes(categoryLabel)).flatMap(([,values])=>values);
+            const secondaryValues=deviation.concat(generationCategories.filter(([categoryLabel])=>secondaryLabels.includes(categoryLabel)).flatMap(([,values])=>values));
+            const primaryExtent=scaleExtent(primaryValues);
+            const secondaryExtent=scaleExtent(secondaryValues);
+            current.yAxis[0].min=-primaryExtent; current.yAxis[0].max=primaryExtent;
+            current.yAxis[1].min=-secondaryExtent; current.yAxis[1].max=secondaryExtent;
+            comparisonChart.setOption({yAxis:current.yAxis,series:current.series},false);
+          });
+          axisButtons.appendChild(button);
+        });
+        window.addEventListener('resize',()=>comparisonChart.resize());
+      }
+    });
+  </script>
+</body>
+</html>`;
+  }, []);
+
+  const handleStackedEventsExport = useCallback(async () => {
+    if (!stackedExportEventIds.length) {
+      toast.error("Select at least one saved event.");
+      return;
+    }
+    setStackedExporting(true);
+    const loadingToast = toast.loading("Building stacked event charts...");
+    try {
+      const response = await API.getStackedFrequencyEvents({
+        event_ids: stackedExportEventIds,
+        states: stackedExportStates,
+      });
+      const html = buildStackedEventsHtml(response);
+      const fileState = stackedExportStates.join("_").replace(/\s+/g, "_");
+      await saveBlobToFile(new Blob([html], { type: "text/html;charset=utf-8" }), `Frequency_Events_${fileState}.html`);
+      const missingCount = response.missing?.length || 0;
+      toast.success(`Exported ${response.events?.length || 0} event chart(s)${missingCount ? `; ${missingCount} unavailable` : ""}.`, { id: loadingToast });
+      setStackedExportOpen(false);
+    } catch (error) {
+      const detail = error?.response?.data?.detail || error?.message || "Unable to create export.";
+      toast.error(detail, { id: loadingToast });
+    } finally {
+      setStackedExporting(false);
+    }
+  }, [buildStackedEventsHtml, saveBlobToFile, stackedExportEventIds, stackedExportStates]);
+
   const rawEditorColumns = [
     { key: "actual", label: "RTG Actual", color: "#0F172A", values: rawEditorActual },
     { key: "scada_file_actual", label: "SCADA File Actual", color: "#C2410C", values: rawEditorScadaFileActual },
@@ -2604,8 +3090,79 @@ export default function FrequencyReport() {
         setSelectedDbDate={setSelectedDbDate}
         useDatabase={useDatabase}
         setUseDatabase={setUseDatabase}
+        onNewEvent={handleNewEvent}
         onResyncSource={handleResyncSource}
+        includeGenerationComparison={includeGenerationComparison}
+        setIncludeGenerationComparison={setIncludeGenerationComparison}
       />
+
+      <div style={{ display: "flex", justifyContent: "flex-end", margin: "-8px 4px 10px" }}>
+        <button
+          type="button"
+          onClick={() => {
+            setStackedExportEventIds((current) => current.length ? current : availableEvents.slice(0, 10).map((event) => event.event_id));
+            setStackedExportOpen(true);
+          }}
+          disabled={!availableEvents.length}
+          title="Select multiple states and up to ten saved event-days for interactive HTML charts"
+          style={{ display: "inline-flex", alignItems: "center", gap: "7px", padding: "8px 13px", border: "1px solid #0F766E", borderRadius: "9px", background: availableEvents.length ? "#ECFDF5" : "#F1F5F9", color: availableEvents.length ? "#065F46" : "#94A3B8", fontSize: "0.76rem", fontWeight: 850, cursor: availableEvents.length ? "pointer" : "not-allowed" }}
+        >
+          <Download size={15} /> Stack saved events · HTML
+        </button>
+      </div>
+
+      {stackedExportOpen && (
+        <div onClick={() => !stackedExporting && setStackedExportOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 100000, display: "flex", alignItems: "center", justifyContent: "center", padding: "20px", background: "rgba(15,23,42,0.48)", backdropFilter: "blur(8px)" }}>
+          <div onClick={(event) => event.stopPropagation()} style={{ width: "min(760px, 96vw)", maxHeight: "88vh", overflow: "hidden", background: "#FFFFFF", border: "1px solid #B8E4D3", borderRadius: "18px", boxShadow: "0 28px 70px rgba(15,23,42,.3)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "16px", padding: "17px 20px", borderBottom: "1px solid #E2E8F0" }}>
+              <div>
+                <h3 style={{ margin: 0, color: "#0F172A", fontSize: "1.05rem", fontWeight: 900 }}>Stack saved frequency events</h3>
+                <div style={{ marginTop: "3px", color: "#64748B", fontSize: "0.74rem" }}>Choose one or more states and up to 10 saved event-days. Every state/event pair uses a separate Annexure chart section.</div>
+              </div>
+              <button type="button" onClick={() => setStackedExportOpen(false)} disabled={stackedExporting} style={{ border: 0, background: "transparent", cursor: "pointer", color: "#64748B" }}><X size={19} /></button>
+            </div>
+            <div style={{ padding: "16px 20px" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "7px" }}>
+                <label style={{ color: "#334155", fontSize: "0.72rem", fontWeight: 850 }}>States</label>
+                <span style={{ color: "#64748B", fontSize: "0.68rem", fontWeight: 800 }}>{stackedExportStates.length} selected</span>
+              </div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: "7px", padding: "10px", border: "1px solid #CBD5E1", borderRadius: "10px", background: "#F8FAFC" }}>
+                {["BIHAR", "JHARKHAND", "ODISHA", "WEST BENGAL", "SIKKIM", "DVC"].map((state) => {
+                  const selected = stackedExportStates.includes(state);
+                  return (
+                    <label key={state} style={{ display: "inline-flex", alignItems: "center", gap: "5px", padding: "5px 9px", border: `1px solid ${selected ? "#10B981" : "#CBD5E1"}`, borderRadius: "999px", background: selected ? "#ECFDF5" : "#FFF", color: selected ? "#065F46" : "#475569", fontSize: "0.7rem", fontWeight: 850, cursor: "pointer" }}>
+                      <input type="checkbox" checked={selected} onChange={() => toggleStackedExportState(state)} style={{ accentColor: "#047857" }} />
+                      {state}
+                    </label>
+                  );
+                })}
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", margin: "15px 0 7px" }}>
+                <span style={{ color: "#334155", fontSize: "0.72rem", fontWeight: 850 }}>Saved events</span>
+                <span style={{ padding: "3px 8px", borderRadius: "999px", background: stackedExportEventIds.length >= 8 ? "#DCFCE7" : "#EFF6FF", color: stackedExportEventIds.length >= 8 ? "#166534" : "#1D4ED8", fontSize: "0.69rem", fontWeight: 900 }}>{stackedExportEventIds.length}/10 selected</span>
+              </div>
+              <div style={{ maxHeight: "42vh", overflowY: "auto", border: "1px solid #E2E8F0", borderRadius: "11px" }}>
+                {availableEvents.map((event, index) => {
+                  const checked = stackedExportEventIds.includes(event.event_id);
+                  return (
+                    <label key={event.event_id} style={{ display: "grid", gridTemplateColumns: "22px 1fr auto", gap: "9px", alignItems: "center", padding: "10px 12px", borderBottom: index === availableEvents.length - 1 ? 0 : "1px solid #E2E8F0", background: checked ? "#F0FDFA" : "#FFF", cursor: "pointer" }}>
+                      <input type="checkbox" checked={checked} onChange={() => toggleStackedExportEvent(event.event_id)} style={{ width: "16px", height: "16px", accentColor: "#047857" }} />
+                      <span><strong style={{ display: "block", color: "#0F172A", fontSize: "0.76rem" }}>{event.name || event.event_id}</strong><span style={{ color: "#64748B", fontSize: "0.67rem" }}>{event.start_time || ""} to {event.end_time || ""}</span></span>
+                      <span style={{ color: event.event_type === "high" ? "#9A3412" : "#075985", fontSize: "0.65rem", fontWeight: 900, textTransform: "uppercase" }}>{event.event_type || "low"}</span>
+                    </label>
+                  );
+                })}
+              </div>
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: "9px", marginTop: "16px" }}>
+                <button type="button" onClick={() => setStackedExportOpen(false)} disabled={stackedExporting} style={{ padding: "9px 15px", border: "1px solid #CBD5E1", borderRadius: "9px", background: "#FFF", color: "#334155", fontWeight: 800 }}>Cancel</button>
+                <button type="button" onClick={handleStackedEventsExport} disabled={stackedExporting || !stackedExportEventIds.length} style={{ display: "inline-flex", alignItems: "center", gap: "7px", padding: "9px 16px", border: 0, borderRadius: "9px", background: stackedExporting || !stackedExportEventIds.length ? "#94A3B8" : "linear-gradient(135deg,#03624C,#0F766E)", color: "#FFF", fontWeight: 850, cursor: stackedExporting ? "wait" : "pointer" }}>
+                  <Download size={15} /> {stackedExporting ? "Preparing..." : "Export stacked HTML"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── TABS SELECTOR ─────────────────────────────────────── */}
       <div
@@ -2976,7 +3533,7 @@ export default function FrequencyReport() {
                 Plant and Source Mapping Settings
               </h2>
               <p style={{ fontSize: "0.74rem", color: "#64748B", margin: "2px 0 0" }}>
-                Define acronym keys, SCADA column headers, and schedule retrieval sources for each grid node.
+                Click the MIS Name cell to enter the exact stationName used by the MIS API, then click Save changes.
               </p>
             </div>
             <div style={{ display: "flex", gap: "8px" }}>
@@ -3131,6 +3688,24 @@ export default function FrequencyReport() {
                       style={{ paddingLeft: 30, fontSize: "0.74rem" }}
                     />
                   </div>
+                </div>
+                <div className="d-flex flex-wrap gap-1 mb-2" aria-label="Generator group selection shortcuts">
+                  {exportGeneratorGroups.map((group) => {
+                    const allSelected = group.ids.length > 0 && group.ids.every((id) => selectedExportGeneratorIds.includes(id));
+                    return (
+                      <button
+                        key={`generator-group-${group.key}`}
+                        type="button"
+                        className={`btn btn-sm py-0 px-2 ${allSelected ? "theme-btn-primary" : "theme-btn-outline"}`}
+                        onClick={() => toggleExportGeneratorGroup(group.ids)}
+                        disabled={!group.ids.length}
+                        title={`${allSelected ? "Deselect" : "Select"} all ${group.label} generators`}
+                        style={{ fontSize: "0.68rem" }}
+                      >
+                        {group.label} ({group.ids.length})
+                      </button>
+                    );
+                  })}
                 </div>
                 <div className="d-flex flex-column gap-1" style={{ maxHeight: 240, overflow: "auto" }}>
                   {filteredExportGeneratorOptions.map((item) => (
@@ -3355,9 +3930,9 @@ export default function FrequencyReport() {
               }}
             >
               <input
-                value={eventNameDraft}
-                onChange={(e) => setEventNameDraft(e.target.value)}
-                placeholder="Enter one event name for this uploaded range"
+                value={eventDurationName()}
+                readOnly
+                aria-label="Automatically generated event name"
                 style={{
                   border: "1px solid #CBD5E1",
                   borderRadius: "8px",

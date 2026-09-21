@@ -220,6 +220,21 @@ const API = {
     return res.data;
   },
 
+  getISGSScheduleCheck: async () => {
+    const res = await axios.get(`${BASE_URL}/rtg-dashboard/isgs-schedule-check`);
+    return res.data;
+  },
+
+  runISGSScheduleCheck: async () => {
+    const res = await axios.post(`${BASE_URL}/rtg-dashboard/isgs-schedule-check/run`);
+    return res.data;
+  },
+
+  updateISGSScheduleCheckConfig: async (payload) => {
+    const res = await axios.put(`${BASE_URL}/rtg-dashboard/isgs-schedule-check/config`, payload);
+    return res.data;
+  },
+
   getRTGTodayTrend: async (dateStr) => {
 
     const res = await axios.get(
@@ -412,9 +427,20 @@ const API = {
     return res.data;
   },
 
-  downloadIndia15MinGenerationBreakup: async (dateStr) => {
+  getIndia15MinGenerationBreakupRange: async (startDate, endDate) => {
+    const params = new URLSearchParams({ start_date: startDate, end_date: endDate });
+    const res = await axios.get(
+      `${BASE_URL}/psp/india-15-min-demand/generation-breakup-range?${params.toString()}`
+    );
+    return res.data;
+  },
+
+  downloadIndia15MinGenerationBreakup: async (dateStr, endDate = null) => {
     const params = new URLSearchParams();
-    if (dateStr) params.append("date_str", dateStr);
+    if (dateStr && endDate) {
+      params.append("start_date", dateStr);
+      params.append("end_date", endDate);
+    } else if (dateStr) params.append("date_str", dateStr);
     const query = params.toString();
     const res = await axios.get(
       `${BASE_URL}/psp/india-15-min-demand/generation-breakup/export${query ? `?${query}` : ""}`,
@@ -904,6 +930,12 @@ const API = {
   getScheduleData: async (params) => (await axios.get(`${BASE_URL}/frequency/schedule-data`, { params })).data,
   getScheduleDataRaw: async (params) => (await axios.get(`${BASE_URL}/frequency/schedule-data/raw`, { params })).data,
   getScheduleDataActual: async (params) => (await axios.get(`${BASE_URL}/frequency/schedule-data/actual`, { params })).data,
+  exportScheduleDataExcel: async (payload) => (
+    await axios.post(`${BASE_URL}/frequency/schedule-data/export-excel`, payload, { responseType: "blob" })
+  ).data,
+  sendScheduleDataChartMail: async (payload) => (
+    await axios.post(`${BASE_URL}/frequency/schedule-data/send-chart-mail`, payload)
+  ).data,
 
   getFrequencyReportData: async (date) => {
     const res = await axios.get(`${BASE_URL}/frequency/report-data?date=${date}`);
@@ -1049,6 +1081,13 @@ const API = {
     return res.data;
   },
 
+  getStackedFrequencyEvents: async (payload) => {
+    const res = await axios.post(`${BASE_URL}/frequency/events/stacked-comparison`, payload, {
+      headers: { "Content-Type": "application/json" }
+    });
+    return res.data;
+  },
+
   createFrequencyEvent: async (payload) => {
     const res = await axios.post(`${BASE_URL}/frequency/events`, payload, {
       headers: { "Content-Type": "application/json" }
@@ -1066,7 +1105,7 @@ const API = {
     return res.data;
   },
 
-  createFrequencyReportJob: async (fileId, startTime, endTime, entities, eventId = "", eventType = "low") => {
+  createFrequencyReportJob: async (fileId, startTime, endTime, entities, eventId = "", eventType = "low", includeGenerationComparison = false) => {
     const clean = (entities || []).map(e => {
       const { series, statistics, ...rest } = e;
       return rest;
@@ -1077,7 +1116,8 @@ const API = {
       end_time: endTime,
       entities: clean,
       event_id: eventId || "",
-      event_type: eventType || "low"
+      event_type: eventType || "low",
+      include_generation_comparison: !!includeGenerationComparison
     }, {
       headers: { "Content-Type": "application/json" }
     });
@@ -1204,6 +1244,41 @@ const API = {
   getPlantDeviationStatic: async (reportDate, refresh = false) => {
     const res = await axios.get(`${BASE_URL}/plant-deviation/static`, {
       params: { report_date: reportDate, refresh },
+    });
+    return res.data;
+  },
+
+  getPlantDeviationDayAhead: async (reportDate, refresh = false) => {
+    const res = await axios.get(`${BASE_URL}/plant-deviation/day-ahead`, {
+      params: { report_date: reportDate, refresh },
+    });
+    return res.data;
+  },
+
+  downloadPlantDeviationDayAhead: async (reportDate) => {
+    const res = await axios.get(`${BASE_URL}/plant-deviation/day-ahead/excel`, {
+      params: { report_date: reportDate },
+      responseType: "blob",
+    });
+    return res.data;
+  },
+
+  savePlantDeviationDayAhead: async (payload) => {
+    const res = await axios.put(`${BASE_URL}/plant-deviation/day-ahead/save`, payload);
+    return res.data;
+  },
+
+  getPlantDeviationAllIndia: async (reportDate, fetchMail = false) => {
+    const res = await axios.get(`${BASE_URL}/plant-deviation/all-india`, {
+      params: { report_date: reportDate, fetch_mail: fetchMail },
+    });
+    return res.data;
+  },
+
+  downloadPlantDeviationAllIndia: async (reportDate) => {
+    const res = await axios.get(`${BASE_URL}/plant-deviation/all-india/excel`, {
+      params: { report_date: reportDate },
+      responseType: "blob",
     });
     return res.data;
   },

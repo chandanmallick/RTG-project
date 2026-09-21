@@ -1,0 +1,127 @@
+INFO:     Started server process [11724]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8001 (Press CTRL+C to quit)
+Job "run_dso_shared_folder_sync (trigger: cron[hour='17', minute='30'], next run at: 2026-09-09 17:30:00 IST)" raised an exception
+Traceback (most recent call last):
+  File "D:\RTG-project\.venv\Lib\site-packages\apscheduler\executors\base.py", line 131, in run_job
+    retval = job.func(*job.args, **job.kwargs)
+  File "D:\RTG-project\backend\scheduler\jobs.py", line 36, in run_dso_shared_folder_sync
+    result = sync_dso_report_from_folder(
+        report_type=report_type,
+        report_date=report_day.isoformat(),
+        overwrite=True,
+    )
+  File "D:\RTG-project\backend\routes\dso_report_routes.py", line 917, in sync_dso_report_from_folder
+    source_file = expected_dso_source_file(report_type, report_date)
+  File "D:\RTG-project\backend\routes\dso_report_routes.py", line 905, in expected_dso_source_file
+    raise FileNotFoundError(
+        f"Expected source file was not found in {folder}: {base_name}.xlsx"
+    )
+FileNotFoundError: Expected source file was not found in \\10.3.95.200\HTTP-Access\ScadaData\DSO_reports: SCHD_ACT_08092026.xlsx
+Job "sync_employee_directory_to_atlas (trigger: cron[hour='2', minute='30'], next run at: 2026-09-10 02:30:00 IST)" raised an exception
+Traceback (most recent call last):
+  File "D:\RTG-project\.venv\Lib\site-packages\apscheduler\executors\base.py", line 131, in run_job
+    retval = job.func(*job.args, **job.kwargs)
+  File "D:\RTG-project\backend\crew_legacy\admin_logic\atlas_sync.py", line 71, in sync_employee_directory_to_atlas
+    _mirror_collection(name, dry_run=dry_run)
+    ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\RTG-project\backend\crew_legacy\admin_logic\atlas_sync.py", line 48, in _mirror_collection
+    "targetCountBefore": target.count_documents({}),
+                         ~~~~~~~~~~~~~~~~~~~~~~^^^^
+  File "D:\RTG-project\.venv\Lib\site-packages\pymongo\synchronous\collection.py", line 2162, in count_documents
+    return self._retryable_non_cursor_read(_cmd, session, _Op.COUNT)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\RTG-project\.venv\Lib\site-packages\pymongo\synchronous\collection.py", line 2176, in _retryable_non_cursor_read
+    return client._retryable_read(func, self._read_preference_for(s), s, operation)
+           ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\RTG-project\.venv\Lib\site-packages\pymongo\synchronous\mongo_client.py", line 2076, in _retryable_read
+    return self._retry_internal(
+           ~~~~~~~~~~~~~~~~~~~~^
+        func,
+        ^^^^^
+    ...<9 lines>...
+        is_aggregate_write=is_aggregate_write,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "D:\RTG-project\.venv\Lib\site-packages\pymongo\_csot.py", line 125, in csot_wrapper
+    return func(self, *args, **kwargs)
+  File "D:\RTG-project\.venv\Lib\site-packages\pymongo\synchronous\mongo_client.py", line 2038, in _retry_internal
+    ).run()
+      ~~~^^
+  File "D:\RTG-project\.venv\Lib\site-packages\pymongo\synchronous\mongo_client.py", line 2811, in run
+    res = self._read() if self._is_read else self._write()
+          ~~~~~~~~~~^^
+  File "D:\RTG-project\.venv\Lib\site-packages\pymongo\synchronous\mongo_client.py", line 3027, in _read
+    self._server = self._get_server()
+                   ~~~~~~~~~~~~~~~~^^
+  File "D:\RTG-project\.venv\Lib\site-packages\pymongo\synchronous\mongo_client.py", line 2975, in _get_server
+    return self._client._select_server(
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        self._server_selector,
+        ^^^^^^^^^^^^^^^^^^^^^^
+    ...<4 lines>...
+        operation_id=self._operation_id,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "D:\RTG-project\.venv\Lib\site-packages\pymongo\synchronous\mongo_client.py", line 1851, in _select_server
+    server = topology.select_server(
+        server_selector,
+    ...<2 lines>...
+        operation_id=operation_id,
+    )
+  File "D:\RTG-project\.venv\Lib\site-packages\pymongo\synchronous\topology.py", line 428, in select_server
+    server = self._select_server(
+        selector,
+    ...<4 lines>...
+        operation_id=operation_id,
+    )
+  File "D:\RTG-project\.venv\Lib\site-packages\pymongo\synchronous\topology.py", line 402, in _select_server
+    servers = self.select_servers(
+        selector,
+    ...<4 lines>...
+        deprioritized_servers,
+    )
+  File "D:\RTG-project\.venv\Lib\site-packages\pymongo\synchronous\topology.py", line 298, in select_servers
+    server_descriptions = self._select_servers_loop(
+        selector,
+    ...<4 lines>...
+        deprioritized_servers=deprioritized_servers,
+    )
+  File "D:\RTG-project\.venv\Lib\site-packages\pymongo\synchronous\topology.py", line 359, in _select_servers_loop
+    raise ServerSelectionTimeoutError(
+        f"{self._error_message(selector)}, Timeout: {timeout}s, Topology Description: {self.description!r}"
+    )
+pymongo.errors.ServerSelectionTimeoutError: ac-o8rxgtb-shard-00-00.kudznxl.mongodb.net:27017: timed out (configured timeouts: socketTimeoutMS: 20000.0ms, connectTimeoutMS: 20000.0ms),ac-o8rxgtb-shard-00-01.kudznxl.mongodb.net:27017: timed out (configured timeouts: socketTimeoutMS: 20000.0ms, connectTimeoutMS: 20000.0ms),ac-o8rxgtb-shard-00-02.kudznxl.mongodb.net:27017: timed out (configured timeouts: socketTimeoutMS: 20000.0ms, connectTimeoutMS: 20000.0ms), Timeout: 10.0s, Topology Description: <TopologyDescription id: 6a9feee0996c8a8983fd926c, topology_type: ReplicaSetNoPrimary, servers: [<ServerDescription ('ac-o8rxgtb-shard-00-00.kudznxl.mongodb.net', 27017) server_type: Unknown, rtt: None, error=NetworkTimeout('ac-o8rxgtb-shard-00-00.kudznxl.mongodb.net:27017: timed out (configured timeouts: socketTimeoutMS: 20000.0ms, connectTimeoutMS: 20000.0ms)')>, <ServerDescription ('ac-o8rxgtb-shard-00-01.kudznxl.mongodb.net', 27017) server_type: Unknown, rtt: None, error=NetworkTimeout('ac-o8rxgtb-shard-00-01.kudznxl.mongodb.net:27017: timed out (configured timeouts: socketTimeoutMS: 20000.0ms, connectTimeoutMS: 20000.0ms)')>, <ServerDescription ('ac-o8rxgtb-shard-00-02.kudznxl.mongodb.net', 27017) server_type: Unknown, rtt: None, error=NetworkTimeout('ac-o8rxgtb-shard-00-02.kudznxl.mongodb.net:27017: timed out (configured timeouts: socketTimeoutMS: 20000.0ms, connectTimeoutMS: 20000.0ms)')>]>
+Job "run_dso_shared_folder_sync (trigger: cron[hour='7', minute='30'], next run at: 2026-09-10 07:30:00 IST)" raised an exception
+Traceback (most recent call last):
+  File "D:\RTG-project\.venv\Lib\site-packages\apscheduler\executors\base.py", line 131, in run_job
+    retval = job.func(*job.args, **job.kwargs)
+  File "D:\RTG-project\backend\scheduler\jobs.py", line 36, in run_dso_shared_folder_sync
+    result = sync_dso_report_from_folder(
+        report_type=report_type,
+        report_date=report_day.isoformat(),
+        overwrite=True,
+    )
+  File "D:\RTG-project\backend\routes\dso_report_routes.py", line 917, in sync_dso_report_from_folder
+    source_file = expected_dso_source_file(report_type, report_date)
+  File "D:\RTG-project\backend\routes\dso_report_routes.py", line 905, in expected_dso_source_file
+    raise FileNotFoundError(
+        f"Expected source file was not found in {folder}: {base_name}.xlsx"
+    )
+FileNotFoundError: Expected source file was not found in \\10.3.95.200\HTTP-Access\ScadaData\DSO_reports: DSO_Morning_report_09092026.xlsx
+Job "run_er_plant_deviation_sync (trigger: cron[hour='11', minute='30'], next run at: 2026-09-10 11:30:00 IST)" raised an exception
+Traceback (most recent call last):
+  File "D:\RTG-project\.venv\Lib\site-packages\apscheduler\executors\base.py", line 131, in run_job
+    retval = job.func(*job.args, **job.kwargs)
+  File "D:\RTG-project\backend\scheduler\jobs.py", line 68, in run_er_plant_deviation_sync
+    result = sync_er_day_ahead_report(report_date)
+  File "D:\RTG-project\backend\routes\plant_deviation_routes.py", line 481, in sync_er_day_ahead_report
+    report = _day_ahead_thermal_report(selected_date.isoformat(), force_refresh=True)
+  File "D:\RTG-project\backend\routes\plant_deviation_routes.py", line 131, in _day_ahead_thermal_report
+    raise HTTPException(
+    ...<2 lines>...
+    )
+fastapi.exceptions.HTTPException: 404: Day-ahead MOP file not found: ER_Plantwise Deviation from IC_09-09-2026.xlsx

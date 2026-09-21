@@ -32,7 +32,7 @@ class PSPService:
     LOGIN_URL = "https://report.erldc.in/POSOCO/Account/Login"
     DATA_URL  = "https://report.erldc.in/POSOCO/PSP/GetPSPData"
     NLDC_PSP_DEMAND_URL = (
-        "https://reporting.nldc.in/Reporting_API/API/NLDCReport/"
+        "https://reporting.grid-india.in/Reporting_API/API/NLDCReport/"
         "GetMaxDemandMetTimeDataByDate/{date_text}"
     )
     INDIA_15_MIN_DEMAND_URL = (
@@ -40,7 +40,7 @@ class PSPService:
         "GetStgHourlyStateDataNRByMonthNLDC/{date_from}/{date_to}/1"
     )
     ALL_STATE_DEMAND_URL = (
-        "https://reporting.nldc.in/Reporting_API/API/NLDCReport/"
+        "https://reporting.grid-india.in/Reporting_API/API/NLDCReport/"
         "GetPowerSupplyPositionStatesDataByDate/{date_text}"
     )
 

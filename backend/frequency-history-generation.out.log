@@ -1,0 +1,618 @@
+WARNING: CREW_JWT_SECRET is not set. Using a temporary runtime secret.
+Scheduler enabled: starting background jobs
+PIPELINE CONFIGS = [{'config_type': 'SCHEDULE', 'schedule_url': 'https://gateway.grid-india.in/POSOCO/reports/1.0/WebAccessAPI/GetUtilityExternalSharedData', 'schedule_api_key': '6dc32d47-f46a-45c9-afaf-c6ce73c4ca71', 'schedule_username': 'erldc_internal_prod', 'schedule_password': 'ErldcPr0d@052024', 'rtg_post_url': 'https://rtgapi.grid-india.in/sendData/wbes-data/saveupdatemulti/', 'enabled': True, 'interval_minutes': 5}, {'config_type': 'OUTAGE', 'outage_fetch_url': 'http://10.3.230.130:8001/Codebook/getCurrentTrElementOutagesData', 'rtg_outage_push_url': 'https://rtgapi.grid-india.in/sendData/outage-data/save/', 'enabled': True, 'interval_minutes': 15, 'generation_outage_history_url': 'https://crms.erldc.in/Codebook/GenOutagesHistoryData'}, {'config_type': 'RTG', 'rtg_username': 'ERLDC', 'rtg_password': 'Er1dc@#$700033', 'rtg_token_url': 'https://rtgapi.grid-india.in/sendData/api-token-auth/', 'rtg_schedule_url': 'https://rtgapi.grid-india.in/sendData/wbes-data/', 'rtg_scada_url': 'https://rtgapi.grid-india.in/sendData/scada-data/', 'rtg_cap_on_bar_url': 'https://rtgapi.grid-india.in/sendData/cap-on-bar/'}, {'rtg_data_url': 'https://rtgapi.grid-india.in/sendData/combined-data-view/?in_region_name=ERLDC&in_fuel_type=THERMAL', 'refresh_interval_min': 15, 'config_type': 'RTG_DASHBOARD'}, {'config_type': 'PSP', 'psp_login_url': 'https://report.erldc.in/POSOCO/Account/Login', 'psp_data_url': 'https://report.erldc.in/POSOCO/PSP/GetPSPData', 'psp_username': 'erldc', 'psp_password': 'erldc1', 'curve_er_column': 'T', 'curve_file_dir': '\\\\10.3.95.200\\HTTP-Access\\Control_Room_Report\\curve', 'curve_off_peak_hour': '03:00', 'curve_peak_hour_by_month': '1:19:00,2:19:00,3:20:00,4:20:00,5:20:00,6:20:00,7:20:00,8:20:00,9:20:00,10:19:00,11:19:00,12:19:00', 'curve_sheet_name': '30SEC', 'curve_state_columns': 'V:AA', 'curve_time_column': 'C', 'loadshed_api_url': 'https://report.erldc.in/posoco_api/api/StgHourlyStateData/GetStgHourlyStateDataNRByMonthNLDC/{date_from}/{date_to}/1', 'outage_api_url': 'https://report.erldc.in/POSOCO_API/api/Outage/GetQueryNpmcReportData/{date}', 'wbes_api_key': '6dc32d47-f46a-45c9-afaf-c6ce73c4ca71', 'wbes_password': 'ErldcPr0d@052024', 'wbes_url': 'https://gateway.grid-india.in/POSOCO/reports/1.0/WebAccessAPI/GetUtilityExternalSharedData', 'wbes_username': 'erldc_internal_prod', 'india_15_min_demand_api_url': 'https://reporting.grid-india.in/Reporting_API/API/PSP/GetTimeSeriesDataByDate/{date_from}', 'nldc_demand_api_url': 'https://reporting.grid-india.in/Reporting_API/API/NLDCReport/GetMaxDemandMetTimeDataByDate/{date_text}', 'all_state_demand_api_url': 'https://reporting.grid-india.in/Reporting_API/API/NLDCReport/GetPowerSupplyPositionStatesDataByDate/{date_text}'}, {'config_type': 'DSO_TTC_ATC', 'limits': {'BIHAR': {'ttc': 8142.0, 'atc': 7979.0}, 'JHARKHAND': {'ttc': 2029.0, 'atc': 1983.0}, 'DVC': {'ttc': -3517.0, 'atc': -3466.0}, 'ODISHA': {'ttc': 4429.0, 'atc': 4265.0}, 'WB': {'ttc': 8403.0, 'atc': 8123.0}, 'SIKKIM': {'ttc': 165.0, 'atc': 162.0}}, 'updated_at': '2026-09-05T14:42:05.604099'}, {'config_type': 'DSO_REPORT_SYNC', 'source_path': '\\\\10.3.95.200\\HTTP-Access\\ScadaData\\DSO_reports', 'updated_at': '2026-08-30T12:27:43.028963'}, {'config_type': 'ISGS_SCHEDULE_RECONCILIATION', 'interval_minutes': 15, 'tolerance_mw': 1.0, 'updated_at': datetime.datetime(2026, 9, 8, 11, 17, 16, 324000)}]
+RTG CONFIG = {'config_type': 'RTG', 'rtg_username': 'ERLDC', 'rtg_password': '***', 'rtg_token_url': 'https://rtgapi.grid-india.in/sendData/api-token-auth/', 'rtg_schedule_url': 'https://rtgapi.grid-india.in/sendData/wbes-data/', 'rtg_scada_url': 'https://rtgapi.grid-india.in/sendData/scada-data/', 'rtg_cap_on_bar_url': 'https://rtgapi.grid-india.in/sendData/cap-on-bar/'}
+RTG DASHBOARD CONFIG = {'rtg_data_url': 'https://rtgapi.grid-india.in/sendData/combined-data-view/?in_region_name=ERLDC&in_fuel_type=THERMAL', 'refresh_interval_min': 15, 'config_type': 'RTG_DASHBOARD'}
+RTG DASHBOARD FETCH URL = https://rtgapi.grid-india.in/sendData/combined-data-view/?in_date=2026-09-10&in_region_name=ERLDC&in_fuel_type=THERMAL
+RTG RESPONSE STATUS = 200
+{
+  "plant_id": "RTG_ER00001",
+  "plant_name": "BARAUNI TPS",
+  "fuel_type": "THERMAL",
+  "region_name": "ERLDC",
+  "state_name": "Bihar",
+  "utility_type": "State",
+  "wbes_acronym": "Not Available",
+  "owner_name": "NTPC",
+  "installed_capacity": 500.0,
+  "effective_capacity": 500.0,
+  "scada_point": "NA",
+  "actual_gen": 458.0,
+  "actual_gen_derived": 0,
+  "schedule": 451.0,
+  "schedule_gen_derived": 0,
+  "dc": 451.0,
+  "dc_derived": 0,
+  "qsold": 0.0,
+  "planned_outage": 0.0,
+  "forced_outage": 0.0,
+  "rsd": 0.0,
+  "fuel_shortage": 0.0,
+  "commercial_issues": 0.0,
+  "partial_outage": 0.0,
+  "variable_cost": 0.0,
+  "reason_partial_outage": "--",
+  "reason_nofull_generation": "--",
+  "actual_last_updated": "2026-09-10 11:13",
+  "schedule_last_updated": "2026-09-10 11:15",
+  "percentage_of_dc": 100,
+  "cap_on_bar": 500.0,
+  "unreq_margin": 0.0,
+  "proxy_unreq_margin": 2.0
+}
+CHANDAN RTG RECORD COUNT = 43
+API HIT GET /openapi.json -> 200 (105.3 ms)
+INFO:     127.0.0.1:53797 - "GET /openapi.json HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (7.2 ms)
+INFO:     127.0.0.1:53798 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (10.7 ms)
+INFO:     127.0.0.1:53799 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (4.9 ms)
+INFO:     127.0.0.1:53802 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (9.0 ms)
+INFO:     127.0.0.1:53801 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/frequency/plant-mapping -> 200 (21.8 ms)
+INFO:     127.0.0.1:53809 - "GET /api/frequency/plant-mapping HTTP/1.1" 200 OK
+API HIT GET /api/frequency/available-dates -> 200 (69.4 ms)
+INFO:     127.0.0.1:53808 - "GET /api/frequency/available-dates HTTP/1.1" 200 OK
+API HIT GET /api/frequency/events -> 200 (50.9 ms)
+INFO:     127.0.0.1:53816 - "GET /api/frequency/events HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (6.0 ms)
+INFO:     127.0.0.1:53828 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (8.8 ms)
+INFO:     127.0.0.1:53829 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (5.1 ms)
+INFO:     127.0.0.1:53835 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (9.6 ms)
+INFO:     127.0.0.1:53834 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/frequency/check-rtg-status?start_time=2026-09-10T00:00&end_time=2026-09-10T23:59&_t=1789019330294 -> 200 (18.2 ms)
+INFO:     127.0.0.1:53908 - "GET /api/frequency/check-rtg-status?start_time=2026-09-10T00:00&end_time=2026-09-10T23:59&_t=1789019330294 HTTP/1.1" 200 OK
+API HIT GET /api/frequency/check-rtg-status?start_time=2026-09-09T17:00&end_time=2026-09-09T22:59&_t=1789019332702 -> 200 (19.4 ms)
+INFO:     127.0.0.1:53912 - "GET /api/frequency/check-rtg-status?start_time=2026-09-09T17:00&end_time=2026-09-09T22:59&_t=1789019332702 HTTP/1.1" 200 OK
+API HIT POST /api/frequency/process-report-job -> 200 (41.5 ms)
+INFO:     127.0.0.1:53916 - "POST /api/frequency/process-report-job HTTP/1.1" 200 OK
+API HIT GET /api/frequency/process-report-sse?job_id=ccc5d3b9-301b-46f5-90ad-3f3b1a8c8250 -> 200 (2.7 ms)
+INFO:     127.0.0.1:53917 - "GET /api/frequency/process-report-sse?job_id=ccc5d3b9-301b-46f5-90ad-3f3b1a8c8250 HTTP/1.1" 200 OK
+API HIT GET /api/frequency/crms-messages?start_time=2026-09-09T17:00&end_time=2026-09-09T22:59&_t=1789019356525 -> 200 (854.5 ms)
+INFO:     127.0.0.1:54006 - "GET /api/frequency/crms-messages?start_time=2026-09-09T17:00&end_time=2026-09-09T22:59&_t=1789019356525 HTTP/1.1" 200 OK
+API HIT GET /api/frequency/crms-transmission-lines?start_time=2026-09-09T17:00&end_time=2026-09-09T22:59&_t=1789019356525 -> 200 (533.0 ms)
+INFO:     127.0.0.1:54007 - "GET /api/frequency/crms-transmission-lines?start_time=2026-09-09T17:00&end_time=2026-09-09T22:59&_t=1789019356525 HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (7.1 ms)
+INFO:     127.0.0.1:54017 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (12.0 ms)
+INFO:     127.0.0.1:54016 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/auth/me -> 401 (1.5 ms)
+INFO:     127.0.0.1:54019 - "GET /api/crew/auth/me HTTP/1.1" 401 Unauthorized
+API HIT GET /api/crew/auth/me -> 401 (1.3 ms)
+INFO:     127.0.0.1:54020 - "GET /api/crew/auth/me HTTP/1.1" 401 Unauthorized
+API HIT GET /api/crew/notifications/ -> 200 (4.2 ms)
+INFO:     127.0.0.1:54023 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (8.3 ms)
+INFO:     127.0.0.1:54022 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT POST /api/crew/auth/login -> 200 (108.3 ms)
+INFO:     127.0.0.1:54021 - "POST /api/crew/auth/login HTTP/1.1" 200 OK
+RTG LIVE FETCH URL = https://rtgapi.grid-india.in/sendData/combined-data-view/?in_date=2026-09-10&in_region_name=ERLDC&in_fuel_type=THERMAL
+API HIT GET /api/rtg-dashboard/live -> 200 (2396.7 ms)
+INFO:     127.0.0.1:54026 - "GET /api/rtg-dashboard/live HTTP/1.1" 200 OK
+API HIT GET /api/psp/report-checking -> 200 (791.9 ms)
+INFO:     127.0.0.1:54028 - "GET /api/psp/report-checking HTTP/1.1" 200 OK
+API HIT GET /api/psp/power-position -> 200 (153.4 ms)
+INFO:     127.0.0.1:54029 - "GET /api/psp/power-position HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (3201.6 ms)
+INFO:     127.0.0.1:54024 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (3202.5 ms)
+INFO:     127.0.0.1:54025 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/dashboard/duty-today-tomorrow -> 200 (802.7 ms)
+INFO:     127.0.0.1:54027 - "GET /api/crew/dashboard/duty-today-tomorrow HTTP/1.1" 200 OK
+API HIT GET /api/psp/nldc-demand/trend?start_date=2026-08-10&end_date=2026-09-09 -> 200 (17.7 ms)
+INFO:     127.0.0.1:54041 - "GET /api/psp/nldc-demand/trend?start_date=2026-08-10&end_date=2026-09-09 HTTP/1.1" 200 OK
+RTG LIVE FETCH URL = https://rtgapi.grid-india.in/sendData/combined-data-view/?in_date=2026-09-10&in_region_name=ERLDC&in_fuel_type=THERMAL
+API HIT GET /api/rtg-dashboard/live -> 200 (3007.4 ms)
+INFO:     127.0.0.1:54045 - "GET /api/rtg-dashboard/live HTTP/1.1" 200 OK
+API HIT GET /api/psp/report-checking -> 200 (615.0 ms)
+INFO:     127.0.0.1:54046 - "GET /api/psp/report-checking HTTP/1.1" 200 OK
+API HIT GET /api/psp/power-position -> 200 (157.5 ms)
+INFO:     127.0.0.1:54053 - "GET /api/psp/power-position HTTP/1.1" 200 OK
+API HIT GET /api/psp/nldc-demand/trend?start_date=2026-08-10&end_date=2026-09-09 -> 200 (15.6 ms)
+INFO:     127.0.0.1:54066 - "GET /api/psp/nldc-demand/trend?start_date=2026-08-10&end_date=2026-09-09 HTTP/1.1" 200 OK
+API HIT GET /api/crew/dashboard/duty-today-tomorrow -> 200 (19.0 ms)
+INFO:     127.0.0.1:54057 - "GET /api/crew/dashboard/duty-today-tomorrow HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (27.7 ms)
+INFO:     127.0.0.1:54055 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (28.6 ms)
+INFO:     127.0.0.1:54056 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (3.9 ms)
+INFO:     127.0.0.1:54074 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (5.1 ms)
+INFO:     127.0.0.1:54075 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (6.3 ms)
+INFO:     127.0.0.1:54076 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (3.7 ms)
+INFO:     127.0.0.1:54077 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (4.2 ms)
+INFO:     127.0.0.1:54079 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (9.2 ms)
+INFO:     127.0.0.1:54078 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/frequency/plant-mapping -> 200 (11.9 ms)
+INFO:     127.0.0.1:54081 - "GET /api/frequency/plant-mapping HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (6.3 ms)
+INFO:     127.0.0.1:54083 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (8.3 ms)
+INFO:     127.0.0.1:54086 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/frequency/plant-mapping -> 200 (51.4 ms)
+INFO:     127.0.0.1:54090 - "GET /api/frequency/plant-mapping HTTP/1.1" 200 OK
+API HIT GET /api/frequency/available-dates -> 200 (84.0 ms)
+INFO:     127.0.0.1:54080 - "GET /api/frequency/available-dates HTTP/1.1" 200 OK
+API HIT GET /api/frequency/available-dates -> 200 (58.7 ms)
+INFO:     127.0.0.1:54094 - "GET /api/frequency/available-dates HTTP/1.1" 200 OK
+API HIT GET /api/frequency/events -> 200 (54.7 ms)
+INFO:     127.0.0.1:54098 - "GET /api/frequency/events HTTP/1.1" 200 OK
+API HIT GET /api/frequency/events -> 200 (55.0 ms)
+INFO:     127.0.0.1:54102 - "GET /api/frequency/events HTTP/1.1" 200 OK
+API HIT GET /api/frequency/check-rtg-status?start_time=2026-09-10T00:00&end_time=2026-09-10T23:59&_t=1789019388254 -> 200 (20.5 ms)
+INFO:     127.0.0.1:54109 - "GET /api/frequency/check-rtg-status?start_time=2026-09-10T00:00&end_time=2026-09-10T23:59&_t=1789019388254 HTTP/1.1" 200 OK
+API HIT GET /api/frequency/check-rtg-status?start_time=2026-09-09T17:00&end_time=2026-09-09T22:59&_t=1789019390134 -> 200 (18.0 ms)
+INFO:     127.0.0.1:54113 - "GET /api/frequency/check-rtg-status?start_time=2026-09-09T17:00&end_time=2026-09-09T22:59&_t=1789019390134 HTTP/1.1" 200 OK
+API HIT POST /api/frequency/process-report-job -> 200 (5.1 ms)
+INFO:     127.0.0.1:54117 - "POST /api/frequency/process-report-job HTTP/1.1" 200 OK
+API HIT GET /api/frequency/process-report-sse?job_id=0af35c26-e2ad-40d5-a5e5-a02b7edbbaa6 -> 200 (1.7 ms)
+INFO:     127.0.0.1:54118 - "GET /api/frequency/process-report-sse?job_id=0af35c26-e2ad-40d5-a5e5-a02b7edbbaa6 HTTP/1.1" 200 OK
+API HIT GET /api/frequency/crms-messages?start_time=2026-09-09T17:00&end_time=2026-09-09T22:59&_t=1789019411760 -> 200 (868.9 ms)
+INFO:     127.0.0.1:54211 - "GET /api/frequency/crms-messages?start_time=2026-09-09T17:00&end_time=2026-09-09T22:59&_t=1789019411760 HTTP/1.1" 200 OK
+API HIT GET /api/frequency/crms-transmission-lines?start_time=2026-09-09T17:00&end_time=2026-09-09T22:59&_t=1789019411760 -> 200 (531.4 ms)
+INFO:     127.0.0.1:54212 - "GET /api/frequency/crms-transmission-lines?start_time=2026-09-09T17:00&end_time=2026-09-09T22:59&_t=1789019411760 HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (4.5 ms)
+INFO:     127.0.0.1:54221 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (8.7 ms)
+INFO:     127.0.0.1:54220 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (6.0 ms)
+INFO:     127.0.0.1:54223 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (9.3 ms)
+INFO:     127.0.0.1:54222 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (4.4 ms)
+INFO:     127.0.0.1:54240 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (9.1 ms)
+INFO:     127.0.0.1:54239 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (6.1 ms)
+INFO:     127.0.0.1:54247 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (10.6 ms)
+INFO:     127.0.0.1:54246 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT POST /api/frequency/events/stacked-comparison -> 200 (2860.0 ms)
+INFO:     127.0.0.1:54250 - "POST /api/frequency/events/stacked-comparison HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (4.2 ms)
+INFO:     127.0.0.1:54281 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (8.4 ms)
+INFO:     127.0.0.1:54280 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (5.0 ms)
+INFO:     127.0.0.1:54286 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (13.4 ms)
+INFO:     127.0.0.1:54285 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/frequency/check-rtg-status?start_time=2026-09-09T17:00&end_time=2026-09-09T22:59&_t=1789019587670 -> 200 (79.1 ms)
+INFO:     127.0.0.1:54291 - "GET /api/frequency/check-rtg-status?start_time=2026-09-09T17:00&end_time=2026-09-09T22:59&_t=1789019587670 HTTP/1.1" 200 OK
+API HIT GET /api/frequency/plant-mapping -> 200 (59.2 ms)
+INFO:     127.0.0.1:54292 - "GET /api/frequency/plant-mapping HTTP/1.1" 200 OK
+API HIT GET /api/frequency/available-dates -> 200 (86.2 ms)
+INFO:     127.0.0.1:54290 - "GET /api/frequency/available-dates HTTP/1.1" 200 OK
+API HIT GET /api/frequency/events -> 200 (181.9 ms)
+INFO:     127.0.0.1:54302 - "GET /api/frequency/events HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (5.1 ms)
+INFO:     127.0.0.1:54328 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (8.6 ms)
+INFO:     127.0.0.1:54327 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (6.2 ms)
+INFO:     127.0.0.1:54332 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (8.5 ms)
+INFO:     127.0.0.1:54333 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/frequency/check-rtg-status?start_time=2026-09-09T17:00&end_time=2026-09-09T22:59&_t=1789019649641 -> 200 (89.9 ms)
+INFO:     127.0.0.1:54340 - "GET /api/frequency/check-rtg-status?start_time=2026-09-09T17:00&end_time=2026-09-09T22:59&_t=1789019649641 HTTP/1.1" 200 OK
+API HIT GET /api/frequency/plant-mapping -> 200 (70.3 ms)
+INFO:     127.0.0.1:54341 - "GET /api/frequency/plant-mapping HTTP/1.1" 200 OK
+API HIT GET /api/frequency/available-dates -> 200 (97.2 ms)
+INFO:     127.0.0.1:54339 - "GET /api/frequency/available-dates HTTP/1.1" 200 OK
+API HIT GET /api/frequency/events -> 200 (55.7 ms)
+INFO:     127.0.0.1:54351 - "GET /api/frequency/events HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (4.4 ms)
+INFO:     127.0.0.1:54371 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (8.8 ms)
+INFO:     127.0.0.1:54370 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (5.4 ms)
+INFO:     127.0.0.1:54374 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (10.7 ms)
+INFO:     127.0.0.1:54375 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/frequency/check-rtg-status?start_time=2026-09-09T17:00&end_time=2026-09-09T22:59&_t=1789019702654 -> 200 (84.3 ms)
+INFO:     127.0.0.1:54382 - "GET /api/frequency/check-rtg-status?start_time=2026-09-09T17:00&end_time=2026-09-09T22:59&_t=1789019702654 HTTP/1.1" 200 OK
+API HIT GET /api/frequency/plant-mapping -> 200 (66.0 ms)
+INFO:     127.0.0.1:54383 - "GET /api/frequency/plant-mapping HTTP/1.1" 200 OK
+API HIT GET /api/frequency/available-dates -> 200 (91.1 ms)
+INFO:     127.0.0.1:54381 - "GET /api/frequency/available-dates HTTP/1.1" 200 OK
+API HIT GET /api/frequency/events -> 200 (54.0 ms)
+INFO:     127.0.0.1:54393 - "GET /api/frequency/events HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (3.9 ms)
+INFO:     127.0.0.1:54402 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (11.2 ms)
+INFO:     127.0.0.1:54401 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (7.4 ms)
+INFO:     127.0.0.1:54404 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (9.9 ms)
+INFO:     127.0.0.1:54405 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (4.5 ms)
+INFO:     127.0.0.1:54429 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (8.5 ms)
+INFO:     127.0.0.1:54428 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (5.3 ms)
+INFO:     127.0.0.1:54460 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (4.3 ms)
+INFO:     127.0.0.1:54461 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/auth/me -> 200 (4.0 ms)
+INFO:     127.0.0.1:54462 - "GET /api/crew/auth/me HTTP/1.1" 200 OK
+API HIT GET /api/crew/auth/me -> 200 (4.9 ms)
+INFO:     127.0.0.1:54463 - "GET /api/crew/auth/me HTTP/1.1" 200 OK
+API HIT GET /api/crew/auth/me -> 200 (4.6 ms)
+INFO:     127.0.0.1:54464 - "GET /api/crew/auth/me HTTP/1.1" 200 OK
+API HIT GET /api/crew/auth/me -> 200 (4.6 ms)
+INFO:     127.0.0.1:54465 - "GET /api/crew/auth/me HTTP/1.1" 200 OK
+RTG LIVE FETCH URL = https://rtgapi.grid-india.in/sendData/combined-data-view/?in_date=2026-09-10&in_region_name=ERLDC&in_fuel_type=THERMAL
+API HIT GET /api/rtg-dashboard/live -> 200 (3354.6 ms)
+INFO:     127.0.0.1:54468 - "GET /api/rtg-dashboard/live HTTP/1.1" 200 OK
+API HIT GET /api/psp/report-checking -> 200 (3501.0 ms)
+INFO:     127.0.0.1:54470 - "GET /api/psp/report-checking HTTP/1.1" 200 OK
+API HIT GET /api/psp/power-position -> 200 (151.2 ms)
+INFO:     127.0.0.1:54471 - "GET /api/psp/power-position HTTP/1.1" 200 OK
+API HIT GET /api/crew/dashboard/duty-today-tomorrow -> 200 (3508.7 ms)
+INFO:     127.0.0.1:54469 - "GET /api/crew/dashboard/duty-today-tomorrow HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (3513.7 ms)
+INFO:     127.0.0.1:54467 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (3516.7 ms)
+INFO:     127.0.0.1:54466 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/psp/nldc-demand/trend?start_date=2026-08-10&end_date=2026-09-09 -> 200 (13.6 ms)
+INFO:     127.0.0.1:54486 - "GET /api/psp/nldc-demand/trend?start_date=2026-08-10&end_date=2026-09-09 HTTP/1.1" 200 OK
+API HIT GET /api/frequency/plant-mapping -> 200 (57.0 ms)
+INFO:     127.0.0.1:54494 - "GET /api/frequency/plant-mapping HTTP/1.1" 200 OK
+API HIT GET /api/frequency/available-dates -> 200 (90.6 ms)
+INFO:     127.0.0.1:54487 - "GET /api/frequency/available-dates HTTP/1.1" 200 OK
+RTG LIVE FETCH URL = https://rtgapi.grid-india.in/sendData/combined-data-view/?in_date=2026-09-10&in_region_name=ERLDC&in_fuel_type=THERMAL
+API HIT GET /api/frequency/check-rtg-status?start_time=2026-09-10T00:00&end_time=2026-09-10T23:59&_t=1789019853275 -> 200 (2460.7 ms)
+INFO:     127.0.0.1:54495 - "GET /api/frequency/check-rtg-status?start_time=2026-09-10T00:00&end_time=2026-09-10T23:59&_t=1789019853275 HTTP/1.1" 200 OK
+API HIT GET /api/rtg-dashboard/live -> 200 (3040.4 ms)
+INFO:     127.0.0.1:54496 - "GET /api/rtg-dashboard/live HTTP/1.1" 200 OK
+API HIT GET /api/psp/report-checking -> 200 (746.6 ms)
+INFO:     127.0.0.1:54497 - "GET /api/psp/report-checking HTTP/1.1" 200 OK
+API HIT GET /api/psp/power-position -> 200 (151.1 ms)
+INFO:     127.0.0.1:54501 - "GET /api/psp/power-position HTTP/1.1" 200 OK
+API HIT GET /api/psp/nldc-demand/trend?start_date=2026-08-10&end_date=2026-09-09 -> 200 (15.8 ms)
+INFO:     127.0.0.1:54523 - "GET /api/psp/nldc-demand/trend?start_date=2026-08-10&end_date=2026-09-09 HTTP/1.1" 200 OK
+API HIT GET /api/crew/dashboard/duty-today-tomorrow -> 200 (41.2 ms)
+INFO:     127.0.0.1:54503 - "GET /api/crew/dashboard/duty-today-tomorrow HTTP/1.1" 200 OK
+API HIT GET /api/frequency/plant-mapping -> 200 (16.8 ms)
+INFO:     127.0.0.1:54524 - "GET /api/frequency/plant-mapping HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (43.1 ms)
+INFO:     127.0.0.1:54511 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (44.7 ms)
+INFO:     127.0.0.1:54519 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/frequency/check-rtg-status?start_time=2026-09-09T17:00&end_time=2026-09-09T22:59&_t=1789019856038 -> 200 (120.5 ms)
+INFO:     127.0.0.1:54533 - "GET /api/frequency/check-rtg-status?start_time=2026-09-09T17:00&end_time=2026-09-09T22:59&_t=1789019856038 HTTP/1.1" 200 OK
+API HIT GET /api/frequency/available-dates -> 200 (139.2 ms)
+INFO:     127.0.0.1:54525 - "GET /api/frequency/available-dates HTTP/1.1" 200 OK
+API HIT GET /api/frequency/events -> 200 (130.0 ms)
+INFO:     127.0.0.1:54530 - "GET /api/frequency/events HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (7.6 ms)
+INFO:     127.0.0.1:54537 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (8.8 ms)
+INFO:     127.0.0.1:54538 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (4.0 ms)
+INFO:     127.0.0.1:54545 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (4.6 ms)
+INFO:     127.0.0.1:54548 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (11.1 ms)
+INFO:     127.0.0.1:54546 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/frequency/events -> 200 (60.0 ms)
+INFO:     127.0.0.1:54547 - "GET /api/frequency/events HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (53.6 ms)
+INFO:     127.0.0.1:54552 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (8.7 ms)
+INFO:     127.0.0.1:54553 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (4.8 ms)
+INFO:     127.0.0.1:54554 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT POST /api/frequency/process-report-job -> 200 (41.2 ms)
+INFO:     127.0.0.1:54555 - "POST /api/frequency/process-report-job HTTP/1.1" 200 OK
+API HIT GET /api/frequency/process-report-sse?job_id=478d4f00-451a-4445-8c2f-d3fa04279d2c -> 200 (1.7 ms)
+INFO:     127.0.0.1:54556 - "GET /api/frequency/process-report-sse?job_id=478d4f00-451a-4445-8c2f-d3fa04279d2c HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (4.7 ms)
+INFO:     127.0.0.1:54581 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (9.9 ms)
+INFO:     127.0.0.1:54580 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/frequency/crms-messages?start_time=2026-09-09T17:00&end_time=2026-09-09T22:59&_t=1789019877234 -> 200 (832.6 ms)
+INFO:     127.0.0.1:54650 - "GET /api/frequency/crms-messages?start_time=2026-09-09T17:00&end_time=2026-09-09T22:59&_t=1789019877234 HTTP/1.1" 200 OK
+API HIT GET /api/frequency/crms-transmission-lines?start_time=2026-09-09T17:00&end_time=2026-09-09T22:59&_t=1789019877234 -> 200 (522.4 ms)
+INFO:     127.0.0.1:54651 - "GET /api/frequency/crms-transmission-lines?start_time=2026-09-09T17:00&end_time=2026-09-09T22:59&_t=1789019877234 HTTP/1.1" 200 OK
+API HIT POST /api/frequency/process-report-job -> 200 (46.4 ms)
+INFO:     127.0.0.1:54659 - "POST /api/frequency/process-report-job HTTP/1.1" 200 OK
+API HIT GET /api/frequency/process-report-sse?job_id=b255f065-bc5b-4ec4-bef3-1a16b154ffa1 -> 200 (3.0 ms)
+INFO:     127.0.0.1:54660 - "GET /api/frequency/process-report-sse?job_id=b255f065-bc5b-4ec4-bef3-1a16b154ffa1 HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (12.7 ms)
+INFO:     127.0.0.1:54689 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (12.7 ms)
+INFO:     127.0.0.1:54748 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (16.5 ms)
+INFO:     127.0.0.1:54690 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (17.4 ms)
+INFO:     127.0.0.1:54747 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (3.8 ms)
+INFO:     127.0.0.1:54757 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (4.3 ms)
+INFO:     127.0.0.1:54758 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (5.7 ms)
+INFO:     127.0.0.1:54759 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (3.6 ms)
+INFO:     127.0.0.1:54760 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT POST /api/crew/auth/login -> 200 (101.8 ms)
+INFO:     127.0.0.1:54749 - "POST /api/crew/auth/login HTTP/1.1" 200 OK
+API HIT GET /api/frequency/crms-messages?start_time=2026-09-09T17:00&end_time=2026-09-09T22:59&_t=1789019925992 -> 200 (301.6 ms)
+INFO:     127.0.0.1:54761 - "GET /api/frequency/crms-messages?start_time=2026-09-09T17:00&end_time=2026-09-09T22:59&_t=1789019925992 HTTP/1.1" 200 OK
+API HIT GET /api/frequency/crms-transmission-lines?start_time=2026-09-09T17:00&end_time=2026-09-09T22:59&_t=1789019925993 -> 200 (521.6 ms)
+INFO:     127.0.0.1:54762 - "GET /api/frequency/crms-transmission-lines?start_time=2026-09-09T17:00&end_time=2026-09-09T22:59&_t=1789019925993 HTTP/1.1" 200 OK
+RTG LIVE FETCH URL = https://rtgapi.grid-india.in/sendData/combined-data-view/?in_date=2026-09-10&in_region_name=ERLDC&in_fuel_type=THERMAL
+API HIT GET /api/rtg-dashboard/live -> 200 (2391.3 ms)
+INFO:     127.0.0.1:54766 - "GET /api/rtg-dashboard/live HTTP/1.1" 200 OK
+API HIT GET /api/psp/report-checking -> 200 (625.9 ms)
+INFO:     127.0.0.1:54768 - "GET /api/psp/report-checking HTTP/1.1" 200 OK
+API HIT GET /api/psp/nldc-demand/trend?start_date=2026-08-10&end_date=2026-09-09 -> 200 (19.9 ms)
+INFO:     127.0.0.1:54769 - "GET /api/psp/nldc-demand/trend?start_date=2026-08-10&end_date=2026-09-09 HTTP/1.1" 200 OK
+API HIT GET /api/crew/dashboard/duty-today-tomorrow -> 200 (633.4 ms)
+INFO:     127.0.0.1:54767 - "GET /api/crew/dashboard/duty-today-tomorrow HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (3029.8 ms)
+INFO:     127.0.0.1:54764 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (3031.6 ms)
+INFO:     127.0.0.1:54765 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+RTG LIVE FETCH URL = https://rtgapi.grid-india.in/sendData/combined-data-view/?in_date=2026-09-10&in_region_name=ERLDC&in_fuel_type=THERMAL
+API HIT GET /api/psp/power-position -> 200 (2509.3 ms)
+INFO:     127.0.0.1:54789 - "GET /api/psp/power-position HTTP/1.1" 200 OK
+API HIT GET /api/rtg-dashboard/live -> 200 (2368.6 ms)
+INFO:     127.0.0.1:54790 - "GET /api/rtg-dashboard/live HTTP/1.1" 200 OK
+API HIT GET /api/psp/report-checking -> 200 (584.9 ms)
+INFO:     127.0.0.1:54791 - "GET /api/psp/report-checking HTTP/1.1" 200 OK
+API HIT GET /api/psp/nldc-demand/trend?start_date=2026-08-10&end_date=2026-09-09 -> 200 (18.8 ms)
+INFO:     127.0.0.1:54792 - "GET /api/psp/nldc-demand/trend?start_date=2026-08-10&end_date=2026-09-09 HTTP/1.1" 200 OK
+API HIT GET /api/psp/power-position -> 200 (158.5 ms)
+INFO:     127.0.0.1:54811 - "GET /api/psp/power-position HTTP/1.1" 200 OK
+API HIT GET /api/crew/dashboard/duty-today-tomorrow -> 200 (171.2 ms)
+INFO:     127.0.0.1:54796 - "GET /api/crew/dashboard/duty-today-tomorrow HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (202.8 ms)
+INFO:     127.0.0.1:54797 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (201.6 ms)
+INFO:     127.0.0.1:54808 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (7.3 ms)
+INFO:     127.0.0.1:54818 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (7.3 ms)
+INFO:     127.0.0.1:54819 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (5.4 ms)
+INFO:     127.0.0.1:54823 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (5.3 ms)
+INFO:     127.0.0.1:54824 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT POST /api/frequency/events -> 200 (3535.2 ms)
+INFO:     127.0.0.1:54785 - "POST /api/frequency/events HTTP/1.1" 200 OK
+API HIT GET /api/frequency/available-dates -> 200 (53.3 ms)
+INFO:     127.0.0.1:54825 - "GET /api/frequency/available-dates HTTP/1.1" 200 OK
+API HIT GET /api/frequency/events -> 200 (51.7 ms)
+INFO:     127.0.0.1:54829 - "GET /api/frequency/events HTTP/1.1" 200 OK
+API HIT GET /api/frequency/plant-mapping -> 200 (13.3 ms)
+INFO:     127.0.0.1:54836 - "GET /api/frequency/plant-mapping HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (20.3 ms)
+INFO:     127.0.0.1:54833 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (22.6 ms)
+INFO:     127.0.0.1:54834 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/frequency/plant-mapping -> 200 (76.4 ms)
+INFO:     127.0.0.1:54843 - "GET /api/frequency/plant-mapping HTTP/1.1" 200 OK
+API HIT GET /api/frequency/available-dates -> 200 (105.2 ms)
+INFO:     127.0.0.1:54835 - "GET /api/frequency/available-dates HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (8.1 ms)
+INFO:     127.0.0.1:54844 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (7.6 ms)
+INFO:     127.0.0.1:54845 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/frequency/available-dates -> 200 (59.3 ms)
+INFO:     127.0.0.1:54849 - "GET /api/frequency/available-dates HTTP/1.1" 200 OK
+API HIT GET /api/frequency/events -> 200 (62.1 ms)
+INFO:     127.0.0.1:54853 - "GET /api/frequency/events HTTP/1.1" 200 OK
+API HIT GET /api/frequency/events -> 200 (55.6 ms)
+INFO:     127.0.0.1:54857 - "GET /api/frequency/events HTTP/1.1" 200 OK
+API HIT GET /api/frequency/plant-mapping -> 200 (15.2 ms)
+INFO:     127.0.0.1:54865 - "GET /api/frequency/plant-mapping HTTP/1.1" 200 OK
+API HIT GET /api/frequency/available-dates -> 200 (61.8 ms)
+INFO:     127.0.0.1:54864 - "GET /api/frequency/available-dates HTTP/1.1" 200 OK
+API HIT GET /api/frequency/check-rtg-status?start_time=2026-09-09T17:00&end_time=2026-09-09T22:59&_t=1789019943967 -> 200 (39.2 ms)
+INFO:     127.0.0.1:54873 - "GET /api/frequency/check-rtg-status?start_time=2026-09-09T17:00&end_time=2026-09-09T22:59&_t=1789019943967 HTTP/1.1" 200 OK
+API HIT GET /api/frequency/plant-mapping -> 200 (22.3 ms)
+INFO:     127.0.0.1:54874 - "GET /api/frequency/plant-mapping HTTP/1.1" 200 OK
+API HIT GET /api/frequency/available-dates -> 200 (98.5 ms)
+INFO:     127.0.0.1:54872 - "GET /api/frequency/available-dates HTTP/1.1" 200 OK
+API HIT GET /api/frequency/events -> 200 (51.9 ms)
+INFO:     127.0.0.1:54884 - "GET /api/frequency/events HTTP/1.1" 200 OK
+API HIT GET /api/frequency/events -> 200 (54.7 ms)
+INFO:     127.0.0.1:54888 - "GET /api/frequency/events HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (6.2 ms)
+INFO:     127.0.0.1:54901 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (8.3 ms)
+INFO:     127.0.0.1:54902 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (5.5 ms)
+INFO:     127.0.0.1:54903 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (6.8 ms)
+INFO:     127.0.0.1:54904 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (4.6 ms)
+INFO:     127.0.0.1:54905 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (5.8 ms)
+INFO:     127.0.0.1:54906 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (3.3 ms)
+INFO:     127.0.0.1:54909 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (8.3 ms)
+INFO:     127.0.0.1:54908 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (5.0 ms)
+INFO:     127.0.0.1:54915 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (8.4 ms)
+INFO:     127.0.0.1:54914 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT POST /api/frequency/upload-temp-file -> 200 (363.5 ms)
+INFO:     127.0.0.1:54944 - "POST /api/frequency/upload-temp-file HTTP/1.1" 200 OK
+API HIT POST /api/frequency/process-report-job -> 200 (46.3 ms)
+INFO:     127.0.0.1:54945 - "POST /api/frequency/process-report-job HTTP/1.1" 200 OK
+API HIT GET /api/frequency/process-report-sse?job_id=9f323332-6897-4321-8d01-f66e229dfeb3 -> 200 (1.8 ms)
+INFO:     127.0.0.1:54946 - "GET /api/frequency/process-report-sse?job_id=9f323332-6897-4321-8d01-f66e229dfeb3 HTTP/1.1" 200 OK
+API HIT GET /api/frequency/crms-messages?start_time=2026-09-05T15:00&end_time=2026-09-05T20:53&_t=1789020015608 -> 200 (755.4 ms)
+INFO:     127.0.0.1:54956 - "GET /api/frequency/crms-messages?start_time=2026-09-05T15:00&end_time=2026-09-05T20:53&_t=1789020015608 HTTP/1.1" 200 OK
+API HIT GET /api/frequency/crms-transmission-lines?start_time=2026-09-05T15:00&end_time=2026-09-05T20:53&_t=1789020015608 -> 200 (436.6 ms)
+INFO:     127.0.0.1:54957 - "GET /api/frequency/crms-transmission-lines?start_time=2026-09-05T15:00&end_time=2026-09-05T20:53&_t=1789020015608 HTTP/1.1" 200 OK
+API HIT GET /api/frequency/check-rtg-status?start_time=2026-09-09T17:00&end_time=2026-09-09T22:59&_t=1789020020144 -> 200 (20.9 ms)
+INFO:     127.0.0.1:54962 - "GET /api/frequency/check-rtg-status?start_time=2026-09-09T17:00&end_time=2026-09-09T22:59&_t=1789020020144 HTTP/1.1" 200 OK
+API HIT GET /api/frequency/plant-mapping -> 200 (14.5 ms)
+INFO:     127.0.0.1:54964 - "GET /api/frequency/plant-mapping HTTP/1.1" 200 OK
+API HIT GET /api/frequency/plant-mapping -> 200 (65.1 ms)
+INFO:     127.0.0.1:54969 - "GET /api/frequency/plant-mapping HTTP/1.1" 200 OK
+API HIT GET /api/frequency/available-dates -> 200 (83.8 ms)
+INFO:     127.0.0.1:54963 - "GET /api/frequency/available-dates HTTP/1.1" 200 OK
+API HIT GET /api/frequency/available-dates -> 200 (122.4 ms)
+INFO:     127.0.0.1:54968 - "GET /api/frequency/available-dates HTTP/1.1" 200 OK
+API HIT GET /api/frequency/events -> 200 (52.5 ms)
+INFO:     127.0.0.1:54982 - "GET /api/frequency/events HTTP/1.1" 200 OK
+API HIT GET /api/frequency/events -> 200 (56.0 ms)
+INFO:     127.0.0.1:54986 - "GET /api/frequency/events HTTP/1.1" 200 OK
+API HIT POST /api/frequency/events -> 200 (402.5 ms)
+INFO:     127.0.0.1:54990 - "POST /api/frequency/events HTTP/1.1" 200 OK
+API HIT GET /api/frequency/available-dates -> 200 (64.3 ms)
+INFO:     127.0.0.1:54995 - "GET /api/frequency/available-dates HTTP/1.1" 200 OK
+API HIT GET /api/frequency/events -> 200 (57.3 ms)
+INFO:     127.0.0.1:54999 - "GET /api/frequency/events HTTP/1.1" 200 OK
+API HIT POST /api/frequency/events -> 200 (356.5 ms)
+INFO:     127.0.0.1:55003 - "POST /api/frequency/events HTTP/1.1" 200 OK
+API HIT GET /api/frequency/available-dates -> 200 (68.3 ms)
+INFO:     127.0.0.1:55007 - "GET /api/frequency/available-dates HTTP/1.1" 200 OK
+API HIT GET /api/frequency/events -> 200 (63.2 ms)
+INFO:     127.0.0.1:55011 - "GET /api/frequency/events HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (5.9 ms)
+INFO:     127.0.0.1:55015 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (8.6 ms)
+INFO:     127.0.0.1:55016 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (6.5 ms)
+INFO:     127.0.0.1:55017 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (9.7 ms)
+INFO:     127.0.0.1:55018 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (3.9 ms)
+INFO:     127.0.0.1:55019 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (3.5 ms)
+INFO:     127.0.0.1:55020 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (4.3 ms)
+INFO:     127.0.0.1:55022 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (24.7 ms)
+INFO:     127.0.0.1:55021 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (4.0 ms)
+INFO:     127.0.0.1:55028 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (8.3 ms)
+INFO:     127.0.0.1:55027 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/frequency/plant-mapping -> 200 (15.3 ms)
+INFO:     127.0.0.1:55038 - "GET /api/frequency/plant-mapping HTTP/1.1" 200 OK
+API HIT GET /api/frequency/available-dates -> 200 (70.9 ms)
+INFO:     127.0.0.1:55037 - "GET /api/frequency/available-dates HTTP/1.1" 200 OK
+API HIT GET /api/frequency/events -> 200 (60.3 ms)
+INFO:     127.0.0.1:55045 - "GET /api/frequency/events HTTP/1.1" 200 OK
+API HIT GET /api/frequency/check-rtg-status?start_time=2026-09-09T17:00&end_time=2026-09-09T22:59&_t=1789020084646 -> 200 (98.8 ms)
+INFO:     127.0.0.1:55051 - "GET /api/frequency/check-rtg-status?start_time=2026-09-09T17:00&end_time=2026-09-09T22:59&_t=1789020084646 HTTP/1.1" 200 OK
+API HIT GET /api/frequency/plant-mapping -> 200 (73.1 ms)
+INFO:     127.0.0.1:55052 - "GET /api/frequency/plant-mapping HTTP/1.1" 200 OK
+API HIT GET /api/frequency/available-dates -> 200 (110.7 ms)
+INFO:     127.0.0.1:55049 - "GET /api/frequency/available-dates HTTP/1.1" 200 OK
+API HIT GET /api/frequency/events -> 200 (71.8 ms)
+INFO:     127.0.0.1:55061 - "GET /api/frequency/events HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (5.9 ms)
+INFO:     127.0.0.1:55065 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (9.5 ms)
+INFO:     127.0.0.1:55066 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (5.2 ms)
+INFO:     127.0.0.1:55067 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (7.4 ms)
+INFO:     127.0.0.1:55068 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (6.0 ms)
+INFO:     127.0.0.1:55069 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (8.9 ms)
+INFO:     127.0.0.1:55070 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (6.7 ms)
+INFO:     127.0.0.1:55071 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (8.6 ms)
+INFO:     127.0.0.1:55072 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT POST /api/frequency/upload-temp-file -> 200 (312.4 ms)
+INFO:     127.0.0.1:55073 - "POST /api/frequency/upload-temp-file HTTP/1.1" 200 OK
+API HIT POST /api/frequency/process-report-job -> 200 (52.2 ms)
+INFO:     127.0.0.1:55074 - "POST /api/frequency/process-report-job HTTP/1.1" 200 OK
+API HIT GET /api/frequency/process-report-sse?job_id=57e865e4-9b25-452f-8699-c20b2e296014 -> 200 (3.7 ms)
+INFO:     127.0.0.1:55076 - "GET /api/frequency/process-report-sse?job_id=57e865e4-9b25-452f-8699-c20b2e296014 HTTP/1.1" 200 OK
+API HIT GET /api/frequency/crms-messages?start_time=2026-09-05T18:00&end_time=2026-09-05T19:00&_t=1789020102073 -> 200 (668.1 ms)
+INFO:     127.0.0.1:55107 - "GET /api/frequency/crms-messages?start_time=2026-09-05T18:00&end_time=2026-09-05T19:00&_t=1789020102073 HTTP/1.1" 200 OK
+API HIT GET /api/frequency/crms-transmission-lines?start_time=2026-09-05T18:00&end_time=2026-09-05T19:00&_t=1789020102073 -> 200 (348.3 ms)
+INFO:     127.0.0.1:55108 - "GET /api/frequency/crms-transmission-lines?start_time=2026-09-05T18:00&end_time=2026-09-05T19:00&_t=1789020102073 HTTP/1.1" 200 OK
+API HIT POST /api/frequency/events -> 200 (140.7 ms)
+INFO:     127.0.0.1:55113 - "POST /api/frequency/events HTTP/1.1" 200 OK
+API HIT GET /api/frequency/available-dates -> 200 (65.2 ms)
+INFO:     127.0.0.1:55117 - "GET /api/frequency/available-dates HTTP/1.1" 200 OK
+API HIT GET /api/frequency/events -> 200 (61.5 ms)
+INFO:     127.0.0.1:55121 - "GET /api/frequency/events HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (4.7 ms)
+INFO:     127.0.0.1:55129 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (9.0 ms)
+INFO:     127.0.0.1:55128 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+PIPELINE CONFIGS = [{'config_type': 'SCHEDULE', 'schedule_url': 'https://gateway.grid-india.in/POSOCO/reports/1.0/WebAccessAPI/GetUtilityExternalSharedData', 'schedule_api_key': '6dc32d47-f46a-45c9-afaf-c6ce73c4ca71', 'schedule_username': 'erldc_internal_prod', 'schedule_password': 'ErldcPr0d@052024', 'rtg_post_url': 'https://rtgapi.grid-india.in/sendData/wbes-data/saveupdatemulti/', 'enabled': True, 'interval_minutes': 5}, {'config_type': 'OUTAGE', 'outage_fetch_url': 'http://10.3.230.130:8001/Codebook/getCurrentTrElementOutagesData', 'rtg_outage_push_url': 'https://rtgapi.grid-india.in/sendData/outage-data/save/', 'enabled': True, 'interval_minutes': 15, 'generation_outage_history_url': 'https://crms.erldc.in/Codebook/GenOutagesHistoryData'}, {'config_type': 'RTG', 'rtg_username': 'ERLDC', 'rtg_password': 'Er1dc@#$700033', 'rtg_token_url': 'https://rtgapi.grid-india.in/sendData/api-token-auth/', 'rtg_schedule_url': 'https://rtgapi.grid-india.in/sendData/wbes-data/', 'rtg_scada_url': 'https://rtgapi.grid-india.in/sendData/scada-data/', 'rtg_cap_on_bar_url': 'https://rtgapi.grid-india.in/sendData/cap-on-bar/'}, {'rtg_data_url': 'https://rtgapi.grid-india.in/sendData/combined-data-view/?in_region_name=ERLDC&in_fuel_type=THERMAL', 'refresh_interval_min': 15, 'config_type': 'RTG_DASHBOARD'}, {'config_type': 'PSP', 'psp_login_url': 'https://report.erldc.in/POSOCO/Account/Login', 'psp_data_url': 'https://report.erldc.in/POSOCO/PSP/GetPSPData', 'psp_username': 'erldc', 'psp_password': 'erldc1', 'curve_er_column': 'T', 'curve_file_dir': '\\\\10.3.95.200\\HTTP-Access\\Control_Room_Report\\curve', 'curve_off_peak_hour': '03:00', 'curve_peak_hour_by_month': '1:19:00,2:19:00,3:20:00,4:20:00,5:20:00,6:20:00,7:20:00,8:20:00,9:20:00,10:19:00,11:19:00,12:19:00', 'curve_sheet_name': '30SEC', 'curve_state_columns': 'V:AA', 'curve_time_column': 'C', 'loadshed_api_url': 'https://report.erldc.in/posoco_api/api/StgHourlyStateData/GetStgHourlyStateDataNRByMonthNLDC/{date_from}/{date_to}/1', 'outage_api_url': 'https://report.erldc.in/POSOCO_API/api/Outage/GetQueryNpmcReportData/{date}', 'wbes_api_key': '6dc32d47-f46a-45c9-afaf-c6ce73c4ca71', 'wbes_password': 'ErldcPr0d@052024', 'wbes_url': 'https://gateway.grid-india.in/POSOCO/reports/1.0/WebAccessAPI/GetUtilityExternalSharedData', 'wbes_username': 'erldc_internal_prod', 'india_15_min_demand_api_url': 'https://reporting.grid-india.in/Reporting_API/API/PSP/GetTimeSeriesDataByDate/{date_from}', 'nldc_demand_api_url': 'https://reporting.grid-india.in/Reporting_API/API/NLDCReport/GetMaxDemandMetTimeDataByDate/{date_text}', 'all_state_demand_api_url': 'https://reporting.grid-india.in/Reporting_API/API/NLDCReport/GetPowerSupplyPositionStatesDataByDate/{date_text}'}, {'config_type': 'DSO_TTC_ATC', 'limits': {'BIHAR': {'ttc': 8142.0, 'atc': 7979.0}, 'JHARKHAND': {'ttc': 2029.0, 'atc': 1983.0}, 'DVC': {'ttc': -3517.0, 'atc': -3466.0}, 'ODISHA': {'ttc': 4429.0, 'atc': 4265.0}, 'WB': {'ttc': 8403.0, 'atc': 8123.0}, 'SIKKIM': {'ttc': 165.0, 'atc': 162.0}}, 'updated_at': '2026-09-05T14:42:05.604099'}, {'config_type': 'DSO_REPORT_SYNC', 'source_path': '\\\\10.3.95.200\\HTTP-Access\\ScadaData\\DSO_reports', 'updated_at': '2026-08-30T12:27:43.028963'}, {'config_type': 'ISGS_SCHEDULE_RECONCILIATION', 'interval_minutes': 15, 'tolerance_mw': 1.0, 'updated_at': datetime.datetime(2026, 9, 8, 11, 17, 16, 324000)}]
+RTG CONFIG = {'config_type': 'RTG', 'rtg_username': 'ERLDC', 'rtg_password': '***', 'rtg_token_url': 'https://rtgapi.grid-india.in/sendData/api-token-auth/', 'rtg_schedule_url': 'https://rtgapi.grid-india.in/sendData/wbes-data/', 'rtg_scada_url': 'https://rtgapi.grid-india.in/sendData/scada-data/', 'rtg_cap_on_bar_url': 'https://rtgapi.grid-india.in/sendData/cap-on-bar/'}
+RTG DASHBOARD CONFIG = {'rtg_data_url': 'https://rtgapi.grid-india.in/sendData/combined-data-view/?in_region_name=ERLDC&in_fuel_type=THERMAL', 'refresh_interval_min': 15, 'config_type': 'RTG_DASHBOARD'}
+RTG DASHBOARD FETCH URL = https://rtgapi.grid-india.in/sendData/combined-data-view/?in_date=2026-09-10&in_region_name=ERLDC&in_fuel_type=THERMAL
+RTG RESPONSE STATUS = 200
+{
+  "plant_id": "RTG_ER00001",
+  "plant_name": "BARAUNI TPS",
+  "fuel_type": "THERMAL",
+  "region_name": "ERLDC",
+  "state_name": "Bihar",
+  "utility_type": "State",
+  "wbes_acronym": "Not Available",
+  "owner_name": "NTPC",
+  "installed_capacity": 500.0,
+  "effective_capacity": 500.0,
+  "scada_point": "NA",
+  "actual_gen": 410.0,
+  "actual_gen_derived": 0,
+  "schedule": 381.0,
+  "schedule_gen_derived": 0,
+  "dc": 451.0,
+  "dc_derived": 0,
+  "qsold": 0.0,
+  "planned_outage": 0.0,
+  "forced_outage": 0.0,
+  "rsd": 0.0,
+  "fuel_shortage": 0.0,
+  "commercial_issues": 0.0,
+  "partial_outage": 0.0,
+  "variable_cost": 0.0,
+  "reason_partial_outage": "--",
+  "reason_nofull_generation": "--",
+  "actual_last_updated": "2026-09-10 11:28",
+  "schedule_last_updated": "2026-09-10 11:30",
+  "percentage_of_dc": 90.91,
+  "cap_on_bar": 500.0,
+  "unreq_margin": 70.0,
+  "proxy_unreq_margin": 50.0
+}
+CHANDAN RTG RECORD COUNT = 43
+API HIT GET /api/frequency/check-rtg-status?start_time=2026-09-05T18:00&end_time=2026-09-05T19:00&_t=1789020143135 -> 200 (20.8 ms)
+INFO:     127.0.0.1:55206 - "GET /api/frequency/check-rtg-status?start_time=2026-09-05T18:00&end_time=2026-09-05T19:00&_t=1789020143135 HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (132.6 ms)
+INFO:     127.0.0.1:55213 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (139.4 ms)
+INFO:     127.0.0.1:55214 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (122.6 ms)
+INFO:     127.0.0.1:55216 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (129.0 ms)
+INFO:     127.0.0.1:55215 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (4.3 ms)
+INFO:     127.0.0.1:55217 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (7.5 ms)
+INFO:     127.0.0.1:55218 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/crew/notifications/ -> 200 (4.1 ms)
+INFO:     127.0.0.1:55226 - "GET /api/crew/notifications/ HTTP/1.1" 200 OK
+API HIT GET /api/crew/replacement/notifications -> 200 (9.8 ms)
+INFO:     127.0.0.1:55225 - "GET /api/crew/replacement/notifications HTTP/1.1" 200 OK
+API HIT GET /api/frequency/check-rtg-status?start_time=2026-09-09T17:00&end_time=2026-09-09T22:59&_t=1789020160388 -> 200 (20.9 ms)
+INFO:     127.0.0.1:55229 - "GET /api/frequency/check-rtg-status?start_time=2026-09-09T17:00&end_time=2026-09-09T22:59&_t=1789020160388 HTTP/1.1" 200 OK

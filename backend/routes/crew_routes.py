@@ -16,6 +16,8 @@ from crew_legacy.database.database_mongo import (
     roster_collection,
     roster_group_collection,
     roster_master_collection,
+    sports_application_collection,
+    training_nomination_history_collection,
 )
 
 
@@ -471,13 +473,23 @@ def calendar_view(start_date: str = Query(...), end_date: str = Query(...)):
             "name": 1,
             "date": 1,
             "assignedDuty": 1,
+            "groupName": 1,
             "leaveType": 1,
             "leaveStatus": 1,
             "leaveRequestId": 1,
             "replacementRequired": 1,
             "trainingName": 1,
+            "trainingFinal": 1,
+            "trainingOriginalAssignment": 1,
+            "replacementMode": 1,
+            "sportsName": 1,
+            "sportsApplicationId": 1,
             "replacementDuty": 1,
             "replacementFor": 1,
+            "replacementOriginal": 1,
+            "vacatedDuty": 1,
+            "vacancyReason": 1,
+            "vacancyReplacement": 1,
             "isActingSIC": 1,
             "actingSICFor": 1,
             "actingSICGroup": 1,
@@ -546,13 +558,36 @@ def calendar_view(start_date: str = Query(...), end_date: str = Query(...)):
     for record in records:
         emp_id, date = employee_id(record), record.get("date")
         if emp_id and date:
+            replacement_original = record.get("replacementOriginal") or {}
+            is_replacement_duty = bool(record.get("replacementDuty"))
+            is_additional_replacement = is_replacement_duty and record.get("replacementMode") == "double"
             daily[(emp_id, date)] = {
-                "shift": record.get("assignedDuty") or "-", "leaveType": record.get("leaveType"),
+                "shift": (
+                    replacement_original.get("assignedDuty")
+                    if is_additional_replacement and replacement_original.get("assignedDuty")
+                    else record.get("assignedDuty") or "-"
+                ), "leaveType": record.get("leaveType"),
                 "leaveStatus": record.get("leaveStatus"), "trainingName": record.get("trainingName"),
+                "trainingNominationId": (record.get("trainingFinal") or {}).get("nominationId"),
+                "trainingOriginalDuty": (record.get("trainingOriginalAssignment") or {}).get("assignedDuty"),
+                "sportsName": record.get("sportsName"),
+                "sportsApplicationId": record.get("sportsApplicationId"),
                 "leaveRequestId": record.get("leaveRequestId"),
-                "replacementRequired": bool(record.get("replacementRequired")),
+                "replacementRequired": bool(
+                    record.get("replacementRequired")
+                    or (record.get("trainingFinal") or {}).get("replacementRequired")
+                ),
                 "replacementEmployee": replacement_map.get((emp_id, date)),
-                "replacementFor": replacement_for_map.get((emp_id, date)),
+                "replacementFor": record.get("replacementFor") if is_replacement_duty else replacement_for_map.get((emp_id, date)),
+                "vacatedDuty": record.get("vacatedDuty"),
+                "vacancyReason": record.get("vacancyReason"),
+                "vacancyReplacement": record.get("vacancyReplacement"),
+                "additionalDuties": ([{
+                    "shift": record.get("assignedDuty") or "-",
+                    "groupName": record.get("groupName"),
+                    "replacementFor": record.get("replacementFor"),
+                    "type": "Replacement",
+                }] if is_additional_replacement else []),
                 "isActingSIC": bool(record.get("isActingSIC")),
                 "actingSICFor": record.get("actingSICFor"),
                 "actingSICGroup": record.get("actingSICGroup"),
@@ -593,6 +628,122 @@ def calendar_view(start_date: str = Query(...), end_date: str = Query(...)):
             "replacementRequired": bool(leave.get("replacementRequired")),
             "replacementEmployee": replacement,
         })
+
+    # Pending nominations belong on their requested dates, without changing
+    # the underlying duty until the approval workflow completes.
+    nominations = training_nomination_history_collection.find({
+        "employeeId": {"$in": list(roster_employee_ids)},
+        "workflowKind": {"$ne": "Adjacent OFF"},
+        "status": {"$in": ["Nominated", "Pending Approval", "Approved"]},
+        "startDate": {"$lte": end_date},
+        "endDate": {"$gte": start_date},
+    }).sort("createdOn", 1)
+    for nomination in nominations:
+        emp_id = employee_id(nomination)
+        cursor = datetime.strptime(max(nomination["startDate"], start_date), "%Y-%m-%d")
+        last = min(nomination["endDate"], end_date)
+        while cursor.strftime("%Y-%m-%d") <= last:
+            date = cursor.strftime("%Y-%m-%d")
+            duty = daily.setdefault((emp_id, date), {"shift": "-"})
+            duty.update({
+                "trainingName": nomination.get("trainingName"),
+                "trainingNominationId": str(nomination["_id"]),
+                "trainingStatus": nomination.get("status"),
+            })
+            if nomination.get("status") == "Approved":
+                duty["replacementRequired"] = bool(nomination.get("replacementRequired"))
+                duty["replacementEmployee"] = nomination.get("replacementEmployee") or duty.get("replacementEmployee")
+            cursor += timedelta(days=1)
+
+    # An adjacent-OFF request is a separate workflow from the approved
+    # training nomination.  Surface its target day on the calendar while the
+    # original roster duty remains unchanged until final approval.
+    adjacent_window_start = (datetime.strptime(start_date, "%Y-%m-%d") - timedelta(days=1)).strftime("%Y-%m-%d")
+    adjacent_window_end = (datetime.strptime(end_date, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
+    adjacent_off_requests = training_nomination_history_collection.find({
+        "employeeId": {"$in": list(roster_employee_ids)},
+        "workflowKind": "Adjacent OFF",
+        "status": {"$in": ["Nominated", "Pending Approval", "Approved"]},
+        "startDate": {"$lte": adjacent_window_end},
+        "endDate": {"$gte": adjacent_window_start},
+    }).sort("createdOn", 1)
+    for request in adjacent_off_requests:
+        emp_id = employee_id(request)
+        adjacent = request.get("adjacentOff") or {}
+        target_dates = []
+        try:
+            if adjacent.get("before"):
+                target_dates.append((datetime.strptime(request.get("startDate"), "%Y-%m-%d") - timedelta(days=1)).strftime("%Y-%m-%d"))
+            if adjacent.get("after"):
+                target_dates.append((datetime.strptime(request.get("endDate"), "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d"))
+        except (TypeError, ValueError):
+            target_dates = []
+        chain = request.get("approvalChain") or []
+        current_index = int(request.get("currentApprovalIndex") or 0)
+        current_approver = chain[current_index] if current_index < len(chain) else {}
+        for date in target_dates:
+            if not (start_date <= date <= end_date):
+                continue
+            duty = daily.setdefault((emp_id, date), {
+                "shift": "-", "leaveType": None, "leaveStatus": None,
+                "trainingName": None, "replacementEmployee": None,
+                "replacementFor": None,
+            })
+            duty.update({
+                "trainingAdjacentOffRequestId": str(request["_id"]),
+                "trainingAdjacentOffStatus": request.get("status"),
+                "trainingAdjacentOffName": request.get("trainingName") or "Training",
+                "trainingAdjacentOffPosition": (
+                    "Before training"
+                    if date < str(request.get("startDate") or "")
+                    else "After training"
+                ),
+                "trainingAdjacentOffCurrentApproverId": current_approver.get("employeeId"),
+                "trainingAdjacentOffCurrentApproverName": current_approver.get("name"),
+                "trainingAdjacentOffCurrentApproverLevel": current_approver.get("level"),
+            })
+
+    # Overlay approved sports applications as well. This also makes older
+    # approvals visible without requiring a one-off migration of daily rows.
+    approved_sports = sports_application_collection.find({
+        "employeeId": {"$in": list(roster_employee_ids)},
+        "status": "Approved",
+        "startDate": {"$lte": end_date},
+        "endDate": {"$gte": start_date},
+    })
+    for application in approved_sports:
+        emp_id = employee_id(application)
+        selected_dates = [
+            value for value in (application.get("selectedDates") or [])
+            if start_date <= str(value) <= end_date
+        ]
+        if not selected_dates:
+            current = max(str(application.get("startDate") or ""), start_date)
+            last = min(str(application.get("endDate") or ""), end_date)
+            selected_dates = []
+            try:
+                cursor = datetime.strptime(current, "%Y-%m-%d")
+                limit = datetime.strptime(last, "%Y-%m-%d")
+                while cursor <= limit:
+                    selected_dates.append(cursor.strftime("%Y-%m-%d"))
+                    cursor += timedelta(days=1)
+            except (TypeError, ValueError):
+                selected_dates = []
+        for date in selected_dates:
+            duty = daily.setdefault((emp_id, date), {
+                "shift": "-", "leaveType": None, "leaveStatus": None,
+                "trainingName": None, "replacementEmployee": None,
+                "replacementFor": None,
+            })
+            original_shift = duty.get("shift")
+            duty.update({
+                "shift": "Sports",
+                "sportsName": application.get("eventName") or "Sports",
+                "sportsApplicationId": str(application["_id"]),
+                "sportsOriginalDuty": original_shift,
+                "replacementRequired": bool(application.get("replacementRequired")),
+                "replacementEmployee": application.get("replacementEmployee") or replacement_map.get((emp_id, date)),
+            })
     dates = []
     while start <= end:
         dates.append(start.strftime("%Y-%m-%d"))

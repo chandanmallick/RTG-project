@@ -64,7 +64,15 @@ export default function DataValidation() {
 
   const selectedIssueRows = useMemo(() => {
     if (!report || !selectedIssue || selectedIssue.startIndex === null) return [];
-    return report.rows.slice(selectedIssue.startIndex, selectedIssue.endIndex + 1);
+    const indices = selectedIssue.sampleIndices?.length
+      ? new Set(selectedIssue.sampleIndices)
+      : new Set((selectedIssue.blocks || []).flatMap((block) => {
+        if (block.startIndex === null || block.startIndex === undefined) return [];
+        return Array.from({ length: block.endIndex - block.startIndex + 1 }, (_, offset) => block.startIndex + offset);
+      }));
+    return indices.size
+      ? report.rows.filter((row) => indices.has(row.index))
+      : report.rows.slice(selectedIssue.startIndex, selectedIssue.endIndex + 1);
   }, [report, selectedIssue]);
 
   const chooseFile = (chosen) => {
@@ -231,7 +239,7 @@ export default function DataValidation() {
             <Metric label="Substations" value={report.stationCount} detail={`${report.sampleCount} samples per station`} />
             <Metric label="Healthy" value={report.healthyStations} detail="No validation issue detected" tone="green" />
             <Metric label="Need attention" value={report.stationsWithIssues} detail="Click a station for evidence" tone="red" />
-            <Metric label="Issue blocks" value={report.issueBlockCount} detail="Contiguous blocks with remarks" tone="amber" />
+            <Metric label="Issue types" value={report.issueBlockCount} detail="Same issue instances are clubbed by substation" tone="amber" />
             <Metric label="Marked cells" value={report.flaggedCellCount} detail={`${report.sheetName} · ${report.fileName}`} tone="red" />
           </Box>
 
@@ -297,12 +305,12 @@ export default function DataValidation() {
           <Stack spacing={1}>
             <Typography sx={{ fontSize: 11, fontWeight: 900, color: "#667085", letterSpacing: .5 }}>ISSUE BLOCKS</Typography>
             {!selectedStation.issues?.length && <Alert severity="success">No validation issue was detected for this substation.</Alert>}
-            {(selectedStation.issues || []).map((issue) => <Paper key={issue.id} variant="outlined" onClick={() => setSelectedIssue(issue)} sx={{ p: 1.25, cursor: "pointer", borderColor: selectedIssue?.id === issue.id ? "#B42318" : "#F4C7C3", background: selectedIssue?.id === issue.id ? "#FEF3F2" : "#FFFBFA" }}><Stack direction="row" spacing={1} alignItems="flex-start"><AlertTriangle size={17} color={issue.severity === "error" ? "#B42318" : "#B54708"} /><Box minWidth={0}><Typography sx={{ fontSize: 12.5, fontWeight: 900, color: "#7A271A" }}>{issue.title}</Typography><Typography sx={{ mt: .25, color: "#667085", fontSize: 10.5 }}>{issue.startTime ? `${issue.startTime} to ${issue.endTime} · ${issue.sampleCount} sample(s)` : "Station-level check"}</Typography><Typography sx={{ mt: .55, color: "#344054", fontSize: 10.8 }}>{issue.remark}</Typography></Box></Stack></Paper>)}
+            {(selectedStation.issues || []).map((issue) => <Paper key={issue.id} variant="outlined" onClick={() => setSelectedIssue(issue)} sx={{ p: 1.25, cursor: "pointer", borderColor: selectedIssue?.id === issue.id ? "#B42318" : "#F4C7C3", background: selectedIssue?.id === issue.id ? "#FEF3F2" : "#FFFBFA" }}><Stack direction="row" spacing={1} alignItems="flex-start"><AlertTriangle size={17} color={issue.severity === "error" ? "#B42318" : "#B54708"} /><Box minWidth={0}><Typography sx={{ fontSize: 12.5, fontWeight: 900, color: "#7A271A" }}>{issue.title}</Typography><Typography sx={{ mt: .25, color: "#667085", fontSize: 10.5 }}>{issue.startTime ? `${issue.instanceCount || issue.blocks?.length || 1} instance(s) · ${issue.sampleCount} sample(s) · ${issue.startTime} to ${issue.endTime}` : "Station-level check"}</Typography><Typography sx={{ mt: .55, color: "#344054", fontSize: 10.8 }}>{issue.remark}</Typography></Box></Stack></Paper>)}
           </Stack>
           <Box minWidth={0}>
             {!selectedIssue ? <Paper variant="outlined" sx={{ minHeight: 260, display: "grid", placeItems: "center", color: "#667085" }}>Select an issue block to inspect its samples.</Paper> : <>
               <Paper elevation={0} sx={{ p: 1.4, mb: 1, border: "1px solid #FDA29B", background: "#FEF3F2" }}><Typography sx={{ fontWeight: 950, color: "#B42318" }}>{selectedIssue.title}</Typography><Typography sx={{ mt: .35, color: "#7A271A", fontSize: 11.5 }}>{selectedIssue.remark}</Typography></Paper>
-              {selectedIssue.startIndex === null ? <Alert severity={selectedIssue.severity === "error" ? "error" : "warning"}>This is a station-level issue and does not belong to an individual sample block.</Alert> : <Box sx={{ overflow: "auto", maxHeight: 480 }}><Table stickyHeader size="small"><TableHead><TableRow><TableCell sx={{ fontWeight: 900 }}>Sample</TableCell><TableCell sx={{ fontWeight: 900 }}>Date &amp; time</TableCell><TableCell align="right" sx={{ fontWeight: 900 }}>Voltage (kV)</TableCell><TableCell sx={{ fontWeight: 900 }}>Remarks</TableCell></TableRow></TableHead><TableBody>{selectedIssueRows.map((row) => { const flags = row.flags?.[selectedStation.id] || []; return <TableRow key={row.index} sx={{ background: "#FEF3F2" }}><TableCell>{row.index + 1}</TableCell><TableCell sx={{ whiteSpace: "nowrap" }}>{row.dateTime || "—"}</TableCell><TableCell align="right" sx={{ color: "#B42318", fontWeight: 950 }}>{row.values?.[selectedStation.id] ?? "—"}</TableCell><TableCell sx={{ minWidth: 260 }}>{[...new Set(flags.map((flag) => flag.remark))].join(" · ") || selectedIssue.remark}</TableCell></TableRow>; })}</TableBody></Table></Box>}
+              {selectedIssue.startIndex === null ? <Alert severity={selectedIssue.severity === "error" ? "error" : "warning"}>This is a station-level issue and does not belong to an individual sample block.</Alert> : <Box sx={{ overflow: "auto", maxHeight: 480 }}><Table stickyHeader size="small"><TableHead><TableRow><TableCell sx={{ fontWeight: 900 }}>Sample</TableCell><TableCell sx={{ fontWeight: 900 }}>Date &amp; time</TableCell><TableCell align="right" sx={{ fontWeight: 900 }}>Voltage (kV)</TableCell><TableCell sx={{ fontWeight: 900 }}>Remarks</TableCell></TableRow></TableHead><TableBody>{selectedIssueRows.map((row) => { const flags = (row.flags?.[selectedStation.id] || []).filter((flag) => flag.code === selectedIssue.code); return <TableRow key={row.index} sx={{ background: "#FEF3F2" }}><TableCell>{row.index + 1}</TableCell><TableCell sx={{ whiteSpace: "nowrap" }}>{row.dateTime || "—"}</TableCell><TableCell align="right" sx={{ color: "#B42318", fontWeight: 950 }}>{row.values?.[selectedStation.id] ?? "—"}</TableCell><TableCell sx={{ minWidth: 260 }}>{[...new Set(flags.map((flag) => flag.remark))].join(" · ") || selectedIssue.remark}</TableCell></TableRow>; })}</TableBody></Table></Box>}
             </>}
           </Box>
         </Box>}

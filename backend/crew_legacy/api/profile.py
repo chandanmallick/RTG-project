@@ -15,6 +15,7 @@ from urllib3.util.ssl_ import create_urllib3_context
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
+from pydantic import BaseModel
 
 from crew_legacy.admin_logic.auth_utils import get_current_user, hash_password, validate_password_policy, verify_password
 from crew_legacy.database.database_mongo import (
@@ -34,6 +35,7 @@ from crew_legacy.database.database_mongo import (
 )
 from crew_legacy.security_utils import ensure_upload_allowed
 from crew_legacy.api.duty_rules import duty_category, is_excluded_duty_record, normalized_duty
+from crew_legacy.api.auth import LANDING_PAGE_KEYS
 
 router = APIRouter()
 
@@ -305,7 +307,9 @@ def _report_date(value) -> str:
 
 
 def _report_actor_can_view_all(user: dict) -> bool:
-    return str(user.get("role") or "").lower() == "admin" or str(user.get("employeeId") or "") == "50041"
+    # Crew Reports are an authenticated employee resource. This includes the
+    # detailed report, consolidated activity matrix and CRMS reconciliation.
+    return bool(str(user.get("employeeId") or user.get("userId") or "").strip())
 
 
 def _inclusive_days(start_value, end_value=None, window_start: str | None = None, window_end: str | None = None) -> int:
@@ -633,6 +637,9 @@ def activity_matrix(
             "leaveTotal": 0,
             "leaveByType": {},
             "compOffDays": 0,
+            "compOffUsable": 0,
+            "compOffNonExpired": 0,
+            "compOffCredits": [],
         }
 
     people = {}
@@ -730,6 +737,51 @@ def activity_matrix(
         if comp_off_key not in comp_off_keys:
             comp_off_keys.add(comp_off_key)
             row["compOffDays"] += 1
+
+    # Current C-OFF balance/details are intentionally independent of the
+    # activity report period. The matrix shows usable / total non-expired,
+    # while the period-specific earned/used count remains in compOffDays.
+    balance_as_of = datetime.now().date().isoformat()
+    for comp_off in compensatory_off_collection.find({"employeeId": {"$exists": True, "$ne": None}}).sort([
+        ("earnedDate", -1), ("date", -1), ("createdOn", -1),
+    ]):
+        employee_id = str(comp_off.get("employeeId") or "").strip()
+        if not employee_id:
+            continue
+        row = people.setdefault(
+            employee_id,
+            empty_row(employee_id, comp_off.get("employeeName") or employee_id, comp_off.get("designation") or ""),
+        )
+        earned_date = _report_date(comp_off.get("earnedDate") or comp_off.get("date"))
+        expiry_date = _report_date(comp_off.get("expiryDate"))
+        if not expiry_date and earned_date:
+            try:
+                expiry_date = f"{datetime.strptime(earned_date, '%Y-%m-%d').year + 1}-03-31"
+            except ValueError:
+                expiry_date = ""
+        raw_status = str(comp_off.get("status") or "Available").strip() or "Available"
+        expired = bool(expiry_date and expiry_date < balance_as_of)
+        display_status = "Expired" if expired and raw_status.lower() == "available" else raw_status
+        non_expired = not expired
+        usable = non_expired and raw_status.lower() == "available"
+        if non_expired:
+            row["compOffNonExpired"] += 1
+        if usable:
+            row["compOffUsable"] += 1
+        reference = comp_off.get("reference") or {}
+        row["compOffCredits"].append({
+            "id": str(comp_off.get("_id")),
+            "earnedDate": earned_date,
+            "expiryDate": expiry_date,
+            "status": display_status,
+            "usable": usable,
+            "nonExpired": non_expired,
+            "usedDate": _report_date(comp_off.get("usedDate")),
+            "reason": comp_off.get("reason") or reference.get("reason") or "",
+            "source": reference.get("type") or ("Roster" if comp_off.get("rosterId") else "System"),
+            "groupName": reference.get("groupName") or comp_off.get("groupName") or "",
+            "linkedLeaveId": comp_off.get("linkedLeaveId") or reference.get("leaveRequestId"),
+        })
 
     configured_leave_categories = {
         str(item.get("value") or "").strip()
@@ -1142,6 +1194,26 @@ def crms_duty_reconciliation(
 # -----------------------------
 # 1. Profile (static info only)
 # -----------------------------
+class LandingPagePreference(BaseModel):
+    landingPage: str
+
+
+@router.post("/landing-page")
+@router.put("/landing-page")
+def update_landing_page(data: LandingPagePreference, user=Depends(get_current_user)):
+    employee_id = str(user.get("employeeId") or "").strip()
+    landing_page = str(data.landingPage or "").strip()
+    if landing_page not in LANDING_PAGE_KEYS:
+        raise HTTPException(status_code=400, detail="Select a valid page to open after login")
+    result = employee_collection.update_one(
+        _employee_id_query(employee_id),
+        {"$set": {"landingPage": landing_page, "updatedOn": datetime.utcnow()}},
+    )
+    if not result.matched_count:
+        raise HTTPException(status_code=404, detail="Employee profile not found")
+    return {"employeeId": employee_id, "landingPage": landing_page}
+
+
 @router.get("/{employeeId}")
 def get_profile(employeeId: str):
     employeeId = str(employeeId or "").strip()
@@ -1194,6 +1266,7 @@ def get_profile(employeeId: str):
         "gmail": employee.get("gmail") or employee.get("email"),
         "phone": employee.get("phone"),
         "profilePhoto": _profile_photo_url(employee, canonical_id),
+        "landingPage": employee.get("landingPage") or "",
         "isActive": employee.get("isActive", True) is not False,
         "functions": [function_names.get(value, value) for value in function_ids],
         "verticals": organization.get("verticals") or employee.get("verticals") or ([employee.get("vertical")] if employee.get("vertical") else []),

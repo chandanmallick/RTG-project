@@ -139,7 +139,7 @@ export default function HomePage() {
             </Box>
           </SectionCard>
 
-          <SectionCard title="Crew Management Dashboard" subtitle="Today duty assignments" icon={ShieldCheck} action={<Box sx={{ display: "flex", gap: .75, flexWrap: "wrap" }}><Button size="small" startIcon={<CalendarDays size={14} />} onClick={() => setTomorrowDutyOpen(true)} sx={{ textTransform: "none", fontWeight: 850 }}>Tomorrow duty</Button><Button size="small" variant="outlined" href="/public/crew-calendar" target="_blank" sx={{ textTransform: "none", fontWeight: 850 }}>Public calendar</Button></Box>}>
+          <SectionCard title="Crew Management Dashboard" subtitle="Today duty assignments" icon={ShieldCheck} action={<Box sx={{ display: "flex", gap: .75, flexWrap: "wrap" }}><Button size="small" startIcon={<CalendarDays size={14} />} onClick={() => setTomorrowDutyOpen(true)} sx={{ textTransform: "none", fontWeight: 850 }}>Tomorrow duty</Button><Button size="small" variant="outlined" href="/crew/calendar" sx={{ textTransform: "none", fontWeight: 850 }}>Crew calendar</Button></Box>}>
             {["Morning", "Evening", "Night"].map((shift) => (
               <Box key={shift} sx={{ mb: 1.5 }}>
                 <Typography sx={{ fontSize: 13, fontWeight: 900, color: "#0F172A", mb: 0.75 }}>{shift}</Typography>

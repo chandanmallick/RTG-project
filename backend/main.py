@@ -23,6 +23,7 @@ from routes.rtg_dashboard_routes import router as rtg_dashboard_router
 
 from routes.psp_routes import router as psp_router
 from routes.frequency_routes import router as frequency_router
+from routes.crms_compilation_routes import router as crms_compilation_router
 from routes.old_logbook_routes import router as old_logbook_router
 from routes.outage_ml_routes import router as outage_ml_router
 from routes.crew_routes import router as crew_router
@@ -146,6 +147,7 @@ app.include_router(
 app.include_router(
     frequency_router
 )
+app.include_router(crms_compilation_router)
 
 app.include_router(
     old_logbook_router

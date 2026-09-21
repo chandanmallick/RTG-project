@@ -39,6 +39,7 @@ import {
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import ExpandLessIcon from "@mui/icons-material/ExpandLess";
 import DutyReassignmentPanel from "../components/crew/DutyReassignmentPanel";
+import WorkflowHeader from "../components/crew/WorkflowHeader";
 
 export default function ReplacementManagement() {
 
@@ -66,6 +67,7 @@ export default function ReplacementManagement() {
   const [sicExchangeContext, setSicExchangeContext] = useState(null);
   const [halfDuty, setHalfDuty] = useState(false);
   const [candidateFilter, setCandidateFilter] = useState("auto");
+  const [candidateHistory, setCandidateHistory] = useState({ open: false, employee: null, rows: [], loading: false, error: "" });
   const [switchDate, setSwitchDate] = useState(dayjs().format("YYYY-MM-DD"));
   const [switchOptions, setSwitchOptions] = useState([]);
   const [switchEmployeeId, setSwitchEmployeeId] = useState("");
@@ -77,26 +79,20 @@ export default function ReplacementManagement() {
   const [switchNotice, setSwitchNotice] = useState(null);
   const [switchSaving, setSwitchSaving] = useState(false);
   const [canSwitchDuty, setCanSwitchDuty] = useState(true);
+  const [historyVisible, setHistoryVisible] = useState(false);
   const sicShortcutHandled = useRef(false);
   const [activeWorkflow, setActiveWorkflow] = useState(() => {
     const params = new URLSearchParams(window.location.search);
     if (["duty", "leave", "board", "sic"].includes(params.get("section"))) return params.get("section");
     if (params.get("action") === "assign-sic") return "sic";
     if (params.get("action") === "leave") return "leave";
-    return null;
+    return "duty";
   });
 
   useEffect(() => {
     if (!activeWorkflow) return;
     window.setTimeout(() => document.getElementById(`replacement-workflow-${activeWorkflow}`)?.scrollIntoView({ behavior: "smooth", block: "start" }), 220);
   }, [activeWorkflow]);
-
-  const openWorkflow = (workflow) => {
-    setActiveWorkflow(workflow);
-    window.setTimeout(() => {
-      document.getElementById(`replacement-workflow-${workflow}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
-    }, 180);
-  };
 
   useEffect(() => {
     fetchPendingLeaves();
@@ -152,6 +148,16 @@ export default function ReplacementManagement() {
       params: { roleFilter: filterValue }
     });
     setCandidates(res.data || []);
+  };
+
+  const openCandidateHistory = async (candidate) => {
+    setCandidateHistory({ open: true, employee: candidate, rows: [], loading: true, error: "" });
+    try {
+      const res = await api.get("/replacement/history", { params: { employeeId: candidate.employeeId } });
+      setCandidateHistory((current) => ({ ...current, rows: res.data || [], loading: false }));
+    } catch (err) {
+      setCandidateHistory((current) => ({ ...current, loading: false, error: err.response?.data?.detail || "Replacement-duty history could not be loaded." }));
+    }
   };
 
   const fetchDutySwitchOptions = async () => {
@@ -472,58 +478,9 @@ export default function ReplacementManagement() {
   return (
     <Box sx={{ p: 3 }}>
 
-      {/* HEADER */}
-      <Box
-        sx={{
-          p: 3,
-          mb: 3,
-          borderRadius: 3,
-          background: "linear-gradient(105deg,#08103A 0%,#0057B7 65%,#0F6FDB 100%)",
-          color: "white"
-        }}
-      >
-        <Typography variant="h5" fontWeight="bold" sx={{ color: "#FFFFFF" }}>
-          Replacement Management
-        </Typography>
-        <Typography variant="body2" sx={{ color: "rgba(255,255,255,.88)" }}>
-          Manage leave replacements and SIC assignments
-        </Typography>
-      </Box>
-
-      <Grid container spacing={2} sx={{ mb: 3 }}>
-        {[
-          { key: "duty", title: "Duty Switching & Reassignment", subtitle: "Exchange, move or reassign duty", count: null, color: "#0057B7", tint: "#EAF2FF" },
-          { key: "leave", title: "Leaves Requiring Replacement", subtitle: "Open pending manpower replacement", count: pendingLeaves.length, color: "#17876D", tint: "#EAF8F3" },
-          { key: "board", title: "Replacement Duty Board", subtitle: "Assigned duties, decisions and audit", count: assignedReplacements.length, color: "#4338CA", tint: "#EEF2FF" },
-          { key: "sic", title: "SIC Assignment", subtitle: "Allocate acting SIC for approved leave", count: pendingSIC.length, color: "#D97706", tint: "#FFF7E8" },
-        ].map((tile) => (
-          <Grid item xs={12} md={3} key={tile.key}>
-            <Paper
-              component="button"
-              type="button"
-              onClick={() => openWorkflow(tile.key)}
-              elevation={0}
-              sx={{
-                width: "100%", minHeight: 118, p: 2.2, borderRadius: 3, textAlign: "left", cursor: "pointer",
-                border: `1px solid ${activeWorkflow === tile.key ? tile.color : "#D7E3F4"}`,
-                background: activeWorkflow === tile.key ? tile.tint : "#FFFFFF",
-                boxShadow: activeWorkflow === tile.key ? `0 12px 28px ${tile.color}22` : "0 5px 18px rgba(15,23,42,.06)",
-                transition: "transform .22s ease, box-shadow .22s ease, border-color .22s ease, background .22s ease",
-                "&:hover": { transform: "translateY(-3px)", borderColor: tile.color, boxShadow: `0 14px 30px ${tile.color}26` },
-              }}
-            >
-              <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 2 }}>
-                <Box>
-                  <Typography sx={{ color: "#0F172A", fontSize: 16, fontWeight: 950 }}>{tile.title}</Typography>
-                  <Typography sx={{ mt: .65, color: "#64748B", fontSize: 11.5, fontWeight: 650 }}>{tile.subtitle}</Typography>
-                </Box>
-                {tile.count !== null && <Box sx={{ minWidth: 42, height: 42, px: 1, borderRadius: 2.2, display: "grid", placeItems: "center", color: "#FFFFFF", background: tile.color, fontSize: 18, fontWeight: 950 }}>{tile.count}</Box>}
-              </Box>
-              <Typography sx={{ mt: 1.4, color: tile.color, fontSize: 11.5, fontWeight: 900 }}>{activeWorkflow === tile.key ? "Workspace open" : "Click to open"}</Typography>
-            </Paper>
-          </Grid>
-        ))}
-      </Grid>
+      <Box sx={{ mb: 2 }}><WorkflowHeader title="Manpower coverage" subtitle="One guided window for replacement, additional manpower, exchange and duty reallocation." accent="#0057B7">
+        <Button onClick={() => { setHistoryVisible((value) => !value); if (!historyVisible) fetchHistory(); }} size="small" sx={{ color: "#4338CA", border: "1px solid #C7D2FE", background: "#FFF", textTransform: "none", fontWeight: 850 }}>{historyVisible ? "Hide history" : "View history"}</Button>
+      </WorkflowHeader></Box>
 
       <Collapse in={activeWorkflow === "duty"} timeout={420} unmountOnExit>
       <Box id="replacement-workflow-duty" sx={{ scrollMarginTop: 110 }}>
@@ -1033,6 +990,7 @@ export default function ReplacementManagement() {
       {/* HISTORY */}
       {/* ========================= */}
 
+      <Collapse in={historyVisible} unmountOnExit>
       <Accordion
         defaultExpanded
         sx={{
@@ -1103,6 +1061,7 @@ export default function ReplacementManagement() {
 
         </AccordionDetails>
       </Accordion>
+      </Collapse>
 
       {/* ========================= */}
       {/* REPLACEMENT DIALOG */}
@@ -1156,16 +1115,19 @@ export default function ReplacementManagement() {
                     ...(candidate.organization?.verticals || []),
                     ...(candidate.organization?.sections || []),
                   ].filter(Boolean).join(" · ") || "Organization Master";
-                  const lastDuty = candidate.lastMatchingDutyDate ? dayjs(candidate.lastMatchingDutyDate).format("DD MMM YYYY") : "Never recorded";
+                  const hasMatchingDuty = Boolean(candidate.lastMatchingDutyDate);
+                  const displayedDutyDate = candidate.lastMatchingDutyDate || candidate.lastDutyDate;
+                  const lastDuty = displayedDutyDate ? dayjs(displayedDutyDate).format("DD MMM YYYY") : "Never recorded";
+                  const dutyAge = hasMatchingDuty ? candidate.daysSinceMatchingDuty : candidate.daysSinceLastDuty;
                   return <TableRow key={candidate.employeeId} hover sx={{ "&:hover": { background: "#F5FAFF" } }}>
                     <TableCell><Chip size="small" label={candidate.serialNo || "-"} sx={{ fontWeight: 900, background: "#E8F1FF", color: "#0057B7" }} /></TableCell>
-                    <TableCell><Typography sx={{ fontSize: 12.5, fontWeight: 900 }}>{candidate.name}</Typography><Typography sx={{ fontSize: 11, color: "#64748B" }}>{candidate.designation || "-"} · {candidate.employeeId}</Typography></TableCell>
+                    <TableCell><Button variant="text" onClick={() => openCandidateHistory(candidate)} sx={{ minWidth: 0, p: 0, justifyContent: "flex-start", textTransform: "none", fontSize: 12.5, fontWeight: 900 }}>{candidate.name}</Button><Typography sx={{ fontSize: 11, color: "#64748B" }}>{candidate.designation || "-"} · {candidate.employeeId}</Typography><Typography sx={{ fontSize: 9.8, color: "#2563EB" }}>Click for replacement history</Typography></TableCell>
                     <TableCell><Chip size="small" label={sourceLabel(candidate.source)} color={candidate.source === "replacement" ? "success" : candidate.source === "otherShift" ? "warning" : "default"} variant="outlined" />{candidate.eligibility && <Typography sx={{ mt: .4, fontSize: 10.5, color: "#0057B7", fontWeight: 800 }}>{candidate.eligibility}</Typography>}</TableCell>
                     <TableCell><Typography sx={{ fontSize: 11.5, fontWeight: 750 }}>{unit}</Typography><Typography sx={{ mt: .35, fontSize: 10.5, color: "#64748B" }}>{(candidate.authorityNames || []).join(" → ") || "No reporting line recorded"}</Typography></TableCell>
                     <TableCell sx={{ fontWeight: 800 }}>{candidate.assignedDuty || "-"}</TableCell>
                     <TableCell sx={{ fontWeight: 800 }}>{candidate.nextDayDuty || "-"}</TableCell>
-                    <TableCell sx={{ whiteSpace: "nowrap" }}>{lastDuty}</TableCell>
-                    <TableCell>{candidate.daysSinceMatchingDuty ?? "-"}</TableCell>
+                    <TableCell sx={{ whiteSpace: "nowrap" }}>{lastDuty}{displayedDutyDate && <Typography sx={{ fontSize: 10.5, color: hasMatchingDuty ? "#15803D" : "#B45309", fontWeight: 750 }}>{hasMatchingDuty ? `${candidate.requiredDuty} · matching` : `${candidate.lastDutyType || "Shift"} · latest duty`}</Typography>}</TableCell>
+                    <TableCell>{dutyAge ?? "-"}</TableCell>
                     <TableCell>{candidate.denialCount ?? candidate.denialCount90Days ?? 0}</TableCell>
                     <TableCell align="right"><Button size="small" variant="contained" onClick={() => assignReplacement(candidate.employeeId)} sx={{ whiteSpace: "nowrap" }}>Assign</Button></TableCell>
                   </TableRow>;
@@ -1181,6 +1143,27 @@ export default function ReplacementManagement() {
           <Button onClick={() => setDialogOpen(false)}>Close</Button>
         </DialogActions>
 
+      </Dialog>
+
+      <Dialog open={candidateHistory.open} onClose={() => setCandidateHistory((current) => ({ ...current, open: false }))} fullWidth maxWidth="md">
+        <DialogTitle sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", fontWeight: 900 }}>
+          Replacement duty history · {candidateHistory.employee?.name || "Employee"}
+          <IconButton onClick={() => setCandidateHistory((current) => ({ ...current, open: false }))}><span aria-hidden>×</span></IconButton>
+        </DialogTitle>
+        <DialogContent dividers>
+          {candidateHistory.loading ? <Box sx={{ py: 5, textAlign: "center" }}>Loading replacement duties…</Box> : candidateHistory.error ? <Alert severity="error">{candidateHistory.error}</Alert> : (
+            <TableContainer sx={{ border: "1px solid #CBD5E1", borderRadius: 2, maxHeight: "58vh" }}>
+              <Table size="small" stickyHeader>
+                <TableHead><TableRow><TableCell sx={{ fontWeight: 900 }}>Date</TableCell><TableCell sx={{ fontWeight: 900 }}>Duty</TableCell><TableCell sx={{ fontWeight: 900 }}>Group</TableCell><TableCell sx={{ fontWeight: 900 }}>Replaced employee</TableCell><TableCell sx={{ fontWeight: 900 }}>Leave</TableCell></TableRow></TableHead>
+                <TableBody>
+                  {!candidateHistory.rows.length && <TableRow><TableCell colSpan={5} align="center" sx={{ py: 4, color: "#64748B" }}>No replacement duty recorded.</TableCell></TableRow>}
+                  {candidateHistory.rows.map((item, index) => <TableRow key={`${item.date}-${index}`}><TableCell>{item.date ? dayjs(item.date).format("DD MMM YYYY") : "-"}</TableCell><TableCell sx={{ fontWeight: 800 }}>{item.assignedDuty || "-"}</TableCell><TableCell>{item.groupName || "-"}</TableCell><TableCell>{item.replacedEmployee || "-"}</TableCell><TableCell>{item.leaveType || "-"}</TableCell></TableRow>)}
+                </TableBody>
+              </Table>
+            </TableContainer>
+          )}
+        </DialogContent>
+        <DialogActions><Button onClick={() => setCandidateHistory((current) => ({ ...current, open: false }))}>Close</Button></DialogActions>
       </Dialog>
 
       {/* ========================= */}

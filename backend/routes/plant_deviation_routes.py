@@ -2,20 +2,27 @@ from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, datetime, timedelta, timezone
 from io import BytesIO
+import base64
+import json
+import os
+from pathlib import Path
 from time import monotonic
 from typing import Any
+from urllib.parse import quote
 
 import requests
 import urllib3
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import StreamingResponse
-from openpyxl import Workbook
+from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 from pydantic import BaseModel
 
 from services.db_handler import MongoService
 from services.token_service import TokenService
+from crew_legacy.admin_logic.notification_service import _runtime_env_value, replacement_mail_settings
+from crew_legacy.api.mail_settings import _persist_backend_credentials
 
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -36,6 +43,14 @@ HYDRO_FUELS = {"HYDEL", "HYDRO", "HYDROELECTRIC"}
 REPORT_CACHE: dict[str, tuple[float, dict]] = {}
 CACHE_SECONDS = 300
 EDIT_COLLECTION = "plant_deviation_mop_edits"
+DAY_AHEAD_COLLECTION = "plant_deviation_day_ahead_reports"
+ALL_INDIA_COLLECTION = "plant_deviation_all_india_reports"
+DEFAULT_MOP_06_HRS_DIR = Path(
+    r"\\10.3.95.200\HTTP-Access\Control_Room_Report\Reserve Margin Report_Intra state\MOP_06 HRS Report"
+)
+MOP_06_HRS_CACHE: dict[str, tuple[float, dict]] = {}
+DEFAULT_ALL_INDIA_DIR = Path(__file__).resolve().parents[1] / "data" / "plant_deviation" / "all_india"
+ALL_INDIA_REGIONS = ("NR", "SR", "WR")
 
 
 class PlantDeviationEdit(BaseModel):
@@ -59,6 +74,18 @@ class PlantDeviationBatchItem(BaseModel):
 class PlantDeviationBatchEdit(BaseModel):
     report_date: str
     edits: list[PlantDeviationBatchItem]
+
+
+class DayAheadCoalStockItem(BaseModel):
+    source_row: int
+    plant_name: str
+    coal_stock_days_left: float | None = None
+    daily_coal_requirement: float | None = None
+
+
+class DayAheadReportSave(BaseModel):
+    report_date: str
+    rows: list[DayAheadCoalStockItem]
 
 
 def _text(value: Any) -> str:
@@ -89,6 +116,481 @@ def _parse_report_date(value: str | None) -> date:
         return date.fromisoformat(value)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail="report_date must be in YYYY-MM-DD format.") from exc
+
+
+def _mop_06_hrs_directory() -> Path:
+    return Path(os.getenv("MOP_06_HRS_REPORT_DIR", str(DEFAULT_MOP_06_HRS_DIR)))
+
+
+def _mop_06_hrs_file(selected_date: date) -> Path:
+    return _mop_06_hrs_directory() / f"ER_Plantwise Deviation from IC_{selected_date.strftime('%d-%m-%Y')}.xlsx"
+
+
+def _day_ahead_thermal_report(report_date: str | None = None, force_refresh: bool = False) -> dict:
+    """Read the daily MOP workbook and retain Thermal stations with non-zero margin."""
+    selected_date = _parse_report_date(report_date)
+    source_file = _mop_06_hrs_file(selected_date)
+    if not source_file.is_file():
+        raise HTTPException(
+            status_code=404,
+            detail=f"Day-ahead MOP file not found: {source_file.name}",
+        )
+
+    modified_at = source_file.stat().st_mtime
+    cache_key = selected_date.isoformat()
+    cached = MOP_06_HRS_CACHE.get(cache_key)
+    if not force_refresh and cached and cached[0] == modified_at:
+        return cached[1]
+
+    try:
+        workbook = load_workbook(source_file, read_only=True, data_only=True)
+    except PermissionError as exc:
+        raise HTTPException(status_code=503, detail="The daily MOP workbook is currently locked or inaccessible.") from exc
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail=f"Unable to read daily MOP workbook: {exc}") from exc
+
+    try:
+        sheet_name = next(
+            (name for name in workbook.sheetnames if _compact(name) == "ERTHERMAL"),
+            None,
+        )
+        if not sheet_name:
+            raise HTTPException(status_code=422, detail="ER_Thermal sheet was not found in the daily MOP workbook.")
+        sheet = workbook[sheet_name]
+        output = []
+        category = "State"
+        section = "STATE - NOT MAPPED"
+        ignored_zero_rows = 0
+        all_thermal_outage_capacity = 0.0
+        for row_number, values in enumerate(
+            sheet.iter_rows(min_row=4, max_col=11, values_only=True),
+            start=4,
+        ):
+            values = list(values) + [None] * (11 - len(values))
+            station = _text(values[0])
+            marker = _text(values[5])
+            installed = _number(values[1])
+            outage = _number(values[7])
+            margin = _number(values[6])
+
+            if marker.upper() == "REGIONAL IPP":
+                category, section = "Regional IPP", "REGIONAL IPP"
+                continue
+            if marker.upper() == "ISGS":
+                category, section = "ISGS", "ISGS"
+                continue
+            if station.upper() == "STATE ENTITIES GENERATION":
+                category, section = "State", "STATE - NOT MAPPED"
+                continue
+
+            # Section headings have text in column A but no numeric capacity.
+            if station and installed is None:
+                if station.upper() not in {"GRAND TOTAL", "TOTAL"}:
+                    section = station.upper()
+                continue
+            if not station or installed is None:
+                continue
+            all_thermal_outage_capacity += outage or 0
+            if margin is None or abs(margin) < 1e-9:
+                ignored_zero_rows += 1
+                continue
+
+            output.append({
+                "serial": len(output) + 1,
+                "source_row": row_number,
+                "category": category,
+                "section": section,
+                "plant_name": station,
+                "installed_capacity_mw": installed,
+                "capacity_on_bar_mw": _number(values[2]),
+                "max_generation_1900_2400_mw": _number(values[3]),
+                "max_generation_1900_2400_time": _text(values[4]),
+                "generation_max_min_1900_2400": _text(values[5]),
+                "running_units_margin_mw": margin,
+                "outage_capacity_mw": outage,
+                "reason_for_not_attaining_full_generation": _text(values[8]),
+                "loading_factor_pct": _number(values[9]),
+                "expected_revival_time": _text(values[10]),
+            })
+    finally:
+        workbook.close()
+
+    saved_document = MongoService().db[DAY_AHEAD_COLLECTION].find_one(
+        {"report_date": selected_date.isoformat()},
+        {"_id": 0},
+    ) or {}
+    saved_rows = {
+        (_compact(row.get("plant_name")), row.get("source_row")): row
+        for row in saved_document.get("rows", [])
+    }
+    saved_rows_by_name = {
+        _compact(row.get("plant_name")): row
+        for row in saved_document.get("rows", [])
+    }
+    output.sort(key=lambda row: row.get("running_units_margin_mw") or 0, reverse=True)
+    for serial, row in enumerate(output, 1):
+        saved = saved_rows.get(
+            (_compact(row["plant_name"]), row["source_row"]),
+        ) or saved_rows_by_name.get(_compact(row["plant_name"]), {})
+        row["serial"] = serial
+        row["coal_stock_days_left"] = _number(saved.get("coal_stock_days_left"))
+        row["daily_coal_requirement"] = _number(saved.get("daily_coal_requirement"))
+
+    report = {
+        "success": True,
+        "report_name": "Day-ahead Thermal Margin Consolidation",
+        "report_date": selected_date.isoformat(),
+        "source_file": source_file.name,
+        "source_directory": str(source_file.parent),
+        "sheet_name": sheet_name,
+        "filter": "Margin on running units != 0 MW",
+        "sort": "Margin on running units (descending)",
+        "saved_at": saved_document.get("saved_at"),
+        "rows": output,
+        "summary": {
+            "thermal_margin_stations": len(output),
+            "zero_margin_stations_excluded": ignored_zero_rows,
+            "total_margin_mw": round(sum(row["running_units_margin_mw"] for row in output), 3),
+            "total_outage_capacity_mw": round(sum((row["outage_capacity_mw"] or 0) for row in output), 3),
+            "all_thermal_outage_capacity_mw": round(all_thermal_outage_capacity, 3),
+            "total_running_capacity_mw": round(sum((row["capacity_on_bar_mw"] or 0) for row in output), 3),
+            "total_installed_capacity_mw": round(sum((row["installed_capacity_mw"] or 0) for row in output), 3),
+        },
+    }
+    MOP_06_HRS_CACHE[cache_key] = (modified_at, report)
+    return report
+
+
+def _all_india_report_directory(selected_date: date) -> Path:
+    root = Path(os.getenv("PLANT_DEVIATION_ALL_INDIA_DIR", str(DEFAULT_ALL_INDIA_DIR)))
+    return root / f"{selected_date:%Y}" / f"{selected_date:%m}"
+
+
+def _all_india_attachment_name(selected_date: date) -> str:
+    return f"Plantwise Deviation from IC_{selected_date:%d-%m-%Y}_consolidated.xlsm"
+
+
+def _all_india_subject(selected_date: date) -> str:
+    return f"Consolidated details for thermal and hydro stations_{selected_date:%d.%m.%y}"
+
+
+def _graph_access_token() -> tuple[str, str]:
+    tenant_id = _runtime_env_value("PLANT_REPORT_GRAPH_TENANT_ID")
+    client_id = _runtime_env_value("PLANT_REPORT_GRAPH_CLIENT_ID")
+    auth_mode = _runtime_env_value("PLANT_REPORT_GRAPH_AUTH_MODE").strip().lower()
+    auth_mode = auth_mode if auth_mode in {"application", "delegated"} else "delegated"
+
+    if auth_mode == "delegated":
+        refresh_token = _runtime_env_value("PLANT_REPORT_GRAPH_REFRESH_TOKEN")
+        if not all((tenant_id, client_id, refresh_token)):
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "Connect your Microsoft mailbox in Admin > Mail & 2FA Settings > "
+                    "Consolidated Report Inbox."
+                ),
+            )
+        try:
+            response = requests.post(
+                f"https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token",
+                data={
+                    "grant_type": "refresh_token",
+                    "client_id": client_id,
+                    "refresh_token": refresh_token,
+                    "scope": (
+                        "openid profile offline_access "
+                        "https://graph.microsoft.com/Mail.Read"
+                    ),
+                },
+                timeout=25,
+            )
+        except requests.RequestException as exc:
+            raise HTTPException(status_code=502, detail=f"Microsoft delegated sign-in refresh failed: {exc}") from exc
+        payload = response.json() if response.content else {}
+        token = payload.get("access_token")
+        if response.status_code != 200 or not token:
+            error = payload.get("error_description") or payload.get("error") or "delegated authentication failed"
+            raise HTTPException(
+                status_code=401,
+                detail=(
+                    "The connected Microsoft mailbox session has expired or was revoked. "
+                    "Reconnect it in Admin > Mail & 2FA Settings > Consolidated Report Inbox. "
+                    f"Microsoft response: {str(error)[:240]}"
+                ),
+            )
+        rotated_refresh_token = str(payload.get("refresh_token") or "").strip()
+        if rotated_refresh_token and rotated_refresh_token != refresh_token:
+            _persist_backend_credentials(
+                {"PLANT_REPORT_GRAPH_REFRESH_TOKEN": rotated_refresh_token},
+                "Rotated delegated Microsoft Graph report-mailbox token",
+            )
+        return token, "delegated"
+
+    client_secret = _runtime_env_value("PLANT_REPORT_GRAPH_CLIENT_SECRET")
+    if not all((tenant_id, client_id, client_secret)):
+        raise HTTPException(status_code=409, detail="Configure the Consolidated Thermal/Hydro Report Tenant ID, Application ID and Client Secret in Mail Settings.")
+    try:
+        response = requests.post(
+            f"https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token",
+            data={
+                "grant_type": "client_credentials",
+                "client_id": client_id,
+                "client_secret": client_secret,
+                "scope": "https://graph.microsoft.com/.default",
+            },
+            timeout=25,
+        )
+    except requests.RequestException as exc:
+        raise HTTPException(status_code=502, detail=f"Microsoft Graph authentication request failed: {exc}") from exc
+    payload = response.json() if response.content else {}
+    token = payload.get("access_token")
+    if response.status_code != 200 or not token:
+        error = payload.get("error_description") or payload.get("error") or "authentication failed"
+        if "AADSTS7000215" in str(error):
+            raise HTTPException(
+                status_code=502,
+                detail=(
+                    "Invalid Microsoft Graph client secret. Open Microsoft Entra "
+                    "ID > App registrations > Certificates & secrets and paste the "
+                    "secret Value (not the Secret ID) in Admin > Mail Settings > "
+                    "Consolidated Report Inbox, then save it again."
+                ),
+            )
+        raise HTTPException(status_code=502, detail=f"Microsoft Graph authentication failed: {str(error)[:300]}")
+    try:
+        encoded_claims = token.split(".")[1]
+        encoded_claims += "=" * (-len(encoded_claims) % 4)
+        claims = json.loads(base64.urlsafe_b64decode(encoded_claims).decode("utf-8"))
+        application_roles = set(claims.get("roles") or [])
+        if not application_roles.intersection({"Mail.Read", "Mail.ReadWrite"}):
+            raise HTTPException(
+                status_code=403,
+                detail=(
+                    "Microsoft Graph authentication succeeded, but this application "
+                    "token has no Mail.Read application role. In Microsoft Entra ID, "
+                    "add Microsoft Graph > Application permissions > Mail.Read and "
+                    "select Grant admin consent. Delegated Mail.Read is not sufficient."
+                ),
+            )
+    except HTTPException:
+        raise
+    except (IndexError, ValueError, TypeError, UnicodeDecodeError):
+        # If Microsoft changes the access-token format, allow Graph itself to
+        # make the authorization decision instead of rejecting a valid token.
+        pass
+    return token, "application"
+
+
+def _fetch_all_india_attachment(selected_date: date) -> tuple[Path, dict]:
+    inbox_settings = replacement_mail_settings()
+    if not inbox_settings.get("plantReportInboxEnabled"):
+        raise HTTPException(status_code=409, detail="Enable the Consolidated Thermal/Hydro Report inbox in Mail Settings.")
+    mailbox = _text(inbox_settings.get("reportMailbox"))
+    if not mailbox:
+        raise HTTPException(status_code=409, detail="Configure the Microsoft 365 report mailbox in Mail Settings.")
+    token, auth_mode = _graph_access_token()
+    headers = {"Authorization": f"Bearer {token}"}
+    subject = _all_india_subject(selected_date)
+    expected_attachment = _all_india_attachment_name(selected_date)
+    mailbox_path = quote(mailbox, safe="")
+    mailbox_resource = "me" if auth_mode == "delegated" else f"users/{mailbox_path}"
+    try:
+        message_response = requests.get(
+            f"https://graph.microsoft.com/v1.0/{mailbox_resource}/mailFolders/inbox/messages",
+            headers=headers,
+            params={
+                "$filter": f"subject eq '{subject.replace(chr(39), chr(39) * 2)}' and hasAttachments eq true",
+                "$select": "id,subject,receivedDateTime,from,hasAttachments",
+                "$top": "50",
+            },
+            timeout=35,
+        )
+    except requests.RequestException as exc:
+        raise HTTPException(status_code=502, detail=f"Microsoft Graph inbox request failed: {exc}") from exc
+    if message_response.status_code != 200:
+        try:
+            graph_error = (message_response.json().get("error") or {})
+        except (ValueError, AttributeError):
+            graph_error = {}
+        message = graph_error.get("message") or "Mailbox access failed"
+        if message_response.status_code == 403:
+            message = (
+                "Mailbox authorization was denied. Reconnect your own mailbox and consent "
+                "to delegated Mail.Read in Mail Settings"
+                if auth_mode == "delegated"
+                else (
+                    "Mailbox authorization was denied. Confirm that Mail.Read is an "
+                    "Application permission with admin consent. If it is already granted, "
+                    "ask the Exchange administrator to verify the application's mailbox "
+                    "scope includes the configured report mailbox"
+                )
+            )
+        raise HTTPException(
+            status_code=502,
+            detail=f"Microsoft Graph mailbox request failed (HTTP {message_response.status_code}): {str(message)[:400]}.",
+        )
+    messages = message_response.json().get("value") or []
+    messages.sort(key=lambda item: item.get("receivedDateTime") or "", reverse=True)
+    for message in messages:
+        message_id = message.get("id")
+        if not message_id:
+            continue
+        attachments_response = requests.get(
+            f"https://graph.microsoft.com/v1.0/{mailbox_resource}/messages/{quote(message_id, safe='')}/attachments",
+            headers=headers,
+            params={"$select": "id,name,size,isInline,contentType"},
+            timeout=35,
+        )
+        if attachments_response.status_code != 200:
+            continue
+        attachment = next(
+            (
+                item for item in attachments_response.json().get("value") or []
+                if _text(item.get("name")).casefold() == expected_attachment.casefold()
+                and not item.get("isInline")
+            ),
+            None,
+        )
+        if not attachment:
+            continue
+        attachment_id = attachment.get("id")
+        content_response = requests.get(
+            f"https://graph.microsoft.com/v1.0/{mailbox_resource}/messages/{quote(message_id, safe='')}/attachments/{quote(attachment_id, safe='')}/$value",
+            headers=headers,
+            timeout=90,
+        )
+        if content_response.status_code != 200:
+            raise HTTPException(status_code=502, detail=f"Microsoft Graph could not download the report attachment (HTTP {content_response.status_code}).")
+        destination_directory = _all_india_report_directory(selected_date)
+        destination_directory.mkdir(parents=True, exist_ok=True)
+        destination = destination_directory / expected_attachment
+        destination.write_bytes(content_response.content)
+        return destination, {
+            "mailbox": mailbox,
+            "subject": message.get("subject") or subject,
+            "received_at": message.get("receivedDateTime"),
+            "message_id": message_id,
+            "attachment_id": attachment_id,
+        }
+    raise HTTPException(
+        status_code=404,
+        detail=f"No Inbox message with subject '{subject}' and attachment '{expected_attachment}' was found.",
+    )
+
+
+def _parse_all_india_workbook(source_file: Path, selected_date: date, mail: dict | None = None) -> dict:
+    try:
+        workbook = load_workbook(source_file, read_only=True, data_only=True)
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail=f"Unable to read the All India workbook: {exc}") from exc
+    try:
+        missing = [name for name in ALL_INDIA_REGIONS if name not in workbook.sheetnames]
+        if missing:
+            raise HTTPException(status_code=422, detail=f"Required sheet(s) missing: {', '.join(missing)}")
+        rows = []
+        zero_margin_excluded = 0
+        all_outage = 0.0
+        for region in ALL_INDIA_REGIONS:
+            sheet = workbook[region]
+            section = "NOT MAPPED"
+            for row_number, values in enumerate(sheet.iter_rows(min_row=1, max_col=11, values_only=True), start=1):
+                values = list(values) + [None] * (11 - len(values))
+                station = _text(values[0])
+                installed = _number(values[1])
+                if station and installed is None:
+                    normalized = _compact(station)
+                    if normalized not in {"STATIONCONSTITUENTS", "GRANDTOTAL", "TOTAL", "ER", "NR", "SR", "WR"}:
+                        section = station.upper()
+                    continue
+                if not station or installed is None or station.upper() in {"TOTAL", "GRAND TOTAL"}:
+                    continue
+                margin = _number(values[6])
+                outage = _number(values[7])
+                all_outage += outage or 0
+                if margin is None or abs(margin) < 1e-9:
+                    zero_margin_excluded += 1
+                    continue
+                rows.append({
+                    "serial": 0,
+                    "source_row": row_number,
+                    "region": region,
+                    "section": section,
+                    "plant_name": station,
+                    "installed_capacity_mw": installed,
+                    "capacity_on_bar_mw": _number(values[2]),
+                    "max_generation_1900_2400_mw": _number(values[3]),
+                    "max_generation_1900_2400_time": _text(values[4]),
+                    "generation_max_min_1900_2400": _text(values[5]),
+                    "running_units_margin_mw": margin,
+                    "outage_capacity_mw": outage,
+                    "reason_for_not_attaining_full_generation": _text(values[8]),
+                    "loading_factor_pct": _number(values[9]),
+                    "expected_revival_time": _text(values[10]),
+                })
+    finally:
+        workbook.close()
+    rows.sort(key=lambda row: row["running_units_margin_mw"], reverse=True)
+    for serial, row in enumerate(rows, 1):
+        row["serial"] = serial
+    report = {
+        "success": True,
+        "report_name": "All India Partial Outage - Margin Consolidation",
+        "report_date": selected_date.isoformat(),
+        "source_file": source_file.name,
+        "source_sheets": list(ALL_INDIA_REGIONS),
+        "filter": "Margin on running units != 0 MW",
+        "sort": "Margin on running units (descending)",
+        "mail": mail or {},
+        "rows": rows,
+        "summary": {
+            "stations": len(rows),
+            "zero_margin_stations_excluded": zero_margin_excluded,
+            "total_margin_mw": round(sum(row["running_units_margin_mw"] for row in rows), 3),
+            "total_outage_capacity_mw": round(sum((row["outage_capacity_mw"] or 0) for row in rows), 3),
+            "all_outage_capacity_mw": round(all_outage, 3),
+            "regions": {
+                region: len([row for row in rows if row["region"] == region])
+                for region in ALL_INDIA_REGIONS
+            },
+        },
+    }
+    MongoService().db[ALL_INDIA_COLLECTION].update_one(
+        {"report_date": selected_date.isoformat()},
+        {"$set": {**report, "updated_at": datetime.now(timezone.utc)}},
+        upsert=True,
+    )
+    return report
+
+
+def _all_india_report(report_date: str | None = None, fetch_mail: bool = False) -> dict:
+    selected_date = _parse_report_date(report_date)
+    source_file = _all_india_report_directory(selected_date) / _all_india_attachment_name(selected_date)
+    mail = None
+    if fetch_mail or not source_file.is_file():
+        source_file, mail = _fetch_all_india_attachment(selected_date)
+    return _parse_all_india_workbook(source_file, selected_date, mail)
+
+
+def sync_er_day_ahead_report(report_date: str | None = None) -> dict:
+    """Scheduled ER network-file ingestion; keeps any manually entered coal values."""
+    selected_date = _parse_report_date(report_date or date.today().isoformat())
+    report = _day_ahead_thermal_report(selected_date.isoformat(), force_refresh=True)
+    synced_at = datetime.now(timezone.utc)
+    MongoService().db[DAY_AHEAD_COLLECTION].update_one(
+        {"report_date": selected_date.isoformat()},
+        {"$set": {
+            "report_date": selected_date.isoformat(),
+            "source_file": report["source_file"],
+            "filter": report["filter"],
+            "sort": report["sort"],
+            "summary": report["summary"],
+            "rows": report["rows"],
+            "auto_fetched_at": synced_at,
+        }},
+        upsert=True,
+    )
+    MOP_06_HRS_CACHE.pop(selected_date.isoformat(), None)
+    return {"success": True, "report_date": selected_date.isoformat(), "rows": len(report["rows"]), "synced_at": synced_at}
 
 
 def _rtg_access() -> tuple[str, str, str]:
@@ -690,6 +1192,73 @@ def get_static_report(
         raise HTTPException(status_code=500, detail=f"Unable to prepare plant table: {exc}") from exc
 
 
+@router.get("/day-ahead")
+def get_day_ahead_thermal_report(
+    report_date: str | None = Query(default=None),
+    refresh: bool = Query(default=False),
+):
+    return _day_ahead_thermal_report(report_date, force_refresh=refresh)
+
+
+@router.get("/all-india")
+def get_all_india_partial_outage_report(
+    report_date: str | None = Query(default=None),
+    fetch_mail: bool = Query(default=False),
+):
+    return _all_india_report(report_date, fetch_mail=fetch_mail)
+
+
+@router.put("/day-ahead/save")
+def save_day_ahead_thermal_report(payload: DayAheadReportSave):
+    selected_date = _parse_report_date(payload.report_date)
+    report = _day_ahead_thermal_report(selected_date.isoformat())
+    source_rows = {
+        (row["source_row"], _compact(row["plant_name"])): row
+        for row in report["rows"]
+    }
+    saved_rows = []
+    for item in payload.rows:
+        values = item.model_dump() if hasattr(item, "model_dump") else item.dict()
+        key = (values["source_row"], _compact(values["plant_name"]))
+        source = source_rows.get(key)
+        if not source:
+            raise HTTPException(
+                status_code=422,
+                detail=f"{values['plant_name']}: station is not present in the selected source report.",
+            )
+        for field in ("coal_stock_days_left", "daily_coal_requirement"):
+            value = values.get(field)
+            if value is not None and value < 0:
+                raise HTTPException(status_code=422, detail=f"{values['plant_name']}: {field} cannot be negative.")
+        saved_rows.append({
+            **source,
+            "coal_stock_days_left": values.get("coal_stock_days_left"),
+            "daily_coal_requirement": values.get("daily_coal_requirement"),
+        })
+
+    saved_at = datetime.now(timezone.utc)
+    MongoService().db[DAY_AHEAD_COLLECTION].update_one(
+        {"report_date": selected_date.isoformat()},
+        {"$set": {
+            "report_date": selected_date.isoformat(),
+            "source_file": report["source_file"],
+            "filter": report["filter"],
+            "sort": report["sort"],
+            "summary": report["summary"],
+            "rows": saved_rows,
+            "saved_at": saved_at,
+        }},
+        upsert=True,
+    )
+    MOP_06_HRS_CACHE.pop(selected_date.isoformat(), None)
+    return {
+        "success": True,
+        "report_date": selected_date.isoformat(),
+        "saved_rows": len(saved_rows),
+        "saved_at": saved_at,
+    }
+
+
 @router.put("/static/edits/{plant_id}")
 def save_static_report_edit(plant_id: str, payload: PlantDeviationEdit):
     selected_date = _parse_report_date(payload.report_date)
@@ -1000,6 +1569,191 @@ def _write_margin_available_sheet(workbook: Workbook, report: dict) -> None:
     sheet.page_setup.fitToWidth = 1
     sheet.page_setup.fitToHeight = 1
     sheet.sheet_properties.pageSetUpPr.fitToPage = True
+
+
+def _write_day_ahead_sheet(workbook: Workbook, report: dict) -> None:
+    sheet = workbook.create_sheet(title="Thermal Margin Report")
+    headers = [
+        "Station/Constituents",
+        "Installed Capacity (A) MW",
+        "Running Capacity (B=A-E) MW",
+        "Max generation 1900-2400 (C) MW",
+        "Time",
+        "Generation range 1900-2400 Max/Min",
+        "Margin on running units (D=B*0.93-C) MW",
+        "Outage Capacity (E) MW",
+        "Reason for not attaining full generation",
+        "Loading Factor %",
+        "Expected revival dates",
+        "No. of days left",
+        "Daily coal requirement",
+    ]
+    navy, white, pale_yellow, pale_green = "08103A", "FFFFFF", "FFF2CC", "E2F0D9"
+    thin_border = Border(
+        left=Side(style="thin", color="A6A6A6"),
+        right=Side(style="thin", color="A6A6A6"),
+        top=Side(style="thin", color="A6A6A6"),
+        bottom=Side(style="thin", color="A6A6A6"),
+    )
+    sheet.append(headers)
+    for cell in sheet[1]:
+        cell.fill = PatternFill("solid", fgColor=navy)
+        cell.font = Font(color=white, bold=True, size=10)
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        cell.border = thin_border
+    sheet.row_dimensions[1].height = 55
+
+    keys = [
+        "plant_name", "installed_capacity_mw", "capacity_on_bar_mw",
+        "max_generation_1900_2400_mw", "max_generation_1900_2400_time",
+        "generation_max_min_1900_2400", "running_units_margin_mw",
+        "outage_capacity_mw", "reason_for_not_attaining_full_generation",
+        "loading_factor_pct", "expected_revival_time", "coal_stock_days_left",
+        "daily_coal_requirement",
+    ]
+    for source in report["rows"]:
+        sheet.append([source.get(key) for key in keys])
+        row_index = sheet.max_row
+        for column_index, cell in enumerate(sheet[row_index], 1):
+            cell.border = thin_border
+            cell.font = Font(color="000000", size=10)
+            cell.alignment = Alignment(
+                horizontal="left" if column_index in (1, 9, 11) else "center",
+                vertical="center",
+                wrap_text=True,
+            )
+            if column_index == 7:
+                cell.fill = PatternFill("solid", fgColor=pale_yellow)
+            elif column_index in (12, 13):
+                cell.fill = PatternFill("solid", fgColor=pale_green)
+
+    total_row = sheet.max_row + 1
+    sheet.cell(total_row, 1, f"TOTAL ({len(report['rows'])} stations)")
+    totals = {
+        2: report["summary"]["total_installed_capacity_mw"],
+        3: report["summary"]["total_running_capacity_mw"],
+        7: report["summary"]["total_margin_mw"],
+        8: report["summary"]["total_outage_capacity_mw"],
+    }
+    for column_index in range(1, 14):
+        cell = sheet.cell(total_row, column_index)
+        if column_index in totals:
+            cell.value = totals[column_index]
+        cell.font = Font(color="000000", bold=True, size=10)
+        cell.border = thin_border
+        cell.alignment = Alignment(horizontal="center", vertical="center")
+
+    widths = [34, 16, 17, 18, 11, 23, 21, 16, 40, 16, 28, 16, 22]
+    for index, width in enumerate(widths, 1):
+        sheet.column_dimensions[get_column_letter(index)].width = width
+    sheet.freeze_panes = "A2"
+    sheet.auto_filter.ref = f"A1:M{sheet.max_row - 1}"
+    sheet.sheet_view.showGridLines = False
+    sheet.page_setup.orientation = "landscape"
+    sheet.page_setup.fitToWidth = 1
+    sheet.page_setup.fitToHeight = 0
+    sheet.sheet_properties.pageSetUpPr.fitToPage = True
+
+
+@router.get("/day-ahead/excel")
+def download_day_ahead_thermal_report(report_date: str | None = Query(default=None)):
+    report = _day_ahead_thermal_report(report_date)
+    workbook = Workbook()
+    summary_sheet = workbook.active
+    summary_sheet.title = "Summary"
+    summary_sheet.append(["Day-ahead Thermal Margin Consolidation", None])
+    summary_sheet.append(["Report date", report["report_date"]])
+    summary_sheet.append(["Source file", report["source_file"]])
+    summary_sheet.append(["Filter", report["filter"]])
+    summary_sheet.append(["Sort", report["sort"]])
+    summary_sheet.append(["Thermal stations with non-zero margin", report["summary"]["thermal_margin_stations"]])
+    summary_sheet.append(["Total margin on running units (MW)", report["summary"]["total_margin_mw"]])
+    summary_sheet.append(["Outage capacity in displayed rows (MW)", report["summary"]["total_outage_capacity_mw"]])
+    summary_sheet.append(["Total outage capacity - all Thermal rows (MW)", report["summary"]["all_thermal_outage_capacity_mw"]])
+    summary_sheet.merge_cells("A1:B1")
+    summary_sheet["A1"].font = Font(bold=True, size=14, color="FFFFFF")
+    summary_sheet["A1"].fill = PatternFill("solid", fgColor="08103A")
+    summary_sheet["A1"].alignment = Alignment(horizontal="center")
+    for row in summary_sheet.iter_rows(min_row=2, max_row=9, min_col=1, max_col=2):
+        for cell in row:
+            cell.border = Border(
+                left=Side(style="thin", color="000000"),
+                right=Side(style="thin", color="000000"),
+                top=Side(style="thin", color="000000"),
+                bottom=Side(style="thin", color="000000"),
+            )
+        row[0].font = Font(bold=True)
+    summary_sheet.column_dimensions["A"].width = 34
+    summary_sheet.column_dimensions["B"].width = 65
+    _write_day_ahead_sheet(workbook, report)
+    output = BytesIO()
+    workbook.save(output)
+    output.seek(0)
+    return StreamingResponse(
+        output,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={
+            "Content-Disposition": (
+                f'attachment; filename="ER_Thermal_Margin_Consolidated_{report["report_date"]}.xlsx"'
+            )
+        },
+    )
+
+
+@router.get("/all-india/excel")
+def download_all_india_partial_outage_report(report_date: str | None = Query(default=None)):
+    report = _all_india_report(report_date, fetch_mail=False)
+    workbook = Workbook()
+    summary = workbook.active
+    summary.title = "Summary"
+    summary.append(["All India Partial Outage - Margin Consolidation", None])
+    summary.append(["Report date", report["report_date"]])
+    summary.append(["Source attachment", report["source_file"]])
+    summary.append(["Source sheets", ", ".join(report["source_sheets"])])
+    summary.append(["Filter", report["filter"]])
+    summary.append(["Sort", report["sort"]])
+    summary.append(["Stations", report["summary"]["stations"]])
+    summary.append(["Total margin (MW)", report["summary"]["total_margin_mw"]])
+    summary.append(["Total outage - all source rows (MW)", report["summary"]["all_outage_capacity_mw"]])
+    summary.merge_cells("A1:B1")
+    summary["A1"].fill = PatternFill("solid", fgColor="312E81")
+    summary["A1"].font = Font(color="FFFFFF", bold=True, size=14)
+    summary["A1"].alignment = Alignment(horizontal="center")
+    summary.column_dimensions["A"].width = 38
+    summary.column_dimensions["B"].width = 70
+
+    sheet = workbook.create_sheet("NR SR WR Consolidated")
+    headers = ["Region", "Station/Constituents", "Section", "Installed MW", "Running MW", "Max generation MW", "Time", "Generation Max/Min", "Margin on running units MW", "Outage MW", "Reason for not attaining full generation", "Loading Factor %", "Expected revival"]
+    sheet.append(headers)
+    for cell in sheet[1]:
+        cell.fill = PatternFill("solid", fgColor="312E81")
+        cell.font = Font(color="FFFFFF", bold=True)
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    for row in report["rows"]:
+        sheet.append([
+            row["region"], row["plant_name"], row["section"], row["installed_capacity_mw"],
+            row["capacity_on_bar_mw"], row["max_generation_1900_2400_mw"],
+            row["max_generation_1900_2400_time"], row["generation_max_min_1900_2400"],
+            row["running_units_margin_mw"], row["outage_capacity_mw"],
+            row["reason_for_not_attaining_full_generation"], row["loading_factor_pct"],
+            row["expected_revival_time"],
+        ])
+        sheet.cell(sheet.max_row, 9).fill = PatternFill("solid", fgColor="FDE68A")
+        sheet.cell(sheet.max_row, 9).font = Font(color="713F12", bold=True)
+    widths = [10, 34, 24, 14, 14, 18, 11, 22, 22, 14, 40, 16, 28]
+    for index, width in enumerate(widths, 1):
+        sheet.column_dimensions[get_column_letter(index)].width = width
+    sheet.freeze_panes = "A2"
+    sheet.auto_filter.ref = f"A1:M{sheet.max_row}"
+    sheet.sheet_view.showGridLines = False
+    output = BytesIO()
+    workbook.save(output)
+    output.seek(0)
+    return StreamingResponse(
+        output,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="All_India_Partial_Outage_{report["report_date"]}.xlsx"'},
+    )
 
 
 @router.get("/static/excel")

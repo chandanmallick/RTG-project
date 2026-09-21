@@ -224,11 +224,13 @@ const ComplianceChart = forwardRef(function ComplianceChart(
   const cleanDevs = useMemo(() => toCleanNumbers(series.deviation || []), [series.deviation]);
   const cleanScheds = useMemo(() => toCleanNumbers(series.schedule || []), [series.schedule]);
   const cleanActuals = useMemo(() => toCleanNumbers(series.actual || []), [series.actual]);
+  const cleanPuruliaNet = useMemo(() => toCleanNumbers(series.purulia_psp_net || []), [series.purulia_psp_net]);
 
   const hasDeviation = useMemo(
     () => cleanDevs.length > 0 && cleanDevs.some((v) => v !== null),
     [cleanDevs]
   );
+  const hasPuruliaNet = type === "state" && cleanPuruliaNet.some((value) => value !== null);
 
   const annotationText = useMemo(() => {
     if (!hasDeviation) return "";
@@ -298,12 +300,13 @@ const ComplianceChart = forwardRef(function ComplianceChart(
       ? cleanDevs.filter((v) => v !== null).map(Math.abs)
       : cleanActuals.filter((v) => v !== null).map(Math.abs);
     if (showSchAct) values.push(...cleanScheds.filter((v) => v !== null).map(Math.abs));
+    if (hasPuruliaNet) values.push(...cleanPuruliaNet.filter((v) => v !== null).map(Math.abs));
     const peak = Math.max(...values, 1);
     if (peak < 10) return Math.ceil(peak / 3) * 3;
     if (peak < 100) return Math.ceil(peak / 20) * 20;
     if (peak < 1000) return Math.ceil(peak / 100) * 100;
     return Math.ceil(peak / 500) * 500;
-  }, [cleanDevs, cleanScheds, cleanActuals, showSchAct, hasDeviation]);
+  }, [cleanDevs, cleanScheds, cleanActuals, cleanPuruliaNet, showSchAct, hasDeviation, hasPuruliaNet]);
 
   const crmsMarkers = useMemo(() => {
     const messages = Array.isArray(row.crms_messages) ? row.crms_messages : [];
@@ -467,6 +470,18 @@ const ComplianceChart = forwardRef(function ComplianceChart(
           z: 4,
         },
       ] : []),
+      ...(hasPuruliaNet ? [{
+        name: "Purulia PSP Net (G + P)",
+        type: "line",
+        xAxisIndex: 0,
+        yAxisIndex: 0,
+        data: cleanPuruliaNet,
+        symbol: "none",
+        connectNulls: false,
+        itemStyle: { color: "#0284C7" },
+        lineStyle: { color: "#0284C7", width: compact ? 2.8 : 3.2 },
+        z: 5,
+      }] : []),
       {
         name: "Frequency (Hz)",
         type: "line",
@@ -581,6 +596,7 @@ const ComplianceChart = forwardRef(function ComplianceChart(
     const legendItems = [
       ...(hasDeviation ? [meta.helping.label, meta.adverse.label] : []),
       ...(hasDeviation ? ["Deviation (MW)"] : []),
+      ...(hasPuruliaNet ? ["Purulia PSP Net (G + P)"] : []),
       "Frequency (Hz)",
       `Event Threshold (${meta.thresholdText})`,
       ...(!hasDeviation || showSchAct ? [
@@ -620,6 +636,7 @@ const ComplianceChart = forwardRef(function ComplianceChart(
           });
           const freq = map["Frequency (Hz)"];
           const dev = map["Deviation (MW)"];
+          const puruliaNet = map["Purulia PSP Net (G + P)"];
           const inEvent = freq != null && meta.isEvent(freq);
           const badge = inEvent ? `<span style="background:${eventType === "high" ? "#DC2626" : "#F97316"};color:#fff;border-radius:3px;padding:1px 5px;font-size:${smallFont}px;font-weight:800;margin-left:6px">${meta.badge}</span>` : "";
           let html = `<div style="border-bottom:1px solid #CBD5E1;padding-bottom:5px;margin-bottom:6px;font-size:${smallFont}px;color:#64748B">${ts}${badge}</div>`;
@@ -627,6 +644,7 @@ const ComplianceChart = forwardRef(function ComplianceChart(
           if (hasDeviation) {
             html += `<div style="display:flex;justify-content:space-between;gap:16px;margin-bottom:3px"><span style="color:#64748B">Deviation:</span><span style="font-weight:700;color:${dev >= 0 ? palette.deviation : "#EF4444"}">${dev != null ? (dev >= 0 ? "+" : "") + Number(dev).toFixed(0) : "-"} MW</span></div>`;
           }
+          if (hasPuruliaNet) html += `<div style="display:flex;justify-content:space-between;gap:16px;margin-bottom:3px"><span style="color:#64748B">Purulia PSP Net:</span><span style="font-weight:700;color:#0284C7">${puruliaNet != null ? Number(puruliaNet).toFixed(0) : "-"} MW</span></div>`;
           if (map["Schedule (MW)"] != null) html += `<div style="display:flex;justify-content:space-between;gap:16px;margin-bottom:3px"><span style="color:#64748B">Schedule:</span><span style="color:#6366F1;font-weight:600">${Number(map["Schedule (MW)"]).toFixed(0)} MW</span></div>`;
           if (map["Actual (MW)"] != null) html += `<div style="display:flex;justify-content:space-between;gap:16px"><span style="color:#64748B">Actual:</span><span style="color:#EC4899;font-weight:600">${Number(map["Actual (MW)"]).toFixed(0)} MW</span></div>`;
           if (hasDeviation && inEvent) {
@@ -659,6 +677,7 @@ const ComplianceChart = forwardRef(function ComplianceChart(
         pageIconSize: Math.max(10, smallFont),
         pageTextStyle: { color: "#64748B", fontSize: smallFont },
         selectedMode: true,
+        selected: hasPuruliaNet ? { "Purulia PSP Net (G + P)": false } : undefined,
         data: legendItems,
       },
       toolbox: {
@@ -731,7 +750,7 @@ const ComplianceChart = forwardRef(function ComplianceChart(
       ],
       series: chartSeries,
     };
-  }, [timestamps, cleanDevs, cleanFreqs, cleanScheds, cleanActuals, showSchAct, compact, fontSize, palette, meta, maxDevAbs, helpingData, adverseData, eventType, hasDeviation, row, crmsMarkersByCategory, transmissionMarkers, annotationText]);
+  }, [timestamps, cleanDevs, cleanFreqs, cleanScheds, cleanActuals, cleanPuruliaNet, showSchAct, compact, fontSize, palette, meta, maxDevAbs, helpingData, adverseData, eventType, hasDeviation, hasPuruliaNet, row, crmsMarkersByCategory, transmissionMarkers, annotationText]);
 
   const handleDownload = (event) => {
     event?.stopPropagation();

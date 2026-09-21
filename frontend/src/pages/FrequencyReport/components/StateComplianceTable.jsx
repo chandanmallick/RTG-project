@@ -6,6 +6,7 @@ import React from "react";
 import { ChevronDown, ChevronUp, Zap } from "lucide-react";
 import SectionAccordion from "../../../components/ui/SectionAccordion";
 import ComplianceChart from "./ComplianceChart";
+import GenerationDeviationChart from "./GenerationDeviationChart";
 import StatisticsCard from "./StatisticsCard";
 
 // Helper to format values
@@ -320,6 +321,11 @@ export default function StateComplianceTable({
                                 }}
                               >
                                 No time series data available. Please verify the SCADA file upload.
+                              </div>
+                            )}
+                            {(row.series?.purulia_psp_net || []).some((value) => value !== null && value !== undefined && value !== "") && (
+                              <div style={{ marginTop: 10, borderTop: "1px solid #D7E7E2", paddingTop: 8 }}>
+                                <GenerationDeviationChart row={row} height={440} fontSize={chartFontSize} />
                               </div>
                             )}
                           </div>

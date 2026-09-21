@@ -34,6 +34,7 @@ import {
 import { CalendarDays, CheckCircle2, GraduationCap, GripVertical, RefreshCw, Send, ShieldCheck, User } from "lucide-react";
 import api from "./api";
 import DutyReassignmentPanel from "../components/crew/DutyReassignmentPanel";
+import WorkflowHeader from "../components/crew/WorkflowHeader";
 
 const employeeIdOf = (employee) => String(employee?.employeeId || employee?.userId || "").trim();
 const statusColor = (status) => ({
@@ -100,11 +101,20 @@ function SectionTitle({ icon: Icon, title, subtitle, count }) {
   );
 }
 
-export default function LeaveManagement({ embeddedApproval = false, initialApprovalDate = "", initialLeaveId = "", onApprovalChanged } = {}) {
+export default function LeaveManagement({ embeddedApproval = false, embeddedApplication = false, initialApprovalDate = "", initialLeaveId = "", initialEmployeeId = "", initialApplicationDates = [], onApprovalChanged, onApplicationChanged } = {}) {
   const [employees, setEmployees] = useState([]);
   const [selectedEmployee, setSelectedEmployee] = useState(null);
   const [leaveTypes, setLeaveTypes] = useState([]);
-  const [dateRange, setDateRange] = useState([]);
+  const [dateRange, setDateRange] = useState(() => {
+    if (initialApplicationDates.length) {
+      const sortedDates = [...initialApplicationDates].sort();
+      return [new Date(`${sortedDates[0]}T00:00:00`), new Date(`${sortedDates[sortedDates.length - 1]}T00:00:00`)];
+    }
+    const params = new URLSearchParams(window.location.search);
+    const from = params.get("from");
+    const to = params.get("to") || from;
+    return from ? [new Date(`${from}T00:00:00`), new Date(`${to}T00:00:00`)] : [];
+  });
   const [rows, setRows] = useState([]);
   const [compOffs, setCompOffs] = useState([]);
   const [reason, setReason] = useState("");
@@ -128,7 +138,7 @@ export default function LeaveManagement({ embeddedApproval = false, initialAppro
   const [approvalDepartment, setApprovalDepartment] = useState("");
   const [rejectDialog, setRejectDialog] = useState({ open: false, stage: "sic", leaves: [] });
   const [rejectComment, setRejectComment] = useState("");
-  const [activeSection, setActiveSection] = useState(() => new URLSearchParams(window.location.search).get("section") || null);
+  const [activeSection] = useState(() => embeddedApplication ? "apply" : new URLSearchParams(window.location.search).get("section") || "apply");
   const notificationLeaveRef = useMemo(() => new URLSearchParams(window.location.search).get("leaveRef") || "", []);
   const notificationRequestId = useMemo(() => new URLSearchParams(window.location.search).get("requestId") || "", []);
   const [approvedTraining, setApprovedTraining] = useState([]);
@@ -139,13 +149,6 @@ export default function LeaveManagement({ embeddedApproval = false, initialAppro
   const [delegations, setDelegations] = useState([]);
   const [delegationEmployees, setDelegationEmployees] = useState([]);
   const [delegationForm, setDelegationForm] = useState({ delegateEmployeeId: "", startDate: dayjs().format("YYYY-MM-DD"), endDate: dayjs().format("YYYY-MM-DD"), reason: "" });
-
-  const openSection = (section) => {
-    setActiveSection(section);
-    window.setTimeout(() => {
-      document.getElementById(`leave-workspace-${section}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
-    }, 180);
-  };
 
   useEffect(() => {
     if (!activeSection || loading) return;
@@ -159,7 +162,13 @@ export default function LeaveManagement({ embeddedApproval = false, initialAppro
 
   const loadLeaves = async () => {
     const { data } = await api.get("/leave/list", {
-      params: { completedFrom: completedFrom || undefined, completedTo: completedTo || undefined },
+      params: {
+        completedFrom: completedFrom || undefined,
+        completedTo: completedTo || undefined,
+        focusLeaveId: embeddedApproval ? initialLeaveId || undefined : undefined,
+        focusEmployeeId: embeddedApproval ? initialEmployeeId || undefined : undefined,
+        focusDate: embeddedApproval ? initialApprovalDate || undefined : undefined,
+      },
     });
     setLeaves(data || []);
   };
@@ -181,6 +190,19 @@ export default function LeaveManagement({ embeddedApproval = false, initialAppro
   const loadPage = async () => {
     setLoading(true);
     try {
+      if (embeddedApproval) {
+        const [roleResult, leaveResult] = await Promise.all([
+          api.get("/leave/my-role"),
+          api.get("/leave/list", { params: {
+            focusLeaveId: initialLeaveId || undefined,
+            focusEmployeeId: initialEmployeeId || undefined,
+            focusDate: initialApprovalDate || undefined,
+          } }),
+        ]);
+        setRole(roleResult.data || {});
+        setLeaves(leaveResult.data || []);
+        return;
+      }
       const [employeeResult, typeResult, roleResult, leaveResult] = await Promise.all([
         api.get("/leave/employees"),
         api.get("/leave/leave-types"),
@@ -188,14 +210,18 @@ export default function LeaveManagement({ embeddedApproval = false, initialAppro
         api.get("/leave/list", { params: { completedFrom, completedTo: completedTo || undefined } }),
       ]);
       const people = employeeResult.data || [];
-      const currentId = roleResult.data?.employeeId;
+      const currentId = initialEmployeeId || new URLSearchParams(window.location.search).get("employeeId") || roleResult.data?.employeeId;
       setEmployees(people);
       setLeaveTypes(typeResult.data || []);
       setRole(roleResult.data || {});
       setLeaves(leaveResult.data || []);
-      loadDelegations();
-      loadDelegationEmployees();
-      setSelectedEmployee((current) => current || people.find((item) => employeeIdOf(item) === currentId) || people[0] || null);
+      if (!embeddedApplication) {
+        loadDelegations();
+        loadDelegationEmployees();
+      }
+      const requestedEmployee = people.find((item) => employeeIdOf(item) === currentId);
+      setSelectedEmployee((current) => current || requestedEmployee || (initialEmployeeId ? null : people[0]) || null);
+      if (initialEmployeeId && !requestedEmployee) setNotice({ severity: "warning", text: "You cannot apply leave for the selected employee. Choose an employee available to your account." });
     } catch (error) {
       setNotice({ severity: "error", text: error.response?.data?.detail || "Unable to load leave management." });
     } finally {
@@ -244,9 +270,10 @@ export default function LeaveManagement({ embeddedApproval = false, initialAppro
     }
   };
   useEffect(() => {
+    if (embeddedApproval || embeddedApplication) return;
     loadApprovedTraining();
     loadPendingTrainingApprovals();
-  }, []);
+  }, [embeddedApproval, embeddedApplication]);
   useEffect(() => {
     const stopDrag = () => { dragFill.current = null; };
     window.addEventListener("pointerup", stopDrag);
@@ -266,14 +293,24 @@ export default function LeaveManagement({ embeddedApproval = false, initialAppro
       setNotice({ severity: "warning", text: "Select an employee and one continuous date range." });
       return;
     }
-    const startDate = dayjs(dateRange[0].toDate()).format("YYYY-MM-DD");
-    const endDate = dayjs(dateRange[1].toDate()).format("YYYY-MM-DD");
+    // Calendar mode supplies native Date values; the date picker supplies
+    // DateObject values. Keep both entry paths compatible.
+    const asNativeDate = (value) => (typeof value?.toDate === "function" ? value.toDate() : value);
+    const startDateValue = dayjs(asNativeDate(dateRange[0]));
+    const endDateValue = dayjs(asNativeDate(dateRange[1]));
+    if (!startDateValue.isValid() || !endDateValue.isValid()) {
+      setNotice({ severity: "warning", text: "Select a valid continuous date range." });
+      return;
+    }
+    const startDate = startDateValue.format("YYYY-MM-DD");
+    const endDate = endDateValue.format("YYYY-MM-DD");
     setWorking(true);
     try {
       const { data } = await api.get("/leave/duty-detailed", { params: { employeeId: employeeIdOf(selectedEmployee), startDate, endDate } });
+      const calendarDateSet = new Set(initialApplicationDates);
       setRows((data || []).map((row) => ({
         ...row,
-        selected: !row.stationLeaveOnlyAllowed,
+        selected: !row.stationLeaveOnlyAllowed && (!embeddedApplication || calendarDateSet.size === 0 || calendarDateSet.has(row.date)),
         leaveType: "",
         compOffId: "",
         stationLeave: false,
@@ -287,6 +324,9 @@ export default function LeaveManagement({ embeddedApproval = false, initialAppro
   };
 
   const updateRow = (index, patch) => setRows((current) => current.map((row, rowIndex) => rowIndex === index ? { ...row, ...patch } : row));
+  useEffect(() => {
+    if (embeddedApplication && selectedEmployee && dateRange.length === 2) fetchDuty();
+  }, [embeddedApplication, selectedEmployee, dateRange]);
   const setLeaveType = (index, leaveType) => {
     if (rows[index]?.stationLeaveOnlyAllowed) return;
     updateRow(index, { leaveType, compOffId: leaveType === "C-OFF" ? rows[index]?.compOffId || "" : "", selected: true });
@@ -326,6 +366,7 @@ export default function LeaveManagement({ embeddedApproval = false, initialAppro
       setReason("");
       setDateRange([]);
       await loadLeaves();
+      onApplicationChanged?.(data);
     } catch (error) {
       setNotice({ severity: "error", text: error.response?.data?.detail || "Leave application failed." });
     } finally {
@@ -438,8 +479,37 @@ export default function LeaveManagement({ embeddedApproval = false, initialAppro
   );
   const finalReject = (leave) => openRejectDialog("dic", [leave]);
 
-  const pending = useMemo(() => leaves.filter((leave) => !["Approved", "Rejected", "Withdrawn", "Cancelled"].includes(leave.finalStatus)), [leaves]);
-  const completed = useMemo(() => leaves.filter((leave) => ["Approved", "Rejected", "Withdrawn", "Cancelled"].includes(leave.finalStatus)), [leaves]);
+  const embeddedScopeLeaves = useMemo(() => {
+    if (!embeddedApproval) return leaves;
+    const target = leaves.find((leave) => String(leave.id) === String(initialLeaveId))
+      || leaves.find((leave) => (
+        String(leave.employeeId) === String(initialEmployeeId)
+        && leave.date === initialApprovalDate
+      ));
+    if (!target) return [];
+
+    if (target.leaveGroupId) {
+      return leaves.filter((leave) => String(leave.leaveGroupId || "") === String(target.leaveGroupId));
+    }
+
+    // Compatibility for old applications created before leaveGroupId existed:
+    // keep adjacent dates belonging to the same employee and leave selection.
+    const sameKind = leaves.filter((leave) => (
+      String(leave.employeeId) === String(target.employeeId)
+      && Boolean(leave.stationLeaveOnly) === Boolean(target.stationLeaveOnly)
+      && String(leave.leaveType || "") === String(target.leaveType || "")
+    )).sort((a, b) => String(a.date).localeCompare(String(b.date)));
+    const targetIndex = sameKind.findIndex((leave) => String(leave.id) === String(target.id));
+    if (targetIndex < 0) return [target];
+    let start = targetIndex;
+    let end = targetIndex;
+    while (start > 0 && dayjs(sameKind[start].date).diff(dayjs(sameKind[start - 1].date), "day") === 1) start -= 1;
+    while (end < sameKind.length - 1 && dayjs(sameKind[end + 1].date).diff(dayjs(sameKind[end].date), "day") === 1) end += 1;
+    return sameKind.slice(start, end + 1);
+  }, [embeddedApproval, leaves, initialApprovalDate, initialEmployeeId, initialLeaveId]);
+  const workflowLeaves = embeddedApproval ? embeddedScopeLeaves : leaves;
+  const pending = useMemo(() => workflowLeaves.filter((leave) => !["Approved", "Rejected", "Withdrawn", "Cancelled"].includes(leave.finalStatus)), [workflowLeaves]);
+  const completed = useMemo(() => workflowLeaves.filter((leave) => ["Approved", "Rejected", "Withdrawn", "Cancelled"].includes(leave.finalStatus)), [workflowLeaves]);
   const selectedWorkflowLeaves = useMemo(
     () => pending.filter((leave) => selectedWorkflowIds.includes(leave.id)),
     [pending, selectedWorkflowIds],
@@ -453,14 +523,15 @@ export default function LeaveManagement({ embeddedApproval = false, initialAppro
     [selectedWorkflowLeaves],
   );
   const calendarLeaves = pending;
-  const calendarOverlayLeaves = leaves;
+  const calendarOverlayLeaves = workflowLeaves;
   const pendingCalendarRange = useMemo(() => {
-    const dates = calendarLeaves.map((leave) => leave.date).filter(Boolean).sort();
-    const fallback = dayjs().format("YYYY-MM-DD");
+    const rangeSource = embeddedApproval ? calendarOverlayLeaves : calendarLeaves;
+    const dates = rangeSource.map((leave) => leave.date).filter(Boolean).sort();
+    const fallback = initialApprovalDate || dayjs().format("YYYY-MM-DD");
     return { start: dates[0] || fallback, end: dates[dates.length - 1] || dates[0] || fallback };
-  }, [calendarLeaves]);
-  const effectiveApprovalFrom = approvalFrom || pendingCalendarRange.start;
-  const effectiveApprovalTo = approvalTo || pendingCalendarRange.end;
+  }, [calendarLeaves, calendarOverlayLeaves, embeddedApproval, initialApprovalDate]);
+  const effectiveApprovalFrom = embeddedApproval ? pendingCalendarRange.start : approvalFrom || pendingCalendarRange.start;
+  const effectiveApprovalTo = embeddedApproval ? pendingCalendarRange.end : approvalTo || pendingCalendarRange.end;
   const visibleCalendarLeaves = useMemo(() => calendarLeaves.filter((leave) => (
     (!effectiveApprovalFrom || leave.date >= effectiveApprovalFrom)
     && (!effectiveApprovalTo || leave.date <= effectiveApprovalTo)
@@ -497,7 +568,11 @@ export default function LeaveManagement({ embeddedApproval = false, initialAppro
           cursor = chunkEnd.add(1, "day");
         }
         const responses = await Promise.all(chunks.map(([from, to]) => (
-          api.get("/leave/approval-calendar", { params: { startDate: from, endDate: to } }).then(({ data }) => data || [])
+          api.get("/leave/approval-calendar", { params: {
+            startDate: from,
+            endDate: to,
+            employeeId: embeddedApproval ? initialEmployeeId || undefined : undefined,
+          } }).then(({ data }) => data || [])
         )));
         if (cancelled) return;
 
@@ -541,7 +616,7 @@ export default function LeaveManagement({ embeddedApproval = false, initialAppro
     };
     loadApprovalRoster();
     return () => { cancelled = true; };
-  }, [workflowView, effectiveApprovalFrom, effectiveApprovalTo, role]);
+  }, [workflowView, effectiveApprovalFrom, effectiveApprovalTo, role, embeddedApproval, initialEmployeeId]);
   const approvalDepartments = useMemo(() => Array.from(new Set(
     approvalRoster.flatMap((group) => [
       ...(group.departments || []),
@@ -549,12 +624,16 @@ export default function LeaveManagement({ embeddedApproval = false, initialAppro
     ]).filter(Boolean),
   )).sort(), [approvalRoster]);
   const visibleApprovalRoster = useMemo(() => {
-    if (!approvalDepartment) return approvalRoster;
-    return approvalRoster.map((group) => ({
+    const scopedRoster = embeddedApproval ? approvalRoster.map((group) => ({
+      ...group,
+      employees: (group.employees || []).filter((employee) => String(employee.employeeId) === String(initialEmployeeId)),
+    })).filter((group) => group.employees.length) : approvalRoster;
+    if (!approvalDepartment) return scopedRoster;
+    return scopedRoster.map((group) => ({
       ...group,
       employees: (group.employees || []).filter((employee) => (employee.departments || []).includes(approvalDepartment)),
     })).filter((group) => group.employees.length);
-  }, [approvalRoster, approvalDepartment]);
+  }, [approvalRoster, approvalDepartment, embeddedApproval, initialEmployeeId]);
   const approvalHolidayMap = useMemo(() => {
     const result = {};
     approvalRoster.forEach((group) => (group.employees || []).forEach((employee) => Object.entries(employee.duties || {}).forEach(([date, duty]) => {
@@ -731,10 +810,16 @@ export default function LeaveManagement({ embeddedApproval = false, initialAppro
       <Box sx={{ display: "grid", gap: 1.1 }}>
         <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 1, flexWrap: "wrap" }}>
           <Stack direction="row" spacing={.7} useFlexGap flexWrap="wrap" alignItems="center">
-            <TextField size="small" type="date" label="From" value={effectiveApprovalFrom} onChange={(event) => { const value = event.target.value; setApprovalFrom(value); if (effectiveApprovalTo < value) setApprovalTo(value); }} InputLabelProps={{ shrink: true }} inputProps={{ max: effectiveApprovalTo || undefined }} sx={{ width: 145 }} />
-            <TextField size="small" type="date" label="To" value={effectiveApprovalTo} onChange={(event) => { const value = event.target.value; setApprovalTo(value); if (value < effectiveApprovalFrom) setApprovalFrom(value); }} InputLabelProps={{ shrink: true }} inputProps={{ min: effectiveApprovalFrom || undefined }} sx={{ width: 145 }} />
-            <Button size="small" variant="text" onClick={() => { setApprovalFrom(""); setApprovalTo(""); }}>Pending dates</Button>
-            {role.canViewAll && (
+            {embeddedApproval ? (
+              <Typography sx={{ color: "#0F172A", fontSize: 11.5, fontWeight: 900 }}>
+                {embeddedScopeLeaves[0]?.name || initialEmployeeId} · continuous leave from {dayjs(effectiveApprovalFrom).format("DD MMM YYYY")} to {dayjs(effectiveApprovalTo).format("DD MMM YYYY")}
+              </Typography>
+            ) : <>
+              <TextField size="small" type="date" label="From" value={effectiveApprovalFrom} onChange={(event) => { const value = event.target.value; setApprovalFrom(value); if (effectiveApprovalTo < value) setApprovalTo(value); }} InputLabelProps={{ shrink: true }} inputProps={{ max: effectiveApprovalTo || undefined }} sx={{ width: 145 }} />
+              <TextField size="small" type="date" label="To" value={effectiveApprovalTo} onChange={(event) => { const value = event.target.value; setApprovalTo(value); if (value < effectiveApprovalFrom) setApprovalFrom(value); }} InputLabelProps={{ shrink: true }} inputProps={{ min: effectiveApprovalFrom || undefined }} sx={{ width: 145 }} />
+              <Button size="small" variant="text" onClick={() => { setApprovalFrom(""); setApprovalTo(""); }}>Pending dates</Button>
+            </>}
+            {!embeddedApproval && role.canViewAll && (
               <FormControl size="small" sx={{ minWidth: 190 }}>
                 <InputLabel>Department</InputLabel>
                 <Select value={approvalDepartment} label="Department" onChange={(event) => setApprovalDepartment(event.target.value)}>
@@ -1040,37 +1125,21 @@ export default function LeaveManagement({ embeddedApproval = false, initialAppro
     </Box>
   );
 
+  const leaveSectionMeta = {
+    apply: { title: "Apply leave", subtitle: "Select the employee, continuous dates and applicable leave type.", accent: "#0057B7" },
+    pending: { title: "Leave approval inbox", subtitle: "Review only the leave records awaiting action in your approval scope.", accent: "#17876D", count: pending.length },
+    completed: { title: "Leave records", subtitle: "Approved, rejected, cancelled and withdrawn applications.", accent: "#4338CA" },
+    delegation: { title: "Approval delegation", subtitle: "Temporarily authorize another officer while the configured approver is unavailable.", accent: "#B45309" },
+    exchange: { title: "Duty exchange application", subtitle: "Select the affected duty and send the exchange through its approval route.", accent: "#0369A1" },
+    training: { title: "Training approval", subtitle: "Training nominations awaiting action and approved adjacent-OFF requests.", accent: "#7C3AED", count: pendingTrainingApprovals.length },
+  };
+  const currentLeaveSection = leaveSectionMeta[activeSection] || leaveSectionMeta.apply;
+
   return (
-    <Box className="ui-kit-page" sx={{ display: "grid", gap: 2.5 }}>
-      <Box sx={{ p: 3, mb: 3, borderRadius: 3, background: "linear-gradient(105deg,#08103A 0%,#0057B7 65%,#0F6FDB 100%)", color: "white" }}>
-        <Typography variant="h5" fontWeight="bold" sx={{ color: "#FFFFFF" }}>
-          Leave Application &amp; Approval
-        </Typography>
-        <Typography variant="body2" sx={{ color: "rgba(255,255,255,.88)" }}>
-          Shift employee: Employee → SIC → Leave Authority · Other employee: Reporting Officer → configured organization hierarchy
-        </Typography>
-      </Box>
+    <Box className="ui-kit-page" sx={{ display: "grid", gap: embeddedApplication ? 1.5 : 2.5 }}>
+      {!embeddedApplication && <WorkflowHeader title={currentLeaveSection.title} subtitle={currentLeaveSection.subtitle} accent={currentLeaveSection.accent} count={currentLeaveSection.count} />}
 
       {notice && <Alert severity={notice.severity} onClose={() => setNotice(null)}>{notice.text}</Alert>}
-
-      <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "repeat(2, minmax(0, 1fr))", lg: "repeat(3, minmax(0, 1fr))" }, gap: 2 }}>
-        {[
-          { key: "apply", title: "Apply Leave", subtitle: "Select employee, dates and leave type", count: null, color: "#0057B7", tint: "#EAF2FF" },
-          { key: "exchange", title: "Apply for Duty Exchange", subtitle: "Exchange duty through the approval workflow", count: null, color: "#0369A1", tint: "#F0F9FF" },
-          { key: "training", title: "Training & Approval", subtitle: pendingTrainingApprovals.length ? `${pendingTrainingApprovals.length} nomination(s) awaiting your approval` : "Approved training and before/after OFF", count: pendingTrainingApprovals.length || approvedTraining.length, color: "#7C3AED", tint: "#F5F3FF" },
-          { key: "pending", title: "Pending Leave Workflow", subtitle: "Review, approve, forward or reject", count: pending.length, color: "#17876D", tint: "#EAF8F3" },
-          { key: "completed", title: "Completed Leave", subtitle: "Approved, rejected and cancelled records", count: completed.length, color: "#4338CA", tint: "#EEF2FF" },
-          { key: "delegation", title: "Delegate Approval", subtitle: "Temporarily authorize another officer during leave", count: delegations.filter((item) => item.status === "Active").length, color: "#B45309", tint: "#FFF7ED" },
-        ].map((tile) => (
-          <Paper key={tile.key} component="button" type="button" elevation={0} onClick={() => openSection(tile.key)} sx={{ width: "100%", minHeight: 118, p: 2.2, borderRadius: 3, textAlign: "left", cursor: "pointer", border: `1px solid ${activeSection === tile.key ? tile.color : "#D7E3F4"}`, background: activeSection === tile.key ? tile.tint : "#FFFFFF", boxShadow: activeSection === tile.key ? `0 12px 28px ${tile.color}22` : "0 5px 18px rgba(15,23,42,.06)", transition: "transform .22s ease, box-shadow .22s ease, border-color .22s ease, background .22s ease", "&:hover": { transform: "translateY(-3px)", borderColor: tile.color, boxShadow: `0 14px 30px ${tile.color}26` } }}>
-            <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 2 }}>
-              <Box><Typography sx={{ color: "#0F172A", fontSize: 16, fontWeight: 950 }}>{tile.title}</Typography><Typography sx={{ mt: .65, color: "#64748B", fontSize: 11.5, fontWeight: 650 }}>{tile.subtitle}</Typography></Box>
-              {tile.count !== null && <Box sx={{ minWidth: 42, height: 42, px: 1, borderRadius: 2.2, display: "grid", placeItems: "center", color: "#FFFFFF", background: tile.color, fontSize: 18, fontWeight: 950 }}>{tile.count}</Box>}
-            </Box>
-            <Typography sx={{ mt: 1.4, color: tile.color, fontSize: 11.5, fontWeight: 900 }}>{activeSection === tile.key ? "Workspace open" : "Click to open"}</Typography>
-          </Paper>
-        ))}
-      </Box>
 
       <Collapse in={activeSection === "apply"} timeout={420} unmountOnExit>
       <Box id="leave-workspace-apply" sx={{ display: "grid", gap: 2.5, scrollMarginTop: 110 }}>

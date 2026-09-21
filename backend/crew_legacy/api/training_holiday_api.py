@@ -2,10 +2,25 @@
 from bson import ObjectId
 from fastapi import Depends
 from datetime import datetime
-from crew_legacy.database.database_mongo import holiday_master_collection, training_master_collection
+from crew_legacy.database.database_mongo import holiday_master_collection, training_master_collection, page_access_collection
 from crew_legacy.admin_logic.auth_utils import get_authenticated_user, require_page_write
 
 router = APIRouter()
+
+
+def require_training_manager(user: dict):
+    """Only authorized HR training approvers may maintain programmes."""
+    actor_id = str(user.get("employeeId") or user.get("userId") or "").strip()
+    if actor_id == "50041":
+        return user
+    access = page_access_collection.find_one(
+        {"userId": actor_id},
+        {"pages.crew_training.write": 1, "pages.crew_training.approve": 1},
+    ) or {}
+    training_access = ((access.get("pages") or {}).get("crew_training") or {})
+    if not training_access.get("approve"):
+        raise HTTPException(403, "HR training programme management access is required")
+    return user
 
 
 # =====================================================
@@ -29,7 +44,10 @@ def create_holiday(data: dict, user=Depends(get_authenticated_user)):
         "createdOn": datetime.utcnow()
     })
 
-    return {"message": "Holiday added successfully"}
+    from crew_legacy.api.roster_api import sync_holiday_comp_off_for_roster_date
+    sync_result = sync_holiday_comp_off_for_roster_date(data.get("date"), data.get("holidayName"))
+
+    return {"message": "Holiday added successfully", "compOffSync": sync_result}
 
 
 @router.get("/holiday/{year}")
@@ -68,7 +86,10 @@ def update_holiday(holiday_id: str, data: dict, user=Depends(get_authenticated_u
         }
     )
 
-    return {"message": "Holiday updated successfully"}
+    from crew_legacy.api.roster_api import sync_holiday_comp_off_for_roster_date
+    sync_result = sync_holiday_comp_off_for_roster_date(data.get("date"), data.get("holidayName"))
+
+    return {"message": "Holiday updated successfully", "compOffSync": sync_result}
 
 
 @router.delete("/holiday/{holiday_id}")
@@ -88,7 +109,7 @@ def delete_holiday(holiday_id: str, user=Depends(get_authenticated_user)):
 
 @router.post("/training")
 def create_training(data: dict, user=Depends(get_authenticated_user)):
-    require_page_write(user, "crew_training")
+    require_training_manager(user)
 
     if not data.get("financialYear") or not data.get("trainingName"):
         raise HTTPException(status_code=400, detail="Financial Year & Training Name required")
@@ -127,7 +148,12 @@ def get_training(financialYear: str):
             "startDate": t.get("startDate"),
             "endDate": t.get("endDate"),
             "trainingType": t.get("trainingType"),
-            "status": t.get("status")
+            "status": t.get("status"),
+            "durationDays": t.get("durationDays"),
+            "dateStatus": t.get("dateStatus"),
+            "historicalImport": bool(t.get("historicalImport")),
+            "unmatchedEmployees": t.get("unmatchedEmployees") or [],
+            "matchedEmployeeCount": t.get("matchedEmployeeCount") or 0,
         }
         for t in data
     ]
@@ -135,7 +161,7 @@ def get_training(financialYear: str):
 
 @router.put("/training/{training_id}")
 def update_training(training_id: str, data: dict, user=Depends(get_authenticated_user)):
-    require_page_write(user, "crew_training")
+    require_training_manager(user)
 
     if not ObjectId.is_valid(training_id):
         raise HTTPException(400, "Invalid training programme")
@@ -167,7 +193,7 @@ def update_training(training_id: str, data: dict, user=Depends(get_authenticated
 
 @router.delete("/training/{training_id}")
 def delete_training(training_id: str, user=Depends(get_authenticated_user)):
-    require_page_write(user, "crew_training")
+    require_training_manager(user)
 
     training_master_collection.delete_one(
         {"_id": ObjectId(training_id)}

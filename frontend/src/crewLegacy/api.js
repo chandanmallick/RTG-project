@@ -32,7 +32,10 @@ api.interceptors.request.use((config) => {
   // approver, so Crew Training Write access must not be required.
   const isTrainingApproval = method === "POST" && (
     requestUrl.includes("/training-assign/approve") ||
-    requestUrl.includes("/training-assign/request-adjacent-off/")
+    requestUrl.includes("/training-assign/reject") ||
+    requestUrl.includes("/training-assign/request-adjacent-off/") ||
+    requestUrl.includes("/training-assign/nominate") ||
+    requestUrl.includes("/training-assign/delegation")
   );
   // Leave approval is likewise controlled by the live SIC/DIC/reporting hierarchy.
   const isLeaveApproval = method === "PUT" && (
@@ -41,7 +44,17 @@ api.interceptors.request.use((config) => {
     requestUrl.includes("/leave/approve-bulk") ||
     requestUrl.includes("/leave/reject-bulk")
   );
-  if (!["GET", "HEAD", "OPTIONS"].includes(method) && permissions[pageKeyForPath()]?.write === false && !isMasterDelete && !isDutyDecision && !isTrainingApproval && !isLeaveApproval) {
+  // As with leave/training, sports decisions use the current-stage authority
+  // enforced by the server, including explicitly delegated approvers.
+  const isSportsApproval = method === "POST" && /^\/sports\/applications\/[^/]+\/(approve|reject)$/.test(requestUrl);
+  // Calendar applications use the target workflow's server-side employee and
+  // reporting-authority checks, independent of calendar layout edit access.
+  const isLeaveApplication = method === "POST" && requestUrl === "/leave/apply";
+  // Every signed-in employee owns this one profile preference. The backend
+  // binds it to the authenticated employee, so page-level Write access is not
+  // needed to choose a post-login landing page.
+  const isLandingPagePreference = ["POST", "PUT"].includes(method) && requestUrl.includes("/profile/landing-page");
+  if (!["GET", "HEAD", "OPTIONS"].includes(method) && permissions[pageKeyForPath()]?.write === false && !isMasterDelete && !isDutyDecision && !isTrainingApproval && !isLeaveApproval && !isSportsApproval && !isLeaveApplication && !isLandingPagePreference) {
     return Promise.reject(new Error("This page is read-only for your account."));
   }
   return config;

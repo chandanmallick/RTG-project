@@ -59,6 +59,34 @@ def run_dso_shared_folder_sync(report_type):
         raise
 
 
+def run_er_plant_deviation_sync():
+    from routes.plant_deviation_routes import sync_er_day_ahead_report
+
+    report_date = datetime.now(ZoneInfo("Asia/Kolkata")).date().isoformat()
+    revision_id = f"ER_PLANT_DEVIATION_{datetime.now(ZoneInfo('Asia/Kolkata')):%Y%m%d_%H%M%S}"
+    try:
+        result = sync_er_day_ahead_report(report_date)
+        PipelineLogger().log(
+            revision_id=revision_id,
+            pipeline_type="PLANT_DEVIATION",
+            process_name="ER_MOP_NETWORK_SYNC_1130",
+            status="SUCCESS",
+            message=f"Processed ER network report for {report_date}",
+            extra_data={"report_date": report_date, "rows": result.get("rows", 0)},
+        )
+        return result
+    except Exception as exc:
+        PipelineLogger().log(
+            revision_id=revision_id,
+            pipeline_type="PLANT_DEVIATION",
+            process_name="ER_MOP_NETWORK_SYNC_1130",
+            status="FAILED",
+            message=str(exc),
+            extra_data={"report_date": report_date},
+        )
+        raise
+
+
 scheduler.add_job(
     run_dso_shared_folder_sync,
     trigger="cron",
@@ -67,6 +95,19 @@ scheduler.add_job(
     timezone="Asia/Kolkata",
     kwargs={"report_type": "morning"},
     id="dso_morning_shared_folder_0730",
+    max_instances=1,
+    coalesce=True,
+    misfire_grace_time=1800,
+    replace_existing=True,
+)
+
+scheduler.add_job(
+    run_er_plant_deviation_sync,
+    trigger="cron",
+    hour=11,
+    minute=30,
+    timezone="Asia/Kolkata",
+    id="er_mop_network_sync_1130",
     max_instances=1,
     coalesce=True,
     misfire_grace_time=1800,
@@ -178,6 +219,22 @@ def run_rtg_dashboard_snapshot_job():
             }
         )
 
+
+def run_isgs_schedule_reconciliation_job():
+    from routes.rtg_dashboard_routes import run_scheduled_isgs_schedule_check
+    try:
+        return run_scheduled_isgs_schedule_check()
+    except Exception as exc:
+        PipelineLogger().log(
+            revision_id=None,
+            pipeline_type="RTG_DASHBOARD",
+            process_name="ISGS_SCHEDULE_RECONCILIATION",
+            status="FAILED",
+            message=str(exc),
+            extra_data={"base_interval_minutes": 15},
+        )
+        return {"success": False, "message": str(exc)}
+
 scheduler.add_job(
 
     PipelineRunner.run_schedule_pipeline,
@@ -210,6 +267,18 @@ scheduler.add_job(
     misfire_grace_time=300,
 
     replace_existing=True
+)
+
+scheduler.add_job(
+    run_isgs_schedule_reconciliation_job,
+    trigger="interval",
+    minutes=15,
+    id="isgs_schedule_reconciliation_15min",
+    max_instances=1,
+    coalesce=True,
+    misfire_grace_time=300,
+    next_run_time=datetime.now() + timedelta(seconds=90),
+    replace_existing=True,
 )
 
 scheduler.add_job(

@@ -24,6 +24,7 @@ import {
   Download,
   Droplets,
   Factory,
+  Mail,
   Copy,
   RefreshCw,
   RotateCcw,
@@ -516,6 +517,16 @@ export default function PlantDeviationMOP() {
   const [error, setError] = useState("");
   const [reportDate, setReportDate] = useState(localDate());
   const [activeTab, setActiveTab] = useState(0);
+  const [dayAheadReport, setDayAheadReport] = useState(null);
+  const [dayAheadLoading, setDayAheadLoading] = useState(false);
+  const [dayAheadDownloading, setDayAheadDownloading] = useState(false);
+  const [dayAheadSaving, setDayAheadSaving] = useState(false);
+  const [dayAheadError, setDayAheadError] = useState("");
+  const [dayAheadDrafts, setDayAheadDrafts] = useState({});
+  const [allIndiaReport, setAllIndiaReport] = useState(null);
+  const [allIndiaLoading, setAllIndiaLoading] = useState(false);
+  const [allIndiaError, setAllIndiaError] = useState("");
+  const [allIndiaDownloading, setAllIndiaDownloading] = useState(false);
 
   const load = useCallback(async (refresh = false) => {
     setLoading(true);
@@ -548,6 +559,123 @@ export default function PlantDeviationMOP() {
       setError(downloadError.response?.data?.detail || downloadError.message || "Unable to download Excel.");
     } finally {
       setDownloading(false);
+    }
+  };
+
+  const fetchDayAhead = async () => {
+    setDayAheadLoading(true);
+    setDayAheadError("");
+    try {
+      const fetched = await API.getPlantDeviationDayAhead(reportDate, true);
+      setDayAheadReport(fetched);
+      setDayAheadDrafts(Object.fromEntries((fetched.rows || []).map((row) => [
+        `${row.source_row}-${row.plant_name}`,
+        {
+          coal_stock_days_left: row.coal_stock_days_left ?? "",
+          daily_coal_requirement: row.daily_coal_requirement ?? "",
+        },
+      ])));
+    } catch (loadError) {
+      setDayAheadReport(null);
+      setDayAheadError(loadError.response?.data?.detail || loadError.message || "Unable to fetch the day-ahead MOP workbook.");
+    } finally {
+      setDayAheadLoading(false);
+    }
+  };
+
+  const updateDayAheadCoal = (row, field, value) => {
+    const key = `${row.source_row}-${row.plant_name}`;
+    setDayAheadDrafts((current) => ({
+      ...current,
+      [key]: { ...(current[key] || {}), [field]: value },
+    }));
+  };
+
+  const saveDayAhead = async () => {
+    setDayAheadSaving(true);
+    setDayAheadError("");
+    try {
+      const numberOrNull = (value, plantName, label) => {
+        if (value === "" || value === null || value === undefined) return null;
+        const parsed = Number(String(value).replace(/,/g, "").trim());
+        if (!Number.isFinite(parsed) || parsed < 0) throw new Error(`${plantName}: ${label} must be a non-negative number.`);
+        return parsed;
+      };
+      const rows = (dayAheadReport?.rows || []).map((row) => {
+        const draft = dayAheadDrafts[`${row.source_row}-${row.plant_name}`] || {};
+        return {
+          source_row: row.source_row,
+          plant_name: row.plant_name,
+          coal_stock_days_left: numberOrNull(draft.coal_stock_days_left, row.plant_name, "No. of days left"),
+          daily_coal_requirement: numberOrNull(draft.daily_coal_requirement, row.plant_name, "Daily coal requirement"),
+        };
+      });
+      const result = await API.savePlantDeviationDayAhead({ report_date: reportDate, rows });
+      setDayAheadReport((current) => ({
+        ...current,
+        saved_at: result.saved_at,
+        rows: (current?.rows || []).map((row) => ({
+          ...row,
+          ...(rows.find((item) => item.source_row === row.source_row && item.plant_name === row.plant_name) || {}),
+        })),
+      }));
+    } catch (saveError) {
+      setDayAheadError(saveError.response?.data?.detail || saveError.message || "Unable to save the day-ahead report.");
+    } finally {
+      setDayAheadSaving(false);
+    }
+  };
+
+  const fetchAllIndia = async () => {
+    setAllIndiaLoading(true);
+    setAllIndiaError("");
+    try {
+      setAllIndiaReport(await API.getPlantDeviationAllIndia(reportDate, true));
+    } catch (loadError) {
+      setAllIndiaReport(null);
+      setAllIndiaError(loadError.response?.data?.detail || loadError.message || "Unable to fetch the All India report from Microsoft 365.");
+    } finally {
+      setAllIndiaLoading(false);
+    }
+  };
+
+  const downloadAllIndia = async () => {
+    setAllIndiaDownloading(true);
+    setAllIndiaError("");
+    try {
+      const blob = await API.downloadPlantDeviationAllIndia(reportDate);
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `All_India_Partial_Outage_${reportDate}.xlsx`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    } catch (downloadError) {
+      setAllIndiaError(downloadError.response?.data?.detail || downloadError.message || "Unable to download the All India report.");
+    } finally {
+      setAllIndiaDownloading(false);
+    }
+  };
+
+  const downloadDayAhead = async () => {
+    setDayAheadDownloading(true);
+    setDayAheadError("");
+    try {
+      const blob = await API.downloadPlantDeviationDayAhead(reportDate);
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `ER_Thermal_Outage_Consolidated_${reportDate}.xlsx`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    } catch (downloadError) {
+      setDayAheadError(downloadError.response?.data?.detail || downloadError.message || "Unable to download the consolidated thermal report.");
+    } finally {
+      setDayAheadDownloading(false);
     }
   };
 
@@ -652,13 +780,13 @@ export default function PlantDeviationMOP() {
             Static thermal and hydro plant master, prepared for SCADA deviation processing.
           </Typography>
         </Box>
-        <Stack direction="row" spacing={1}>
+        <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
           <TextField
             type="date"
             size="small"
             label="Report date"
             value={reportDate}
-            onChange={(event) => setReportDate(event.target.value)}
+            onChange={(event) => { setReportDate(event.target.value); setDayAheadReport(null); setDayAheadDrafts({}); setDayAheadError(""); setAllIndiaReport(null); setAllIndiaError(""); }}
             InputLabelProps={{ shrink: true }}
             sx={{
               width: 158,
@@ -688,7 +816,125 @@ export default function PlantDeviationMOP() {
         </Stack>
       </Box>
 
+      <Paper elevation={0} sx={{ p: 2, border: "1px solid #F6C45C", borderRadius: 3, background: "linear-gradient(90deg,#FFF7ED,#FFFBEB)" }}>
+        <Stack direction={{ xs: "column", md: "row" }} alignItems={{ md: "center" }} justifyContent="space-between" gap={1.5}>
+          <Box>
+            <Stack direction="row" spacing={1} alignItems="center"><Factory size={21} color="#C2410C" /><Typography sx={{ color: "#7C2D12", fontSize: 17, fontWeight: 950 }}>Day-ahead Thermal Margin Consolidation</Typography></Stack>
+            <Typography sx={{ mt: .45, color: "#64748B", fontSize: 12.2 }}>Reads ER_Thermal from <strong>{`ER_Plantwise Deviation from IC_${reportDate.split("-").reverse().join("-")}.xlsx`}</strong>, retains non-zero Margin on running units, and sorts highest margin first.</Typography>
+          </Box>
+          <Button
+            variant="contained"
+            startIcon={dayAheadLoading ? <CircularProgress size={15} color="inherit" /> : <Factory size={16} />}
+            onClick={fetchDayAhead}
+            disabled={dayAheadLoading || !reportDate}
+            sx={{ minWidth: 235, bgcolor: "#F59E0B", color: "#111827", fontWeight: 950, textTransform: "none", "&:hover": { bgcolor: "#FBBF24" } }}
+          >
+            Fetch day-ahead Thermal file
+          </Button>
+        </Stack>
+      </Paper>
+
       {error && <Alert severity="error">{error}</Alert>}
+      {dayAheadError && <Alert severity="error">{dayAheadError}</Alert>}
+      {allIndiaError && <Alert severity="error">{allIndiaError}</Alert>}
+
+      {dayAheadLoading && (
+        <Paper elevation={0} sx={{ minHeight: 150, display: "grid", placeItems: "center", border: "1px solid #FCD34D", borderRadius: 3, background: "#FFFBEB" }}>
+          <Stack alignItems="center" spacing={1}><CircularProgress size={27} sx={{ color: "#B45309" }} /><Typography sx={{ color: "#92400E", fontWeight: 800 }}>Reading ER_Thermal from the network workbook…</Typography></Stack>
+        </Paper>
+      )}
+
+      {dayAheadReport && !dayAheadLoading && (
+        <Paper elevation={0} sx={{ border: "1px solid #F6C45C", borderRadius: 3, overflow: "hidden" }}>
+          <Box sx={{ p: 2, background: "linear-gradient(90deg,#FFF7ED,#FFFBEB)", borderBottom: "1px solid #F6C45C" }}>
+            <Stack direction={{ xs: "column", lg: "row" }} alignItems={{ lg: "center" }} justifyContent="space-between" gap={1.5}>
+              <Box>
+                <Typography sx={{ color: "#7C2D12", fontSize: 18, fontWeight: 950 }}>Consolidated Thermal Margin Report</Typography>
+                <Typography sx={{ mt: .35, color: "#64748B", fontSize: 12 }}>{dayAheadReport.source_file} · {dayAheadReport.sheet_name} · non-zero running-unit margin · descending order</Typography>
+                {dayAheadReport.saved_at && <Typography sx={{ mt: .25, color: "#15803D", fontSize: 10.5, fontWeight: 800 }}>Saved report available</Typography>}
+              </Box>
+              <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" alignItems="center">
+                <Chip label={`${dayAheadReport.summary?.thermal_margin_stations || 0} stations`} sx={{ color: "#9A3412", background: "#FFEDD5", fontWeight: 900 }} />
+                <Chip label={`Total margin ${formatCapacity(dayAheadReport.summary?.total_margin_mw)} MW`} sx={{ color: "#FFF", background: "#C2410C", fontWeight: 950, fontSize: 13 }} />
+                <Chip label={`Total outage ${formatCapacity(dayAheadReport.summary?.all_thermal_outage_capacity_mw)} MW`} variant="outlined" sx={{ fontWeight: 900 }} />
+                <Chip label={`${dayAheadReport.summary?.zero_margin_stations_excluded || 0} zero-margin rows excluded`} variant="outlined" sx={{ fontWeight: 850 }} />
+                <Button variant="contained" startIcon={dayAheadSaving ? <CircularProgress size={14} color="inherit" /> : <Save size={16} />} disabled={dayAheadSaving} onClick={saveDayAhead} sx={{ bgcolor: "#15803D", fontWeight: 900, textTransform: "none", "&:hover": { bgcolor: "#166534" } }}>Save report</Button>
+                <Button variant="outlined" startIcon={dayAheadDownloading ? <CircularProgress size={14} /> : <Download size={16} />} disabled={dayAheadDownloading} onClick={downloadDayAhead} sx={{ borderColor: "#C2410C", color: "#9A3412", fontWeight: 900, textTransform: "none" }}>Consolidated Excel</Button>
+              </Stack>
+            </Stack>
+          </Box>
+          <TableContainer sx={{ maxHeight: 560 }}>
+            <Table stickyHeader size="small" sx={{ minWidth: 2200 }}>
+              <TableHead><TableRow>{[
+                ["Station/Constituents", "left", 260],
+                ["Installed Capacity (A) MW", "right", 125],
+                ["Running Capacity (B=A-E) MW", "right", 135],
+                ["Max generation 1900–2400 (C) MW", "right", 145],
+                ["Time", "center", 80],
+                ["Generation range 1900–2400 Max/Min", "center", 180],
+                ["Margin on running units (D=B×0.93-C) MW", "right", 170],
+                ["Outage Capacity (E) MW", "right", 140],
+                ["Reason for not attaining full generation", "left", 290],
+                ["Loading Factor %", "right", 125],
+                ["Expected revival dates", "left", 230],
+                ["No. of days left", "center", 125],
+                ["Daily coal requirement", "center", 160],
+              ].map(([label, align, width], columnIndex) => <TableCell key={label} align={align} sx={{ minWidth: width, py: 1, color: columnIndex === 6 ? "#713F12" : "#0F172A", background: columnIndex === 6 ? "#FDE68A" : "#FEF3C7", borderLeft: columnIndex === 6 ? "2px solid #F59E0B" : undefined, borderRight: columnIndex === 6 ? "2px solid #F59E0B" : undefined, fontSize: 10.5, lineHeight: 1.25, fontWeight: 950 }}>{label}</TableCell>)}</TableRow></TableHead>
+              <TableBody>
+                {(dayAheadReport.rows || []).map((row) => <TableRow key={`${row.source_row}-${row.plant_name}`} hover>
+                  <TableCell><Typography sx={{ fontSize: 11.5, fontWeight: 900 }}>{row.plant_name}</Typography><Typography sx={{ color: "#64748B", fontSize: 9.5 }}>{row.category} · {row.section}</Typography></TableCell>
+                  <TableCell align="right">{formatCapacity(row.installed_capacity_mw)}</TableCell>
+                  <TableCell align="right">{formatCapacity(row.capacity_on_bar_mw)}</TableCell>
+                  <TableCell align="right">{formatCapacity(row.max_generation_1900_2400_mw)}</TableCell>
+                  <TableCell align="center">{row.max_generation_1900_2400_time || "—"}</TableCell>
+                  <TableCell align="center">{row.generation_max_min_1900_2400 || "—"}</TableCell>
+                  <TableCell align="right" sx={{ color: "#713F12", fontWeight: 950, background: "#FEF3C7", borderLeft: "2px solid #F59E0B", borderRight: "2px solid #F59E0B" }}>{formatCapacity(row.running_units_margin_mw)}</TableCell>
+                  <TableCell align="right">{formatCapacity(row.outage_capacity_mw)}</TableCell>
+                  <TableCell>{row.reason_for_not_attaining_full_generation || "—"}</TableCell>
+                  <TableCell align="right">{row.loading_factor_pct === null || row.loading_factor_pct === undefined ? "—" : `${formatCapacity(row.loading_factor_pct)}%`}</TableCell>
+                  <TableCell>{row.expected_revival_time || "—"}</TableCell>
+                  <TableCell align="center"><TextField type="number" size="small" value={dayAheadDrafts[`${row.source_row}-${row.plant_name}`]?.coal_stock_days_left ?? ""} onChange={(event) => updateDayAheadCoal(row, "coal_stock_days_left", event.target.value)} inputProps={{ min: 0, step: "any" }} sx={{ width: 105, "& input": { py: .65, textAlign: "center", fontSize: 11 } }} /></TableCell>
+                  <TableCell align="center"><TextField type="number" size="small" value={dayAheadDrafts[`${row.source_row}-${row.plant_name}`]?.daily_coal_requirement ?? ""} onChange={(event) => updateDayAheadCoal(row, "daily_coal_requirement", event.target.value)} inputProps={{ min: 0, step: "any" }} sx={{ width: 135, "& input": { py: .65, textAlign: "center", fontSize: 11 } }} /></TableCell>
+                </TableRow>)}
+                <TableRow sx={{ position: "sticky", bottom: 0, zIndex: 2, background: "#FFFBEB" }}><TableCell sx={{ fontWeight: 950 }}>TOTAL ({dayAheadReport.rows?.length || 0} stations)</TableCell><TableCell align="right" sx={{ fontWeight: 900 }}>{formatCapacity(dayAheadReport.summary?.total_installed_capacity_mw)}</TableCell><TableCell align="right" sx={{ fontWeight: 900 }}>{formatCapacity(dayAheadReport.summary?.total_running_capacity_mw)}</TableCell><TableCell colSpan={3} /><TableCell align="right" sx={{ color: "#713F12", background: "#FDE68A", borderLeft: "2px solid #F59E0B", borderRight: "2px solid #F59E0B", fontSize: 13, fontWeight: 950 }}>{formatCapacity(dayAheadReport.summary?.total_margin_mw)}</TableCell><TableCell align="right" sx={{ fontWeight: 900 }}>{formatCapacity(dayAheadReport.summary?.total_outage_capacity_mw)}</TableCell><TableCell colSpan={5} /></TableRow>
+              </TableBody>
+            </Table>
+          </TableContainer>
+        </Paper>
+      )}
+
+      <Paper elevation={0} sx={{ border: "1px solid #C4B5FD", borderRadius: 3, overflow: "hidden" }}>
+        <Box sx={{ p: 2, background: "linear-gradient(90deg,#F5F3FF,#FAF5FF)" }}>
+          <Stack direction={{ xs: "column", md: "row" }} alignItems={{ md: "center" }} justifyContent="space-between" gap={1.5}>
+            <Box>
+              <Typography sx={{ color: "#4C1D95", fontSize: 17, fontWeight: 950 }}>All India Partial Outage Report · NR / SR / WR</Typography>
+              <Typography sx={{ mt: .35, color: "#64748B", fontSize: 12 }}>Fetches the dated consolidated XLSM attachment from the configured Microsoft 365 report mailbox. Only non-zero Margin on running units is retained and sorted highest first.</Typography>
+            </Box>
+            <Button variant="contained" startIcon={allIndiaLoading ? <CircularProgress size={15} color="inherit" /> : <Mail size={16} />} onClick={fetchAllIndia} disabled={allIndiaLoading || !reportDate} sx={{ minWidth: 230, bgcolor: "#6D28D9", fontWeight: 950, textTransform: "none", "&:hover": { bgcolor: "#5B21B6" } }}>{allIndiaLoading ? "Fetching mailbox..." : "Fetch All India report"}</Button>
+          </Stack>
+        </Box>
+        {allIndiaReport && !allIndiaLoading && (
+          <>
+            <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" sx={{ px: 2, py: 1.25, borderTop: "1px solid #DDD6FE", borderBottom: "1px solid #DDD6FE" }}>
+              <Chip label={`${allIndiaReport.summary?.stations || 0} stations`} size="small" />
+              {Object.entries(allIndiaReport.summary?.regions || {}).map(([region, count]) => <Chip key={region} label={`${region}: ${count}`} size="small" variant="outlined" />)}
+              <Chip label={`Total margin ${formatCapacity(allIndiaReport.summary?.total_margin_mw)} MW`} size="small" sx={{ bgcolor: "#FDE68A", color: "#713F12", fontWeight: 900 }} />
+              <Chip label={allIndiaReport.source_file} size="small" variant="outlined" />
+              <Button size="small" variant="outlined" startIcon={allIndiaDownloading ? <CircularProgress size={13} /> : <Download size={15} />} disabled={allIndiaDownloading} onClick={downloadAllIndia} sx={{ color: "#5B21B6", borderColor: "#8B5CF6", fontWeight: 900, textTransform: "none" }}>Excel</Button>
+            </Stack>
+            <TableContainer sx={{ maxHeight: 500 }}>
+              <Table stickyHeader size="small" sx={{ minWidth: 1450 }}>
+                <TableHead><TableRow>{["Region", "Station/Constituents", "Section", "Installed MW", "Running MW", "Max generation MW", "Time", "Margin on running units MW", "Outage MW", "Reason", "Loading Factor %", "Expected revival"].map((label, index) => <TableCell key={label} align={index >= 3 && index <= 8 && index !== 6 ? "right" : "left"} sx={{ bgcolor: index === 7 ? "#FDE68A" : "#EDE9FE", color: index === 7 ? "#713F12" : "#312E81", fontSize: 10.5, fontWeight: 950 }}>{label}</TableCell>)}</TableRow></TableHead>
+                <TableBody>
+                  {(allIndiaReport.rows || []).map((row) => <TableRow key={`${row.region}-${row.source_row}-${row.plant_name}`} hover>
+                    <TableCell sx={{ fontWeight: 950 }}>{row.region}</TableCell><TableCell sx={{ fontWeight: 850 }}>{row.plant_name}</TableCell><TableCell>{row.section}</TableCell><TableCell align="right">{formatCapacity(row.installed_capacity_mw)}</TableCell><TableCell align="right">{formatCapacity(row.capacity_on_bar_mw)}</TableCell><TableCell align="right">{formatCapacity(row.max_generation_1900_2400_mw)}</TableCell><TableCell>{row.max_generation_1900_2400_time || "—"}</TableCell><TableCell align="right" sx={{ bgcolor: "#FEF3C7", color: "#713F12", fontWeight: 950 }}>{formatCapacity(row.running_units_margin_mw)}</TableCell><TableCell align="right">{formatCapacity(row.outage_capacity_mw)}</TableCell><TableCell>{row.reason_for_not_attaining_full_generation || "—"}</TableCell><TableCell align="right">{row.loading_factor_pct == null ? "—" : `${formatCapacity(row.loading_factor_pct)}%`}</TableCell><TableCell>{row.expected_revival_time || "—"}</TableCell>
+                  </TableRow>)}
+                </TableBody>
+              </Table>
+            </TableContainer>
+          </>
+        )}
+      </Paper>
 
       {loading ? (
         <Paper elevation={0} sx={{ minHeight: 420, display: "grid", placeItems: "center", border: "1px solid #CFE0F6", borderRadius: 3 }}>

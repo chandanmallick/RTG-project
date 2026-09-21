@@ -1,0 +1,796 @@
+(node:9656) [DEP0060] DeprecationWarning: The `util._extend` API is deprecated. Please use Object.assign() instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+10:16:17 am [vite] Internal server error: D:\RTG-project\frontend\src\pages\MailSettings.jsx: Unexpected token, expected ":" (437:9)
+
+  435 |             </Paper>
+  436 |           </Box>
+> 437 |         )}
+      |          ^
+  438 |       </Box>
+  439 |     </AppShell>
+  440 |   );
+  Plugin: vite:react-babel
+  File: D:/RTG-project/frontend/src/pages/MailSettings.jsx:437:9
+  435|              </Paper>
+  436|            </Box>
+  437|          )}
+     |           ^
+  438|        </Box>
+  439|      </AppShell>
+      at constructor (D:\RTG-project\frontend\node_modules\@babel\parser\lib\index.js:365:19)
+      at JSXParserMixin.raise (D:\RTG-project\frontend\node_modules\@babel\parser\lib\index.js:6616:19)
+      at JSXParserMixin.unexpected (D:\RTG-project\frontend\node_modules\@babel\parser\lib\index.js:6636:16)
+      at JSXParserMixin.expect (D:\RTG-project\frontend\node_modules\@babel\parser\lib\index.js:6916:12)
+      at JSXParserMixin.parseConditional (D:\RTG-project\frontend\node_modules\@babel\parser\lib\index.js:10909:12)
+      at JSXParserMixin.parseMaybeConditional (D:\RTG-project\frontend\node_modules\@babel\parser\lib\index.js:10902:17)
+      at JSXParserMixin.parseMaybeAssign (D:\RTG-project\frontend\node_modules\@babel\parser\lib\index.js:10848:21)
+      at JSXParserMixin.parseExpressionBase (D:\RTG-project\frontend\node_modules\@babel\parser\lib\index.js:10801:23)
+      at D:\RTG-project\frontend\node_modules\@babel\parser\lib\index.js:10797:39
+      at JSXParserMixin.allowInAnd (D:\RTG-project\frontend\node_modules\@babel\parser\lib\index.js:12443:12)
+      at JSXParserMixin.parseExpression (D:\RTG-project\frontend\node_modules\@babel\parser\lib\index.js:10797:17)
+      at JSXParserMixin.jsxParseExpressionContainer (D:\RTG-project\frontend\node_modules\@babel\parser\lib\index.js:4644:31)
+      at JSXParserMixin.jsxParseElementAt (D:\RTG-project\frontend\node_modules\@babel\parser\lib\index.js:4723:36)
+      at JSXParserMixin.jsxParseElement (D:\RTG-project\frontend\node_modules\@babel\parser\lib\index.js:4761:17)
+      at JSXParserMixin.parseExprAtom (D:\RTG-project\frontend\node_modules\@babel\parser\lib\index.js:4771:19)
+      at JSXParserMixin.parseExprSubscripts (D:\RTG-project\frontend\node_modules\@babel\parser\lib\index.js:11098:23)
+      at JSXParserMixin.parseUpdate (D:\RTG-project\frontend\node_modules\@babel\parser\lib\index.js:11083:21)
+      at JSXParserMixin.parseMaybeUnary (D:\RTG-project\frontend\node_modules\@babel\parser\lib\index.js:11063:23)
+      at JSXParserMixin.parseMaybeUnaryOrPrivate (D:\RTG-project\frontend\node_modules\@babel\parser\lib\index.js:10916:61)
+      at JSXParserMixin.parseExprOps (D:\RTG-project\frontend\node_modules\@babel\parser\lib\index.js:10921:23)
+      at JSXParserMixin.parseMaybeConditional (D:\RTG-project\frontend\node_modules\@babel\parser\lib\index.js:10898:23)
+      at JSXParserMixin.parseMaybeAssign (D:\RTG-project\frontend\node_modules\@babel\parser\lib\index.js:10848:21)
+      at D:\RTG-project\frontend\node_modules\@babel\parser\lib\index.js:10817:39
+      at JSXParserMixin.allowInAnd (D:\RTG-project\frontend\node_modules\@babel\parser\lib\index.js:12443:12)
+      at JSXParserMixin.parseMaybeAssignAllowIn (D:\RTG-project\frontend\node_modules\@babel\parser\lib\index.js:10817:17)
+      at JSXParserMixin.parseMaybeAssignAllowInOrVoidPattern (D:\RTG-project\frontend\node_modules\@babel\parser\lib\index.js:12510:17)
+      at JSXParserMixin.parseParenAndDistinguishExpression (D:\RTG-project\frontend\node_modules\@babel\parser\lib\index.js:11692:28)
+      at JSXParserMixin.parseExprAtom (D:\RTG-project\frontend\node_modules\@babel\parser\lib\index.js:11348:23)
+      at JSXParserMixin.parseExprAtom (D:\RTG-project\frontend\node_modules\@babel\parser\lib\index.js:4776:20)
+      at JSXParserMixin.parseExprSubscripts (D:\RTG-project\frontend\node_modules\@babel\parser\lib\index.js:11098:23)
+      at JSXParserMixin.parseUpdate (D:\RTG-project\frontend\node_modules\@babel\parser\lib\index.js:11083:21)
+      at JSXParserMixin.parseMaybeUnary (D:\RTG-project\frontend\node_modules\@babel\parser\lib\index.js:11063:23)
+      at JSXParserMixin.parseMaybeUnaryOrPrivate (D:\RTG-project\frontend\node_modules\@babel\parser\lib\index.js:10916:61)
+      at JSXParserMixin.parseExprOpBaseRightExpr (D:\RTG-project\frontend\node_modules\@babel\parser\lib\index.js:11003:34)
+      at JSXParserMixin.parseExprOpRightExpr (D:\RTG-project\frontend\node_modules\@babel\parser\lib\index.js:10998:21)
+      at JSXParserMixin.parseExprOp (D:\RTG-project\frontend\node_modules\@babel\parser\lib\index.js:10964:27)
+      at JSXParserMixin.parseExprOp (D:\RTG-project\frontend\node_modules\@babel\parser\lib\index.js:10970:21)
+      at JSXParserMixin.parseExprOps (D:\RTG-project\frontend\node_modules\@babel\parser\lib\index.js:10925:17)
+      at JSXParserMixin.parseMaybeConditional (D:\RTG-project\frontend\node_modules\@babel\parser\lib\index.js:10898:23)
+      at JSXParserMixin.parseMaybeAssign (D:\RTG-project\frontend\node_modules\@babel\parser\lib\index.js:10848:21)
+      at JSXParserMixin.parseExpressionBase (D:\RTG-project\frontend\node_modules\@babel\parser\lib\index.js:10801:23)
+      at D:\RTG-project\frontend\node_modules\@babel\parser\lib\index.js:10797:39
+      at JSXParserMixin.allowInAnd (D:\RTG-project\frontend\node_modules\@babel\parser\lib\index.js:12443:12)
+      at JSXParserMixin.parseExpression (D:\RTG-project\frontend\node_modules\@babel\parser\lib\index.js:10797:17)
+      at JSXParserMixin.jsxParseExpressionContainer (D:\RTG-project\frontend\node_modules\@babel\parser\lib\index.js:4644:31)
+      at JSXParserMixin.jsxParseElementAt (D:\RTG-project\frontend\node_modules\@babel\parser\lib\index.js:4723:36)
+      at JSXParserMixin.jsxParseElementAt (D:\RTG-project\frontend\node_modules\@babel\parser\lib\index.js:4710:32)
+      at JSXParserMixin.jsxParseElement (D:\RTG-project\frontend\node_modules\@babel\parser\lib\index.js:4761:17)
+      at JSXParserMixin.parseExprAtom (D:\RTG-project\frontend\node_modules\@babel\parser\lib\index.js:4771:19)
+      at JSXParserMixin.parseExprSubscripts (D:\RTG-project\frontend\node_modules\@babel\parser\lib\index.js:11098:23)
+12:01:13 pm [vite] http proxy error at /api/crew/replacement/notifications:
+Error: connect ECONNREFUSED 127.0.0.1:8001
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1645:16)
+12:01:13 pm [vite] http proxy error at /api/crew/notifications/:
+Error: connect ECONNREFUSED 127.0.0.1:8001
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1645:16)
+12:01:16 pm [vite] http proxy error at /api/crew/replacement/notifications:
+Error: connect ECONNREFUSED 127.0.0.1:8001
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1645:16)
+12:01:16 pm [vite] http proxy error at /api/crew/notifications/:
+Error: connect ECONNREFUSED 127.0.0.1:8001
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1645:16)
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+5:44:43 pm [vite] http proxy error at /api/crew/notifications/:
+Error: connect ECONNREFUSED 127.0.0.1:8001
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1645:16)
+5:44:43 pm [vite] http proxy error at /api/crew/replacement/notifications:
+Error: connect ECONNREFUSED 127.0.0.1:8001
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1645:16)
+5:44:43 pm [vite] http proxy error at /api/crew/notifications/:
+Error: connect ECONNREFUSED 127.0.0.1:8001
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1645:16)
+5:44:43 pm [vite] http proxy error at /api/crew/replacement/notifications:
+Error: connect ECONNREFUSED 127.0.0.1:8001
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1645:16)
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+5:54:48 pm [vite] http proxy error at /api/crew/replacement/notifications:
+Error: connect ECONNREFUSED 127.0.0.1:8001
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1645:16)
+5:54:48 pm [vite] http proxy error at /api/crew/notifications/:
+Error: connect ECONNREFUSED 127.0.0.1:8001
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1645:16)
+5:54:49 pm [vite] http proxy error at /api/crew/notifications/:
+Error: connect ECONNREFUSED 127.0.0.1:8001
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1645:16)
+5:54:49 pm [vite] http proxy error at /api/crew/replacement/notifications:
+Error: connect ECONNREFUSED 127.0.0.1:8001
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1645:16)
+5:54:49 pm [vite] http proxy error at /api/crew/notifications/:
+Error: connect ECONNREFUSED 127.0.0.1:8001
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1645:16)
+5:54:49 pm [vite] http proxy error at /api/crew/replacement/notifications:
+Error: connect ECONNREFUSED 127.0.0.1:8001
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1645:16)
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+10:17:36 am [vite] http proxy error at /api/crew/replacement/notifications:
+Error: connect ECONNREFUSED 127.0.0.1:8001
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1645:16)
+10:17:36 am [vite] http proxy error at /api/crew/notifications/:
+Error: connect ECONNREFUSED 127.0.0.1:8001
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1645:16)
+10:17:36 am [vite] http proxy error at /api/crew/replacement/notifications:
+Error: connect ECONNREFUSED 127.0.0.1:8001
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1645:16)
+10:17:36 am [vite] http proxy error at /api/crew/notifications/:
+Error: connect ECONNREFUSED 127.0.0.1:8001
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1645:16)
+10:17:36 am [vite] http proxy error at /api/psp/sync-progress:
+Error: connect ECONNREFUSED 127.0.0.1:8001
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1645:16)
+1:08:43 pm [vite] http proxy error at /api/psp/sync-progress:
+Error: connect ECONNREFUSED 127.0.0.1:8001
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1645:16)
+11:23:18 am [vite] http proxy error at /api/crew/replacement/notifications:
+Error: connect ECONNREFUSED 127.0.0.1:8001
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1645:16)
+11:23:18 am [vite] http proxy error at /api/crew/notifications/:
+Error: connect ECONNREFUSED 127.0.0.1:8001
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1645:16)
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+10:25:40 am [vite] http proxy error at /api/crew/replacement/notifications:
+Error: connect ECONNREFUSED 127.0.0.1:8001
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1645:16)
+10:25:41 am [vite] http proxy error at /api/crew/notifications/:
+Error: connect ECONNREFUSED 127.0.0.1:8001
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1645:16)
+11:03:39 am [vite] http proxy error at /api/crew/replacement/notifications:
+Error: connect ECONNREFUSED 127.0.0.1:8001
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1645:16)
+11:03:39 am [vite] http proxy error at /api/crew/notifications/:
+Error: connect ECONNREFUSED 127.0.0.1:8001
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1645:16)
+11:17:16 am [vite] http proxy error at /api/frequency/events/stacked-comparison:
+Error: connect ECONNREFUSED 127.0.0.1:8001
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1645:16)
+11:32:54 am [vite] http proxy error at /api/crew/replacement/notifications:
+Error: connect ECONNREFUSED 127.0.0.1:8001
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1645:16)
+11:32:54 am [vite] http proxy error at /api/crew/notifications/:
+Error: connect ECONNREFUSED 127.0.0.1:8001
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1645:16)
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+12:29:23 pm [vite] Internal server error: D:\RTG-project\frontend\src\crewLegacy\TrainingHolidayMaster.jsx: 'return' outside of function. (642:0)
+
+  640 | /* ================= UI ================= */
+  641 |
+> 642 | return(
+      | ^
+  643 |
+  644 | <Box sx={{p:3,background:"#f4f6fb",minHeight:"100vh"}}>
+  645 |
+  Plugin: vite:react-babel
+  File: D:/RTG-project/frontend/src/crewLegacy/TrainingHolidayMaster.jsx:642:0
+  647|  
+  648|  <Box sx={{p:3,mb:3,borderRadius:3,background:"linear-gradient(105deg,#08103A 0%,#0057B7 65%,#0F6FDB 100%)",color:"#FFFFFF"}}>
+  649|  <Typography variant="h5" sx={{fontWeight:900,color:"#FFFFFF"}}>
+     |                     ^
+  650|  {canViewTrainingPage ? "Training & Holiday Management" : "Training Approval Inbox"}
+  651|  </Typography>
+      at constructor (D:\RTG-project\frontend\node_modules\@babel\parser\lib\index.js:365:19)
+      at JSXParserMixin.raise (D:\RTG-project\frontend\node_modules\@babel\parser\lib\index.js:6616:19)
+      at JSXParserMixin.parseReturnStatement (D:\RTG-project\frontend\node_modules\@babel\parser\lib\index.js:13153:12)
+      at JSXParserMixin.parseStatementContent (D:\RTG-project\frontend\node_modules\@babel\parser\lib\index.js:12815:21)
+      at JSXParserMixin.parseStatementLike (D:\RTG-project\frontend\node_modules\@babel\parser\lib\index.js:12784:17)
+      at JSXParserMixin.parseModuleItem (D:\RTG-project\frontend\node_modules\@babel\parser\lib\index.js:12761:17)
+      at JSXParserMixin.parseBlockOrModuleBlockBody (D:\RTG-project\frontend\node_modules\@babel\parser\lib\index.js:13333:36)
+      at JSXParserMixin.parseBlockBody (D:\RTG-project\frontend\node_modules\@babel\parser\lib\index.js:13326:10)
+      at JSXParserMixin.parseProgram (D:\RTG-project\frontend\node_modules\@babel\parser\lib\index.js:12639:10)
+      at JSXParserMixin.parseTopLevel (D:\RTG-project\frontend\node_modules\@babel\parser\lib\index.js:12629:25)
+      at JSXParserMixin.parse (D:\RTG-project\frontend\node_modules\@babel\parser\lib\index.js:14505:25)
+      at parse (D:\RTG-project\frontend\node_modules\@babel\parser\lib\index.js:14539:38)
+      at parser (D:\RTG-project\frontend\node_modules\@babel\core\lib\parser\index.js:41:34)
+      at parser.next (<anonymous>)
+      at normalizeFile (D:\RTG-project\frontend\node_modules\@babel\core\lib\transformation\normalize-file.js:64:37)
+      at normalizeFile.next (<anonymous>)
+      at run (D:\RTG-project\frontend\node_modules\@babel\core\lib\transformation\index.js:22:50)
+      at run.next (<anonymous>)
+      at transform (D:\RTG-project\frontend\node_modules\@babel\core\lib\transform.js:22:33)
+      at transform.next (<anonymous>)
+      at step (D:\RTG-project\frontend\node_modules\gensync\index.js:261:32)
+      at D:\RTG-project\frontend\node_modules\gensync\index.js:273:13
+      at async.call.result.err.err (D:\RTG-project\frontend\node_modules\gensync\index.js:223:11)
+      at D:\RTG-project\frontend\node_modules\gensync\index.js:189:28
+      at D:\RTG-project\frontend\node_modules\@babel\core\lib\gensync-utils\async.js:67:7
+      at D:\RTG-project\frontend\node_modules\gensync\index.js:113:33
+      at step (D:\RTG-project\frontend\node_modules\gensync\index.js:287:14)
+      at D:\RTG-project\frontend\node_modules\gensync\index.js:273:13
+      at async.call.result.err.err (D:\RTG-project\frontend\node_modules\gensync\index.js:223:11)
+12:29:35 pm [vite] Internal server error: D:\RTG-project\frontend\src\crewLegacy\TrainingHolidayMaster.jsx: 'return' outside of function. (642:0)
+
+  640 | /* ================= UI ================= */
+  641 |
+> 642 | return(
+      | ^
+  643 |
+  644 | <Box sx={{p:3,background:"#f4f6fb",minHeight:"100vh"}}>
+  645 |
+  Plugin: vite:react-babel
+  File: D:/RTG-project/frontend/src/crewLegacy/TrainingHolidayMaster.jsx:642:0
+  647|  
+  648|  <Box sx={{p:3,mb:3,borderRadius:3,background:"linear-gradient(105deg,#08103A 0%,#0057B7 65%,#0F6FDB 100%)",color:"#FFFFFF"}}>
+  649|  <Typography variant="h5" sx={{fontWeight:900,color:"#FFFFFF"}}>
+     |                     ^
+  650|  {canViewTrainingPage ? "Training & Holiday Management" : "Training Approval Inbox"}
+  651|  </Typography>
+      at constructor (D:\RTG-project\frontend\node_modules\@babel\parser\lib\index.js:365:19)
+      at JSXParserMixin.raise (D:\RTG-project\frontend\node_modules\@babel\parser\lib\index.js:6616:19)
+      at JSXParserMixin.parseReturnStatement (D:\RTG-project\frontend\node_modules\@babel\parser\lib\index.js:13153:12)
+      at JSXParserMixin.parseStatementContent (D:\RTG-project\frontend\node_modules\@babel\parser\lib\index.js:12815:21)
+      at JSXParserMixin.parseStatementLike (D:\RTG-project\frontend\node_modules\@babel\parser\lib\index.js:12784:17)
+      at JSXParserMixin.parseModuleItem (D:\RTG-project\frontend\node_modules\@babel\parser\lib\index.js:12761:17)
+      at JSXParserMixin.parseBlockOrModuleBlockBody (D:\RTG-project\frontend\node_modules\@babel\parser\lib\index.js:13333:36)
+      at JSXParserMixin.parseBlockBody (D:\RTG-project\frontend\node_modules\@babel\parser\lib\index.js:13326:10)
+      at JSXParserMixin.parseProgram (D:\RTG-project\frontend\node_modules\@babel\parser\lib\index.js:12639:10)
+      at JSXParserMixin.parseTopLevel (D:\RTG-project\frontend\node_modules\@babel\parser\lib\index.js:12629:25)
+      at JSXParserMixin.parse (D:\RTG-project\frontend\node_modules\@babel\parser\lib\index.js:14505:25)
+      at parse (D:\RTG-project\frontend\node_modules\@babel\parser\lib\index.js:14539:38)
+      at parser (D:\RTG-project\frontend\node_modules\@babel\core\lib\parser\index.js:41:34)
+      at parser.next (<anonymous>)
+      at normalizeFile (D:\RTG-project\frontend\node_modules\@babel\core\lib\transformation\normalize-file.js:64:37)
+      at normalizeFile.next (<anonymous>)
+      at run (D:\RTG-project\frontend\node_modules\@babel\core\lib\transformation\index.js:22:50)
+      at run.next (<anonymous>)
+      at transform (D:\RTG-project\frontend\node_modules\@babel\core\lib\transform.js:22:33)
+      at transform.next (<anonymous>)
+      at step (D:\RTG-project\frontend\node_modules\gensync\index.js:261:32)
+      at D:\RTG-project\frontend\node_modules\gensync\index.js:273:13
+      at async.call.result.err.err (D:\RTG-project\frontend\node_modules\gensync\index.js:223:11)
+      at D:\RTG-project\frontend\node_modules\gensync\index.js:189:28
+      at D:\RTG-project\frontend\node_modules\@babel\core\lib\gensync-utils\async.js:67:7
+      at D:\RTG-project\frontend\node_modules\gensync\index.js:113:33
+      at step (D:\RTG-project\frontend\node_modules\gensync\index.js:287:14)
+      at D:\RTG-project\frontend\node_modules\gensync\index.js:273:13
+      at async.call.result.err.err (D:\RTG-project\frontend\node_modules\gensync\index.js:223:11)
+12:31:00 pm [vite] http proxy error at /api/psp/nldc-demand/trend?start_date=2026-08-11&end_date=2026-09-10:
+Error: read ECONNRESET
+    at TCP.onStreamRead (node:internal/stream_base_commons:216:20)
+12:31:00 pm [vite] http proxy error at /api/crew/dashboard/duty-today-tomorrow:
+Error: read ECONNRESET
+    at TCP.onStreamRead (node:internal/stream_base_commons:216:20)
+12:31:00 pm [vite] http proxy error at /api/crew/replacement/notifications:
+Error: read ECONNRESET
+    at TCP.onStreamRead (node:internal/stream_base_commons:216:20)
+12:31:00 pm [vite] http proxy error at /api/psp/power-position:
+Error: read ECONNRESET
+    at TCP.onStreamRead (node:internal/stream_base_commons:216:20)
+12:31:00 pm [vite] http proxy error at /api/psp/report-checking:
+Error: read ECONNRESET
+    at TCP.onStreamRead (node:internal/stream_base_commons:216:20)
+12:31:00 pm [vite] http proxy error at /api/crew/notifications/:
+Error: read ECONNRESET
+    at TCP.onStreamRead (node:internal/stream_base_commons:216:20)
+12:31:00 pm [vite] http proxy error at /api/rtg-dashboard/live:
+Error: connect ECONNREFUSED 127.0.0.1:8001
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1645:16)
+12:31:00 pm [vite] http proxy error at /api/psp/nldc-demand/trend?start_date=2026-08-11&end_date=2026-09-10:
+Error: connect ECONNREFUSED 127.0.0.1:8001
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1645:16)
+12:31:00 pm [vite] http proxy error at /api/crew/dashboard/duty-today-tomorrow:
+Error: connect ECONNREFUSED 127.0.0.1:8001
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1645:16)
+12:31:00 pm [vite] http proxy error at /api/crew/replacement/notifications:
+Error: connect ECONNREFUSED 127.0.0.1:8001
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1645:16)
+12:31:00 pm [vite] http proxy error at /api/psp/power-position:
+Error: connect ECONNREFUSED 127.0.0.1:8001
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1645:16)
+12:31:00 pm [vite] http proxy error at /api/psp/report-checking:
+Error: connect ECONNREFUSED 127.0.0.1:8001
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1645:16)
+12:31:00 pm [vite] http proxy error at /api/crew/notifications/:
+Error: connect ECONNREFUSED 127.0.0.1:8001
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1645:16)
+12:31:00 pm [vite] http proxy error at /api/crew/replacement/notifications:
+Error: connect ECONNREFUSED 127.0.0.1:8001
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1645:16)
+12:31:00 pm [vite] http proxy error at /api/crew/notifications/:
+Error: connect ECONNREFUSED 127.0.0.1:8001
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1645:16)
+12:31:00 pm [vite] http proxy error at /api/crew/replacement/notifications:
+Error: connect ECONNREFUSED 127.0.0.1:8001
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1645:16)
+12:31:00 pm [vite] http proxy error at /api/crew/notifications/:
+Error: connect ECONNREFUSED 127.0.0.1:8001
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1645:16)
+3:26:40 pm [vite] http proxy error at /api/crew/replacement/notifications:
+Error: connect ECONNREFUSED 127.0.0.1:8001
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1645:16)
+3:26:40 pm [vite] http proxy error at /api/crew/notifications/:
+Error: connect ECONNREFUSED 127.0.0.1:8001
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1645:16)
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+4:41:50 pm [vite] http proxy error at /api/crew/replacement/notifications:
+Error: connect ECONNREFUSED 127.0.0.1:8001
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1645:16)
+4:41:50 pm [vite] http proxy error at /api/crew/notifications/:
+Error: connect ECONNREFUSED 127.0.0.1:8001
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1645:16)
+4:48:01 pm [vite] http proxy error at /api/crew/replacement/pending:
+Error: connect ECONNREFUSED 127.0.0.1:8001
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1645:16)
+4:59:53 pm [vite] http proxy error at /api/crew/replacement/notifications:
+Error: connect ECONNREFUSED 127.0.0.1:8001
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1645:16)
+4:59:53 pm [vite] http proxy error at /api/crew/notifications/:
+Error: connect ECONNREFUSED 127.0.0.1:8001
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1645:16)
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+10:40:24 am [vite] http proxy error at /api/crew/replacement/notifications:
+Error: connect ECONNREFUSED 127.0.0.1:8001
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1645:16)
+10:40:24 am [vite] http proxy error at /api/crew/notifications/:
+Error: connect ECONNREFUSED 127.0.0.1:8001
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1645:16)
+10:40:24 am [vite] http proxy error at /api/crew/replacement/notifications:
+Error: connect ECONNREFUSED 127.0.0.1:8001
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1645:16)
+10:40:24 am [vite] http proxy error at /api/crew/notifications/:
+Error: connect ECONNREFUSED 127.0.0.1:8001
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1645:16)
+10:40:32 am [vite] http proxy error at /api/crew/notifications/:
+Error: connect ECONNREFUSED 127.0.0.1:8001
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1645:16)
+10:40:32 am [vite] http proxy error at /api/crew/replacement/notifications:
+Error: connect ECONNREFUSED 127.0.0.1:8001
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1645:16)
+10:40:32 am [vite] http proxy error at /api/crew/notifications/:
+Error: connect ECONNREFUSED 127.0.0.1:8001
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1645:16)
+10:40:32 am [vite] http proxy error at /api/crew/replacement/notifications:
+Error: connect ECONNREFUSED 127.0.0.1:8001
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1645:16)
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.
+files in the public directory are served at the root path.
+Instead of /public/crew-calendar, use /crew-calendar.

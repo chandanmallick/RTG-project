@@ -1,0 +1,17 @@
+INFO:     Started server process [16796]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8001 (Press CTRL+C to quit)
+Job "run_er_plant_deviation_sync (trigger: cron[hour='11', minute='30'], next run at: 2026-09-11 11:30:00 IST)" raised an exception
+Traceback (most recent call last):
+  File "D:\RTG-project\.venv\Lib\site-packages\apscheduler\executors\base.py", line 131, in run_job
+    retval = job.func(*job.args, **job.kwargs)
+  File "D:\RTG-project\backend\scheduler\jobs.py", line 68, in run_er_plant_deviation_sync
+    result = sync_er_day_ahead_report(report_date)
+  File "D:\RTG-project\backend\routes\plant_deviation_routes.py", line 577, in sync_er_day_ahead_report
+    report = _day_ahead_thermal_report(selected_date.isoformat(), force_refresh=True)
+  File "D:\RTG-project\backend\routes\plant_deviation_routes.py", line 134, in _day_ahead_thermal_report
+    raise HTTPException(
+    ...<2 lines>...
+    )
+fastapi.exceptions.HTTPException: 404: Day-ahead MOP file not found: ER_Plantwise Deviation from IC_10-09-2026.xlsx

@@ -6,6 +6,7 @@ import os
 import re
 import uuid
 import shutil
+from pathlib import Path
 import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
@@ -37,6 +38,11 @@ from pydantic import BaseModel
 from typing import Optional, List
 from services.db_handler import MongoService
 from crew_legacy.admin_logic.auth_utils import get_authenticated_user
+from crew_legacy.admin_logic.notification_service import (
+    replacement_mail_settings,
+    send_email,
+    workflow_mail_templates,
+)
 
 router = APIRouter(
     prefix="/api/frequency",
@@ -710,7 +716,7 @@ async def get_schedule_data(
 
 
 SCHEDULE_DATA_ACTUAL_URL = "http://10.3.230.62:5010/GetThermalGeneratorData"
-SCHEDULE_DATA_STATE_ACTUAL_URL = "http://10.3.230.62:5010/GetStateData"
+SCHEDULE_DATA_STATE_ACTUAL_URL = "http://10.3.230.62:5010/GetDemandData"
 
 
 def _actual_value_list(item):
@@ -785,6 +791,133 @@ async def get_schedule_data_actual(
                 row[station] = None
         rows.append(row)
     return {"success": True, "kind": kind, "frequency_minutes": frequency, "stations": stations, "rows": rows, "raw": raw if not rows else None}
+
+
+@router.post("/schedule-data/export-excel")
+async def export_schedule_data_excel(payload: dict = Body(...)):
+    """Export the already displayed Schedule Data matrix as a real XLSX file."""
+    headers = payload.get("headers") or []
+    data_rows = payload.get("rows") or []
+    if not headers or not isinstance(headers, list) or not isinstance(data_rows, list):
+        raise HTTPException(400, "No displayed schedule data was supplied for export.")
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Schedule Data"
+    ws.append([str(value or "") for value in headers])
+    for source_row in data_rows:
+        if not isinstance(source_row, list):
+            continue
+        ws.append(source_row)
+
+    header_fill = PatternFill("solid", fgColor="DCEBFA")
+    header_font = Font(bold=True, color="003B82")
+    thin_blue = Side(style="thin", color="B9D0EA")
+    for cell in ws[1]:
+        cell.fill = header_fill
+        cell.font = header_font
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        cell.border = Border(left=thin_blue, right=thin_blue, top=thin_blue, bottom=thin_blue)
+    for row in ws.iter_rows(min_row=2):
+        for cell in row:
+            cell.border = Border(left=thin_blue, right=thin_blue, top=thin_blue, bottom=thin_blue)
+            cell.alignment = Alignment(horizontal="center", vertical="center")
+
+    ws.freeze_panes = "B2"
+    ws.auto_filter.ref = ws.dimensions
+    ws.row_dimensions[1].height = 34
+    for index, header in enumerate(headers, start=1):
+        sample_lengths = [len(str(ws.cell(row=row, column=index).value or "")) for row in range(1, min(ws.max_row, 100) + 1)]
+        width = max([len(str(header))] + sample_lengths) + 2
+        ws.column_dimensions[get_column_letter(index)].width = min(max(width, 14), 34)
+
+    output = io.BytesIO()
+    wb.save(output)
+    output.seek(0)
+    start_date = re.sub(r"[^0-9-]", "", str(payload.get("start_date") or ""))
+    end_date = re.sub(r"[^0-9-]", "", str(payload.get("end_date") or ""))
+    filename = f"Schedule_Actual_Deviation_{start_date}_{end_date}.xlsx"
+    return StreamingResponse(
+        output,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.post("/schedule-data/send-chart-mail")
+async def send_schedule_data_chart_mail(
+    payload: dict = Body(...),
+    user=Depends(get_authenticated_user),
+):
+    """Mail the browser-generated, generator-wise interactive HTML report."""
+    html = str(payload.get("html") or "").strip()
+    start_date = re.sub(r"[^0-9-]", "", str(payload.get("startDate") or ""))
+    end_date = re.sub(r"[^0-9-]", "", str(payload.get("endDate") or ""))
+    generator_names = [
+        str(value).strip()
+        for value in (payload.get("generatorNames") or [])
+        if str(value).strip()
+    ]
+    if not html or "<html" not in html.lower():
+        raise HTTPException(400, "No HTML chart report was supplied.")
+    html_bytes = html.encode("utf-8")
+    if len(html_bytes) > 2_500_000:
+        raise HTTPException(
+            413,
+            "The HTML report is too large for a normal Microsoft Graph attachment. Reduce the date range or generator selection.",
+        )
+
+    settings = replacement_mail_settings()
+    template = workflow_mail_templates().get("schedule_data_charts") or {}
+    if not settings.get("enabled"):
+        raise HTTPException(409, "Enable Microsoft Graph mail delivery in Mail Settings before sending.")
+    if not template.get("enabled"):
+        raise HTTPException(409, "Enable the Schedule data chart report template in Mail Settings before sending.")
+    split_addresses = lambda value: [
+        item.strip() for item in re.split(r"[,;\n]+", str(value or "")) if item.strip()
+    ]
+    recipients = split_addresses(template.get("recipients"))
+    cc_recipients = split_addresses(template.get("ccRecipients"))
+    if not recipients:
+        raise HTTPException(409, "Configure at least one Schedule data chart report recipient in Mail Settings.")
+
+    report_period = start_date if start_date == end_date else f"{start_date} to {end_date}"
+    values = {"report_date": report_period}
+    try:
+        subject = str(template.get("subjectTemplate") or "Schedule Data Charts - {report_date}").format(**values)
+        body = str(template.get("bodyTemplate") or "Please find the chart report attached.").format(**values)
+    except (KeyError, ValueError) as exc:
+        raise HTTPException(400, f"Schedule chart mail template is invalid: {exc}") from exc
+    if generator_names:
+        body += (
+            "<br><br><strong>Generators:</strong> "
+            + xml_escape(", ".join(generator_names))
+        )
+    filename = f"Schedule_Actual_Deviation_Charts_{start_date}_{end_date}.html"
+    result = send_email(
+        recipients,
+        subject,
+        body,
+        html=True,
+        sender=settings.get("sender"),
+        enabled=True,
+        cc_list=cc_recipients,
+        attachments=[{
+            "name": filename,
+            "contentType": "text/html; charset=utf-8",
+            "contentBytes": base64.b64encode(html_bytes).decode("ascii"),
+        }],
+    )
+    if result.get("status") != "sent":
+        raise HTTPException(503, result.get("error") or "The chart report email could not be sent.")
+    return {
+        "success": True,
+        "message": (
+            f"Generator-wise HTML chart report sent to {result.get('recipientCount', 0)} recipient(s)"
+            f" with {result.get('ccRecipientCount', 0)} CC recipient(s)."
+        ),
+        "attachmentName": filename,
+    }
 
 
 @router.get("/schedule-data/raw")
@@ -1341,6 +1474,12 @@ def log_api_hit(api_type: str, date_str: str, target: str, url: str, status: str
 RAW_DATA_COLLECTION = "frequency_event_raw_data"
 EVENT_COLLECTION = "frequency_events"
 
+
+def frequency_event_name(event_type: str, start_dt: datetime, end_dt: datetime) -> str:
+    """Return the single canonical display name used by every frequency event."""
+    prefix = "High Freq" if normalize_event_type(event_type) == "high" else "Low Freq"
+    return f"{prefix} {start_dt.strftime('%d-%b-%y')} ({start_dt.strftime('%H:%M')}-{end_dt.strftime('%H:%M')})"
+
 def normalize_series(values, length=96):
     result = []
     for value in values or []:
@@ -1681,7 +1820,14 @@ def build_source_status(db, plant_id: str, wbes_name: str, start_dt: datetime, e
         },
     }
 
-def build_saved_event_response(db, event_id: str, entity_list: list, start_dt: datetime, end_dt: datetime):
+def build_saved_event_response(
+    db,
+    event_id: str,
+    entity_list: list,
+    start_dt: datetime,
+    end_dt: datetime,
+    include_generation_comparison: bool = False,
+):
     event_doc = db.db[EVENT_COLLECTION].find_one({"event_id": event_id}, {"_id": 0})
     if not event_doc:
         return None, f"Saved event not found for id {event_id}."
@@ -1736,6 +1882,12 @@ def build_saved_event_response(db, event_id: str, entity_list: list, start_dt: d
             "schedule": take("schedule"),
             "dc": take("dc"),
             "deviation": take("deviation"),
+            "purulia_psp_net": take("purulia_psp_net"),
+            "generation_categories": {
+                label: ([values[idx] for idx in keep_indexes if idx < len(values)] if keep_indexes else values)
+                for label, values in (series.get("generation_categories") or {}).items()
+                if isinstance(values, list)
+            },
         }
         missing = [
             key for key in ["actual", "schedule", "dc"]
@@ -1794,6 +1946,23 @@ def build_saved_event_response(db, event_id: str, entity_list: list, start_dt: d
             "transmission_line_events": point.get("transmission_line_events") or [],
         })
 
+    generation_sources = []
+    if include_generation_comparison:
+        for row in rows:
+            if not row.get("is_state"):
+                continue
+            state_name = _normalized_header(row.get("state") or row.get("state_name") or row.get("plant_name"))
+            if state_name not in {"WEST BENGAL", "WESTBENGAL", "WB"} and "WEST BENGAL" not in state_name:
+                continue
+            timestamps = (row.get("series") or {}).get("timestamps") or []
+            categories, sources, missing_headers = load_state_generation_series(timestamps, state_name)
+            if sources:
+                row["series"]["generation_categories"] = categories
+                row["series"]["purulia_psp_net"] = categories.get("Purulia PSP Net (G + P)") or []
+                row["purulia_psp_source_files"] = sources
+                row["generation_comparison_missing_headers"] = missing_headers
+                generation_sources.extend(source for source in sources if source not in generation_sources)
+
     return {
         "success": True,
         "rows": rows,
@@ -1809,10 +1978,22 @@ def build_saved_event_response(db, event_id: str, entity_list: list, start_dt: d
             f"Loaded historical event from Mongo: {event_doc.get('name')}",
             f"Merged event rows loaded: {len(rows)}",
             f"Missing source groups: {len(missing_sources)}",
+            *(
+                [f"Generation comparison refreshed from {len(generation_sources)} dated source workbook(s)."]
+                if include_generation_comparison and generation_sources
+                else (["Generation comparison requested, but no matching dated source workbook was found."] if include_generation_comparison else [])
+            ),
         ],
+        "generation_comparison_refreshed": bool(generation_sources),
+        "generation_comparison_sources": generation_sources,
     }, None
 
-def fetch_wbes_schedule_raw(date_str: str, acronyms: list, diagnostics: list | None = None):
+def fetch_wbes_schedule_raw(
+    date_str: str,
+    acronyms: list,
+    diagnostics: list | None = None,
+    force_refresh: bool = False,
+):
     """
     date_str is in DD-MM-YYYY format
     """
@@ -1824,7 +2005,7 @@ def fetch_wbes_schedule_raw(date_str: str, acronyms: list, diagnostics: list | N
     
     for acr in acronyms:
         try:
-            cached = get_event_raw_data(db, date_str, wbes_name=acr)
+            cached = None if force_refresh else get_event_raw_data(db, date_str, wbes_name=acr)
             cached_schedule = get_source_series(cached, "wbes", "schedule")
             cached_dc = get_source_series(cached, "wbes", "dc")
             cached_components = get_source_series(cached, "wbes", "schedule_components")
@@ -1844,7 +2025,7 @@ def fetch_wbes_schedule_raw(date_str: str, acronyms: list, diagnostics: list | N
                     }]
                 })
             else:
-                legacy_cached = db.db["wbes_schedule_raw"].find_one({"date": date_str, "acronym": acr})
+                legacy_cached = None if force_refresh else db.db["wbes_schedule_raw"].find_one({"date": date_str, "acronym": acr})
                 if legacy_cached:
                     results.append({
                         "Acronym": acr,
@@ -1962,14 +2143,14 @@ def fetch_wbes_schedule_raw(date_str: str, acronyms: list, diagnostics: list | N
         
     return results
 
-def fetch_rtg_schedule_raw(date_str: str, plant_id: str):
+def fetch_rtg_schedule_raw(date_str: str, plant_id: str, force_refresh: bool = False):
     """
     date_str is in YYYY-MM-DD format
     """
     db = MongoService()
     
     try:
-        cached = get_event_raw_data(db, date_str, plant_id=plant_id)
+        cached = None if force_refresh else get_event_raw_data(db, date_str, plant_id=plant_id)
         cached_schedule = get_source_series(cached, "rtg", "schedule")
         cached_dc = get_source_series(cached, "rtg", "dc")
         if cached_schedule is not None or cached_dc is not None:
@@ -1977,7 +2158,7 @@ def fetch_rtg_schedule_raw(date_str: str, plant_id: str):
                 "schedule": cached_schedule or [0.0]*96,
                 "dc": cached_dc or [0.0]*96
             }
-        legacy_cached = db.db["rtg_schedule_raw"].find_one({"date": date_str, "plant_id": plant_id})
+        legacy_cached = None if force_refresh else db.db["rtg_schedule_raw"].find_one({"date": date_str, "plant_id": plant_id})
         if legacy_cached:
             schedule = normalize_series(legacy_cached.get("schedule"))
             dc = normalize_series(legacy_cached.get("dc"))
@@ -2409,6 +2590,161 @@ def parse_scada_file(contents: bytes):
             
     return df_data, headers, keys, dt_col_idx, freq_col_idx
 
+
+THERMAL_GENERATION_ROOT = Path(os.getenv(
+    "FREQUENCY_THERMAL_GENERATION_ROOT",
+    r"\\10.3.95.200\HTTP-Access\ScadaData\er_web",
+))
+
+
+def _normalized_header(value):
+    return " ".join(str(value or "").strip().upper().split())
+
+
+def load_purulia_psp_net_series(timestamps: list):
+    """Return Purulia generation + pumping (pumping is negative in the dump)."""
+    requested = [pd.to_datetime(value).to_pydatetime() for value in timestamps or []]
+    if not requested:
+        return [], []
+    values_by_minute = {}
+    source_files = []
+    for source_date in sorted({value.date() for value in requested}):
+        source = THERMAL_GENERATION_ROOT / f"ER_THERMAL_GEN_{source_date:%d%m%Y}.xlsx"
+        if not source.is_file():
+            continue
+        workbook = openpyxl.load_workbook(source, read_only=True, data_only=True)
+        try:
+            worksheet = workbook["DATA"] if "DATA" in workbook.sheetnames else workbook[workbook.sheetnames[0]]
+            rows = worksheet.iter_rows(values_only=True)
+            previous = None
+            header_row = None
+            for row in rows:
+                first = _normalized_header(row[0] if row else "")
+                if first in {"DATE AND TIME", "DATE & TIME", "DATETIME", "DATE/TIME"}:
+                    header_row = previous
+                    key_row = row
+                    break
+                previous = row
+            if header_row is None:
+                continue
+            headers = [_normalized_header(value) for value in header_row]
+            generation_index = next((idx for idx, name in enumerate(headers) if name == "PURULIA PSP(G)"), None)
+            pumping_index = next((idx for idx, name in enumerate(headers) if name == "PURULIA PSP(P)"), None)
+            if generation_index is None or pumping_index is None:
+                continue
+            for row in rows:
+                if not row or row[0] is None:
+                    continue
+                try:
+                    timestamp = pd.to_datetime(row[0]).to_pydatetime().replace(second=0, microsecond=0)
+                except Exception:
+                    continue
+                generation = safe_float(row[generation_index]) or 0.0
+                pumping = safe_float(row[pumping_index]) or 0.0
+                net = generation + pumping
+                values_by_minute[timestamp] = 0.0 if abs(net) < 1e-8 else round(net, 3)
+            source_files.append(str(source))
+        finally:
+            workbook.close()
+    return [values_by_minute.get(value.replace(second=0, microsecond=0)) for value in requested], source_files
+
+
+def load_state_generation_series(timestamps: list, state_name: str):
+    """Load configured state generation categories plus Purulia net for West Bengal."""
+    requested = [pd.to_datetime(value).to_pydatetime() for value in timestamps or []]
+    if not requested:
+        return {}, [], []
+    normalized_state = _normalized_header(state_name)
+    db = MongoService()
+    mapping_doc = db.db["psp_portfolio_mapping"].find_one({"mapping.name": normalized_state}, {"_id": 0}) or {}
+    mapping = mapping_doc.get("mapping") or {}
+    configured = {
+        "Thermal": mapping.get("scada_thermal"),
+        "Hydro": mapping.get("scada_hydro"),
+        "Solar / Renewable": mapping.get("scada_solar"),
+        "Others": mapping.get("scada_others"),
+        "Nuclear": mapping.get("scada_nuclear"),
+        "Own Generation Total": mapping.get("scada_gen"),
+    }
+    configured = {label: header for label, header in configured.items() if str(header or "").strip()}
+    is_west_bengal = normalized_state.replace(" ", "") in {"WESTBENGAL", "WB"}
+    values_by_category = {label: {} for label in configured}
+    if is_west_bengal:
+        values_by_category["Purulia PSP Net (G + P)"] = {}
+    source_files = []
+    missing_headers = set()
+
+    for source_date in sorted({value.date() for value in requested}):
+        source = THERMAL_GENERATION_ROOT / f"ER_THERMAL_GEN_{source_date:%d%m%Y}.xlsx"
+        if not source.is_file():
+            continue
+        workbook = openpyxl.load_workbook(source, read_only=True, data_only=True)
+        try:
+            worksheet = workbook["DATA"] if "DATA" in workbook.sheetnames else workbook[workbook.sheetnames[0]]
+            rows = worksheet.iter_rows(values_only=True)
+            previous = None
+            header_row = None
+            for row in rows:
+                first = _normalized_header(row[0] if row else "")
+                if first in {"DATE AND TIME", "DATE & TIME", "DATETIME", "DATE/TIME"}:
+                    header_row = previous
+                    break
+                previous = row
+            if header_row is None:
+                continue
+            headers = [_normalized_header(value) for value in header_row]
+            indexes = {}
+            for label, configured_header in configured.items():
+                wanted = _normalized_header(configured_header)
+                index = next((idx for idx, header in enumerate(headers) if header == wanted), None)
+                if index is None:
+                    missing_headers.add(str(configured_header))
+                else:
+                    indexes[label] = index
+            purulia_generation_index = next((idx for idx, header in enumerate(headers) if header == "PURULIA PSP(G)"), None)
+            purulia_pumping_index = next((idx for idx, header in enumerate(headers) if header == "PURULIA PSP(P)"), None)
+            for row in rows:
+                if not row or row[0] is None:
+                    continue
+                try:
+                    timestamp = pd.to_datetime(row[0]).to_pydatetime().replace(second=0, microsecond=0)
+                except Exception:
+                    continue
+                for label, index in indexes.items():
+                    value = safe_float(row[index])
+                    values_by_category[label][timestamp] = round(value, 3) if value is not None else None
+                if is_west_bengal and purulia_generation_index is not None and purulia_pumping_index is not None:
+                    generation = safe_float(row[purulia_generation_index]) or 0.0
+                    pumping = safe_float(row[purulia_pumping_index]) or 0.0
+                    net = generation + pumping
+                    values_by_category["Purulia PSP Net (G + P)"][timestamp] = 0.0 if abs(net) < 1e-8 else round(net, 3)
+            source_files.append(str(source))
+        finally:
+            workbook.close()
+
+    output = {
+        label: [values.get(value.replace(second=0, microsecond=0)) for value in requested]
+        for label, values in values_by_category.items()
+        if values
+    }
+    return output, source_files, sorted(missing_headers)
+
+
+def attach_purulia_series_to_west_bengal(processed_rows: list, timestamps: list):
+    for row in processed_rows:
+        if not row.get("is_state"):
+            continue
+        state_name = _normalized_header(row.get("state") or row.get("state_name") or row.get("plant_name"))
+        if state_name not in {"WEST BENGAL", "WB", "WESTBENGAL"} and "WEST BENGAL" not in state_name:
+            continue
+        categories, sources, missing_headers = load_state_generation_series(timestamps, "WEST BENGAL")
+        if not sources:
+            continue
+        row["series_generation_categories"] = categories
+        row["series_purulia_psp_net"] = categories.get("Purulia PSP Net (G + P)") or []
+        row["purulia_psp_source_files"] = sources
+        row["generation_comparison_missing_headers"] = missing_headers
+
 def normalize_match_text(value):
     if value in [None, ""]:
         return ""
@@ -2461,6 +2797,21 @@ def match_scada_columns(entities: list, headers: list, keys: list):
             if matched_idx is None:
                 for idx, h in enumerate(headers):
                     if normalize_match_text(h) in candidate_set:
+                        matched_idx = idx
+                        break
+            # State mappings historically only stored the actual key. Daily
+            # event workbooks also carry a clearly named schedule column, so
+            # resolve it from the header without requiring a portal mapping.
+            if matched_idx is None and col_type == "schedule" and e.get("is_state"):
+                base = normalize_match_text(e.get("plant_name") or e.get("state_name"))
+                aliases = {base}
+                if "WESTBENGAL" in base.replace(" ", ""):
+                    aliases.add("WB")
+                for idx, h in enumerate(headers):
+                    normalized_header = normalize_match_text(h)
+                    if "SCHEDULE" not in normalized_header:
+                        continue
+                    if any(alias and alias in normalized_header for alias in aliases):
                         matched_idx = idx
                         break
             if matched_idx is not None:
@@ -2901,6 +3252,7 @@ async def create_process_report_job(payload: dict = Body(...)):
             "entities": payload.get("entities") or [],
             "event_id": payload.get("event_id") or None,
             "event_type": normalize_event_type(payload.get("event_type")),
+            "include_generation_comparison": bool(payload.get("include_generation_comparison")),
         },
     }
     return {"success": True, "job_id": job_id}
@@ -2928,6 +3280,7 @@ async def process_report_sse(
                 end_time_from_job = payload.get("end_time")
                 event_id_from_job = payload.get("event_id")
                 event_type_from_job = payload.get("event_type")
+                include_generation_comparison = bool(payload.get("include_generation_comparison"))
                 entity_payload = payload.get("entities") or []
                 file_id = file_id_from_job
                 start_time = start_time_from_job
@@ -2937,6 +3290,7 @@ async def process_report_sse(
                 entities = json.dumps(entity_payload)
             else:
                 event_type = normalize_event_type(None)
+                include_generation_comparison = False
 
             if not file_id or not start_time or not end_time:
                 yield "data: " + json.dumps({"success": False, "error": "Missing report job parameters."}) + "\n\n"
@@ -2956,6 +3310,25 @@ async def process_report_sse(
             
             db = MongoService()
 
+            uploaded_scada_only = file_id != "database"
+            if uploaded_scada_only:
+                # A new-event reset can race the mapping request in the UI.
+                # Always recover the maintained mapping server-side so a valid
+                # SCADA workbook can never compile to zero configured rows.
+                if not entity_list:
+                    entity_list = list(db.map_collection.find({}, {"_id": 0}))
+                entity_list = [
+                    {
+                        **entity,
+                        "actual_source": "SCADA",
+                        "sched_src": "SCADA",
+                        "schedule_source": "SCADA",
+                        "dc_src": "SCADA",
+                        "dc_source": "SCADA",
+                    }
+                    for entity in entity_list
+                ]
+
             saved_event_doc = None
             if file_id == "database":
                 if event_id:
@@ -2964,7 +3337,14 @@ async def process_report_sse(
                         yield "data: " + json.dumps({"success": False, "error": f"Saved event not found for id {event_id}."}) + "\n\n"
                         return
                     yield "data: " + json.dumps({"step": 2, "message": "Saved event found. Loading stored event series from MongoDB."}) + "\n\n"
-                    saved_response, saved_error = build_saved_event_response(db, event_id, entity_list, st, et)
+                    saved_response, saved_error = build_saved_event_response(
+                        db,
+                        event_id,
+                        entity_list,
+                        st,
+                        et,
+                        include_generation_comparison=include_generation_comparison,
+                    )
                     if saved_error:
                         yield "data: " + json.dumps({"success": False, "error": saved_error}) + "\n\n"
                         return
@@ -3002,30 +3382,36 @@ async def process_report_sse(
                 return
 
             unique_dates = get_unique_date_strings(st, et)
-            cap_on_bar_by_id = lookup_rtg_capacity_on_bar(db, entity_list, unique_dates)
+            cap_on_bar_by_id = {} if uploaded_scada_only else lookup_rtg_capacity_on_bar(db, entity_list, unique_dates)
 
             
-            yield "data: " + json.dumps({"step": 2, "message": "Checking MongoDB cache for existing actuals and schedules..."}) + "\n\n"
-            
-            yield "data: " + json.dumps({"step": 3, "message": "Fetching missing data from RTG & WBES in parallel..."}) + "\n\n"
-            
-            rtg_available = True
-            for d in unique_dates:
-                doc = db.rtg_dashboard_collection.find_one(
-                    {"snapshot_date": d},
-                    sort=[("snapshot_time", -1)]
-                )
-                if doc and doc.get("record_count", 0) > 0:
-                    records = doc.get("data", [])
-                    has_actuals = any(float(r.get("actual_gen") or r.get("actual_gen_derived") or 0) > 0 for r in records)
-                    if not has_actuals:
+            if uploaded_scada_only:
+                yield "data: " + json.dumps({"step": 2, "message": "Matching SCADA workbook columns to configured plants and states..."}) + "\n\n"
+                yield "data: " + json.dumps({"step": 3, "message": "Using SCADA workbook only; RTG and WBES fetches skipped."}) + "\n\n"
+                rtg_available = False
+                dt_index = df_filtered[dt_col].tolist()
+                aligned_schedules_dc = {}
+                rtg_stats = {"success": 0, "failed": 0}
+                wbes_stats = {"success": 0, "failed": 0}
+            else:
+                yield "data: " + json.dumps({"step": 2, "message": "Checking MongoDB cache for existing actuals and schedules..."}) + "\n\n"
+                yield "data: " + json.dumps({"step": 3, "message": "Fetching missing data from RTG & WBES in parallel..."}) + "\n\n"
+                rtg_available = True
+                for d in unique_dates:
+                    doc = db.rtg_dashboard_collection.find_one(
+                        {"snapshot_date": d},
+                        sort=[("snapshot_time", -1)]
+                    )
+                    if doc and doc.get("record_count", 0) > 0:
+                        records = doc.get("data", [])
+                        has_actuals = any(float(r.get("actual_gen") or r.get("actual_gen_derived") or 0) > 0 for r in records)
+                        if not has_actuals:
+                            rtg_available = False
+                            break
+                    else:
                         rtg_available = False
                         break
-                else:
-                    rtg_available = False
-                    break
-
-            dt_index, aligned_schedules_dc, rtg_stats, wbes_stats = get_aligned_schedule_dc(entity_list, st, et)
+                dt_index, aligned_schedules_dc, rtg_stats, wbes_stats = get_aligned_schedule_dc(entity_list, st, et)
 
             rtg_scada_success = 0
             rtg_scada_failed = 0
@@ -3064,9 +3450,10 @@ async def process_report_sse(
                 return None, None, True
 
             scada_tasks = []
-            for e in entity_list:
-                for d in unique_dates:
-                    scada_tasks.append((e, d))
+            if not uploaded_scada_only:
+                for e in entity_list:
+                    for d in unique_dates:
+                        scada_tasks.append((e, d))
                     
             with ThreadPoolExecutor(max_workers=15) as executor:
                 scada_results = list(executor.map(lambda t: fetch_one_scada(t[0], t[1]), scada_tasks))
@@ -3078,15 +3465,18 @@ async def process_report_sse(
                     if key and val:
                         rtg_scada_cache[key] = val
 
-            yield "data: " + json.dumps({
-                "step": 3,
-                "message": f"Fetch complete. RTG SCADA (Success: {rtg_scada_success}, Fail: {rtg_scada_failed}), RTG Sched (Success: {rtg_stats['success']}, Fail: {rtg_stats['failed']}), WBES (Success: {wbes_stats['success']}, Fail: {wbes_stats['failed']})"
-            }) + "\n\n"
+            if not uploaded_scada_only:
+                yield "data: " + json.dumps({
+                    "step": 3,
+                    "message": f"Fetch complete. RTG SCADA (Success: {rtg_scada_success}, Fail: {rtg_scada_failed}), RTG Sched (Success: {rtg_stats['success']}, Fail: {rtg_stats['failed']}), WBES (Success: {wbes_stats['success']}, Fail: {wbes_stats['failed']})"
+                }) + "\n\n"
 
             yield "data: " + json.dumps({"step": 4, "message": "Aligning and resolving multi-source data priorities..."}) + "\n\n"
             
             logs = []
-            if rtg_available:
+            if uploaded_scada_only:
+                logs.append("Source mode: uploaded SCADA workbook only (RTG/WBES not requested)")
+            elif rtg_available:
                 logs.append(f"RTG SCADA Actuals fetch status: Success={rtg_scada_success} requests | Failed/Timeout={rtg_scada_failed} requests")
                 logs.append(f"RTG Schedules fetch status: Success={rtg_stats['success']} requests | Failed/Timeout={rtg_stats['failed']} requests")
                 logs.append(f"WBES Schedules fetch status: Success={wbes_stats['success']} requests | Failed/Timeout={wbes_stats['failed']} requests")
@@ -3267,6 +3657,7 @@ async def process_report_sse(
                     })
                 processed_rows.append(row_data)
 
+            attach_purulia_series_to_west_bengal(processed_rows, scada_dts)
             for row in processed_rows:
                 is_state = row.get("is_state", False)
                 row["series"] = {
@@ -3276,6 +3667,8 @@ async def process_report_sse(
                     "schedule":   row.pop("series_schedule", None) or [],
                     "actual":     row.pop("series_actual", None) or [],
                     "dc":         row.pop("series_dc", None) or [],
+                    "purulia_psp_net": row.pop("series_purulia_psp_net", None) or [],
+                    "generation_categories": row.pop("series_generation_categories", None) or {},
                 }
                 if is_state:
                     row["statistics"] = {
@@ -3300,8 +3693,8 @@ async def process_report_sse(
                         "under_inj_pct":        row.pop("under_inj_pct", 0.0),
                         "helping_grid_pct":     row.pop("helping_grid_pct", 0.0),
                     }
-                row["type"] = "state" if is_state else "generator"
-                matching_entity = next((item for item in entity_list if item.get("plant_id") == row["plant_id"]), {})
+                matching_entity = next((item for item in entity_list if item.get("plant_id") == row.get("plant_id")), {})
+                row["type"] = matching_entity.get("type") or ("state" if is_state else "generator")
                 row["crms_utility_name"] = row.get("crms_utility_name") or matching_entity.get("crms_utility_name", "")
                 row["state"] = row.get("state") or (matching_entity.get("state_name") or matching_entity.get("state") or "")
                 row["fuel"]  = lookup_unit_fuel_name(db, row.get("plant_id")) or row.get("fuel")  or (matching_entity.get("fuel_type") or matching_entity.get("fuel") or "")
@@ -3654,7 +4047,8 @@ async def process_report(
                     "helping_grid_pct": helping_grid_pct
                 })
             processed_rows.append(row_data)
-            
+
+        attach_purulia_series_to_west_bengal(processed_rows, scada_dts)
         for row in processed_rows:
             is_state = row.get("is_state", False)
             row["series"] = {
@@ -3664,6 +4058,8 @@ async def process_report(
                 "schedule":   row.pop("series_schedule", None) or [],
                 "actual":     row.pop("series_actual", None) or [],
                 "dc":         row.pop("series_dc", None) or [],
+                "purulia_psp_net": row.pop("series_purulia_psp_net", None) or [],
+                "generation_categories": row.pop("series_generation_categories", None) or {},
             }
             if is_state:
                 row["statistics"] = {
@@ -3686,8 +4082,8 @@ async def process_report(
                     "helping_grid_pct":     row.pop("helping_grid_pct", 0.0),
                 }
             # Add entity type
-            row["type"] = "state" if is_state else "generator"
-            matching_entity = next((item for item in entity_list if item.get("plant_id") == row["plant_id"]), {})
+            matching_entity = next((item for item in entity_list if item.get("plant_id") == row.get("plant_id")), {})
+            row["type"] = matching_entity.get("type") or ("state" if is_state else "generator")
             row["crms_utility_name"] = row.get("crms_utility_name") or matching_entity.get("crms_utility_name", "")
             row["state"] = row.get("state") or (matching_entity.get("state_name") or matching_entity.get("state") or "")
             row["fuel"]  = lookup_unit_fuel_name(db, row.get("plant_id")) or row.get("fuel")  or (matching_entity.get("fuel_type") or matching_entity.get("fuel") or "")
@@ -3865,15 +4261,14 @@ async def download_pdf(payload: dict):
         frequency_plot_b64 = payload.get("frequency_plot_image")
 
         buf = io.BytesIO()
-        portrait_size = portrait(A4)
         landscape_size = landscape(A4)
-        doc = BaseDocTemplate(buf, pagesize=portrait_size, rightMargin=18, leftMargin=18, topMargin=18, bottomMargin=18)
+        # Compliance tables contain long plant labels.  Keeping them on a
+        # portrait page made adjacent columns overlap and the exported report
+        # unreadable.  Use a landscape frame and wrap every table cell.
+        doc = BaseDocTemplate(buf, pagesize=landscape_size, rightMargin=22, leftMargin=22, topMargin=20, bottomMargin=20)
         doc.addPageTemplates([
-            PageTemplate(id="portrait", pagesize=portrait_size, frames=[
-                Frame(18, 18, portrait_size[0] - 36, portrait_size[1] - 36, id="portrait-frame")
-            ]),
             PageTemplate(id="landscape", pagesize=landscape_size, frames=[
-                Frame(18, 18, landscape_size[0] - 36, landscape_size[1] - 36, id="landscape-frame")
+                Frame(22, 20, landscape_size[0] - 44, landscape_size[1] - 40, id="landscape-frame")
             ]),
         ])
 
@@ -3882,23 +4277,37 @@ async def download_pdf(payload: dict):
         section_style = ParagraphStyle("SectionHeading", parent=styles["Heading2"], fontSize=base_font + 2.5, textColor=colors.HexColor("#03624C"), spaceBefore=9, spaceAfter=7)
         text_style = ParagraphStyle("NormalText", parent=styles["Normal"], fontSize=base_font, leading=base_font + 2.5, spaceAfter=7)
         small_style = ParagraphStyle("SmallText", parent=styles["Normal"], fontSize=max(6.5, base_font - 1.5), leading=base_font + 0.5, textColor=colors.HexColor("#475569"))
+        table_font = min(10.0, max(8.5, base_font - 2.0))
+        table_header_cell = ParagraphStyle(
+            "PdfTableHeader", parent=styles["Normal"], fontName="Helvetica-Bold",
+            fontSize=table_font, leading=table_font + 2, textColor=colors.white,
+        )
+        table_body_cell = ParagraphStyle(
+            "PdfTableBody", parent=styles["Normal"], fontName="Helvetica",
+            fontSize=table_font, leading=table_font + 2, textColor=colors.HexColor("#111827"),
+        )
+        def pdf_cell(value, style=table_body_cell):
+            return Paragraph(xml_escape(str(value if value not in [None, ""] else "-")), style)
+
         table_style = TableStyle([
             ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0F172A")),
             ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
             ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-            ("FONTSIZE", (0, 0), (-1, 0), max(7, base_font - 1)),
-            ("FONTSIZE", (0, 1), (-1, -1), max(6.5, base_font - 1.5)),
+            ("FONTSIZE", (0, 0), (-1, 0), table_font),
+            ("FONTSIZE", (0, 1), (-1, -1), table_font),
             ("BACKGROUND", (0, 1), (-1, -1), colors.HexColor("#F8FAFC")),
             ("GRID", (0, 0), (-1, -1), 0.6, colors.HexColor("#CBD5E1")),
             ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
             ("LEFTPADDING", (0, 0), (-1, -1), 4),
             ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+            ("TOPPADDING", (0, 0), (-1, -1), 5),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
         ])
 
         state_rows = [r for r in rows if r.get("is_state")]
         gen_rows = [r for r in rows if not r.get("is_state")]
         story = [
-            NextPageTemplate("portrait"),
+            NextPageTemplate("landscape"),
             Paragraph("POWER SYSTEM DEVIATION ANALYSIS REPORT", title_style),
             Paragraph(f"Generated on {datetime.now().strftime('%d-%m-%Y %H:%M')}", text_style),
         ]
@@ -3913,17 +4322,17 @@ async def download_pdf(payload: dict):
             story.append(Paragraph("State Drawal Compliance Details", section_style))
             if payload.get("state_desc"):
                 story.append(Paragraph(xml_escape(str(payload.get("state_desc"))), text_style))
-            state_data = [["State Name", "Max UD (MW)" if event_type == "high" else "Max OD (MW)", "Time", "Freq", "% Dev>0", "% Dev<0"]]
+            state_data = [[pdf_cell(value, table_header_cell) for value in ["State Name", "Max UD (MW)" if event_type == "high" else "Max OD (MW)", "Time", "Freq", "% Dev>0", "% Dev<0"]]]
             for r in state_rows:
-                state_data.append([
+                state_data.append([pdf_cell(value) for value in [
                     str(r.get("plant_name") or ""),
                     safe_format_mw(get_stat(r, "max_ud") if event_type == "high" else get_stat(r, "max_od")),
                     str((get_stat(r, "max_ud_time") if event_type == "high" else get_stat(r, "max_od_time")) or "-"),
                     safe_format_hz(get_stat(r, "max_ud_freq") if event_type == "high" else get_stat(r, "max_od_freq")),
                     safe_format_pct(get_stat(r, "over_drawal_pct")),
                     safe_format_pct(get_stat(r, "under_drawal_pct")),
-                ])
-            t = Table(state_data, colWidths=[120, 72, 78, 62, 65, 65], repeatRows=1)
+                ]])
+            t = Table(state_data, colWidths=[150, 115, 155, 100, 105, 105], repeatRows=1)
             t.setStyle(table_style)
             story.append(t)
             if include_annexure:
@@ -3934,10 +4343,10 @@ async def download_pdf(payload: dict):
             story.append(Paragraph("Generator Scheduling Compliance Details", section_style))
             if payload.get("gen_desc"):
                 story.append(Paragraph(xml_escape(str(payload.get("gen_desc"))), text_style))
-            gen_data = [["Generator Name", "% Dev<0", "% Dev>0"]]
+            gen_data = [[pdf_cell(value, table_header_cell) for value in ["Generator Name", "% Dev<0", "% Dev>0"]]]
             for r in gen_rows:
-                gen_data.append([report_entity_label(r), safe_format_pct(get_stat(r, "under_inj_pct")), safe_format_pct(get_stat(r, "helping_grid_pct"))])
-            t = Table(gen_data, colWidths=[270, 100, 100], repeatRows=1)
+                gen_data.append([pdf_cell(report_entity_label(r)), pdf_cell(safe_format_pct(get_stat(r, "under_inj_pct"))), pdf_cell(safe_format_pct(get_stat(r, "helping_grid_pct")))])
+            t = Table(gen_data, colWidths=[550, 115, 115], repeatRows=1)
             t.setStyle(table_style)
             story.append(t)
             if include_annexure:
@@ -3946,7 +4355,7 @@ async def download_pdf(payload: dict):
         if include_annexure:
             annexure_rows = [r for r in rows if r.get("plot_image") or r.get("capacity_plot_image")]
             if frequency_plot_b64 or annexure_rows:
-                story.extend([NextPageTemplate("landscape"), PageBreak()])
+                story.append(PageBreak())
                 if frequency_plot_b64:
                     story.append(Paragraph("Annexure: System Frequency", section_style))
                     try:
@@ -4778,6 +5187,12 @@ class FrequencyEventPayload(BaseModel):
     details: Optional[List[dict]] = None
     data_points: Optional[List[dict]] = None
 
+
+class FrequencyEventStackPayload(BaseModel):
+    event_ids: List[str]
+    state: Optional[str] = None
+    states: Optional[List[str]] = None
+
 @router.get("/raw-data")
 def get_raw_data(plant_id: str, date: str, source: Optional[str] = "", wbes_name: Optional[str] = ""):
     db = MongoService()
@@ -4909,6 +5324,76 @@ def list_frequency_events():
     except Exception as e:
         return {"success": False, "error": str(e)}
 
+
+@router.post("/events/stacked-comparison")
+def stacked_frequency_event_comparison(payload: FrequencyEventStackPayload):
+    event_ids = list(dict.fromkeys(str(value or "").strip() for value in payload.event_ids if str(value or "").strip()))
+    if not 1 <= len(event_ids) <= 10:
+        raise HTTPException(400, "Select between 1 and 10 saved frequency events.")
+    requested_states = list(dict.fromkeys(
+        str(value or "").strip()
+        for value in ((payload.states or []) + ([payload.state] if payload.state else []))
+        if str(value or "").strip()
+    ))
+    if not requested_states:
+        raise HTTPException(400, "Select at least one state for the stacked comparison.")
+    db = MongoService()
+    output = []
+    missing = []
+    for event_id in event_ids:
+        event = db.db[EVENT_COLLECTION].find_one({"event_id": event_id}, {"_id": 0})
+        if not event:
+            missing.append({"event_id": event_id, "reason": "Event not found"})
+            continue
+        for state_name in requested_states:
+            requested_state = _normalized_header(state_name)
+            matching_point = None
+            for point in event.get("data_points") or []:
+                if str(point.get("type") or "").strip().lower() != "state":
+                    continue
+                point_name = _normalized_header(point.get("state") or point.get("state_name") or point.get("plant_name"))
+                aliases = {point_name, point_name.replace(" ", "")}
+                if requested_state in aliases or requested_state.replace(" ", "") in aliases:
+                    matching_point = point
+                    break
+            if not matching_point:
+                missing.append({"event_id": event_id, "event_name": event.get("name"), "state": state_name, "reason": f"{state_name} state row not saved"})
+                continue
+            series = dict(matching_point.get("series") or {})
+            timestamps = series.get("timestamps") or []
+            generation_sources = []
+            missing_headers = []
+            categories = series.get("generation_categories") or {}
+            if not categories:
+                categories, generation_sources, missing_headers = load_state_generation_series(timestamps, state_name)
+            if requested_state.replace(" ", "") in {"WESTBENGAL", "WB"} and not series.get("purulia_psp_net"):
+                series["purulia_psp_net"] = categories.get("Purulia PSP Net (G + P)") or []
+            output.append({
+                "event_id": event_id,
+                "event_name": event.get("name") or event_id,
+                "event_type": normalize_event_type(event.get("event_type")),
+                "start_time": event.get("start_time"),
+                "end_time": event.get("end_time"),
+                "state": state_name,
+                "crms_messages": matching_point.get("crms_messages") or [],
+                "crms_message_count": len(matching_point.get("crms_messages") or []),
+                "transmission_line_events": matching_point.get("transmission_line_events") or [],
+                "transmission_line_event_count": len(matching_point.get("transmission_line_events") or []),
+                "statistics": (matching_point.get("summary") or {}).get("statistics") or matching_point.get("statistics") or {},
+                "series": {
+                    "timestamps": timestamps,
+                    "frequency": series.get("frequency") or [],
+                    "deviation": series.get("deviation") or [],
+                    "purulia_psp_net": series.get("purulia_psp_net") or [],
+                    "generation_categories": categories,
+                },
+                "purulia_psp_source_files": generation_sources or matching_point.get("purulia_psp_source_files") or [],
+                "generation_comparison_missing_headers": missing_headers,
+            })
+    if not output:
+        raise HTTPException(404, "No saved event contains any selected state record.")
+    return {"success": True, "state": requested_states[0], "states": requested_states, "events": output, "missing": missing}
+
 @router.post("/events")
 def save_frequency_event(payload: FrequencyEventPayload):
     try:
@@ -4917,14 +5402,11 @@ def save_frequency_event(payload: FrequencyEventPayload):
         if end_dt < start_dt:
             return {"success": False, "error": "Event end time cannot be before start time."}
 
-        name = payload.name.strip()
-        if not name:
-            name = f"Frequency Event {start_dt.strftime('%d-%m-%Y %H:%M')}"
-
         db = MongoService()
         date_span = get_unique_date_strings(start_dt, end_dt)
         event_id = str(uuid.uuid4())
         event_type = normalize_event_type(payload.event_type)
+        name = frequency_event_name(event_type, start_dt, end_dt)
         doc = {
             "event_id": event_id,
             "name": name,

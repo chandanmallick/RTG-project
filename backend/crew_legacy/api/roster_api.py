@@ -1048,6 +1048,14 @@ def push_roster_to_calendar(roster_id: str):
         })
 
     bulk_operations = []
+    holiday_by_date = {
+        item.get("date"): item.get("holidayName") or "Holiday"
+        for item in holiday_master_collection.find({
+            "date": {"$gte": start_date, "$lte": end_date},
+            "status": {"$not": {"$regex": "^(inactive|deleted)$", "$options": "i"}},
+        }, {"date": 1, "holidayName": 1})
+        if item.get("date")
+    }
     # print(roster_data)
 
     for rec in roster_data:
@@ -1059,7 +1067,7 @@ def push_roster_to_calendar(roster_id: str):
         date_str = rec.get("date")
         shift = rec.get("shift")
 
-        is_holiday = rec.get("isHoliday", "N")
+        is_holiday = "Y" if date_str in holiday_by_date else "N"
         is_sic = rec.get("isSIC", False)
 
         sic_details = rec.get("sic")
@@ -1114,6 +1122,7 @@ def push_roster_to_calendar(roster_id: str):
             "updatedOn": datetime.utcnow(),
 
             "isHoliday": is_holiday,
+            "holidayName": holiday_by_date.get(date_str),
             "compensatoryOffEligible": "Yes" if is_holiday == "Y" else "No"
         }
 
@@ -1275,6 +1284,60 @@ def normalize_members(members):
         })
     return normalized
 
+
+def sync_holiday_comp_off_for_roster_date(date_str: str, holiday_name: str = "Holiday") -> dict:
+    """Award roster C-OFF when a holiday is added after a final roster exists."""
+    roster = roster_master_collection.find_one(
+        {
+            "startDate": {"$lte": date_str},
+            "endDate": {"$gte": date_str},
+            "$or": [{"isFinal": True}, {"calendarPushed": True}],
+        },
+        sort=[("createdOn", -1)],
+    )
+    if not roster:
+        return {"created": 0, "eligible": 0, "rosterId": None}
+
+    group_details = {item.get("groupName"): item for item in (roster.get("groupDetails") or [])}
+    eligible = []
+    for group in roster.get("data") or []:
+        group_name = group.get("groupName")
+        shift = str((group.get("data") or {}).get(date_str) or "").strip()
+        if not shift or shift.upper() in {"OFF", "O", "O1", "O2"}:
+            continue
+        detail = group_details.get(group_name) or {}
+        people = [*(detail.get("members") or [])]
+        if detail.get("shiftInCharge"):
+            people.append(detail["shiftInCharge"])
+        for person in people:
+            employee_id = str(person.get("employeeId") or person.get("userId") or "").strip()
+            if employee_id:
+                eligible.append((employee_id, person, group_name, shift))
+
+    created = 0
+    now = datetime.utcnow()
+    roster_id = str(roster["_id"])
+    for employee_id, person, group_name, shift in eligible:
+        employee_daily_collection.update_one(
+            {"employeeId": employee_id, "date": date_str},
+            {"$set": {"isHoliday": "Y", "holidayName": holiday_name, "compensatoryOffEligible": "Yes", "updatedOn": now}},
+        )
+        result = compensatory_off_collection.update_one(
+            {"employeeId": employee_id, "$or": [{"date": date_str}, {"earnedDate": date_str}]},
+            {"$setOnInsert": {
+                "employeeId": employee_id, "employeeName": person.get("name"),
+                "designation": person.get("designation"), "groupName": group_name,
+                "date": date_str, "earnedDate": date_str,
+                "expiryDate": f"{int(date_str[:4]) + 1}-03-31", "status": "Available",
+                "reason": holiday_name, "type": "C-OFF", "createdOn": now,
+                "rosterId": roster_id,
+                "reference": {"type": "Roster Holiday", "rosterId": roster_id, "groupName": group_name, "shift": shift},
+            }},
+            upsert=True,
+        )
+        created += int(bool(result.upserted_id))
+    return {"created": created, "eligible": len(eligible), "rosterId": roster_id}
+
 @router.get("/calendar-view")
 def get_calendar_view(
     start_date: str = Query(...),
@@ -1419,8 +1482,13 @@ def get_calendar_view(
             "isHoliday": bool(date in holiday_map or str(rec.get("isHoliday") or "").upper() == "Y"),
             "holidayName": holiday_map.get(date) or rec.get("holidayName"),
             "replacementDuty": bool(rec.get("replacementDuty")),
+            "replacementMode": rec.get("replacementMode"),
             "replacementFor": rec.get("replacementFor"),
             "replacementGroupName": rec.get("groupName"),
+            "replacementOriginal": rec.get("replacementOriginal"),
+            "vacatedDuty": rec.get("vacatedDuty"),
+            "vacancyReason": rec.get("vacancyReason"),
+            "vacancyReplacement": rec.get("vacancyReplacement"),
             "leaveType": rec.get("leaveType"),
             "leaveStatus": rec.get("leaveStatus"),
             "stationLeave": bool(rec.get("stationLeave")),
@@ -1478,13 +1546,16 @@ def get_calendar_view(
                 duty = daily_map.get((emp_id, d))
 
                 if duty:
-                    # Replacement duty is an additional assignment. The
-                    # employee's own row must continue to show their normal
-                    # published-roster shift; the replacement Night/Evening is
-                    # already shown on the absent employee's cell.
-                    if duty.get("replacementDuty"):
+                    # Only double-duty replacements preserve the employee's
+                    # original roster duty. A normal replacement transfers the
+                    # employee to the absent person's duty.
+                    if duty.get("replacementDuty") and duty.get("replacementMode") == "double":
+                        original = duty.get("replacementOriginal") or {}
                         duties[d] = {
-                            "shift": roster_shift_map.get((group_name, d), duty.get("shift") or "-"),
+                            "shift": roster_shift_map.get(
+                                (group_name, d),
+                                original.get("assignedDuty") or duty.get("shift") or "-",
+                            ),
                             "isHoliday": bool(duty.get("isHoliday")),
                             "holidayName": duty.get("holidayName"),
                             "leaveType": None,

@@ -1,0 +1,39 @@
+{
+  "training_master_collection": [
+    {
+      "_id": {
+        "$oid": "69a51ed1aa6b5def5c0274c4"
+      },
+      "financialYear": "2025-26",
+      "employeeId": null,
+      "employeeName": null,
+      "trainingName": "A Team Building-Experiential Learning Workshop",
+      "trainingNameHindi": "\u0907\u0902\u0926\u094d\u0930\u0927\u0928\u0941\u0937",
+      "startDate": "2026-03-11",
+      "endDate": "2026-03-13",
+      "trainingType": "",
+      "status": "Scheduled",
+      "createdOn": {
+        "$date": "2026-03-02T05:23:29.380Z"
+      }
+    },
+    {
+      "_id": {
+        "$oid": "69b2b2d67f747a508ad6189b"
+      },
+      "financialYear": "2025-26",
+      "employeeId": null,
+      "employeeName": null,
+      "trainingName": "Mental Health Program: Stress, Anxiety & Fatigue",
+      "trainingNameHindi": "",
+      "startDate": "2026-03-17",
+      "endDate": "2026-03-19",
+      "trainingType": null,
+      "status": "Scheduled",
+      "createdOn": {
+        "$date": "2026-03-12T12:34:30.091Z"
+      }
+    }
+  ],
+  "training_nomination_history_collection": []
+}

@@ -10,12 +10,14 @@ import {
   DialogActions,
   DialogContent,
   DialogTitle,
+  IconButton,
+  MenuItem,
   Paper,
   Stack,
   TextField,
   Typography,
 } from "@mui/material";
-import { Download, FileSpreadsheet, Pencil, RefreshCw, Trash2, Upload } from "lucide-react";
+import { Download, Eye, FileSpreadsheet, Pencil, Plus, RefreshCw, Save, Trash2, Upload } from "lucide-react";
 import AppShell from "../components/layout/AppShell";
 import { useAuth } from "../auth/AuthContext";
 import API from "../services/api";
@@ -49,10 +51,10 @@ const GENERATION = [
 ];
 const EXCHANGES = ["BHUTAN", "NEPAL ISTS", "BANGLADESH", "NEPAL BIHAR"];
 
-function Card({ title, children, sx = {} }) {
+function Card({ title, action, children, sx = {} }) {
   return (
     <Paper elevation={0} sx={{ border: "1px solid #CFE0F6", borderRadius: 3, overflow: "hidden", bgcolor: "#fff", ...sx }}>
-      {title && <Typography sx={{ px: 2, py: 1.2, bgcolor: "#EAF2FF", color: "#004DA8", fontWeight: 900 }}>{title}</Typography>}
+      {title && <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ px: 2, py: .8, minHeight: 43, bgcolor: "#EAF2FF" }}><Typography sx={{ color: "#004DA8", fontWeight: 900 }}>{title}</Typography>{action && <Box data-html2canvas-ignore="true">{action}</Box>}</Stack>}
       <Box sx={{ p: 2 }}>{children}</Box>
     </Paper>
   );
@@ -87,6 +89,12 @@ export default function DSOMorningReport() {
   const [sourcePath, setSourcePath] = useState("W:\\ScadaData\\DSO_reports");
   const [syncLoading, setSyncLoading] = useState(false);
   const [configSaving, setConfigSaving] = useState(false);
+  const [outageOpen, setOutageOpen] = useState(false);
+  const [outageEditing, setOutageEditing] = useState(false);
+  const [outageSaving, setOutageSaving] = useState(false);
+  const [outageDraft, setOutageDraft] = useState([]);
+  const [outageFuelFilter, setOutageFuelFilter] = useState("ALL");
+  const [outageTypeFilter, setOutageTypeFilter] = useState("ALL");
 
   const load = async () => {
     try {
@@ -285,6 +293,62 @@ export default function DSOMorningReport() {
     }
   };
 
+  const openOutageUnits = (fuel = "ALL", outageType = "ALL") => {
+    setOutageDraft(structuredClone(report?.generation_outage_summary?.units || []));
+    setOutageFuelFilter(fuel);
+    setOutageTypeFilter(outageType);
+    setOutageEditing(false);
+    setOutageOpen(true);
+  };
+  const changeOutageUnit = (index, field, value) => {
+    setOutageDraft((current) => current.map((item, itemIndex) => (
+      itemIndex === index ? { ...item, [field]: value } : item
+    )));
+  };
+  const addOutageUnit = () => {
+    setOutageDraft((current) => [
+      ...current,
+      {
+        unit: "",
+        station: "",
+        fuel: outageFuelFilter === "ALL" ? "THERMAL" : outageFuelFilter,
+        outage_type: outageTypeFilter === "ALL" ? "Planned" : outageTypeFilter,
+        capacity_mw: 0,
+        reason: "",
+        expected_revival: "",
+        mapped: true,
+        manual: true,
+      },
+    ]);
+  };
+  const saveOutageUnits = async () => {
+    setOutageSaving(true);
+    try {
+      const data = await API.saveDsoReport("morning", reportDate, {
+        morning_results: report.morning_results,
+        important_events: report.important_events || "",
+        signoff_regards: report.signoff_regards || "Regards",
+        signoff_name: report.signoff_name || "",
+        generation_outage_summary: {
+          ...(report.generation_outage_summary || {}),
+          units: outageDraft,
+        },
+      });
+      setReport(data.report);
+      setOutageDraft(structuredClone(data.report?.generation_outage_summary?.units || []));
+      setOutageEditing(false);
+      setMessage({ type: "success", text: "Generator outage list and recalculated totals were saved." });
+    } catch (error) {
+      setMessage({ type: "error", text: error.response?.data?.detail || error.message || "Generator outage changes could not be saved." });
+    } finally {
+      setOutageSaving(false);
+    }
+  };
+  const visibleOutageUnits = outageDraft
+    .map((item, index) => ({ item, index }))
+    .filter(({ item }) => outageFuelFilter === "ALL" || item.fuel === outageFuelFilter)
+    .filter(({ item }) => outageTypeFilter === "ALL" || item.outage_type === outageTypeFilter);
+
   return (
     <AppShell>
       <Box sx={{ width: "100%", minHeight: "calc(100vh - 76px)", bgcolor: "#F5F8FC", p: { xs: 1, md: 2 } }}>
@@ -359,9 +423,22 @@ export default function DSOMorningReport() {
           </Box>
 
           <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", lg: "repeat(3, 1fr)" }, gap: 2, mb: 2 }}>
-            <Card title="Current generation under planned & forced outage (MW)">
+            <Card
+              title="Current generation under planned & forced outage (MW)"
+              action={
+                <Button
+                  size="small"
+                  variant="outlined"
+                  startIcon={<Eye size={14} />}
+                  onClick={() => openOutageUnits()}
+                  sx={{ minHeight: 29, bgcolor: "#FFFFFF", fontWeight: 900, textTransform: "none" }}
+                >
+                  Generator list ({report?.generation_outage_summary?.units?.length || 0})
+                </Button>
+              }
+            >
               <Box sx={{ overflowX: "auto" }}><Box component="table" sx={{ ...tableSx, minWidth: { xs: 360, lg: 0 } }}><thead><tr><th>Fuel</th><th>Planned</th><th>Forced</th><th>Total</th></tr></thead><tbody>
-                {["THERMAL", "HYDRO"].map((fuel) => { const item = outageByFuel[fuel] || {}; return <tr key={fuel}><td>{fuel}</td><td>{show(item.planned_mw, 0)}</td><td>{show(item.forced_mw, 0)}</td><td><b>{show(item.total_mw, 0)}</b></td></tr>; })}
+                {["THERMAL", "HYDRO"].map((fuel) => { const item = outageByFuel[fuel] || {}; return <tr key={fuel} onClick={() => openOutageUnits(fuel)} style={{ cursor: "pointer" }} title={`View ${fuel.toLowerCase()} generator outage list`}><td>{fuel}</td><td>{show(item.planned_mw, 0)}</td><td>{show(item.forced_mw, 0)}</td><td><b>{show(item.total_mw, 0)}</b></td></tr>; })}
               </tbody></Box></Box>
             </Card>
             <Card title={`International Exchange During Yesterday ${displayDate(reportDate)} (Import +ve / Export -ve)`}>
@@ -386,6 +463,62 @@ export default function DSOMorningReport() {
           </Box>
         </Box>}
       </Box>
+
+      <Dialog open={outageOpen} onClose={() => !outageSaving && setOutageOpen(false)} maxWidth="xl" fullWidth>
+        <DialogTitle sx={{ fontWeight: 900, pb: 1 }}>
+          Generators under planned and forced outage
+          <Typography component="div" sx={{ mt: .35, color: "#64748B", fontSize: 11.5, fontWeight: 500 }}>
+            {displayDate(reportDate)} · {(report?.generation_outage_summary?.units || []).length} included unit(s) · click Edit to correct the saved report.
+          </Typography>
+        </DialogTitle>
+        <DialogContent dividers sx={{ bgcolor: "#F8FAFC" }}>
+          <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ md: "center" }} sx={{ mb: 1.5 }}>
+            <TextField select size="small" label="Fuel" value={outageFuelFilter} onChange={(event) => setOutageFuelFilter(event.target.value)} sx={{ minWidth: 155 }}>
+              <MenuItem value="ALL">All fuels</MenuItem>
+              <MenuItem value="THERMAL">Thermal</MenuItem>
+              <MenuItem value="HYDRO">Hydro</MenuItem>
+            </TextField>
+            <TextField select size="small" label="Outage type" value={outageTypeFilter} onChange={(event) => setOutageTypeFilter(event.target.value)} sx={{ minWidth: 175 }}>
+              <MenuItem value="ALL">Planned + Forced</MenuItem>
+              <MenuItem value="Planned">Planned</MenuItem>
+              <MenuItem value="Forced">Forced</MenuItem>
+            </TextField>
+            <Typography sx={{ flex: 1, color: "#475569", fontSize: 12, fontWeight: 800 }}>
+              Showing {visibleOutageUnits.length} of {outageDraft.length} generator unit(s)
+            </Typography>
+            {canWrite && !outageEditing && <Button variant="contained" startIcon={<Pencil size={15} />} onClick={() => setOutageEditing(true)} sx={{ fontWeight: 900 }}>Edit list</Button>}
+            {canWrite && outageEditing && <Button variant="outlined" startIcon={<Plus size={15} />} onClick={addOutageUnit} sx={{ fontWeight: 900, bgcolor: "#FFFFFF" }}>Add generator</Button>}
+          </Stack>
+          <Alert severity="info" sx={{ mb: 1.5 }}>
+            Saved changes recalculate all four totals automatically. Refreshing CRMS Outage later replaces manual changes with the latest source list.
+          </Alert>
+          <Box sx={{ overflow: "auto", maxHeight: "62vh", border: "1px solid #D7E4F6", borderRadius: 2, bgcolor: "#FFFFFF" }}>
+            <Box component="table" sx={{ ...tableSx, minWidth: 1180, "& th": { ...tableSx["& th"], position: "sticky", top: 0, zIndex: 2 }, "& td": { ...tableSx["& td"], p: outageEditing ? .65 : 1.05, textAlign: "left" } }}>
+              <thead><tr><th>Generator / Unit</th><th>Station</th><th>Fuel</th><th>Outage</th><th>Capacity (MW)</th><th>Reason</th><th>Expected revival</th>{outageEditing && <th style={{ width: 62 }}>Action</th>}</tr></thead>
+              <tbody>
+                {visibleOutageUnits.map(({ item, index }) => (
+                  <tr key={`${index}-${item.unit}`}>
+                    <td>{outageEditing ? <TextField fullWidth size="small" value={item.unit || ""} onChange={(event) => changeOutageUnit(index, "unit", event.target.value)} /> : <b>{item.unit || "Unnamed unit"}</b>}</td>
+                    <td>{outageEditing ? <TextField fullWidth size="small" value={item.station || ""} onChange={(event) => changeOutageUnit(index, "station", event.target.value)} /> : (item.station || "—")}</td>
+                    <td>{outageEditing ? <TextField select fullWidth size="small" value={item.fuel || "THERMAL"} onChange={(event) => changeOutageUnit(index, "fuel", event.target.value)}><MenuItem value="THERMAL">Thermal</MenuItem><MenuItem value="HYDRO">Hydro</MenuItem></TextField> : item.fuel}</td>
+                    <td>{outageEditing ? <TextField select fullWidth size="small" value={item.outage_type || "Planned"} onChange={(event) => changeOutageUnit(index, "outage_type", event.target.value)}><MenuItem value="Planned">Planned</MenuItem><MenuItem value="Forced">Forced</MenuItem></TextField> : item.outage_type}</td>
+                    <td>{outageEditing ? <TextField type="number" fullWidth size="small" value={item.capacity_mw ?? ""} onChange={(event) => changeOutageUnit(index, "capacity_mw", event.target.value)} inputProps={{ min: 0, step: .1 }} /> : show(item.capacity_mw, 1)}</td>
+                    <td>{outageEditing ? <TextField fullWidth size="small" value={item.reason || ""} onChange={(event) => changeOutageUnit(index, "reason", event.target.value)} /> : (item.reason || "—")}</td>
+                    <td>{outageEditing ? <TextField fullWidth size="small" value={item.expected_revival || ""} onChange={(event) => changeOutageUnit(index, "expected_revival", event.target.value)} /> : (item.expected_revival || "—")}</td>
+                    {outageEditing && <td><IconButton color="error" aria-label={`Remove ${item.unit || "generator"}`} onClick={() => setOutageDraft((current) => current.filter((_, itemIndex) => itemIndex !== index))}><Trash2 size={16} /></IconButton></td>}
+                  </tr>
+                ))}
+                {!visibleOutageUnits.length && <tr><td colSpan={outageEditing ? 8 : 7} style={{ textAlign: "center", color: "#64748B", padding: 28 }}>No generator units match the selected filters.</td></tr>}
+              </tbody>
+            </Box>
+          </Box>
+        </DialogContent>
+        <DialogActions sx={{ px: 3, py: 1.5 }}>
+          <Button onClick={() => setOutageOpen(false)} disabled={outageSaving}>Close</Button>
+          {outageEditing && <Button variant="outlined" onClick={() => { setOutageDraft(structuredClone(report?.generation_outage_summary?.units || [])); setOutageEditing(false); }} disabled={outageSaving}>Discard changes</Button>}
+          {outageEditing && <Button variant="contained" startIcon={outageSaving ? <CircularProgress size={15} color="inherit" /> : <Save size={16} />} onClick={saveOutageUnits} disabled={outageSaving} sx={{ bgcolor: "#08755B", fontWeight: 900 }}>{outageSaving ? "Saving…" : "Save & recalculate"}</Button>}
+        </DialogActions>
+      </Dialog>
 
       <Dialog open={overwriteOpen} onClose={() => !loading && setOverwriteOpen(false)} maxWidth="sm" fullWidth>
         <DialogTitle sx={{ fontWeight: 900 }}>Overwrite saved Morning report?</DialogTitle>

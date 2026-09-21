@@ -1,6 +1,11 @@
 ﻿from fastapi import APIRouter, HTTPException, Query, Depends
-from datetime import datetime, timedelta
+from fastapi import File, UploadFile
+from fastapi.responses import Response
+from datetime import date, datetime, timedelta
 from bson import ObjectId
+from io import BytesIO
+from openpyxl import Workbook, load_workbook
+from openpyxl.styles import Alignment, Font, PatternFill
 
 from crew_legacy.database.database_mongo import (
     leave_request_collection,
@@ -953,6 +958,7 @@ def revoke_leave_delegation(delegation_id: str, user=Depends(get_authenticated_u
 def get_organization_approval_calendar(
     startDate: str = Query(...),
     endDate: str = Query(...),
+    employeeId: Optional[str] = Query(None),
     user=Depends(get_authenticated_user),
 ):
     try:
@@ -969,6 +975,12 @@ def get_organization_approval_calendar(
         employee for employee in active_employees
         if clean_id(employee.get("userId") or employee.get("employeeId")) in visible_ids
     ]
+    if employeeId:
+        target_employee_id = clean_id(employeeId)
+        employees = [
+            employee for employee in employees
+            if clean_id(employee.get("userId") or employee.get("employeeId")) == target_employee_id
+        ]
 
     employee_ids = [clean_id(item.get("userId") or item.get("employeeId")) for item in employees]
     daily = list(employee_daily_collection.find({
@@ -2318,6 +2330,9 @@ def reject_bulk(data: dict, user=Depends(get_authenticated_user)):
 def get_leave_list(
     completedFrom: Optional[str] = Query(None),
     completedTo: Optional[str] = Query(None),
+    focusLeaveId: Optional[str] = Query(None),
+    focusEmployeeId: Optional[str] = Query(None),
+    focusDate: Optional[str] = Query(None),
     user=Depends(get_authenticated_user),
 ):
     migrate_pending_nonshift_leave_workflows()
@@ -2338,7 +2353,7 @@ def get_leave_list(
     completed_date_filter = {"$gte": completed_from}
     if completedTo:
         completed_date_filter["$lte"] = completedTo
-    query = {
+    status_query = {
         "$or": [
             {"finalStatus": {"$nin": completed_statuses}},
             {
@@ -2347,6 +2362,28 @@ def get_leave_list(
             },
         ]
     }
+    focus_record = None
+    if focusLeaveId:
+        try:
+            focus_record = leave_request_collection.find_one({"_id": ObjectId(focusLeaveId)})
+        except Exception:
+            focus_record = None
+
+    # Calendar popups request only the clicked continuous application. Newer
+    # applications share leaveGroupId across leave and Station Leave dates.
+    # Legacy records fall back to the employee so the client can derive the
+    # adjacent stretch without loading every employee's workflow.
+    focus_filter = None
+    if focus_record and clean_id(focus_record.get("leaveGroupId")):
+        focus_filter = {"leaveGroupId": focus_record.get("leaveGroupId")}
+    else:
+        target_employee_id = clean_id(
+            (focus_record or {}).get("employeeId") or focusEmployeeId
+        )
+        if target_employee_id:
+            focus_filter = {"employeeId": employee_id_filter(target_employee_id)}
+
+    query = focus_filter or status_query
     records = list(leave_request_collection.find(query).sort([("date", -1), ("createdOn", -1)]).limit(2000))
 
     result = []
@@ -2566,6 +2603,327 @@ def get_duty_detailed(
     return result
 
 ################# C-OFF History 
+
+def comp_off_display_status(record: dict) -> str:
+    status = record.get("status") or "Available"
+    expiry_date = clean_id(record.get("expiryDate"))
+    if status == "Available" and expiry_date and expiry_date < datetime.now().date().isoformat():
+        return "Expired"
+    return status
+
+@router.get("/comp-off/manual")
+def manual_comp_off_history(
+    scope: str = Query("manual", pattern="^(manual|all)$"),
+    user=Depends(get_authenticated_user),
+):
+    """Return administrator C-OFF history, optionally including every source."""
+    if not is_admin(user):
+        raise HTTPException(403, "Only an administrator can manage manual C-OFF credits")
+
+    query = {"reference.type": "ManualAdmin"} if scope == "manual" else {}
+    limit = 200 if scope == "manual" else 10000
+    records = list(compensatory_off_collection.find(query).sort([("earnedDate", -1), ("createdOn", -1)]).limit(limit))
+    group_by_employee = manual_comp_off_shift_members() if scope == "all" else {}
+    employee_ids = list({clean_id(record.get("employeeId")) for record in records if clean_id(record.get("employeeId"))})
+    employee_details = {
+        clean_id(employee.get("userId") or employee.get("employeeId")): employee
+        for employee in employee_collection.find(
+            {"$or": [{"userId": {"$in": employee_ids}}, {"employeeId": {"$in": employee_ids}}]},
+            {"userId": 1, "employeeId": 1, "name": 1, "designation": 1},
+        )
+    }
+    return [{
+        "id": str(record["_id"]),
+        "employeeId": clean_id(record.get("employeeId")),
+        "employeeName": record.get("employeeName") or employee_details.get(clean_id(record.get("employeeId")), {}).get("name") or clean_id(record.get("employeeId")),
+        "designation": record.get("designation") or employee_details.get(clean_id(record.get("employeeId")), {}).get("designation"),
+        "groupName": (record.get("reference") or {}).get("groupName") or group_by_employee.get(clean_id(record.get("employeeId"))),
+        "earnedDate": record.get("earnedDate") or record.get("date"),
+        "expiryDate": record.get("expiryDate"),
+        "status": comp_off_display_status(record),
+        "usedDate": record.get("usedDate"),
+        "reason": record.get("reason"),
+        "createdByName": record.get("createdByName"),
+        "source": (record.get("reference") or {}).get("type") or ("Roster" if record.get("rosterId") else "System"),
+        "createdOn": record.get("createdOn"),
+    } for record in records]
+
+
+@router.post("/comp-off/manual")
+def add_manual_comp_off(data: dict, user=Depends(get_authenticated_user)):
+    """Backfill C-OFF for shift-group staff when an old roster was unavailable."""
+    if not is_admin(user):
+        raise HTTPException(403, "Only an administrator can add manual C-OFF credits")
+
+    employee_ids = list(dict.fromkeys(
+        clean_id(value) for value in (data.get("employeeIds") or []) if clean_id(value)
+    ))
+    earned_date = clean_id(data.get("earnedDate"))
+    reason = clean_id(data.get("reason"))
+    if not employee_ids:
+        raise HTTPException(400, "Select at least one shift-group employee")
+    if len(employee_ids) > 100:
+        raise HTTPException(400, "A maximum of 100 employees can be credited at one time")
+    try:
+        parsed_date = datetime.strptime(earned_date, "%Y-%m-%d")
+    except ValueError as exc:
+        raise HTTPException(400, "Earned date must use YYYY-MM-DD format") from exc
+    if parsed_date.date() >= datetime.now().date():
+        raise HTTPException(400, "Manual C-OFF can be credited only for a past date")
+    if len(reason) < 3:
+        raise HTTPException(400, "Enter the holiday or manual credit reason")
+
+    shift_members = {}
+    for group in roster_group_collection.find(
+        {"isActive": {"$ne": False}},
+        {"groupName": 1, "shiftInCharge": 1, "members": 1},
+    ):
+        for person in [group.get("shiftInCharge") or {}, *(group.get("members") or [])]:
+            member_id = clean_id(person.get("employeeId") or person.get("userId") or person.get("id"))
+            if member_id:
+                shift_members[member_id] = clean_id(group.get("groupName")) or "Shift group"
+
+    invalid_ids = [employee_id for employee_id in employee_ids if employee_id not in shift_members]
+    if invalid_ids:
+        raise HTTPException(400, f"Not active shift-group employee(s): {', '.join(invalid_ids)}")
+
+    actor_id = clean_id(user.get("employeeId") or user.get("userId"))
+    actor = employee_by_id(actor_id)
+    created = []
+    skipped = []
+    now = datetime.utcnow()
+    for employee_id in employee_ids:
+        existing = compensatory_off_collection.find_one({
+            "employeeId": employee_id_filter(employee_id),
+            "$or": [{"earnedDate": earned_date}, {"date": earned_date}],
+        })
+        if existing:
+            skipped.append({
+                "employeeId": employee_id,
+                "reason": f"Credit already exists with status {existing.get('status') or 'Available'}",
+            })
+            continue
+
+        employee = employee_by_id(employee_id)
+        credit = {
+            "employeeId": employee_id,
+            "employeeName": employee.get("name") or employee_id,
+            "designation": employee.get("designation"),
+            "earnedDate": earned_date,
+            "expiryDate": calculate_expiry(earned_date),
+            "status": "Available",
+            "reason": reason,
+            "dutyType": "Shift",
+            "reference": {
+                "type": "ManualAdmin",
+                "source": "Roster Setup",
+                "groupName": shift_members[employee_id],
+                "reason": reason,
+            },
+            "createdBy": actor_id,
+            "createdByName": actor.get("name") or user.get("name") or actor_id,
+            "createdOn": now,
+        }
+        inserted = compensatory_off_collection.insert_one(credit)
+        created.append({
+            "id": str(inserted.inserted_id),
+            "employeeId": employee_id,
+            "employeeName": credit["employeeName"],
+            "groupName": shift_members[employee_id],
+            "earnedDate": earned_date,
+            "expiryDate": credit["expiryDate"],
+        })
+
+    return {
+        "message": f"{len(created)} C-OFF credit(s) added; {len(skipped)} duplicate(s) skipped",
+        "created": created,
+        "skipped": skipped,
+    }
+
+
+def manual_comp_off_shift_members() -> dict[str, str]:
+    """Return active shift employee IDs mapped to their current group."""
+    members = {}
+    for group in roster_group_collection.find(
+        {"isActive": {"$ne": False}},
+        {"groupName": 1, "shiftInCharge": 1, "members": 1},
+    ):
+        for person in [group.get("shiftInCharge") or {}, *(group.get("members") or [])]:
+            employee_id = clean_id(person.get("employeeId") or person.get("userId") or person.get("id"))
+            if employee_id:
+                members[employee_id] = clean_id(group.get("groupName")) or "Shift group"
+    return members
+
+
+def resolve_manual_employee_id(raw_value, shift_members: dict[str, str]) -> str:
+    """Resolve numeric Excel IDs without losing stored leading zeroes."""
+    supplied = str(int(raw_value)) if isinstance(raw_value, float) and raw_value.is_integer() else clean_id(raw_value)
+    if supplied in shift_members:
+        return supplied
+    normalized = supplied.lstrip("0") or "0"
+    matches = [value for value in shift_members if (value.lstrip("0") or "0") == normalized]
+    return matches[0] if len(matches) == 1 else supplied
+
+
+def parse_manual_credit_date(value) -> str:
+    if isinstance(value, datetime):
+        return value.date().isoformat()
+    if isinstance(value, date):
+        return value.isoformat()
+    text = clean_id(value)
+    for pattern in ("%Y-%m-%d", "%d-%m-%Y", "%d/%m/%Y", "%d.%m.%Y"):
+        try:
+            return datetime.strptime(text, pattern).date().isoformat()
+        except ValueError:
+            continue
+    raise ValueError("use YYYY-MM-DD or DD-MM-YYYY")
+
+
+@router.get("/comp-off/manual/template")
+def download_manual_comp_off_template(user=Depends(get_authenticated_user)):
+    """Download the administrator template for importing old C-OFF credits."""
+    if not is_admin(user):
+        raise HTTPException(403, "Only an administrator can manage manual C-OFF credits")
+
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Past C-OFF"
+    sheet.append(["Employee No", "Earned Date", "Reason / Holiday"])
+    for cell in sheet[1]:
+        cell.font = Font(bold=True, color="FFFFFF")
+        cell.fill = PatternFill("solid", fgColor="B45309")
+        cell.alignment = Alignment(horizontal="center")
+    sheet.column_dimensions["A"].width = 18
+    sheet.column_dimensions["B"].width = 18
+    sheet.column_dimensions["C"].width = 55
+    for row_number in range(2, 1002):
+        sheet.cell(row_number, 1).number_format = "@"
+        sheet.cell(row_number, 2).number_format = "yyyy-mm-dd"
+    sheet.freeze_panes = "A2"
+    sheet.auto_filter.ref = "A1:C1"
+
+    instructions = workbook.create_sheet("Instructions")
+    instructions.append(["Past C-OFF bulk upload instructions"])
+    instructions["A1"].font = Font(bold=True, size=14, color="B45309")
+    for line in (
+        "Enter one employee and one earned date per row in the Past C-OFF sheet.",
+        "Only dates before today are accepted.",
+        "Employee must belong to an active shift group.",
+        "Employee No is formatted as text so leading zeroes are preserved.",
+        "Existing credits for the same employee and date are skipped.",
+    ):
+        instructions.append([line])
+    instructions.column_dimensions["A"].width = 95
+
+    output = BytesIO()
+    workbook.save(output)
+    return Response(
+        content=output.getvalue(),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": 'attachment; filename="Past_C-OFF_Import_Template.xlsx"'},
+    )
+
+
+@router.post("/comp-off/manual/import")
+def import_manual_comp_off_excel(file: UploadFile = File(...), user=Depends(get_authenticated_user)):
+    """Import old C-OFF credits and report every rejected or skipped row."""
+    if not is_admin(user):
+        raise HTTPException(403, "Only an administrator can add manual C-OFF credits")
+    filename = clean_id(file.filename)
+    extension = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+    if extension not in {"xlsx", "xlsm"}:
+        raise HTTPException(400, "Upload an .xlsx or .xlsm file")
+    contents = file.file.read(5 * 1024 * 1024 + 1)
+    if len(contents) > 5 * 1024 * 1024:
+        raise HTTPException(413, "Uploaded file is too large (maximum 5 MB)")
+    try:
+        workbook = load_workbook(BytesIO(contents), data_only=True, read_only=True)
+    except Exception as exc:
+        raise HTTPException(400, "The uploaded Excel workbook could not be read") from exc
+
+    sheet = workbook["Past C-OFF"] if "Past C-OFF" in workbook.sheetnames else workbook.active
+    rows = sheet.iter_rows(values_only=True)
+    try:
+        raw_headers = next(rows)
+    except StopIteration as exc:
+        raise HTTPException(400, "The uploaded sheet is empty") from exc
+    normalize_header = lambda value: re.sub(r"[^a-z0-9]", "", clean_id(value).lower())
+    header_indexes = {normalize_header(value): index for index, value in enumerate(raw_headers) if clean_id(value)}
+    employee_column = next((header_indexes[key] for key in ("employeeno", "employeeid", "userid") if key in header_indexes), None)
+    date_column = next((header_indexes[key] for key in ("earneddate", "date", "holidaydate") if key in header_indexes), None)
+    reason_column = next((header_indexes[key] for key in ("reasonholiday", "reason", "holiday", "remarks") if key in header_indexes), None)
+    if employee_column is None or date_column is None:
+        raise HTTPException(400, "Required columns are Employee No and Earned Date")
+
+    shift_members = manual_comp_off_shift_members()
+    actor_id = clean_id(user.get("employeeId") or user.get("userId"))
+    actor = employee_by_id(actor_id)
+    created, skipped, errors, seen = [], [], [], set()
+    now = datetime.utcnow()
+    row_count = 0
+    for row_number, row in enumerate(rows, start=2):
+        if not any(value is not None and clean_id(value) for value in row):
+            continue
+        row_count += 1
+        if row_count > 1000:
+            errors.append({"row": row_number, "reason": "Maximum 1000 data rows per upload"})
+            break
+        raw_employee = row[employee_column] if employee_column < len(row) else None
+        raw_date = row[date_column] if date_column < len(row) else None
+        raw_reason = row[reason_column] if reason_column is not None and reason_column < len(row) else None
+        employee_id = resolve_manual_employee_id(raw_employee, shift_members)
+        reason = clean_id(raw_reason)
+        if not employee_id:
+            errors.append({"row": row_number, "reason": "Employee No is required"})
+            continue
+        try:
+            earned_date = parse_manual_credit_date(raw_date)
+        except ValueError as exc:
+            errors.append({"row": row_number, "employeeId": employee_id, "reason": f"Invalid Earned Date; {exc}"})
+            continue
+        if datetime.strptime(earned_date, "%Y-%m-%d").date() >= datetime.now().date():
+            errors.append({"row": row_number, "employeeId": employee_id, "reason": "Earned Date must be before today"})
+            continue
+        if employee_id not in shift_members:
+            errors.append({"row": row_number, "employeeId": employee_id, "reason": "Not an active shift-group employee"})
+            continue
+        if len(reason) < 3:
+            errors.append({"row": row_number, "employeeId": employee_id, "reason": "Reason / Holiday is required"})
+            continue
+        key = (employee_id, earned_date)
+        if key in seen:
+            skipped.append({"row": row_number, "employeeId": employee_id, "earnedDate": earned_date, "reason": "Duplicate row in upload"})
+            continue
+        seen.add(key)
+        existing = compensatory_off_collection.find_one({"employeeId": employee_id_filter(employee_id), "$or": [{"earnedDate": earned_date}, {"date": earned_date}]})
+        if existing:
+            skipped.append({"row": row_number, "employeeId": employee_id, "earnedDate": earned_date, "reason": f"Credit already exists with status {existing.get('status') or 'Available'}"})
+            continue
+        employee = employee_by_id(employee_id)
+        credit = {
+            "employeeId": employee_id,
+            "employeeName": employee.get("name") or employee_id,
+            "designation": employee.get("designation"),
+            "earnedDate": earned_date,
+            "expiryDate": calculate_expiry(earned_date),
+            "status": "Available",
+            "reason": reason,
+            "dutyType": "Shift",
+            "reference": {"type": "ManualAdmin", "source": "Admin Excel import", "groupName": shift_members[employee_id], "reason": reason},
+            "createdBy": actor_id,
+            "createdByName": actor.get("name") or user.get("name") or actor_id,
+            "createdOn": now,
+        }
+        inserted = compensatory_off_collection.insert_one(credit)
+        created.append({"row": row_number, "id": str(inserted.inserted_id), "employeeId": employee_id, "employeeName": credit["employeeName"], "earnedDate": earned_date})
+
+    return {
+        "message": f"{len(created)} C-OFF credit(s) added; {len(skipped)} skipped; {len(errors)} error(s)",
+        "totalRows": row_count,
+        "created": created,
+        "skipped": skipped,
+        "errors": errors,
+    }
 
 @router.get("/comp-off/history")
 def comp_off_history(

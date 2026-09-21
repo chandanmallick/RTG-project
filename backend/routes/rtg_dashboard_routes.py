@@ -1,6 +1,7 @@
 import io
-from datetime import datetime
-from fastapi import APIRouter, Query
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
+from fastapi import APIRouter, Body, Query
 from fastapi.responses import StreamingResponse
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
@@ -25,6 +26,196 @@ router = APIRouter(
 
 CRMS_OUTAGE_CACHE_COLLECTION = "rtg_current_crms_outages"
 CRMS_TRANSMISSION_CACHE_COLLECTION = "rtg_current_crms_transmission_outages"
+ISGS_SCHEDULE_CHECK_COLLECTION = "rtg_isgs_schedule_checks"
+ISGS_SCHEDULE_CHECK_CONFIG_ID = "ISGS_SCHEDULE_RECONCILIATION"
+
+
+def _number(value):
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _serialise_schedule_check(document):
+    if not document:
+        return None
+    result = dict(document)
+    result.pop("_id", None)
+    for key in ("checked_at", "rtg_snapshot_time"):
+        if isinstance(result.get(key), datetime):
+            result[key] = result[key].isoformat()
+    return result
+
+
+def get_isgs_schedule_check_config(db=None):
+    db = db or MongoService()
+    stored = db.pipeline_config_collection.find_one({"config_type": ISGS_SCHEDULE_CHECK_CONFIG_ID}) or {}
+    interval = int(stored.get("interval_minutes", 15))
+    if interval not in (0, 15, 30):
+        interval = 15
+    return {
+        "interval_minutes": interval,
+        "tolerance_mw": max(0.0, float(stored.get("tolerance_mw", 1.0))),
+    }
+
+
+def run_isgs_schedule_check(force_rtg_refresh=False):
+    """Compare the current IST block's WBES and RTG schedules for mapped ISGS rows."""
+    from concurrent.futures import ThreadPoolExecutor
+    from routes.frequency_routes import fetch_rtg_schedule_raw, fetch_wbes_schedule_raw, normalize_wbes_identifier
+
+    db = MongoService()
+    config = get_isgs_schedule_check_config(db)
+    now = datetime.now(ZoneInfo("Asia/Kolkata"))
+    date_iso = now.date().isoformat()
+    date_dmy = now.strftime("%d-%m-%Y")
+    block_index = min(95, (now.hour * 60 + now.minute) // 15)
+
+    diagnostics = []
+    snapshot = db.rtg_dashboard_collection.find_one(
+        {"snapshot_date": date_iso}, sort=[("snapshot_time", -1)]
+    ) or db.rtg_dashboard_collection.find_one({}, sort=[("snapshot_time", -1)])
+    rtg_by_id = {
+        str(row.get("plant_id") or "").strip(): row
+        for row in (snapshot or {}).get("data", [])
+        if row.get("plant_id")
+    }
+
+    # utility_type distinguishes true inter-state stations from legacy rows whose
+    # report bucket was once labelled ISGS despite being state-sector stations.
+    mappings = list(db.map_collection.find({
+        "$or": [
+            {"utility_type": {"$regex": "^ISGS$", "$options": "i"}},
+            {"type": {"$regex": "^ISGS$", "$options": "i"}, "wbes_name": {"$nin": [None, ""]}},
+        ]
+    }, {"_id": 0}))
+    acronyms = sorted({
+        normalize_wbes_identifier(row.get("wbes_name") or row.get("wbes_acronym"))
+        for row in mappings
+        if normalize_wbes_identifier(row.get("wbes_name") or row.get("wbes_acronym"))
+    })
+    wbes_raw = fetch_wbes_schedule_raw(date_dmy, acronyms, diagnostics, force_refresh=True)
+    wbes_by_name = {
+        normalize_wbes_identifier(item.get("Acronym")): item
+        for item in wbes_raw
+        if normalize_wbes_identifier(item.get("Acronym"))
+    }
+    plant_ids = sorted({str(row.get("rtg_plant_id") or row.get("plant_id") or "").strip() for row in mappings if row.get("rtg_plant_id") or row.get("plant_id")})
+
+    def load_rtg_schedule(plant_id):
+        fresh = fetch_rtg_schedule_raw(date_iso, plant_id, force_refresh=force_rtg_refresh)
+        if fresh:
+            return plant_id, fresh
+        # A transient source failure should be identified, but a cached series
+        # remains preferable to the dashboard aggregate (which is not block-wise).
+        cached = fetch_rtg_schedule_raw(date_iso, plant_id, force_refresh=False)
+        return plant_id, cached
+
+    with ThreadPoolExecutor(max_workers=min(12, max(1, len(plant_ids)))) as executor:
+        rtg_schedule_by_id = dict(executor.map(load_rtg_schedule, plant_ids))
+
+    rows = []
+    tolerance = config["tolerance_mw"]
+    for mapping in mappings:
+        plant_id = str(mapping.get("rtg_plant_id") or mapping.get("plant_id") or "").strip()
+        acronym = normalize_wbes_identifier(mapping.get("wbes_name") or mapping.get("wbes_acronym"))
+        plant_name = str(mapping.get("plant_name") or mapping.get("STAGE_NAME") or acronym or plant_id).strip()
+        rtg_row = rtg_by_id.get(plant_id)
+        rtg_series = (rtg_schedule_by_id.get(plant_id) or {}).get("schedule") or []
+        wbes_row = wbes_by_name.get(acronym)
+        schedule = ((wbes_row or {}).get("NetScheduleSummary") or {}).get("TotalNetSchdAmount") or []
+        raw_wbes_value = _number(schedule[block_index]) if block_index < len(schedule) else None
+        # WBES represents generator injection with a negative sign, while RTG
+        # stores generation schedules as positive MW.
+        wbes_value = -raw_wbes_value if raw_wbes_value is not None else None
+        rtg_value = _number(rtg_series[block_index]) if block_index < len(rtg_series) else None
+        difference = round(rtg_value - wbes_value, 3) if rtg_value is not None and wbes_value is not None else None
+        if not acronym:
+            status, remark = "UNMAPPED", "WBES name is not mapped"
+        elif wbes_value is None:
+            status, remark = "NO_WBES_DATA", "WBES schedule is unavailable for the current block"
+        elif rtg_value is None:
+            status, remark = "NO_RTG_DATA", "RTG schedule is unavailable"
+        elif abs(difference) > tolerance:
+            status, remark = "MISMATCH", f"Difference exceeds {tolerance:g} MW tolerance"
+        else:
+            status, remark = "MATCHED", "Schedule matched"
+        rows.append({
+            "plant_id": plant_id,
+            "plant_name": plant_name,
+            "stage_name": mapping.get("STAGE_NAME") or mapping.get("stage_name") or "",
+            "wbes_name": acronym,
+            "wbes_schedule_mw": wbes_value,
+            "rtg_schedule_mw": rtg_value,
+            "rtg_schedule_updated_at": (rtg_row or {}).get("schedule_last_updated"),
+            "difference_mw": difference,
+            "status": status,
+            "remark": remark,
+        })
+
+    rows.sort(key=lambda row: (row["status"] == "MATCHED", -(abs(row["difference_mw"]) if row["difference_mw"] is not None else 10**9), row["plant_name"]))
+    mismatches = [row for row in rows if row["status"] != "MATCHED"]
+    document = {
+        "checked_at": now.replace(tzinfo=None),
+        "date": date_iso,
+        "block": block_index + 1,
+        "block_start": f"{(block_index * 15) // 60:02d}:{(block_index * 15) % 60:02d}",
+        "interval_minutes": config["interval_minutes"],
+        "tolerance_mw": tolerance,
+        "total": len(rows),
+        "matched": len(rows) - len(mismatches),
+        "mismatch_count": len(mismatches),
+        "rows": rows,
+        "mismatches": mismatches,
+        "diagnostics": diagnostics,
+        "rtg_snapshot_time": (snapshot or {}).get("snapshot_time"),
+    }
+    db.db[ISGS_SCHEDULE_CHECK_COLLECTION].insert_one(document)
+    return _serialise_schedule_check(document)
+
+
+def run_scheduled_isgs_schedule_check():
+    db = MongoService()
+    config = get_isgs_schedule_check_config(db)
+    interval = config["interval_minutes"]
+    if interval == 0:
+        return {"skipped": True, "reason": "Manual mode"}
+    latest = db.db[ISGS_SCHEDULE_CHECK_COLLECTION].find_one({}, sort=[("checked_at", -1)])
+    if latest and isinstance(latest.get("checked_at"), datetime):
+        if datetime.now() - latest["checked_at"] < timedelta(minutes=interval - 1):
+            return {"skipped": True, "reason": "Configured interval has not elapsed"}
+    return run_isgs_schedule_check(force_rtg_refresh=False)
+
+
+@router.get("/isgs-schedule-check")
+async def get_isgs_schedule_check():
+    db = MongoService()
+    latest = db.db[ISGS_SCHEDULE_CHECK_COLLECTION].find_one({}, sort=[("checked_at", -1)])
+    return {"success": True, "config": get_isgs_schedule_check_config(db), "report": _serialise_schedule_check(latest)}
+
+
+@router.post("/isgs-schedule-check/run")
+async def check_isgs_schedules_now():
+    try:
+        return {"success": True, "report": run_isgs_schedule_check(force_rtg_refresh=True)}
+    except Exception as exc:
+        return {"success": False, "message": str(exc)}
+
+
+@router.put("/isgs-schedule-check/config")
+async def update_isgs_schedule_check_config(payload: dict = Body(...)):
+    interval = int(payload.get("interval_minutes") or 0)
+    if interval not in (0, 15, 30):
+        return {"success": False, "message": "Interval must be Manual, 15 minutes or 30 minutes."}
+    tolerance = max(0.0, float(payload.get("tolerance_mw", 1.0)))
+    db = MongoService()
+    db.pipeline_config_collection.update_one(
+        {"config_type": ISGS_SCHEDULE_CHECK_CONFIG_ID},
+        {"$set": {"config_type": ISGS_SCHEDULE_CHECK_CONFIG_ID, "interval_minutes": interval, "tolerance_mw": tolerance, "updated_at": datetime.utcnow()}},
+        upsert=True,
+    )
+    return {"success": True, "config": {"interval_minutes": interval, "tolerance_mw": tolerance}}
 
 
 def _first_value(row, *keys):
