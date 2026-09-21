@@ -1,6 +1,6 @@
 ﻿import React, { useEffect, useState } from "react";
 import api from "./api";
-import { useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import dayjs from "dayjs";
 
 import {
@@ -315,14 +315,14 @@ export default function ReplacementManagement() {
       const selected = candidates.find(c => c.employeeId === employeeId);
       setSelectedCandidate(selected);
 
-      alert("Replacement Assigned Successfully");
-
       setDialogOpen(false);
-
-      fetchPendingLeaves();
-      fetchPendingSIC();
-      fetchAssignedReplacements();
-      fetchDecisionAudit();
+      await Promise.all([
+        fetchPendingLeaves(),
+        fetchPendingSIC(),
+        fetchAssignedReplacements(),
+        fetchDecisionAudit(),
+      ]);
+      setSwitchNotice({ severity: "success", text: `Replacement assigned to ${selected?.name || employeeId}. It is now visible in the assigned coverage board.` });
 
       if (selectedLeave?.isSIC) {
         await openSICDialog(selectedLeave, "Replacement workflow");
@@ -367,12 +367,9 @@ export default function ReplacementManagement() {
         source: selectedLeave.sicAssignmentSource || "Direct acting-SIC assignment",
       });
 
-      alert("SIC Assigned");
-
       setSicDialogOpen(false);
-      fetchPendingLeaves();
-      fetchPendingSIC();
-      fetchDecisionAudit();
+      await Promise.all([fetchPendingLeaves(), fetchPendingSIC(), fetchDecisionAudit(), fetchAssignedReplacements()]);
+      setSwitchNotice({ severity: "success", text: `Acting SIC assigned to ${selectedSIC}.` });
 
     } catch (err) {
       console.error(err);
