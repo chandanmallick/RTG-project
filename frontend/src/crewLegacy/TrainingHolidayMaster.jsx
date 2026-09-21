@@ -143,7 +143,7 @@ if(duty?.isHoliday) result[date]=duty.holidayName || "Holiday"
 })))
 return result
 },[calendarData])
-const [activeSection]=useState(()=>embeddedRequest ? "request" : embeddedApproval ? "pending" : new URLSearchParams(window.location.search).get("section") || (canViewTrainingPage ? "request" : "pending"))
+const [activeSection]=useState(()=>embeddedRequest ? "request" : embeddedApproval ? "pending" : new URLSearchParams(window.location.search).get("section") || (canAssignTraining ? "assign" : canViewTrainingPage ? "request" : "pending"))
 const selectedApprovalDetail = pendingList.find((row)=>row.id===expandedApprovalId)
 
 /* ================= FETCH HOLIDAY ================= */
@@ -416,6 +416,18 @@ programmes:activeTrainingProgrammes.filter((item)=>dateValue>=item.startDate && 
 },[activeTrainingProgrammes,assignCalendarMonth])
 
 const selectedTrainingProgramme=useMemo(()=>(trainingList || []).find((item)=>item.trainingName===selectedTraining) || null,[trainingList,selectedTraining])
+
+const nominatedEmployeesByDate=useMemo(()=>{
+const result={}
+Object.values(calendarData).forEach((employees)=>(employees || []).forEach((employee)=>Object.entries(employee.duties || {}).forEach(([date,duty])=>{
+(duty?.trainingLines || []).forEach((line)=>{
+if(!selectedTraining || line.trainingName!==selectedTraining) return
+result[date] ||= []
+if(!result[date].some((item)=>item.employeeId===employee.employeeId)) result[date].push({employeeId:employee.employeeId,name:employee.name})
+})
+})))
+return result
+},[calendarData,selectedTraining])
 
 const moveAssignCalendarMonth=(offset)=>{
 const [year,month]=assignCalendarMonth.split("-").map(Number)
@@ -1138,7 +1150,8 @@ return <Box key={day.date} sx={{minHeight:{xs:94,md:116},p:.7,borderRight:"1px s
 <Stack spacing={.4}>{day.programmes.slice(0,3).map((item)=>{
 const selected=selectedTraining===item.trainingName
 const color=trainingLineColor(item.trainingName)
-return <Tooltip key={`${day.date}-${item.id || item.trainingName}`} title={`${item.trainingName} · ${item.location || "Location not specified"} · ${item.startDate} to ${item.endDate || item.startDate}`} arrow><Box component="button" type="button" onClick={()=>setSelectedTraining(item.trainingName)} sx={{width:"100%",p:.55,border:selected ? `2px solid ${color}` : `1px solid ${color}33`,borderLeft:`4px solid ${color}`,borderRadius:1.2,background:selected ? `${color}18` : `${color}0D`,color:"#172033",textAlign:"left",cursor:"pointer",overflow:"hidden","&:hover":{background:`${color}20`,transform:"translateY(-1px)"},transition:"all .12s ease"}}><Typography sx={{fontSize:9.5,fontWeight:950,lineHeight:1.15,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{item.trainingName}</Typography><Typography sx={{mt:.2,fontSize:8.2,color:"#64748B",fontWeight:750,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{item.location || "Place not specified"}</Typography></Box></Tooltip>
+const nomineeNames=selected ? (nominatedEmployeesByDate[day.date] || []).map((person)=>person.name).filter(Boolean) : []
+return <Tooltip key={`${day.date}-${item.id || item.trainingName}`} title={`${item.trainingName} · ${item.location || "Location not specified"} · ${item.startDate} to ${item.endDate || item.startDate}`} arrow><Box component="button" type="button" onClick={()=>setSelectedTraining(item.trainingName)} sx={{width:"100%",p:.55,border:selected ? `2px solid ${color}` : `1px solid ${color}33`,borderLeft:`4px solid ${color}`,borderRadius:1.2,background:selected ? `${color}18` : `${color}0D`,color:"#172033",textAlign:"left",cursor:"pointer",overflow:"hidden","&:hover":{background:`${color}20`,transform:"translateY(-1px)"},transition:"all .12s ease"}}><Typography sx={{fontSize:9.5,fontWeight:950,lineHeight:1.15,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{item.trainingName}</Typography><Typography sx={{mt:.2,fontSize:8.2,color:"#64748B",fontWeight:750,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{item.location || "Place not specified"}</Typography>{selected && nomineeNames.length>0 && <Typography sx={{mt:.35,fontSize:8,color:"#047857",fontWeight:900,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{nomineeNames.length} nominated · {nomineeNames.slice(0,2).join(", ")}{nomineeNames.length>2 ? "…" : ""}</Typography>}</Box></Tooltip>
 })}{overflow && <Typography sx={{pl:.5,fontSize:8.5,color:"#475569",fontWeight:900}}>+{day.programmes.length-3} more</Typography>}</Stack>
 </Box>
 })}
