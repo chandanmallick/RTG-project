@@ -110,6 +110,7 @@ const [calendarDates,setCalendarDates]=useState([])
 
 const [selectedEmployees,setSelectedEmployees]=useState([])
 const [employeeTypeFilter,setEmployeeTypeFilter]=useState("All")
+const [departmentFilter,setDepartmentFilter]=useState("All")
 const [delegationOpen,setDelegationOpen]=useState(false)
 const [delegationRows,setDelegationRows]=useState([])
 const [delegationLoading,setDelegationLoading]=useState(false)
@@ -143,7 +144,11 @@ if(duty?.isHoliday) result[date]=duty.holidayName || "Holiday"
 })))
 return result
 },[calendarData])
-const [activeSection]=useState(()=>embeddedRequest ? "request" : embeddedApproval ? "pending" : new URLSearchParams(window.location.search).get("section") || (canAssignTraining ? "assign" : canViewTrainingPage ? "request" : "pending"))
+const requestedSection=new URLSearchParams(window.location.search).get("section")
+const [activeSection,setActiveSection]=useState(()=>embeddedRequest ? "request" : embeddedApproval ? "pending" : requestedSection || (canAssignTraining ? "assign" : canViewTrainingPage ? "request" : "pending"))
+useEffect(()=>{
+if(!embeddedRequest && !embeddedApproval && !requestedSection && canAssignTraining) setActiveSection("assign")
+},[canAssignTraining,embeddedApproval,embeddedRequest,requestedSection])
 const selectedApprovalDetail = pendingList.find((row)=>row.id===expandedApprovalId)
 
 /* ================= FETCH HOLIDAY ================= */
@@ -270,7 +275,7 @@ return list
 
 }
 
-const fetchCalendarDuty = async(trainingName, fallbackStartDate = "", fallbackEndDate = "")=>{
+const fetchCalendarDuty = async(trainingName, fallbackStartDate = "", fallbackEndDate = "", openDialog = true)=>{
 
 const trainingObj = trainingList.find(
 t=>t.trainingName===trainingName
@@ -290,8 +295,9 @@ setCalendarData(res.data)
 setCalendarDates(generateDates(trainingObj.startDate,trainingObj.endDate))
 setSelectedEmployees([])
 setEmployeeTypeFilter("All")
+setDepartmentFilter("All")
 
-setCalendarOpen(true)
+if(openDialog) setCalendarOpen(true)
 
 }
 
@@ -416,6 +422,11 @@ programmes:activeTrainingProgrammes.filter((item)=>dateValue>=item.startDate && 
 },[activeTrainingProgrammes,assignCalendarMonth])
 
 const selectedTrainingProgramme=useMemo(()=>(trainingList || []).find((item)=>item.trainingName===selectedTraining) || null,[trainingList,selectedTraining])
+useEffect(()=>{
+if(selectedTrainingProgramme && canAssignTraining) fetchCalendarDuty(selectedTrainingProgramme.trainingName,selectedTrainingProgramme.startDate,selectedTrainingProgramme.endDate,false)
+// Loading the calendar context here makes existing nominees visible before the assignment dialog is opened.
+// eslint-disable-next-line react-hooks/exhaustive-deps
+},[selectedTrainingProgramme?.trainingName,canAssignTraining])
 
 const nominatedEmployeesByDate=useMemo(()=>{
 const result={}
@@ -428,6 +439,14 @@ if(!result[date].some((item)=>item.employeeId===employee.employeeId)) result[dat
 })))
 return result
 },[calendarData,selectedTraining])
+const nominatedEmployeesForSelectedTraining=useMemo(()=>{
+const result=[]
+Object.values(nominatedEmployeesByDate).flat().forEach((person)=>{
+if(!result.some((item)=>item.employeeId===person.employeeId)) result.push(person)
+})
+return result
+},[nominatedEmployeesByDate])
+const availableDepartments=useMemo(()=>Array.from(new Set(Object.values(calendarData).flat().map((employee)=>employee.organization).filter(Boolean))).sort(),[calendarData])
 
 const moveAssignCalendarMonth=(offset)=>{
 const [year,month]=assignCalendarMonth.split("-").map(Number)
@@ -1123,6 +1142,15 @@ return(
       <Typography sx={{fontSize:11.5,color:"rgba(255,255,255,.82)"}}>Select a programme directly from its date to assign employees.</Typography>
     </Box>
   </Box>
+  {canAssignTraining && (
+    <Button
+      variant="outlined"
+      onClick={()=>window.location.assign("/crew/training?section=history")}
+      sx={{color:"#FFF",borderColor:"rgba(255,255,255,.72)",textTransform:"none",fontWeight:850,"&:hover":{borderColor:"#FFF",background:"rgba(255,255,255,.08)"}}}
+    >
+      Employee matrix
+    </Button>
+  )}
   {canDelegateTraining && (
     <Button
       variant="outlined"
@@ -1202,11 +1230,15 @@ return <Tooltip key={`${day.date}-${item.id || item.trainingName}`} title={`${it
 
 <Box sx={{display:"flex",gap:1,mb:2,position:"sticky",top:0,zIndex:5,py:1,background:"#FFFFFF"}}>
 {["All","Shift","Non-shift"].map((value)=><Button key={value} size="small" variant={employeeTypeFilter===value ? "contained" : "outlined"} onClick={()=>setEmployeeTypeFilter(value)}>{value} employees</Button>)}
+<TextField select size="small" label="Department" value={departmentFilter} onChange={(event)=>setDepartmentFilter(event.target.value)} sx={{minWidth:210}}>
+<MenuItem value="All">All departments</MenuItem>
+{availableDepartments.map((department)=><MenuItem key={department} value={department}>{department}</MenuItem>)}
+</TextField>
 <Stack direction="row" spacing={1} alignItems="center" sx={{ml:1}}><Chip size="small" label="Holiday" sx={{background:"#E9D5FF",color:"#6B21A8",border:"1px solid #A855F7",fontWeight:900}}/><Typography variant="caption">Full block: non-shift · H marker: shift duty continues</Typography></Stack>
 <Chip sx={{ml:"auto"}} color="primary" label={`${selectedEmployees.length} selected`} />
 </Box>
 
-{Object.keys(calendarData).filter((group)=>calendarData[group].some((emp)=>employeeTypeFilter==="All" || emp.employeeType===employeeTypeFilter)).map(group => (
+{Object.keys(calendarData).filter((group)=>calendarData[group].some((emp)=>(employeeTypeFilter==="All" || emp.employeeType===employeeTypeFilter) && (departmentFilter==="All" || emp.organization===departmentFilter))).map(group => (
 
 <Box key={group} sx={{mb:4}}>
 
@@ -1236,7 +1268,7 @@ return <TableCell key={date} title={holidayName || undefined} align="center" sx=
 
 <TableBody>
 
-{calendarData[group].filter((emp)=>employeeTypeFilter==="All" || emp.employeeType===employeeTypeFilter).map(emp => (
+{calendarData[group].filter((emp)=>(employeeTypeFilter==="All" || emp.employeeType===employeeTypeFilter) && (departmentFilter==="All" || emp.organization===departmentFilter)).map(emp => (
 
 <TableRow key={emp.employeeId} hover>
 
@@ -1258,7 +1290,7 @@ const hasLeave=Boolean(duty?.leaveStatus && !["Rejected","Cancelled","Withdrawn"
 const isHoliday=Boolean(duty?.isHoliday)
 const isNonShiftHoliday=isHoliday && emp.employeeType==="Non-shift"
 const trainingLines=[...(duty?.trainingLines || [])]
-if(isTrainingDate) trainingLines.push({id:"proposed",trainingName:trainingObj?.trainingName || selectedTraining,status:"Proposed"})
+if(isTrainingDate) trainingLines.push({id:"proposed",trainingName:selectedTraining,status:"Proposed"})
 const uniqueTrainingLines=trainingLines.filter((line,index,list)=>list.findIndex((item)=>`${item.id}:${item.trainingName}`===`${line.id}:${line.trainingName}`)===index)
 
 return(
@@ -1289,7 +1321,7 @@ minWidth:118
 </Typography>
 {isNonShiftHoliday && <Typography variant="caption" title={duty.holidayName} sx={{display:"block",color:"#6B21A8",fontWeight:900}}>{duty.holidayName}</Typography>}
 {uniqueTrainingLines.map((line)=><Tooltip key={`${line.id}-${line.trainingName}`} title={`${line.trainingName} · ${line.status || "Training"}`} arrow>
-<Box sx={{mt:.45,px:.65,py:.3,borderRadius:1,color:"#FFFFFF",background:trainingLineColor(line.trainingName),fontSize:9,fontWeight:900,lineHeight:1.2,whiteSpace:"normal"}}>{line.status==="Proposed" ? "Proposed · " : ""}{line.trainingName}</Box>
+<Box sx={{mt:.45,px:.65,py:.3,borderRadius:1,color:"#FFFFFF",background:trainingLineColor(line.trainingName),fontSize:9,fontWeight:900,lineHeight:1.2,whiteSpace:"normal"}}>{line.status==="Proposed" ? "Selected training" : "Already nominated"}</Box>
 </Tooltip>)}
 {uniqueTrainingLines.length>1 && <Chip size="small" label={`${uniqueTrainingLines.length} training overlap`} sx={{mt:.5,height:19,background:"#FEE2E2",color:"#991B1B",fontSize:9,fontWeight:950}} />}
 {hasLeave && <Typography variant="caption" sx={{display:"block",color:"#DC2626",fontWeight:900}}>Leave: {duty.stationLeaveOnly ? "Station Leave" : `${duty.leaveType || duty.leaveStatus}${duty.stationLeave ? " + Station Leave" : ""}`}</Typography>}
