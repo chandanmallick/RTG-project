@@ -1,0 +1,62 @@
+{"kind":"deck","id":"pr/xjqbmf","name":"Deck"}
+{"kind":"layout","layoutId":"d992ee58-a243-45e1-a816-a5f0f9e43027","name":"Master","type":"master"}
+{"kind":"layout","layoutId":"5919e5cb-a1d6-420a-93e5-d658ba51a24c","name":"Title Slide","type":"title"}
+{"kind":"slide","id":"sl/kgifdi","slide":1,"title":"COMPASS: Integrated Platform for Operations Management","textShapes":28}
+{"kind":"shape","id":"sh/s721ofe1","slide":1,"bbox":[0,0,1280,12]}
+{"kind":"textbox","id":"sh/r6tkfaxg","slide":1,"text":"COMPASS: Integrated Platform for Operations Management","textPreview":"COMPASS: Integrated Platform for Operations Management","textChars":54,"textLines":1,"bbox":[42,24,930,48]}
+{"kind":"textbox","id":"sh/q5kjm5wb","slide":1,"text":"GRID-INDIA","textPreview":"GRID-INDIA","textChars":10,"textLines":1,"bbox":[1010,26,225,34]}
+{"kind":"textbox","id":"sh/1wv2lkfy","slide":1,"text":"Operational digital ecosystem","textPreview":"Operational digital ecosystem","textChars":29,"textLines":1,"bbox":[1010,56,225,22]}
+{"kind":"shape","id":"sh/0vm1sfed","slide":1,"bbox":[42,82,1196,76]}
+{"kind":"shape","id":"sh/fudkjuxs","slide":1,"bbox":[432,92,2,56]}
+{"kind":"shape","id":"sh/et4jqpw7","slide":1,"bbox":[835,92,2,56]}
+{"kind":"textbox","id":"sh/h0b290fe","slide":1,"text":"PURPOSE","textPreview":"PURPOSE","textChars":7,"textLines":1,"bbox":[60,88,350,24]}
+{"kind":"textbox","id":"sh/gzi1gvet","slide":1,"text":"• Common operational workspace\n• Faster coordination and decisions","textPreview":"• Common operational workspace | • Faster coordination and decisions","textChars":66,"textLines":2,"bbox":[60,112,350,38]}
+{"kind":"textbox","id":"sh/mt4rap0r","slide":1,"text":"INPUTS","textPreview":"INPUTS","textChars":6,"textLines":1,"bbox":[452,88,360,24]}
+{"kind":"textbox","id":"sh/nud83uhc","slide":1,"text":"• RTG, schedule, generation and frequency data\n• Rosters, requests and controlled documents","textPreview":"• RTG, schedule, generation and frequency data | • Rosters, requests and controlled documents","textChars":91,"textLines":2,"bbox":[452,112,360,38]}
+{"kind":"textbox","id":"sh/ovm9czix","slide":1,"text":"OUTCOMES","textPreview":"OUTCOMES","textChars":8,"textLines":1,"bbox":[855,88,360,24]}
+{"kind":"textbox","id":"sh/9gfq54zi","slide":1,"text":"• Validated information and real-time visibility\n• Traceable workflows and ready reports","textPreview":"• Validated information and real-time visibility | • Traceable workflows and ready reports","textChars":88,"textLines":2,"bbox":[855,112,360,38]}
+{"kind":"shape","id":"sh/ahore903","slide":1,"bbox":[382,390,516,3]}
+{"kind":"shape","id":"sh/vix87eho","slide":1,"bbox":[638,214,3,353]}
+{"kind":"shape","id":"sh/wj69gzit","slide":1,"bbox":[360,255,278,3]}
+{"kind":"shape","id":"sh/xkfa94ze","slide":1,"bbox":[360,367,278,3]}
+{"kind":"shape","id":"sh/ilori90z","slide":1,"bbox":[360,479,278,3]}
+{"kind":"shape","id":"sh/jmxsbehk","slide":1,"bbox":[360,591,278,3]}
+{"kind":"shape","id":"sh/fqh8zexs","slide":1,"bbox":[641,283,278,3]}
+{"kind":"shape","id":"sh/up87q9w7","slide":1,"bbox":[641,423,278,3]}
+{"kind":"shape","id":"sh/hszq1ofi","slide":1,"bbox":[641,563,278,3]}
+{"kind":"shape","id":"sh/grqpsjed","slide":1,"bbox":[500,300,280,184]}
+{"kind":"textbox","id":"sh/7mx8vexg","slide":1,"text":"COMPASS","textPreview":"COMPASS","textChars":7,"textLines":1,"bbox":[526,322,228,42]}
+{"kind":"textbox","id":"sh/6lo7m9wv","slide":1,"text":"Common operational platform","textPreview":"Common operational platform","textChars":27,"textLines":1,"bbox":[526,366,228,30]}
+{"kind":"textbox","id":"sh/tozqx4fm","slide":1,"text":"Shared data • role-based workflows\nreal-time visibility • governed outputs","textPreview":"Shared data • role-based workflows | real-time visibility • governed outputs","textChars":74,"textLines":2,"bbox":[530,405,220,55]}
+{"kind":"shape","id":"sh/snqpoje1","slide":1,"bbox":[42,180,340,90]}
+{"kind":"shape","id":"sh/jix8ruxk","slide":1,"bbox":[54,194,8,62]}
+{"kind":"textbox","id":"sh/ixo7ipgz","slide":1,"text":"Integrated Crew Management","textPreview":"Integrated Crew Management","textChars":26,"textLines":1,"bbox":[72,189,296,31]}
+{"kind":"textbox","id":"sh/or2dcbql","slide":1,"text":"Duty roster, leave and training\nApprovals, replacement and coverage","textPreview":"Duty roster, leave and training | Approvals, replacement and coverage","textChars":67,"textLines":2,"bbox":[72,220,296,42]}
+{"kind":"shape","id":"sh/pcbe5wr6","slide":1,"bbox":[42,292,340,90]}
+{"kind":"shape","id":"sh/2p0va18f","slide":1,"bbox":[54,306,8,62]}
+{"kind":"textbox","id":"sh/nqtw3690","slide":1,"text":"Health Card & RTG Availability","textPreview":"Health Card & RTG Availability","textChars":30,"textLines":1,"bbox":[72,301,296,31]}
+{"kind":"textbox","id":"sh/cf2xgbqh","slide":1,"text":"Generation and schedule snapshots\nTelemetry availability and integrity","textPreview":"Generation and schedule snapshots | Telemetry availability and integrity","textChars":70,"textLines":2,"bbox":[72,332,296,42]}
+{"kind":"shape","id":"sh/xgbe9gr2","slide":1,"bbox":[42,404,340,90]}
+{"kind":"shape","id":"sh/adkfe18r","slide":1,"bbox":[54,418,8,62]}
+{"kind":"textbox","id":"sh/betw769c","slide":1,"text":"Data Validation","textPreview":"Data Validation","textChars":15,"textLines":1,"bbox":[72,413,296,31]}
+{"kind":"textbox","id":"sh/sjid4rad","slide":1,"text":"Quality and completeness checks\nExceptions and correction workflow","textPreview":"Quality and completeness checks | Exceptions and correction workflow","textChars":66,"textLines":2,"bbox":[72,444,296,42]}
+{"kind":"shape","id":"sh/dkrexcry","slide":1,"bbox":[42,516,340,90]}
+{"kind":"shape","id":"sh/5snetgve","slide":1,"bbox":[54,530,8,62]}
+{"kind":"textbox","id":"sh/krux0bet","slide":1,"text":"Report Generation","textPreview":"Report Generation","textChars":17,"textLines":1,"bbox":[72,525,296,31]}
+{"kind":"textbox","id":"sh/jqlwr6d8","slide":1,"text":"Standard and custom reports\nExport-ready charts and summaries","textPreview":"Standard and custom reports | Export-ready charts and summaries","textChars":61,"textLines":2,"bbox":[72,556,296,42]}
+{"kind":"shape","id":"sh/ipcfy1w3","slide":1,"bbox":[898,208,340,90]}
+{"kind":"shape","id":"sh/xo3epwvi","slide":1,"bbox":[910,222,8,62]}
+{"kind":"textbox","id":"sh/wnuxwbex","slide":1,"text":"Frequency Event Analysis","textPreview":"Frequency Event Analysis","textChars":24,"textLines":1,"bbox":[928,217,296,31]}
+{"kind":"textbox","id":"sh/vmlwn6dc","slide":1,"text":"Deviation trends and event timeline\nAlerts and disturbance review","textPreview":"Deviation trends and event timeline | Alerts and disturbance review","textChars":65,"textLines":2,"bbox":[928,248,296,42]}
+{"kind":"shape","id":"sh/alcfu1wr","slide":1,"bbox":[898,348,340,90]}
+{"kind":"shape","id":"sh/9kjelwv6","slide":1,"bbox":[910,362,8,62]}
+{"kind":"textbox","id":"sh/8zadsrel","slide":1,"text":"Operational Dashboards","textPreview":"Operational Dashboards","textChars":22,"textLines":1,"bbox":[928,357,296,31]}
+{"kind":"textbox","id":"sh/y58b2xcj","slide":1,"text":"PSP and national plots\nSchedule, generation and deviation views","textPreview":"PSP and national plots | Schedule, generation and deviation views","textChars":63,"textLines":2,"bbox":[928,388,296,42]}
+{"kind":"shape","id":"sh/zqhcv2t4","slide":1,"bbox":[898,488,340,90]}
+{"kind":"shape","id":"sh/0rqt47up","slide":1,"bbox":[910,502,8,62]}
+{"kind":"textbox","id":"sh/lszuxcba","slide":1,"text":"Document Repository","textPreview":"Document Repository","textChars":19,"textLines":1,"bbox":[928,497,296,31]}
+{"kind":"textbox","id":"sh/q18bydcn","slide":1,"text":"Meeting records and controlled files\nSearch, retrieval and version tracking","textPreview":"Meeting records and controlled files | Search, retrieval and version tracking","textChars":75,"textLines":2,"bbox":[928,528,296,42]}
+{"kind":"textbox","id":"sh/b2hcrit8","slide":1,"text":"Outcome: one operational view for faster coordination, consistent decisions and traceable reporting","textPreview":"Outcome: one operational view for faster coordination, consistent decisions and traceable reporting","textChars":99,"textLines":1,"bbox":[42,650,1196,28]}
+{"kind":"shape","id":"sh/c3qt0nud","slide":1,"bbox":[42,648,1196,32]}
+{"kind":"textbox","id":"sh/d4zutsby","slide":1,"text":"Outcome: one operational view for faster coordination, consistent decisions and traceable reporting","textPreview":"Outcome: one operational view for faster coordination, consistent decisions and traceable reporting","textChars":99,"textLines":1,"bbox":[54,650,1172,27]}
+{"kind":"notes","id":"nt/kgifdi","slide":1,"text":"Content based on the user-provided COMPASS module reference image. No external factual claims added."}

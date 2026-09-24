@@ -2,6 +2,7 @@ import os
 from pathlib import Path
 
 from dotenv import load_dotenv
+from config.database_policy import internal_database_uri
 
 
 load_dotenv(Path(__file__).resolve().parents[1] / ".env")
@@ -11,10 +12,10 @@ load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 # MONGO CONFIG
 # =========================================
 
-MONGO_URI = os.getenv(
+MONGO_URI = internal_database_uri(os.getenv(
     "MONGO_URI",
     "mongodb://10.3.230.60:27017/"
-)
+))
 
 DB_NAME = os.getenv(
     "MONGO_DB_NAME",

@@ -1,12 +1,12 @@
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
-import os
 
 from bson import ObjectId
 from fastapi import APIRouter, HTTPException, Query
 from pymongo import UpdateOne
 
 from crew_legacy.database.database_mongo import (
+    LOCAL_DATABASE_NAME,
     compensatory_off_collection,
     cycle_config_collection,
     employee_collection,
@@ -23,7 +23,7 @@ from crew_legacy.database.database_mongo import (
 
 router = APIRouter(prefix="/api/crew", tags=["Crew Management"])
 
-CREW_DB_NAME = os.getenv("CREW_ATLAS_MONGO_DB_NAME", os.getenv("CREW_MONGO_DB_NAME", "crew_management"))
+CREW_DB_NAME = LOCAL_DATABASE_NAME
 
 employees = employee_collection
 groups = roster_group_collection

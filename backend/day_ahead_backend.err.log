@@ -104,14 +104,14 @@ Execution of job "PipelineRunner.run_schedule_pipeline (trigger: interval[0:05:0
 Execution of job "PipelineRunner.run_schedule_pipeline (trigger: interval[0:05:00], next run at: 2026-09-04 02:19:53 IST)" skipped: maximum number of running instances reached (1)
 Execution of job "PipelineRunner.run_schedule_pipeline (trigger: interval[0:05:00], next run at: 2026-09-04 02:24:53 IST)" skipped: maximum number of running instances reached (1)
 Execution of job "PipelineRunner.run_schedule_pipeline (trigger: interval[0:05:00], next run at: 2026-09-04 02:29:53 IST)" skipped: maximum number of running instances reached (1)
-Job "sync_employee_directory_to_atlas (trigger: cron[hour='2', minute='30'], next run at: 2026-09-05 02:30:00 IST)" raised an exception
+Job "sync_employee_directory_to_retired_remote (trigger: cron[hour='2', minute='30'], next run at: 2026-09-05 02:30:00 IST)" raised an exception
 Traceback (most recent call last):
   File "D:\RTG-project\.venv\Lib\site-packages\apscheduler\executors\base.py", line 131, in run_job
     retval = job.func(*job.args, **job.kwargs)
-  File "D:\RTG-project\backend\crew_legacy\admin_logic\atlas_sync.py", line 71, in sync_employee_directory_to_atlas
+  File "D:\RTG-project\backend\crew_legacy\admin_logic\retired_remote_sync.py", line 71, in sync_employee_directory_to_retired_remote
     _mirror_collection(name, dry_run=dry_run)
     ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
-  File "D:\RTG-project\backend\crew_legacy\admin_logic\atlas_sync.py", line 48, in _mirror_collection
+  File "D:\RTG-project\backend\crew_legacy\admin_logic\retired_remote_sync.py", line 48, in _mirror_collection
     "targetCountBefore": target.count_documents({}),
                          ~~~~~~~~~~~~~~~~~~~~~~^^^^
   File "D:\RTG-project\.venv\Lib\site-packages\pymongo\synchronous\collection.py", line 2162, in count_documents
@@ -179,7 +179,7 @@ Traceback (most recent call last):
     raise ServerSelectionTimeoutError(
         f"{self._error_message(selector)}, Timeout: {timeout}s, Topology Description: {self.description!r}"
     )
-pymongo.errors.ServerSelectionTimeoutError: ac-o8rxgtb-shard-00-00.kudznxl.mongodb.net:27017: timed out (configured timeouts: socketTimeoutMS: 20000.0ms, connectTimeoutMS: 20000.0ms),ac-o8rxgtb-shard-00-01.kudznxl.mongodb.net:27017: timed out (configured timeouts: socketTimeoutMS: 20000.0ms, connectTimeoutMS: 20000.0ms),ac-o8rxgtb-shard-00-02.kudznxl.mongodb.net:27017: timed out (configured timeouts: socketTimeoutMS: 20000.0ms, connectTimeoutMS: 20000.0ms), Timeout: 10.0s, Topology Description: <TopologyDescription id: 6a9967135b60afc29d61d34e, topology_type: ReplicaSetNoPrimary, servers: [<ServerDescription ('ac-o8rxgtb-shard-00-00.kudznxl.mongodb.net', 27017) server_type: Unknown, rtt: None, error=NetworkTimeout('ac-o8rxgtb-shard-00-00.kudznxl.mongodb.net:27017: timed out (configured timeouts: socketTimeoutMS: 20000.0ms, connectTimeoutMS: 20000.0ms)')>, <ServerDescription ('ac-o8rxgtb-shard-00-01.kudznxl.mongodb.net', 27017) server_type: Unknown, rtt: None, error=NetworkTimeout('ac-o8rxgtb-shard-00-01.kudznxl.mongodb.net:27017: timed out (configured timeouts: socketTimeoutMS: 20000.0ms, connectTimeoutMS: 20000.0ms)')>, <ServerDescription ('ac-o8rxgtb-shard-00-02.kudznxl.mongodb.net', 27017) server_type: Unknown, rtt: None, error=NetworkTimeout('ac-o8rxgtb-shard-00-02.kudznxl.mongodb.net:27017: timed out (configured timeouts: socketTimeoutMS: 20000.0ms, connectTimeoutMS: 20000.0ms)')>]>
+pymongo.errors.ServerSelectionTimeoutError: [removed-external-database-host]:27017: timed out (configured timeouts: socketTimeoutMS: 20000.0ms, connectTimeoutMS: 20000.0ms),[removed-external-database-host]:27017: timed out (configured timeouts: socketTimeoutMS: 20000.0ms, connectTimeoutMS: 20000.0ms),[removed-external-database-host]:27017: timed out (configured timeouts: socketTimeoutMS: 20000.0ms, connectTimeoutMS: 20000.0ms), Timeout: 10.0s, Topology Description: <TopologyDescription id: 6a9967135b60afc29d61d34e, topology_type: ReplicaSetNoPrimary, servers: [<ServerDescription ('[removed-external-database-host]', 27017) server_type: Unknown, rtt: None, error=NetworkTimeout('[removed-external-database-host]:27017: timed out (configured timeouts: socketTimeoutMS: 20000.0ms, connectTimeoutMS: 20000.0ms)')>, <ServerDescription ('[removed-external-database-host]', 27017) server_type: Unknown, rtt: None, error=NetworkTimeout('[removed-external-database-host]:27017: timed out (configured timeouts: socketTimeoutMS: 20000.0ms, connectTimeoutMS: 20000.0ms)')>, <ServerDescription ('[removed-external-database-host]', 27017) server_type: Unknown, rtt: None, error=NetworkTimeout('[removed-external-database-host]:27017: timed out (configured timeouts: socketTimeoutMS: 20000.0ms, connectTimeoutMS: 20000.0ms)')>]>
 Execution of job "PipelineRunner.run_schedule_pipeline (trigger: interval[0:05:00], next run at: 2026-09-04 02:34:53 IST)" skipped: maximum number of running instances reached (1)
 Execution of job "PipelineRunner.run_schedule_pipeline (trigger: interval[0:05:00], next run at: 2026-09-04 02:39:53 IST)" skipped: maximum number of running instances reached (1)
 Execution of job "PipelineRunner.run_schedule_pipeline (trigger: interval[0:05:00], next run at: 2026-09-04 02:44:53 IST)" skipped: maximum number of running instances reached (1)
@@ -515,14 +515,14 @@ Execution of job "PipelineRunner.run_schedule_pipeline (trigger: interval[0:05:0
 Execution of job "PipelineRunner.run_schedule_pipeline (trigger: interval[0:05:00], next run at: 2026-09-05 02:19:53 IST)" skipped: maximum number of running instances reached (1)
 Execution of job "PipelineRunner.run_schedule_pipeline (trigger: interval[0:05:00], next run at: 2026-09-05 02:24:53 IST)" skipped: maximum number of running instances reached (1)
 Execution of job "PipelineRunner.run_schedule_pipeline (trigger: interval[0:05:00], next run at: 2026-09-05 02:29:53 IST)" skipped: maximum number of running instances reached (1)
-Job "sync_employee_directory_to_atlas (trigger: cron[hour='2', minute='30'], next run at: 2026-09-06 02:30:00 IST)" raised an exception
+Job "sync_employee_directory_to_retired_remote (trigger: cron[hour='2', minute='30'], next run at: 2026-09-06 02:30:00 IST)" raised an exception
 Traceback (most recent call last):
   File "D:\RTG-project\.venv\Lib\site-packages\apscheduler\executors\base.py", line 131, in run_job
     retval = job.func(*job.args, **job.kwargs)
-  File "D:\RTG-project\backend\crew_legacy\admin_logic\atlas_sync.py", line 71, in sync_employee_directory_to_atlas
+  File "D:\RTG-project\backend\crew_legacy\admin_logic\retired_remote_sync.py", line 71, in sync_employee_directory_to_retired_remote
     _mirror_collection(name, dry_run=dry_run)
     ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
-  File "D:\RTG-project\backend\crew_legacy\admin_logic\atlas_sync.py", line 48, in _mirror_collection
+  File "D:\RTG-project\backend\crew_legacy\admin_logic\retired_remote_sync.py", line 48, in _mirror_collection
     "targetCountBefore": target.count_documents({}),
                          ~~~~~~~~~~~~~~~~~~~~~~^^^^
   File "D:\RTG-project\.venv\Lib\site-packages\pymongo\synchronous\collection.py", line 2162, in count_documents
@@ -590,7 +590,7 @@ Traceback (most recent call last):
     raise ServerSelectionTimeoutError(
         f"{self._error_message(selector)}, Timeout: {timeout}s, Topology Description: {self.description!r}"
     )
-pymongo.errors.ServerSelectionTimeoutError: ac-o8rxgtb-shard-00-00.kudznxl.mongodb.net:27017: timed out (configured timeouts: socketTimeoutMS: 20000.0ms, connectTimeoutMS: 20000.0ms),ac-o8rxgtb-shard-00-01.kudznxl.mongodb.net:27017: timed out (configured timeouts: socketTimeoutMS: 20000.0ms, connectTimeoutMS: 20000.0ms),ac-o8rxgtb-shard-00-02.kudznxl.mongodb.net:27017: timed out (configured timeouts: socketTimeoutMS: 20000.0ms, connectTimeoutMS: 20000.0ms), Timeout: 10.0s, Topology Description: <TopologyDescription id: 6a9967135b60afc29d61d34e, topology_type: ReplicaSetNoPrimary, servers: [<ServerDescription ('ac-o8rxgtb-shard-00-00.kudznxl.mongodb.net', 27017) server_type: Unknown, rtt: None, error=NetworkTimeout('ac-o8rxgtb-shard-00-00.kudznxl.mongodb.net:27017: timed out (configured timeouts: socketTimeoutMS: 20000.0ms, connectTimeoutMS: 20000.0ms)')>, <ServerDescription ('ac-o8rxgtb-shard-00-01.kudznxl.mongodb.net', 27017) server_type: Unknown, rtt: None, error=NetworkTimeout('ac-o8rxgtb-shard-00-01.kudznxl.mongodb.net:27017: timed out (configured timeouts: socketTimeoutMS: 20000.0ms, connectTimeoutMS: 20000.0ms)')>, <ServerDescription ('ac-o8rxgtb-shard-00-02.kudznxl.mongodb.net', 27017) server_type: Unknown, rtt: None, error=NetworkTimeout('ac-o8rxgtb-shard-00-02.kudznxl.mongodb.net:27017: timed out (configured timeouts: socketTimeoutMS: 20000.0ms, connectTimeoutMS: 20000.0ms)')>]>
+pymongo.errors.ServerSelectionTimeoutError: [removed-external-database-host]:27017: timed out (configured timeouts: socketTimeoutMS: 20000.0ms, connectTimeoutMS: 20000.0ms),[removed-external-database-host]:27017: timed out (configured timeouts: socketTimeoutMS: 20000.0ms, connectTimeoutMS: 20000.0ms),[removed-external-database-host]:27017: timed out (configured timeouts: socketTimeoutMS: 20000.0ms, connectTimeoutMS: 20000.0ms), Timeout: 10.0s, Topology Description: <TopologyDescription id: 6a9967135b60afc29d61d34e, topology_type: ReplicaSetNoPrimary, servers: [<ServerDescription ('[removed-external-database-host]', 27017) server_type: Unknown, rtt: None, error=NetworkTimeout('[removed-external-database-host]:27017: timed out (configured timeouts: socketTimeoutMS: 20000.0ms, connectTimeoutMS: 20000.0ms)')>, <ServerDescription ('[removed-external-database-host]', 27017) server_type: Unknown, rtt: None, error=NetworkTimeout('[removed-external-database-host]:27017: timed out (configured timeouts: socketTimeoutMS: 20000.0ms, connectTimeoutMS: 20000.0ms)')>, <ServerDescription ('[removed-external-database-host]', 27017) server_type: Unknown, rtt: None, error=NetworkTimeout('[removed-external-database-host]:27017: timed out (configured timeouts: socketTimeoutMS: 20000.0ms, connectTimeoutMS: 20000.0ms)')>]>
 Execution of job "PipelineRunner.run_schedule_pipeline (trigger: interval[0:05:00], next run at: 2026-09-05 02:34:53 IST)" skipped: maximum number of running instances reached (1)
 Execution of job "PipelineRunner.run_schedule_pipeline (trigger: interval[0:05:00], next run at: 2026-09-05 02:39:53 IST)" skipped: maximum number of running instances reached (1)
 Execution of job "PipelineRunner.run_schedule_pipeline (trigger: interval[0:05:00], next run at: 2026-09-05 02:44:53 IST)" skipped: maximum number of running instances reached (1)
@@ -926,14 +926,14 @@ Execution of job "PipelineRunner.run_schedule_pipeline (trigger: interval[0:05:0
 Execution of job "PipelineRunner.run_schedule_pipeline (trigger: interval[0:05:00], next run at: 2026-09-06 02:19:53 IST)" skipped: maximum number of running instances reached (1)
 Execution of job "PipelineRunner.run_schedule_pipeline (trigger: interval[0:05:00], next run at: 2026-09-06 02:24:53 IST)" skipped: maximum number of running instances reached (1)
 Execution of job "PipelineRunner.run_schedule_pipeline (trigger: interval[0:05:00], next run at: 2026-09-06 02:29:53 IST)" skipped: maximum number of running instances reached (1)
-Job "sync_employee_directory_to_atlas (trigger: cron[hour='2', minute='30'], next run at: 2026-09-07 02:30:00 IST)" raised an exception
+Job "sync_employee_directory_to_retired_remote (trigger: cron[hour='2', minute='30'], next run at: 2026-09-07 02:30:00 IST)" raised an exception
 Traceback (most recent call last):
   File "D:\RTG-project\.venv\Lib\site-packages\apscheduler\executors\base.py", line 131, in run_job
     retval = job.func(*job.args, **job.kwargs)
-  File "D:\RTG-project\backend\crew_legacy\admin_logic\atlas_sync.py", line 71, in sync_employee_directory_to_atlas
+  File "D:\RTG-project\backend\crew_legacy\admin_logic\retired_remote_sync.py", line 71, in sync_employee_directory_to_retired_remote
     _mirror_collection(name, dry_run=dry_run)
     ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
-  File "D:\RTG-project\backend\crew_legacy\admin_logic\atlas_sync.py", line 48, in _mirror_collection
+  File "D:\RTG-project\backend\crew_legacy\admin_logic\retired_remote_sync.py", line 48, in _mirror_collection
     "targetCountBefore": target.count_documents({}),
                          ~~~~~~~~~~~~~~~~~~~~~~^^^^
   File "D:\RTG-project\.venv\Lib\site-packages\pymongo\synchronous\collection.py", line 2162, in count_documents
@@ -1001,7 +1001,7 @@ Traceback (most recent call last):
     raise ServerSelectionTimeoutError(
         f"{self._error_message(selector)}, Timeout: {timeout}s, Topology Description: {self.description!r}"
     )
-pymongo.errors.ServerSelectionTimeoutError: ac-o8rxgtb-shard-00-00.kudznxl.mongodb.net:27017: timed out (configured timeouts: socketTimeoutMS: 20000.0ms, connectTimeoutMS: 20000.0ms),ac-o8rxgtb-shard-00-01.kudznxl.mongodb.net:27017: timed out (configured timeouts: socketTimeoutMS: 20000.0ms, connectTimeoutMS: 20000.0ms),ac-o8rxgtb-shard-00-02.kudznxl.mongodb.net:27017: timed out (configured timeouts: socketTimeoutMS: 20000.0ms, connectTimeoutMS: 20000.0ms), Timeout: 10.0s, Topology Description: <TopologyDescription id: 6a9967135b60afc29d61d34e, topology_type: ReplicaSetNoPrimary, servers: [<ServerDescription ('ac-o8rxgtb-shard-00-00.kudznxl.mongodb.net', 27017) server_type: Unknown, rtt: None, error=NetworkTimeout('ac-o8rxgtb-shard-00-00.kudznxl.mongodb.net:27017: timed out (configured timeouts: socketTimeoutMS: 20000.0ms, connectTimeoutMS: 20000.0ms)')>, <ServerDescription ('ac-o8rxgtb-shard-00-01.kudznxl.mongodb.net', 27017) server_type: Unknown, rtt: None, error=NetworkTimeout('ac-o8rxgtb-shard-00-01.kudznxl.mongodb.net:27017: timed out (configured timeouts: socketTimeoutMS: 20000.0ms, connectTimeoutMS: 20000.0ms)')>, <ServerDescription ('ac-o8rxgtb-shard-00-02.kudznxl.mongodb.net', 27017) server_type: Unknown, rtt: None, error=NetworkTimeout('ac-o8rxgtb-shard-00-02.kudznxl.mongodb.net:27017: timed out (configured timeouts: socketTimeoutMS: 20000.0ms, connectTimeoutMS: 20000.0ms)')>]>
+pymongo.errors.ServerSelectionTimeoutError: [removed-external-database-host]:27017: timed out (configured timeouts: socketTimeoutMS: 20000.0ms, connectTimeoutMS: 20000.0ms),[removed-external-database-host]:27017: timed out (configured timeouts: socketTimeoutMS: 20000.0ms, connectTimeoutMS: 20000.0ms),[removed-external-database-host]:27017: timed out (configured timeouts: socketTimeoutMS: 20000.0ms, connectTimeoutMS: 20000.0ms), Timeout: 10.0s, Topology Description: <TopologyDescription id: 6a9967135b60afc29d61d34e, topology_type: ReplicaSetNoPrimary, servers: [<ServerDescription ('[removed-external-database-host]', 27017) server_type: Unknown, rtt: None, error=NetworkTimeout('[removed-external-database-host]:27017: timed out (configured timeouts: socketTimeoutMS: 20000.0ms, connectTimeoutMS: 20000.0ms)')>, <ServerDescription ('[removed-external-database-host]', 27017) server_type: Unknown, rtt: None, error=NetworkTimeout('[removed-external-database-host]:27017: timed out (configured timeouts: socketTimeoutMS: 20000.0ms, connectTimeoutMS: 20000.0ms)')>, <ServerDescription ('[removed-external-database-host]', 27017) server_type: Unknown, rtt: None, error=NetworkTimeout('[removed-external-database-host]:27017: timed out (configured timeouts: socketTimeoutMS: 20000.0ms, connectTimeoutMS: 20000.0ms)')>]>
 Execution of job "PipelineRunner.run_schedule_pipeline (trigger: interval[0:05:00], next run at: 2026-09-06 02:34:53 IST)" skipped: maximum number of running instances reached (1)
 Execution of job "PipelineRunner.run_schedule_pipeline (trigger: interval[0:05:00], next run at: 2026-09-06 02:39:53 IST)" skipped: maximum number of running instances reached (1)
 Execution of job "PipelineRunner.run_schedule_pipeline (trigger: interval[0:05:00], next run at: 2026-09-06 02:44:53 IST)" skipped: maximum number of running instances reached (1)
@@ -1337,14 +1337,14 @@ Execution of job "PipelineRunner.run_schedule_pipeline (trigger: interval[0:05:0
 Execution of job "PipelineRunner.run_schedule_pipeline (trigger: interval[0:05:00], next run at: 2026-09-07 02:19:53 IST)" skipped: maximum number of running instances reached (1)
 Execution of job "PipelineRunner.run_schedule_pipeline (trigger: interval[0:05:00], next run at: 2026-09-07 02:24:53 IST)" skipped: maximum number of running instances reached (1)
 Execution of job "PipelineRunner.run_schedule_pipeline (trigger: interval[0:05:00], next run at: 2026-09-07 02:29:53 IST)" skipped: maximum number of running instances reached (1)
-Job "sync_employee_directory_to_atlas (trigger: cron[hour='2', minute='30'], next run at: 2026-09-08 02:30:00 IST)" raised an exception
+Job "sync_employee_directory_to_retired_remote (trigger: cron[hour='2', minute='30'], next run at: 2026-09-08 02:30:00 IST)" raised an exception
 Traceback (most recent call last):
   File "D:\RTG-project\.venv\Lib\site-packages\apscheduler\executors\base.py", line 131, in run_job
     retval = job.func(*job.args, **job.kwargs)
-  File "D:\RTG-project\backend\crew_legacy\admin_logic\atlas_sync.py", line 71, in sync_employee_directory_to_atlas
+  File "D:\RTG-project\backend\crew_legacy\admin_logic\retired_remote_sync.py", line 71, in sync_employee_directory_to_retired_remote
     _mirror_collection(name, dry_run=dry_run)
     ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
-  File "D:\RTG-project\backend\crew_legacy\admin_logic\atlas_sync.py", line 48, in _mirror_collection
+  File "D:\RTG-project\backend\crew_legacy\admin_logic\retired_remote_sync.py", line 48, in _mirror_collection
     "targetCountBefore": target.count_documents({}),
                          ~~~~~~~~~~~~~~~~~~~~~~^^^^
   File "D:\RTG-project\.venv\Lib\site-packages\pymongo\synchronous\collection.py", line 2162, in count_documents
@@ -1412,7 +1412,7 @@ Traceback (most recent call last):
     raise ServerSelectionTimeoutError(
         f"{self._error_message(selector)}, Timeout: {timeout}s, Topology Description: {self.description!r}"
     )
-pymongo.errors.ServerSelectionTimeoutError: ac-o8rxgtb-shard-00-00.kudznxl.mongodb.net:27017: timed out (configured timeouts: socketTimeoutMS: 20000.0ms, connectTimeoutMS: 20000.0ms),ac-o8rxgtb-shard-00-01.kudznxl.mongodb.net:27017: timed out (configured timeouts: socketTimeoutMS: 20000.0ms, connectTimeoutMS: 20000.0ms),ac-o8rxgtb-shard-00-02.kudznxl.mongodb.net:27017: timed out (configured timeouts: socketTimeoutMS: 20000.0ms, connectTimeoutMS: 20000.0ms), Timeout: 10.0s, Topology Description: <TopologyDescription id: 6a9967135b60afc29d61d34e, topology_type: ReplicaSetNoPrimary, servers: [<ServerDescription ('ac-o8rxgtb-shard-00-00.kudznxl.mongodb.net', 27017) server_type: Unknown, rtt: None, error=NetworkTimeout('ac-o8rxgtb-shard-00-00.kudznxl.mongodb.net:27017: timed out (configured timeouts: socketTimeoutMS: 20000.0ms, connectTimeoutMS: 20000.0ms)')>, <ServerDescription ('ac-o8rxgtb-shard-00-01.kudznxl.mongodb.net', 27017) server_type: Unknown, rtt: None, error=NetworkTimeout('ac-o8rxgtb-shard-00-01.kudznxl.mongodb.net:27017: timed out (configured timeouts: socketTimeoutMS: 20000.0ms, connectTimeoutMS: 20000.0ms)')>, <ServerDescription ('ac-o8rxgtb-shard-00-02.kudznxl.mongodb.net', 27017) server_type: Unknown, rtt: None, error=NetworkTimeout('ac-o8rxgtb-shard-00-02.kudznxl.mongodb.net:27017: timed out (configured timeouts: socketTimeoutMS: 20000.0ms, connectTimeoutMS: 20000.0ms)')>]>
+pymongo.errors.ServerSelectionTimeoutError: [removed-external-database-host]:27017: timed out (configured timeouts: socketTimeoutMS: 20000.0ms, connectTimeoutMS: 20000.0ms),[removed-external-database-host]:27017: timed out (configured timeouts: socketTimeoutMS: 20000.0ms, connectTimeoutMS: 20000.0ms),[removed-external-database-host]:27017: timed out (configured timeouts: socketTimeoutMS: 20000.0ms, connectTimeoutMS: 20000.0ms), Timeout: 10.0s, Topology Description: <TopologyDescription id: 6a9967135b60afc29d61d34e, topology_type: ReplicaSetNoPrimary, servers: [<ServerDescription ('[removed-external-database-host]', 27017) server_type: Unknown, rtt: None, error=NetworkTimeout('[removed-external-database-host]:27017: timed out (configured timeouts: socketTimeoutMS: 20000.0ms, connectTimeoutMS: 20000.0ms)')>, <ServerDescription ('[removed-external-database-host]', 27017) server_type: Unknown, rtt: None, error=NetworkTimeout('[removed-external-database-host]:27017: timed out (configured timeouts: socketTimeoutMS: 20000.0ms, connectTimeoutMS: 20000.0ms)')>, <ServerDescription ('[removed-external-database-host]', 27017) server_type: Unknown, rtt: None, error=NetworkTimeout('[removed-external-database-host]:27017: timed out (configured timeouts: socketTimeoutMS: 20000.0ms, connectTimeoutMS: 20000.0ms)')>]>
 Execution of job "PipelineRunner.run_schedule_pipeline (trigger: interval[0:05:00], next run at: 2026-09-07 02:34:53 IST)" skipped: maximum number of running instances reached (1)
 Execution of job "PipelineRunner.run_schedule_pipeline (trigger: interval[0:05:00], next run at: 2026-09-07 02:39:53 IST)" skipped: maximum number of running instances reached (1)
 Execution of job "PipelineRunner.run_schedule_pipeline (trigger: interval[0:05:00], next run at: 2026-09-07 02:44:53 IST)" skipped: maximum number of running instances reached (1)

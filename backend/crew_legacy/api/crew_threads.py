@@ -22,7 +22,6 @@ from crew_legacy.database.database_mongo import (
     crew_thread_collection,
     crew_thread_message_collection,
     crew_thread_file_store,
-    USE_ATLAS,
     employee_collection,
     organization_unit_collection,
     roster_group_collection,
@@ -482,7 +481,6 @@ def post_message(
     message_id = ObjectId()
     message_folder = UPLOAD_ROOT / str(thread_oid) / str(message_id)
     attachments = []
-    stored_gridfs_ids = []
     try:
         for upload in upload_files:
             content = ensure_upload_allowed(
@@ -495,21 +493,9 @@ def post_message(
             extension = safe_name.rsplit(".", 1)[-1].lower() if "." in safe_name else ""
             attachment_id = uuid.uuid4().hex
             stored_name = f"{attachment_id}_{safe_name}"
-            gridfs_id = None
-            if USE_ATLAS:
-                gridfs_id = crew_thread_file_store.put(
-                    content,
-                    filename=safe_name,
-                    contentType=upload.content_type or "application/octet-stream",
-                    messageId=message_id,
-                    attachmentId=attachment_id,
-                    sha256=hashlib.sha256(content).hexdigest(),
-                )
-                stored_gridfs_ids.append(gridfs_id)
-            if gridfs_id is None:
-                message_folder.mkdir(parents=True, exist_ok=True)
-                target = message_folder / stored_name
-                target.write_bytes(content)
+            message_folder.mkdir(parents=True, exist_ok=True)
+            target = message_folder / stored_name
+            target.write_bytes(content)
             attachments.append({
                 "id": attachment_id,
                 "name": safe_name,
@@ -520,12 +506,9 @@ def post_message(
                 "extension": extension,
                 "isImage": extension in {"png", "jpg", "jpeg", "gif", "webp", "bmp"},
                 "sha256": hashlib.sha256(content).hexdigest(),
-                "gridFsId": gridfs_id,
+                "gridFsId": None,
             })
     except Exception:
-        for gridfs_id in stored_gridfs_ids:
-            if crew_thread_file_store.exists(gridfs_id):
-                crew_thread_file_store.delete(gridfs_id)
         if message_folder.exists():
             for candidate in message_folder.iterdir():
                 candidate.unlink(missing_ok=True)
