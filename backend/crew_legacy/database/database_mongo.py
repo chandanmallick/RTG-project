@@ -10,7 +10,7 @@ from config.database_policy import internal_database_uri
 LOCAL_MONGO_URI = internal_database_uri(os.getenv("CREW_LOCAL_MONGO_URI", MONGO_URI))
 LOCAL_DATABASE_NAME = os.getenv("CREW_LOCAL_MONGO_DB_NAME", DATABASE_NAME)
 
-local_client = MongoClient(LOCAL_MONGO_URI, serverSelectionTimeoutMS=5000)
+local_client = MongoClient(LOCAL_MONGO_URI, serverSelectionTimeoutMS=5000, directConnection=True)
 local_db = local_client[LOCAL_DATABASE_NAME]
 operational_db = local_db
 db = operational_db

@@ -21,6 +21,7 @@ class MongoService:
 
         self.client = MongoClient(
             MONGO_URI,
+            directConnection=True,
             serverSelectionTimeoutMS=MONGO_SERVER_SELECTION_TIMEOUT_MS
         )
 

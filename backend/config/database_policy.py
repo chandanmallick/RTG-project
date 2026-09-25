@@ -11,7 +11,11 @@ def internal_database_uri(uri: str) -> str:
     if not uri.startswith("mongodb://"):
         raise ValueError(error)
     try:
-        nodes = parse_uri(uri)["nodelist"]
+        parsed = parse_uri(uri)
+        nodes = parsed["nodelist"]
+        # A single LAN endpoint only; no proxy or replica discovery destinations.
+        if len(nodes) != 1 or any(str(key).lower().startswith("proxy") for key in parsed["options"]):
+            raise ValueError(error)
         for host, _port in nodes:
             hostname = host.lower().rstrip(".")
             if hostname == "localhost" or hostname.endswith(".internal.erldc.in"):
