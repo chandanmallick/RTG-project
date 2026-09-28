@@ -7,6 +7,7 @@ from pymongo import UpdateOne
 
 from crew_legacy.database.database_mongo import (
     LOCAL_DATABASE_NAME,
+    holiday_master_collection,
     compensatory_off_collection,
     cycle_config_collection,
     employee_collection,
@@ -748,6 +749,14 @@ def calendar_view(start_date: str = Query(...), end_date: str = Query(...)):
     while start <= end:
         dates.append(start.strftime("%Y-%m-%d"))
         start += timedelta(days=1)
+    # Holiday master remains live after roster publication; no republish needed.
+    holiday_map = {
+        item["date"]: item.get("holidayName") or "Holiday"
+        for item in holiday_master_collection.find({
+            "date": {"$gte": start_date, "$lte": end_date},
+            "status": {"$not": {"$regex": "^(inactive|deleted)$", "$options": "i"}},
+        }, {"date": 1, "holidayName": 1}) if item.get("date")
+    }
     output = []
     for group_name in sorted(members_by_group):
         crew = []
@@ -756,7 +765,7 @@ def calendar_view(start_date: str = Query(...), end_date: str = Query(...)):
             crew.append({
                 "employeeId": emp_id, "name": person.get("name"), "designation": person.get("designation"),
                 "IsSIC": person.get("IsSIC", False),
-                "duties": {date: daily.get((emp_id, date), {"shift": "-", "leaveType": None, "leaveStatus": None, "trainingName": None, "replacementEmployee": None, "replacementFor": None}) for date in dates},
+                "duties": {date: {**daily.get((emp_id, date), {"shift": "-", "leaveType": None, "leaveStatus": None, "trainingName": None, "replacementEmployee": None, "replacementFor": None}), "isHoliday": date in holiday_map, "holidayName": holiday_map.get(date)} for date in dates},
             })
         output.append({"groupName": group_name, "employees": crew})
     return output

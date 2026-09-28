@@ -6,6 +6,8 @@ import {
 } from "@mui/material";
 import { Award, Briefcase, CalendarCheck2, RefreshCw, Repeat2, X } from "lucide-react";
 
+import EmployeeMultiSelect from "../../components/crew/EmployeeMultiSelect";
+import CrewActivityComparison from "../../components/crew/CrewActivityComparison";
 import AppShell from "../../components/layout/AppShell";
 import api from "../../crewLegacy/api";
 
@@ -35,7 +37,7 @@ function SummaryTile({ title, value, detail, tone }) {
   const item = TILE[tone];
   const Icon = item.icon;
   return <Paper elevation={0} sx={{ p: 2, minWidth: 0, borderRadius: 3, background: item.tint, border: `1px solid ${item.color}33`, boxShadow: "none" }}>
-    <Stack direction="row" justifyContent="space-between" alignItems="flex-start"><Typography sx={{ fontWeight: 900, color: "#0F172A" }}>{title}</Typography><Icon size={19} color={item.color} /></Stack>
+    <Stack sx={{ justifyContent: "space-between", alignItems: "flex-start" }} direction="row"  ><Typography sx={{ fontWeight: 900, color: "#0F172A" }}>{title}</Typography><Icon size={19} color={item.color} /></Stack>
     <Typography sx={{ mt: 1, color: item.color, fontSize: 28, fontWeight: 950, lineHeight: 1 }}>{value || 0}</Typography>
     <Typography sx={{ mt: .6, fontSize: 11.5, color: "#475569", fontWeight: 750 }}>{detail}</Typography>
   </Paper>;
@@ -54,7 +56,10 @@ export default function CrewActivityReport() {
   const [matrixSubDepartment, setMatrixSubDepartment] = useState("All");
   const [matrixActivitySubtype, setMatrixActivitySubtype] = useState("All");
   const [matrixGroup, setMatrixGroup] = useState("All");
-  const [matrixEmployee, setMatrixEmployee] = useState("All");
+  const [matrixEmployee, setMatrixEmployee] = useState([]);
+  const [detailView, setDetailView] = useState("table");
+  const [recordSearch, setRecordSearch] = useState("");
+  const [recordStatus, setRecordStatus] = useState("All");
   const [crmsShift, setCrmsShift] = useState("All");
   const [crmsStatus, setCrmsStatus] = useState("All");
   const [crmsDesk, setCrmsDesk] = useState("All");
@@ -117,7 +122,17 @@ export default function CrewActivityReport() {
     setCrmsEmployeeDetails(null);
     setCrmsShiftDetails(null);
   };
-  const rows = useMemo(() => (report.rows || []).filter((row) => kind === "All" || row.kind === kind), [report.rows, kind]);
+  const rows = useMemo(() => (report.rows || []).filter(row => (kind === "All" || row.kind === kind)
+    && (recordStatus === "All" || row.status === recordStatus)
+    && `${row.employeeName || ""} ${row.employeeId || ""} ${row.title || ""} ${row.detail || ""} ${row.groupName || ""}`.toLowerCase().includes(recordSearch.trim().toLowerCase())
+  ).sort((a,b) => String(b.date).localeCompare(String(a.date))), [report.rows, kind, recordStatus, recordSearch]);
+  const recordStatuses = [...new Set((report.rows || []).map(row => row.status).filter(Boolean))].sort();
+  const exportRows = () => {
+    const cell = value => { let text = String(value ?? ""); if (/^[=+@-]/.test(text)) text = "'" + text; return `"${text.replaceAll('"', '""')}"`; };
+    const csv = [["Date", "Employee ID", "Employee", "Type", "Particular", "Status", "Details"], ...rows.map(row => [row.date, row.employeeId, row.employeeName, row.kind, row.title, row.status, row.detail])].map(row => row.map(cell).join(",")).join("\r\n");
+    const url = URL.createObjectURL(new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8" }));
+    const link = document.createElement("a"); link.href = url; link.download = "crew-activity.csv"; link.click(); URL.revokeObjectURL(url);
+  };
   const matrixActivitySubtypeOptions = useMemo(() => {
     if (matrixKind === "Shift duty") return [...(matrix.shiftDutyCategories || ["Morning", "Evening", "Night", "OFF"]), "Replacement duty"];
     if (matrixKind === "Leave") return matrix.leaveCategories || [];
@@ -156,7 +171,7 @@ export default function CrewActivityReport() {
       ));
     return matchesActivity
       && matchesMatrixOrganization(row)
-      && (matrixEmployee === "All" || row.employeeId === matrixEmployee);
+      && (!matrixEmployee.length || matrixEmployee.includes(String(row.employeeId)));
   }), [matrix.rows, matrixKind, matrixActivitySubtype, matrixDepartment, matrixSubDepartment, matrixGroup, matrixEmployee]);
   const visibleDutyCategories = matrixKind === "Shift duty" && matrixActivitySubtype !== "All" && matrixActivitySubtype !== "Replacement duty"
     ? [matrixActivitySubtype]
@@ -244,7 +259,7 @@ export default function CrewActivityReport() {
 
   return <AppShell>
     <Box sx={{ p: { xs: 1.75, md: 2.1 }, borderRadius: 3, color: "#fff", bgcolor: "#0057B7", backgroundImage: "linear-gradient(105deg,#08103A 0%,#0057B7 62%,#1378DD 100%) !important", boxShadow: "0 12px 28px rgba(0,87,183,.18)" }}>
-      <Stack direction={{ xs: "column", md: "row" }} spacing={2} justifyContent="space-between" alignItems={{ md: "center" }}>
+      <Stack sx={{ justifyContent: "space-between", alignItems: { md: "center" } }} direction={{ xs: "column", md: "row" }} spacing={2}  >
         <Box><Typography sx={{ fontWeight: 950, fontSize: 22 }}>Crew Activity Report</Typography><Typography sx={{ opacity: .9, fontSize: 12, fontWeight: 700 }}>Detailed history and consolidated duty, replacement, training and leave reporting.</Typography></Box>
         <Button variant="outlined" startIcon={<RefreshCw size={16} />} onClick={reportMode === "matrix" ? loadMatrix : reportMode === "crms" ? () => loadCrms(true) : load} sx={{ color: "#fff", borderColor: "rgba(255,255,255,.72)", textTransform: "none", fontWeight: 900 }}>{reportMode === "crms" && !(crms.rows || []).length ? "Load report" : "Refresh"}</Button>
       </Stack>
@@ -262,53 +277,42 @@ export default function CrewActivityReport() {
     </Paper>
 
     <Paper elevation={0} sx={{ p: 2, borderRadius: 3 }}>
-      <Stack direction="row" spacing={1} alignItems="center" sx={{ overflowX: "auto", flexWrap: "nowrap", pb: .25, "& .MuiTextField-root": { flex: "0 0 auto" } }}>
-        {reportMode === "detail" && report.canViewAll && <TextField select size="small" label="Employees" value={employeeIds} onChange={(event) => {
-          const values = typeof event.target.value === "string" ? event.target.value.split(",") : event.target.value;
-          if (!employeeIds.includes("all") && values.includes("all")) setEmployeeIds(["all"]);
-          else if (employeeIds.includes("all")) setEmployeeIds(values.filter((value) => value !== "all"));
-          else setEmployeeIds(values);
-        }} SelectProps={{ multiple: true, renderValue: (selected) => selected.includes("all") ? "All employees" : `${selected.length} employee(s) selected` }} sx={{ minWidth: 255 }}>
-          <MenuItem value="all"><Checkbox size="small" checked={employeeIds.includes("all")} /><ListItemText primary="All employees" /></MenuItem>
-          {(report.employees || []).map((employee) => <MenuItem key={employee.employeeId} value={employee.employeeId}><Checkbox size="small" checked={employeeIds.includes(employee.employeeId)} /><ListItemText primary={`${employee.name || employee.employeeId} · ${employee.employeeId}`} /></MenuItem>)}
-        </TextField>}
+      <Stack direction="row" spacing={1}  useFlexGap sx={{ ...({ flexWrap: "wrap", gap: 1.5, "& .MuiTextField-root": { minWidth: 130 } }), alignItems: "center" }}>
+        {reportMode === "detail" && report.canViewAll && <EmployeeMultiSelect options={report.employees || []} value={employeeIds} onChange={setEmployeeIds} allOption />}
         {reportMode !== "detail" && <TextField select size="small" label="Period" value={matrixPeriod} onChange={(event) => { setMatrixPeriod(event.target.value); if (reportMode === "crms") clearCrmsReport(); }} sx={{ width: 115 }}>
           {["Date range", "Month"].map((value) => <MenuItem key={value} value={value}>{value}</MenuItem>)}
         </TextField>}
-        {reportMode !== "detail" && matrixPeriod === "Month" ? <TextField size="small" type="month" label="Month" value={matrixMonth} onChange={(event) => { setMatrixMonth(event.target.value); if (reportMode === "crms") clearCrmsReport(); }} InputLabelProps={{ shrink: true }} sx={{ width: 155 }} /> : <>
-          <TextField size="small" type="date" label="From" value={startDate} onChange={(event) => { setStartDate(event.target.value); if (reportMode === "crms") clearCrmsReport(); }} InputLabelProps={{ shrink: true }} />
-          <TextField size="small" type="date" label="To" value={endDate} onChange={(event) => { setEndDate(event.target.value); if (reportMode === "crms") clearCrmsReport(); }} InputLabelProps={{ shrink: true }} />
+        {reportMode !== "detail" && matrixPeriod === "Month" ? <TextField slotProps={{ inputLabel: { shrink: true } }} size="small" type="month" label="Month" value={matrixMonth} onChange={(event) => { setMatrixMonth(event.target.value); if (reportMode === "crms") clearCrmsReport(); }}  sx={{ width: 155 }} /> : <>
+          <TextField slotProps={{ inputLabel: { shrink: true } }} size="small" type="date" label="From" value={startDate} onChange={(event) => { setStartDate(event.target.value); if (reportMode === "crms") clearCrmsReport(); }}  />
+          <TextField slotProps={{ inputLabel: { shrink: true } }} size="small" type="date" label="To" value={endDate} onChange={(event) => { setEndDate(event.target.value); if (reportMode === "crms") clearCrmsReport(); }}  />
         </>}
         {reportMode === "detail" ? <TextField select size="small" label="Activity type" value={kind} onChange={(event) => setKind(event.target.value)} sx={{ minWidth: 170 }}>
           {["All", "Leave", "Training", "C-OFF", "Replacement duty"].map((value) => <MenuItem key={value} value={value}>{value}</MenuItem>)}
-        </TextField> : reportMode === "matrix" ? <TextField select size="small" label="Activity category" value={matrixKind} onChange={(event) => { setMatrixKind(event.target.value); setMatrixActivitySubtype("All"); setMatrixEmployee("All"); }} sx={{ minWidth: 165 }}>
+        </TextField> : reportMode === "matrix" ? <TextField select size="small" label="Activity category" value={matrixKind} onChange={(event) => { setMatrixKind(event.target.value); setMatrixActivitySubtype("All"); setMatrixEmployee([]); }} sx={{ minWidth: 165 }}>
           {["All", "Shift duty", "Leave", "Other"].map((value) => <MenuItem key={value} value={value}>{value}</MenuItem>)}
         </TextField> : null}
-        {reportMode === "matrix" && <TextField select size="small" label="Department" value={matrixDepartment} onChange={(event) => { setMatrixDepartment(event.target.value); setMatrixSubDepartment("All"); setMatrixGroup("All"); setMatrixEmployee("All"); }} sx={{ width: 180 }}>
+        {reportMode === "matrix" && <TextField select size="small" label="Department" value={matrixDepartment} onChange={(event) => { setMatrixDepartment(event.target.value); setMatrixSubDepartment("All"); setMatrixGroup("All"); setMatrixEmployee([]); }} sx={{ width: 180 }}>
           <MenuItem value="All">All departments</MenuItem>
           {(matrix.departments || []).map((value) => <MenuItem key={value} value={value}>{value}</MenuItem>)}
         </TextField>}
-        {reportMode === "matrix" && <TextField select size="small" label="Sub-department" value={matrixSubDepartment} onChange={(event) => { setMatrixSubDepartment(event.target.value); setMatrixGroup("All"); setMatrixEmployee("All"); }} sx={{ width: 190 }}>
+        {reportMode === "matrix" && <TextField select size="small" label="Sub-department" value={matrixSubDepartment} onChange={(event) => { setMatrixSubDepartment(event.target.value); setMatrixGroup("All"); setMatrixEmployee([]); }} sx={{ width: 190 }}>
           <MenuItem value="All">All sub-departments</MenuItem>
           {matrixSubDepartmentOptions.map((value) => <MenuItem key={value} value={value}>{value}</MenuItem>)}
         </TextField>}
-        {reportMode === "matrix" && <TextField select size="small" label="Activity subtype" value={matrixActivitySubtype} onChange={(event) => { setMatrixActivitySubtype(event.target.value); setMatrixEmployee("All"); }} sx={{ width: 180 }} disabled={matrixKind === "All"}>
+        {reportMode === "matrix" && <TextField select size="small" label="Activity subtype" value={matrixActivitySubtype} onChange={(event) => { setMatrixActivitySubtype(event.target.value); setMatrixEmployee([]); }} sx={{ width: 180 }} disabled={matrixKind === "All"}>
           <MenuItem value="All">All</MenuItem>
           {matrixActivitySubtypeOptions.map((value) => <MenuItem key={value} value={value}>{value}</MenuItem>)}
         </TextField>}
-        {reportMode === "matrix" && showMatrixGroup && <TextField select size="small" label="Shift group" value={matrixGroup} onChange={(event) => { setMatrixGroup(event.target.value); setMatrixEmployee("All"); }} sx={{ width: 155 }}>
+        {reportMode === "matrix" && showMatrixGroup && <TextField select size="small" label="Shift group" value={matrixGroup} onChange={(event) => { setMatrixGroup(event.target.value); setMatrixEmployee([]); }} sx={{ width: 155 }}>
           <MenuItem value="All">All shift groups</MenuItem>
           {availableMatrixGroups.map((value) => <MenuItem key={value} value={value}>{value}</MenuItem>)}
         </TextField>}
-        {reportMode === "matrix" && <TextField select size="small" label="Employee" value={matrixEmployee} onChange={(event) => setMatrixEmployee(event.target.value)} sx={{ width: 190 }}>
-          <MenuItem value="All">All employees</MenuItem>
-          {matrixEmployeeOptions.map((row) => <MenuItem key={row.employeeId} value={row.employeeId}>{row.employeeName || row.employeeId} · {row.employeeId}</MenuItem>)}
-        </TextField>}
+        {reportMode === "matrix" && <EmployeeMultiSelect options={matrixEmployeeOptions} value={matrixEmployee} onChange={setMatrixEmployee} label="Compare employees (blank means all)" />}
         {reportMode === "crms" && <TextField size="small" label="Employee search" value={crmsSearch} onChange={(event) => setCrmsSearch(event.target.value)} sx={{ width: 190 }} />}
         {reportMode === "crms" && <TextField select size="small" label="Actual shift" value={crmsShift} onChange={(event) => setCrmsShift(event.target.value)} sx={{ width: 135 }}><MenuItem value="All">All shifts</MenuItem>{["Morning", "Evening", "Night"].map((value) => <MenuItem key={value} value={value}>{value}</MenuItem>)}</TextField>}
         {reportMode === "crms" && <TextField select size="small" label="Reconciliation" value={crmsStatus} onChange={(event) => setCrmsStatus(event.target.value)} sx={{ width: 180 }}><MenuItem value="All">All results</MenuItem>{(crms.statuses || []).map((value) => <MenuItem key={value} value={value}>{value}</MenuItem>)}</TextField>}
         {reportMode === "crms" && <TextField select size="small" label="CRMS desk" value={crmsDesk} onChange={(event) => setCrmsDesk(event.target.value)} sx={{ width: 210 }}><MenuItem value="All">All desks</MenuItem>{(crms.deskRoles || []).map((value) => <MenuItem key={value} value={value}>{value}</MenuItem>)}</TextField>}
-        <Button variant="contained" onClick={reportMode === "matrix" ? loadMatrix : reportMode === "crms" ? () => loadCrms(false) : load} sx={{ flex: "0 0 auto", textTransform: "none", fontWeight: 900, background: "#0057B7", whiteSpace: "nowrap" }}>Load report</Button>
+        <Button disabled={loading || (reportMode === "detail" && !employeeIds.length) || (matrixPeriod !== "Month" && startDate > endDate)} variant="contained" onClick={reportMode === "matrix" ? loadMatrix : reportMode === "crms" ? () => loadCrms(false) : load} sx={{ flex: "0 0 auto", textTransform: "none", fontWeight: 900, background: "#0057B7", whiteSpace: "nowrap" }}>Load report</Button>
       </Stack>
     </Paper>
 
@@ -326,28 +330,31 @@ export default function CrewActivityReport() {
     </Paper></>}
 
     {reportMode === "detail" ? <Paper elevation={0} sx={{ overflow: "hidden", borderRadius: 3 }}>
-      <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ px: 2, py: 1.4, borderBottom: "1px solid #E2E8F0" }}><Typography sx={{ fontWeight: 950, color: "#0F172A" }}>Activity details</Typography><Chip label={`${rows.length} record(s)`} size="small" sx={{ fontWeight: 850 }} /></Stack>
-      {loading ? <Box sx={{ minHeight: 300, display: "grid", placeItems: "center" }}><CircularProgress /></Box> : <Box sx={{ overflow: "auto", maxHeight: "calc(100vh - 420px)" }}>
-        <Table stickyHeader size="small"><TableHead><TableRow>
+      <Stack direction={{ xs: "column", md: "row" }}    sx={{ ...({ p: 2, borderBottom: "1px solid #E2E8F0" }), gap: 1.5, justifyContent: "space-between", alignItems: { md: "center" } }}>
+        <Box><Typography sx={{ fontWeight: 850 }} >Activity explorer <Chip label={`${rows.length} records`} size="small" sx={{ ml: 1 }} /></Typography><Typography variant="caption" color="text.secondary">Search within the loaded report. Newest activity first.</Typography></Box>
+        <Stack sx={{ gap: 1, flexWrap: "wrap" }} direction="row"  ><TextField size="small" label="Search activity or person" value={recordSearch} onChange={e => setRecordSearch(e.target.value)} /><TextField select size="small" label="Status" value={recordStatus} onChange={e => setRecordStatus(e.target.value)} sx={{ minWidth: 125 }}><MenuItem value="All">All statuses</MenuItem>{recordStatuses.map(status => <MenuItem key={status} value={status}>{status}</MenuItem>)}</TextField><Button onClick={exportRows} disabled={loading || !rows.length}>Export CSV</Button><Stack direction="row" sx={{ p: .4, bgcolor: "#F1F5F9", borderRadius: 2 }}>{["table", "compare"].map(view => <Button key={view} size="small" variant={detailView === view ? "contained" : "text"} onClick={() => setDetailView(view)} sx={{ textTransform: "capitalize" }}>{view}</Button>)}</Stack></Stack>
+      </Stack>
+      {loading ? <Box sx={{ minHeight: 300, display: "grid", placeItems: "center" }}><CircularProgress /></Box> : detailView === "compare" ? <CrewActivityComparison rows={rows} /> : <Box sx={{ overflow: "auto", maxHeight: "55vh", minHeight: 260 }}>
+        <Table stickyHeader size="small" sx={{ "& tbody tr:nth-of-type(even)": { bgcolor: "#FAFCFF" }, "& th": { bgcolor: "#F8FAFC", whiteSpace: "nowrap" }, "& td": { py: 1.25 } }}> <TableHead><TableRow>
           <TableCell sx={{ fontWeight: 900 }}>Date</TableCell><TableCell sx={{ fontWeight: 900 }}>Applied on</TableCell><TableCell sx={{ fontWeight: 900 }}>Day</TableCell><TableCell sx={{ fontWeight: 900 }}>Type</TableCell><TableCell sx={{ fontWeight: 900 }}>Employee</TableCell><TableCell sx={{ fontWeight: 900 }}>Particular</TableCell><TableCell sx={{ fontWeight: 900 }}>Status</TableCell><TableCell sx={{ fontWeight: 900 }}>Details</TableCell>
         </TableRow></TableHead><TableBody>
           {!rows.length && <TableRow><TableCell colSpan={8} align="center" sx={{ py: 7, color: "#64748B" }}>No activity found for the selected period.</TableCell></TableRow>}
           {rows.map((row) => <TableRow key={`${row.kind}-${row.id}`} hover>
-            <TableCell sx={{ whiteSpace: "nowrap", fontWeight: 750 }}>{displayDate(row.date)}{row.endDate && row.endDate !== row.date && <Typography variant="caption" display="block">to {displayDate(row.endDate)}</Typography>}</TableCell>
+            <TableCell sx={{ whiteSpace: "nowrap", fontWeight: 750 }}>{displayDate(row.date)}{row.endDate && row.endDate !== row.date && <Typography sx={{ display: "block" }} variant="caption" >to {displayDate(row.endDate)}</Typography>}</TableCell>
             <TableCell sx={{ whiteSpace: "nowrap" }}>{row.appliedOn ? new Date(row.appliedOn).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "—"}</TableCell>
             <TableCell>{row.dayLabel ? <Chip size="small" label={row.dayLabel} sx={{ fontWeight: 800, ...(row.isHoliday ? { background: "#FDE8EC", color: "#C62828" } : row.isWeekend ? { background: "#FFF4CC", color: "#9A6700" } : { background: "#F1F5F9", color: "#475569" }) }} /> : "—"}</TableCell>
             <TableCell><Chip size="small" label={row.kind} sx={{ fontWeight: 850, ...(row.kind === "Leave" ? { background: "#FDE8EC", color: "#C62828" } : row.kind === "Training" ? { background: "#F0E7FA", color: "#6A1B9A" } : row.kind === "C-OFF" ? { background: "#FFF4CC", color: "#9A6700" } : { background: "#DCFCE7", color: "#15803D" }) }} /></TableCell>
             <TableCell><Stack spacing={.1}><Typography sx={{ fontSize: 13, fontWeight: 750 }}>{row.employeeName || row.employeeId || "—"}</Typography>{row.employeeId && <Typography variant="caption">{row.employeeId}</Typography>}</Stack></TableCell>
             <TableCell sx={{ fontWeight: 800 }}>{row.title || "—"}</TableCell>
             <TableCell><Chip size="small" label={row.status || "—"} variant="outlined" /></TableCell>
-            <TableCell>{row.detail || "—"}{row.groupName && <Typography variant="caption" display="block">{row.groupName}</Typography>}</TableCell>
+            <TableCell>{row.detail || "—"}{row.groupName && <Typography sx={{ display: "block" }} variant="caption" >{row.groupName}</Typography>}</TableCell>
           </TableRow>)}
         </TableBody></Table>
       </Box>}
     </Paper> : reportMode === "matrix" ? <Paper elevation={0} sx={{ overflow: "hidden", borderRadius: 3 }}>
-      <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ px: 2, py: 1.4, borderBottom: "1px solid #E2E8F0" }}><Box><Typography sx={{ fontWeight: 950, color: "#0F172A" }}>Consolidated crew duty and activity matrix</Typography><Typography sx={{ fontSize: 11.5, color: "#64748B" }}>Final roster/assigned duties, replacement duties, approved training and approved leave; approved leave, training and training-linked OFF dates are excluded from duty totals · {displayDate(matrix.startDate)} to {displayDate(matrix.endDate)}</Typography></Box><Chip label={`${matrixRows.length} employee(s)`} size="small" sx={{ fontWeight: 850 }} /></Stack>
+      <Stack direction="row"   sx={{ ...({ px: 2, py: 1.4, borderBottom: "1px solid #E2E8F0" }), justifyContent: "space-between", alignItems: "center" }}><Box><Typography sx={{ fontWeight: 950, color: "#0F172A" }}>Consolidated crew duty and activity matrix</Typography><Typography sx={{ fontSize: 11.5, color: "#64748B" }}>Final roster/assigned duties, replacement duties, approved training and approved leave; approved leave, training and training-linked OFF dates are excluded from duty totals · {displayDate(matrix.startDate)} to {displayDate(matrix.endDate)}</Typography></Box><Chip label={`${matrixRows.length} employee(s)`} size="small" sx={{ fontWeight: 850 }} /></Stack>
       {loading ? <Box sx={{ minHeight: 300, display: "grid", placeItems: "center" }}><CircularProgress /></Box> : <Box sx={{ overflow: "auto", maxHeight: "calc(100vh - 365px)" }}><Table stickyHeader size="small" sx={{ minWidth: 900 }}><TableHead><TableRow>
-        <TableCell sx={{ fontWeight: 900, minWidth: 230 }}>Employee</TableCell>
+        <TableCell sx={{ fontWeight: 900, minWidth: 230, position: "sticky", left: 0, zIndex: 4, bgcolor: "#F8FAFC" }}>Employee</TableCell>
         {showDuties && <><TableCell align="right" sx={{ fontWeight: 900 }}>Shift duty total</TableCell>{visibleDutyCategories.map((category) => <TableCell key={category} align="right" sx={{ fontWeight: 900 }}>{category}</TableCell>)}</>}
         {showReplacement && <TableCell align="right" sx={{ fontWeight: 900 }}>Replacement duties</TableCell>}
         {showTraining && <TableCell align="right" sx={{ fontWeight: 900 }}>Training days (of 7)</TableCell>}
@@ -356,7 +363,7 @@ export default function CrewActivityReport() {
       </TableRow></TableHead><TableBody>
         {!matrixRows.length && <TableRow><TableCell colSpan={matrixColumnCount} align="center" sx={{ py: 7, color: "#64748B" }}>No {matrixKind === "All" ? "employee activity" : matrixKind.toLowerCase()} found for the selected filters.</TableCell></TableRow>}
         {matrixRows.map((row) => <TableRow key={row.employeeId} hover>
-          <TableCell><Typography sx={{ fontWeight: 850 }}>{row.employeeName || row.employeeId}</Typography><Typography variant="caption" display="block">{row.designation || "—"} · {row.employeeId}</Typography><Typography variant="caption" sx={{ color: "#64748B" }}>{(row.departments || []).join(", ") || "No department"}{(row.subDepartments || []).length ? ` / ${row.subDepartments.join(", ")}` : ""}{(row.periodGroupNames || []).length ? ` · ${row.periodGroupNames.join(", ")}` : ""}</Typography></TableCell>
+          <TableCell sx={{ position: "sticky", left: 0, zIndex: 2, bgcolor: "white" }}><Typography sx={{ fontWeight: 850 }}>{row.employeeName || row.employeeId}</Typography><Typography sx={{ display: "block" }} variant="caption" >{row.designation || "—"} · {row.employeeId}</Typography><Typography variant="caption" sx={{ color: "#64748B" }}>{(row.departments || []).join(", ") || "No department"}{(row.subDepartments || []).length ? ` / ${row.subDepartments.join(", ")}` : ""}{(row.periodGroupNames || []).length ? ` · ${row.periodGroupNames.join(", ")}` : ""}</Typography></TableCell>
           {showDuties && <><TableCell align="right" sx={{ fontWeight: 850 }}>{row.shiftDutyDays || 0}</TableCell>{visibleDutyCategories.map((category) => <TableCell key={category} align="right">{row.dutyCounts?.[category] || 0}</TableCell>)}</>}
           {showReplacement && <TableCell align="right" sx={{ fontWeight: 850, color: row.replacementDutyDays ? "#15803D" : "inherit" }}>{row.replacementDutyDays || 0}</TableCell>}
           {showTraining && <TableCell align="right"><Button size="small" variant="outlined" disabled={!(row.trainings || []).length} onClick={() => setTrainingDetails(row)} sx={{ minWidth: 72, textTransform: "none", fontWeight: 900, color: "#6A1B9A", borderColor: "#CDB4EA" }}>{row.trainingDays || 0} / {row.trainingTargetDays || matrix.trainingTargetDays || 7}</Button></TableCell>}
@@ -385,14 +392,14 @@ export default function CrewActivityReport() {
         ].map(([label, value, detail]) => <Paper key={label} elevation={0} sx={{ p: 1.5, borderRadius: 3, border: "1px solid #D9E7F5", background: label === "Exceptions" || label === "Unmapped names" ? "#FFF8ED" : "#F7FBFF" }}><Typography sx={{ fontSize: 11.5, color: "#475569", fontWeight: 850 }}>{label}</Typography><Typography sx={{ mt: .4, fontSize: 25, lineHeight: 1.1, fontWeight: 950, color: "#0B4F8A" }}>{value}</Typography><Typography sx={{ mt: .5, fontSize: 10.5, color: "#64748B" }}>{detail}</Typography></Paper>)}
       </Box>
       <Paper elevation={0} sx={{ overflow: "hidden", borderRadius: 3 }}>
-        <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ px: 2, py: 1.35, borderBottom: "1px solid #E2E8F0" }}><Box><Typography sx={{ fontWeight: 950 }}>Unique CRMS duties by employee</Typography><Typography sx={{ fontSize: 11.5, color: "#64748B" }}>One employee/date/shift is one duty; simultaneous desk postings remain available in the comparison details.</Typography></Box><Chip size="small" label={`${crmsRows.length} employee(s)`} sx={{ fontWeight: 850 }} /></Stack>
+        <Stack direction="row"   sx={{ ...({ px: 2, py: 1.35, borderBottom: "1px solid #E2E8F0" }), justifyContent: "space-between", alignItems: "center" }}><Box><Typography sx={{ fontWeight: 950 }}>Unique CRMS duties by employee</Typography><Typography sx={{ fontSize: 11.5, color: "#64748B" }}>One employee/date/shift is one duty; simultaneous desk postings remain available in the comparison details.</Typography></Box><Chip size="small" label={`${crmsRows.length} employee(s)`} sx={{ fontWeight: 850 }} /></Stack>
         {loading ? <Box sx={{ minHeight: 260, display: "grid", placeItems: "center" }}><CircularProgress /></Box> : <Box sx={{ overflow: "auto" }}><Table size="small"><TableHead><TableRow><TableCell sx={{ fontWeight: 900 }}>Employee</TableCell><TableCell align="right" sx={{ fontWeight: 900 }}>Unique duty total</TableCell><TableCell align="right" sx={{ fontWeight: 900 }}>Morning</TableCell><TableCell align="right" sx={{ fontWeight: 900 }}>Evening</TableCell><TableCell align="right" sx={{ fontWeight: 900 }}>Night</TableCell><TableCell align="right" sx={{ fontWeight: 900 }}>Roster matched</TableCell><TableCell align="right" sx={{ fontWeight: 900 }}>Replacement</TableCell><TableCell align="right" sx={{ fontWeight: 900 }}>Exceptions</TableCell><TableCell align="right" sx={{ fontWeight: 900 }}>Rostered absent</TableCell></TableRow></TableHead><TableBody>
           {!crmsRows.length && <TableRow><TableCell colSpan={9} align="center" sx={{ py: 6, color: "#64748B" }}>No CRMS duty data found for the selected filters.</TableCell></TableRow>}
           {crmsRows.map((row) => <TableRow key={row.employeeId || row.employeeName} hover onClick={() => setCrmsEmployeeDetails(row)} sx={{ cursor: "pointer" }}><TableCell><Typography sx={{ fontWeight: 850 }}>{row.employeeName}</Typography><Typography variant="caption">{row.employeeId || "CRMS name not mapped"}</Typography></TableCell><TableCell align="right" sx={{ fontWeight: 900 }}>{row.actualDuties || 0}</TableCell>{["Morning", "Evening", "Night"].map((shift) => <TableCell key={shift} align="right"><Button size="small" onClick={(event) => { event.stopPropagation(); setCrmsOnly(false); setCrmsShiftDetails({ ...row, shift }); }} sx={{ minWidth: 34, px: .5, fontWeight: 900, textTransform: "none", color: "#0057B7" }}>{row[shift] || 0}</Button></TableCell>)}<TableCell align="right" sx={{ color: "#15803D", fontWeight: 850 }}>{row.matched || 0}</TableCell><TableCell align="right">{row.replacementDuties || 0}</TableCell><TableCell align="right" sx={{ color: row.exceptions ? "#C2410C" : "inherit", fontWeight: 850 }}>{row.exceptions || 0}</TableCell><TableCell align="right">{row.rosteredButAbsent || 0}</TableCell></TableRow>)}
         </TableBody></Table></Box>}
       </Paper>
       <Paper elevation={0} sx={{ overflow: "hidden", borderRadius: 3 }}>
-        <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ px: 2, py: 1.35, borderBottom: "1px solid #E2E8F0" }}><Box><Typography sx={{ fontWeight: 950 }}>Reconciliation evidence</Typography><Typography sx={{ fontSize: 11.5, color: "#64748B" }}>CRMS name and desk are preserved beside the final Crew assignment for audit.</Typography></Box><Chip size="small" label={`${crmsDetailRows.length} row(s)`} sx={{ fontWeight: 850 }} /></Stack>
+        <Stack direction="row"   sx={{ ...({ px: 2, py: 1.35, borderBottom: "1px solid #E2E8F0" }), justifyContent: "space-between", alignItems: "center" }}><Box><Typography sx={{ fontWeight: 950 }}>Reconciliation evidence</Typography><Typography sx={{ fontSize: 11.5, color: "#64748B" }}>CRMS name and desk are preserved beside the final Crew assignment for audit.</Typography></Box><Chip size="small" label={`${crmsDetailRows.length} row(s)`} sx={{ fontWeight: 850 }} /></Stack>
         <Box sx={{ overflow: "auto", maxHeight: 430 }}><Table stickyHeader size="small"><TableHead><TableRow><TableCell sx={{ fontWeight: 900 }}>Date / shift</TableCell><TableCell sx={{ fontWeight: 900 }}>CRMS employee</TableCell><TableCell sx={{ fontWeight: 900 }}>Desk</TableCell><TableCell sx={{ fontWeight: 900 }}>Roster / assigned</TableCell><TableCell sx={{ fontWeight: 900 }}>Result</TableCell></TableRow></TableHead><TableBody>
           {!crmsDetailRows.length && <TableRow><TableCell colSpan={5} align="center" sx={{ py: 5, color: "#64748B" }}>No reconciliation evidence matches the filters.</TableCell></TableRow>}
           {crmsDetailRows.map((item) => { const good = ["Matched", "Replacement match", "Reassigned match"].includes(item.status); return <TableRow key={item.id} hover><TableCell sx={{ whiteSpace: "nowrap" }}><Typography sx={{ fontSize: 12.5, fontWeight: 850 }}>{displayDate(item.date)} · {item.shift}</Typography><Typography variant="caption">{item.logKey}</Typography></TableCell><TableCell><Typography sx={{ fontSize: 12.5, fontWeight: 800 }}>{item.crmsName || item.employeeName}</Typography><Typography variant="caption">{item.employeeId ? `${item.employeeName || "Mapped"} · ${item.employeeId}` : `Unmapped · confidence ${Math.round((item.matchConfidence || 0) * 100)}%`}</Typography></TableCell><TableCell>{item.desk}</TableCell><TableCell><Typography sx={{ fontSize: 12.5, fontWeight: 850 }}>{item.assignedDuty}</Typography><Typography variant="caption">{item.groupName || "No group"}{item.replacementFor ? ` · for ${item.replacementFor}` : ""}</Typography></TableCell><TableCell><Chip size="small" label={item.status} sx={{ fontWeight: 850, background: good ? "#DCFCE7" : "#FFF1DD", color: good ? "#15803D" : "#C2410C" }} /></TableCell></TableRow>; })}
@@ -412,7 +419,7 @@ export default function CrewActivityReport() {
             <Typography sx={{ color: "#64748B", fontSize: 12 }}>{trainingDetails.employeeId} · {trainingDetails.trainingDays || 0} of {trainingDetails.trainingTargetDays || matrix.trainingTargetDays || 7} training days</Typography>
           </Box>
           {(trainingDetails.trainings || []).map((training) => <Paper key={training.id} variant="outlined" sx={{ p: 1.4, borderColor: "#D8C4EE", background: "#FCF9FF" }}>
-            <Stack direction="row" justifyContent="space-between" spacing={1}>
+            <Stack sx={{ justifyContent: "space-between" }} direction="row"  spacing={1}>
               <Box><Typography sx={{ color: "#4A148C", fontWeight: 900 }}>{training.name}</Typography><Typography sx={{ mt: .3, color: "#64748B", fontSize: 11.5 }}>{displayDate(training.startDate)}{training.endDate && training.endDate !== training.startDate ? ` to ${displayDate(training.endDate)}` : ""}{training.location ? ` · ${training.location}` : ""}</Typography></Box>
               <Chip size="small" label={`${training.days || 0} day(s)`} sx={{ fontWeight: 850, background: "#F0E7FA", color: "#6A1B9A" }} />
             </Stack>
@@ -469,7 +476,7 @@ export default function CrewActivityReport() {
           {(crms.details || []).filter((item) => crmsEmployeeDetails && (
             (crmsEmployeeDetails.employeeId && item.employeeId === crmsEmployeeDetails.employeeId)
             || (!crmsEmployeeDetails.employeeId && item.crmsName === crmsEmployeeDetails.employeeName)
-          )).map((item) => <Paper key={item.id} variant="outlined" sx={{ p: 1.25, borderColor: "#D9E7F5" }}><Stack direction={{ xs: "column", sm: "row" }} justifyContent="space-between" spacing={1}><Box><Typography sx={{ fontWeight: 900 }}>{displayDate(item.date)} · {item.shift} · {item.desk}</Typography><Typography sx={{ mt: .25, fontSize: 11.5, color: "#64748B" }}>CRMS: {item.crmsName || "Not listed"} · Assigned: {item.assignedDuty}{item.groupName ? ` · ${item.groupName}` : ""}</Typography></Box><Chip size="small" label={item.status} sx={{ alignSelf: "flex-start", fontWeight: 850 }} /></Stack></Paper>)}
+          )).map((item) => <Paper key={item.id} variant="outlined" sx={{ p: 1.25, borderColor: "#D9E7F5" }}><Stack sx={{ justifyContent: "space-between" }} direction={{ xs: "column", sm: "row" }}  spacing={1}><Box><Typography sx={{ fontWeight: 900 }}>{displayDate(item.date)} · {item.shift} · {item.desk}</Typography><Typography sx={{ mt: .25, fontSize: 11.5, color: "#64748B" }}>CRMS: {item.crmsName || "Not listed"} · Assigned: {item.assignedDuty}{item.groupName ? ` · ${item.groupName}` : ""}</Typography></Box><Chip size="small" label={item.status} sx={{ alignSelf: "flex-start", fontWeight: 850 }} /></Stack></Paper>)}
         </Stack>
       </DialogContent>
     </Dialog>
@@ -480,19 +487,19 @@ export default function CrewActivityReport() {
       </DialogTitle>
       <DialogContent dividers>
         <Stack spacing={1.5}>
-          <Stack direction={{ xs: "column", sm: "row" }} justifyContent="space-between" alignItems={{ sm: "center" }} gap={1}>
+          <Stack sx={{ justifyContent: "space-between", alignItems: { sm: "center" }, gap: 1 }} direction={{ xs: "column", sm: "row" }}   >
             <Typography sx={{ fontSize: 12, color: "#64748B" }}>One row represents one employee/date/shift. Multiple simultaneous CRMS desks remain listed together and count as one duty. Red rows require review.</Typography>
           </Stack>
           <Box sx={{ display: "none" }}>
             <Paper variant="outlined" sx={{ overflow: "hidden", borderColor: "#B9D5F7" }}>
-              <Stack direction="row" justifyContent="space-between" sx={{ px: 1.5, py: 1, bgcolor: "#F3F8FE", borderBottom: "1px solid #D9E7F5" }}><Typography sx={{ fontWeight: 950 }}>CRMS duties</Typography><Chip size="small" label={`${selectedCrmsShiftRows.length} posting(s)`} /></Stack>
+              <Stack direction="row"  sx={{ ...({ px: 1.5, py: 1, bgcolor: "#F3F8FE", borderBottom: "1px solid #D9E7F5" }), justifyContent: "space-between" }}><Typography sx={{ fontWeight: 950 }}>CRMS duties</Typography><Chip size="small" label={`${selectedCrmsShiftRows.length} posting(s)`} /></Stack>
               <Box sx={{ maxHeight: 440, overflow: "auto" }}><Table stickyHeader size="small"><TableHead><TableRow><TableCell sx={{ fontWeight: 900 }}>Date</TableCell><TableCell sx={{ fontWeight: 900 }}>CRMS desk / name</TableCell><TableCell sx={{ fontWeight: 900 }}>Result</TableCell></TableRow></TableHead><TableBody>
                 {!selectedCrmsShiftRows.length && <TableRow><TableCell colSpan={3} align="center" sx={{ py: 5, color: "#64748B" }}>No CRMS {crmsShiftDetails?.shift} posting found.</TableCell></TableRow>}
                 {selectedCrmsShiftRows.map((item) => { const matched = ["Matched", "Replacement match", "Reassigned match"].includes(item.status); return <TableRow key={item.id} sx={matched ? undefined : { bgcolor: "#FEF2F2", "& td": { borderColor: "#FECACA" } }}><TableCell sx={{ whiteSpace: "nowrap", fontWeight: 800 }}>{displayDate(item.date)}</TableCell><TableCell><Typography sx={{ fontSize: 12.5, fontWeight: 850 }}>{item.desk}</Typography><Typography variant="caption">{item.crmsName || "Not listed"}</Typography></TableCell><TableCell><Chip size="small" label={item.status} sx={{ fontWeight: 850, bgcolor: matched ? "#DCFCE7" : "#FEE2E2", color: matched ? "#15803D" : "#B91C1C" }} /></TableCell></TableRow>; })}
               </TableBody></Table></Box>
             </Paper>
             {!crmsOnly && <Paper variant="outlined" sx={{ overflow: "hidden", borderColor: "#BDE6D4" }}>
-              <Stack direction="row" justifyContent="space-between" sx={{ px: 1.5, py: 1, bgcolor: "#F3FCF7", borderBottom: "1px solid #CFE9D9" }}><Typography sx={{ fontWeight: 950 }}>Final roster duties</Typography><Chip size="small" label={`${selectedRosterShiftRows.length} duty day(s)`} /></Stack>
+              <Stack direction="row"  sx={{ ...({ px: 1.5, py: 1, bgcolor: "#F3FCF7", borderBottom: "1px solid #CFE9D9" }), justifyContent: "space-between" }}><Typography sx={{ fontWeight: 950 }}>Final roster duties</Typography><Chip size="small" label={`${selectedRosterShiftRows.length} duty day(s)`} /></Stack>
               <Box sx={{ maxHeight: 440, overflow: "auto" }}><Table stickyHeader size="small"><TableHead><TableRow><TableCell sx={{ fontWeight: 900 }}>Date</TableCell><TableCell sx={{ fontWeight: 900 }}>Roster assignment</TableCell><TableCell sx={{ fontWeight: 900 }}>CRMS check</TableCell></TableRow></TableHead><TableBody>
                 {!selectedRosterShiftRows.length && <TableRow><TableCell colSpan={3} align="center" sx={{ py: 5, color: "#64748B" }}>No final {crmsShiftDetails?.shift} roster duty found.</TableCell></TableRow>}
                 {selectedRosterShiftRows.map((item) => { const result = rosterShiftResult(item); return <TableRow key={item.id} sx={result.mismatch ? { bgcolor: "#FEF2F2", "& td": { borderColor: "#FECACA" } } : undefined}><TableCell sx={{ whiteSpace: "nowrap", fontWeight: 800 }}>{displayDate(item.date)}</TableCell><TableCell><Typography sx={{ fontSize: 12.5, fontWeight: 850 }}>{item.shift}</Typography><Typography variant="caption">{item.groupName || "No group"}{item.replacementDuty ? " · Replacement" : ""}</Typography></TableCell><TableCell><Chip size="small" label={result.label} sx={{ fontWeight: 850, bgcolor: result.mismatch ? "#FEE2E2" : "#DCFCE7", color: result.mismatch ? "#B91C1C" : "#15803D" }} /></TableCell></TableRow>; })}
@@ -500,7 +507,7 @@ export default function CrewActivityReport() {
             </Paper>}
           </Box>
           <Paper variant="outlined" sx={{ overflow: "hidden", borderColor: "#B9D5F7" }}>
-            <Stack direction="row" justifyContent="space-between" sx={{ px: 1.5, py: 1, bgcolor: "#F3F8FE", borderBottom: "1px solid #D9E7F5" }}><Typography sx={{ fontWeight: 950 }}>CRMS and COMPASS duty comparison</Typography><Chip size="small" label={`${pairedShiftRows.length} duty row(s)`} /></Stack>
+            <Stack direction="row"  sx={{ ...({ px: 1.5, py: 1, bgcolor: "#F3F8FE", borderBottom: "1px solid #D9E7F5" }), justifyContent: "space-between" }}><Typography sx={{ fontWeight: 950 }}>CRMS and COMPASS duty comparison</Typography><Chip size="small" label={`${pairedShiftRows.length} duty row(s)`} /></Stack>
             <Box sx={{ maxHeight: 500, overflow: "auto" }}><Table stickyHeader size="small"><TableHead><TableRow><TableCell sx={{ width: "42%", fontWeight: 900 }}>CRMS</TableCell><TableCell sx={{ width: "38%", fontWeight: 900 }}>COMPASS</TableCell><TableCell sx={{ width: "20%", fontWeight: 900 }}>Remarks</TableCell></TableRow></TableHead><TableBody>
               {!pairedShiftRows.length && <TableRow><TableCell colSpan={3} align="center" sx={{ py: 5, color: "#64748B" }}>No duty comparison found for {crmsShiftDetails?.shift}.</TableCell></TableRow>}
               {pairedShiftRows.map((item) => { const matched = !item.mismatch; const remark = !item.crmsRows.length ? "Not in CRMS" : !item.rosterRows.length ? "Not in COMPASS" : matched ? "Matched" : "Mismatch"; return <TableRow key={item.id} sx={item.mismatch ? { bgcolor: "#FEF2F2", "& td": { borderColor: "#FECACA" } } : undefined}><TableCell><Typography sx={{ mb: .45, fontSize: 12.5, fontWeight: 950 }}>{displayDate(item.date)} · {crmsShiftDetails?.shift}</Typography>{item.crmsRows.length ? item.crmsRows.map((entry) => <Typography key={entry.id} sx={{ fontSize: 11.5, fontWeight: 800 }}>{entry.desk}<Typography component="span" sx={{ ml: .5, fontSize: 10.5, color: "#64748B" }}>· {entry.crmsName || "Not listed"}</Typography></Typography>) : <Typography sx={{ color: "#B91C1C", fontSize: 11.5, fontWeight: 850 }}>No CRMS posting</Typography>}</TableCell><TableCell><Typography sx={{ mb: .45, fontSize: 12.5, fontWeight: 950 }}>{displayDate(item.date)} · {crmsShiftDetails?.shift}</Typography>{item.rosterRows.length ? item.rosterRows.map((roster) => <Box key={roster.id} sx={{ mb: .3 }}><Typography sx={{ fontSize: 11.5, fontWeight: 850 }}>{roster.groupName || "No group"}</Typography><Typography sx={{ fontSize: 10.5, color: "#64748B" }}>{roster.assignmentType || (roster.replacementDuty ? "Replacement duty" : "Normal roster duty")}</Typography></Box>) : <Typography sx={{ color: "#B91C1C", fontSize: 11.5, fontWeight: 850 }}>No COMPASS duty</Typography>}</TableCell><TableCell><Chip size="small" label={remark} sx={{ fontWeight: 900, bgcolor: matched ? "#DCFCE7" : "#FEE2E2", color: matched ? "#15803D" : "#B91C1C" }} /></TableCell></TableRow>; })}

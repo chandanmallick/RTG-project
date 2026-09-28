@@ -1,4 +1,4 @@
-﻿from fastapi import APIRouter, HTTPException, Query, Depends
+from fastapi import APIRouter, HTTPException, Query, Depends
 from fastapi import File, UploadFile
 from fastapi.responses import Response
 from datetime import date, datetime, timedelta
@@ -81,6 +81,73 @@ def add_grouped_leave_notification(groups: dict, leave: dict, recipient_ids) -> 
 
 def is_admin(user: dict) -> bool:
     return str(user.get("role") or "").lower() == "admin" or clean_id(user.get("employeeId")) == "50041"
+
+
+def validate_block_dates(start_date, end_date):
+    try:
+        start = date.fromisoformat(str(start_date))
+        end = date.fromisoformat(str(end_date))
+        if start.isoformat() != start_date or end.isoformat() != end_date or end < start:
+            raise ValueError()
+    except (ValueError, TypeError):
+        raise HTTPException(400, "Enter valid start and end dates; end must not precede start")
+
+
+def ensure_leave_dates_open(dates):
+    dates = sorted(set(str(value or "").strip() for value in dates))
+    for value in dates:
+        validate_block_dates(value, value)
+    if not dates:
+        return
+    blocks = system_settings_collection.find({
+        "type": "leave_block", "active": True,
+        "startDate": {"$lte": dates[-1]}, "endDate": {"$gte": dates[0]},
+    })
+    for block in blocks:
+        affected = [value for value in dates if block["startDate"] <= value <= block["endDate"]]
+        if affected:
+            raise HTTPException(409, f"Leave applications are blocked for {', '.join(affected)}: {block.get('reason', 'Administrative restriction')}")
+
+
+@router.get("/blocked-periods")
+def get_blocked_leave_periods(user=Depends(get_authenticated_user)):
+    return [{"id": str(item["_id"]), "startDate": item["startDate"],
+             "endDate": item["endDate"], "reason": item.get("reason", "")}
+            for item in system_settings_collection.find({"type": "leave_block", "active": True}).sort("startDate", 1)]
+
+
+@router.post("/blocked-periods")
+def create_blocked_leave_period(data: dict, user=Depends(get_authenticated_user)):
+    if not is_admin(user):
+        raise HTTPException(403, "Only an administrator can block leave")
+    start_date, end_date = data.get("startDate"), data.get("endDate")
+    validate_block_dates(start_date, end_date)
+    reason = str(data.get("reason") or "").strip()
+    if not reason or len(reason) > 500:
+        raise HTTPException(400, "Enter a reason of 1 to 500 characters")
+    result = system_settings_collection.insert_one({
+        "type": "leave_block", "active": True, "startDate": start_date,
+        "endDate": end_date, "reason": reason,
+        "createdBy": clean_id(user.get("employeeId")), "createdOn": datetime.utcnow(),
+    })
+    return {"id": str(result.inserted_id), "message": "Leave blocked for all employees"}
+
+
+@router.delete("/blocked-periods/{block_id}")
+def revoke_blocked_leave_period(block_id: str, user=Depends(get_authenticated_user)):
+    if not is_admin(user):
+        raise HTTPException(403, "Only an administrator can unblock leave")
+    try:
+        object_id = ObjectId(block_id)
+    except Exception:
+        raise HTTPException(400, "Invalid blocked period")
+    result = system_settings_collection.update_one(
+        {"_id": object_id, "type": "leave_block", "active": True},
+        {"$set": {"active": False, "revokedBy": clean_id(user.get("employeeId")), "revokedOn": datetime.utcnow()}},
+    )
+    if not result.matched_count:
+        raise HTTPException(404, "Blocked period not found")
+    return {"message": "Leave period reopened"}
 
 
 def can_view_all_leaves(user: dict) -> bool:
@@ -627,6 +694,9 @@ def cancellation_role(user: dict, leave: dict) -> Optional[str]:
     actor = clean_id(user.get("employeeId"))
     if actor == clean_id(leave.get("employeeId")):
         return "Employee"
+    if is_organization_leave(leave):
+        if any(organization_step_actor(user, step)[0] for step in leave.get("approvalChain") or []):
+            return "Reporting Authority"
     if actor in leave_authority_ids(leave):
         return "DIC"
     if sic_record_for(actor, leave.get("date"), leave.get("groupName")):
@@ -683,6 +753,8 @@ def clear_leave_operational_effects(leave: dict):
         except Exception:
             pass
 
+    if is_organization_leave(leave) or not group_name or group_name == "Other Employees":
+        return
     employee_daily_collection.update_many(
         {"date": leave_date, "groupName": group_name},
         {"$unset": {"sic": "", "isActingSIC": ""}},
@@ -1451,6 +1523,8 @@ def apply_leave_v2(data: dict, user=Depends(get_authenticated_user)):
 
     if not applications:
         raise HTTPException(400, "Select at least one leave date")
+
+    ensure_leave_dates_open([item.get("date") for item in applications])
 
     reason = str(data.get("reason") or "").strip()
     if not reason:
@@ -2485,12 +2559,13 @@ def get_leave_list(
             "reason": r.get("reason"),
             "compOffId": r.get("compOffId"),
             "createdOn": r.get("createdOn"),
+            "cancellationHistory": r.get("cancellationHistory") or [],
             "cancelledBy": r.get("cancelledBy"),
             "cancelledByRole": r.get("cancelledByRole"),
             "cancelledOn": r.get("cancelledOn"),
             "isOwner": owner,
             "isOrganizationObserver": organization_observer,
-            "canCancel": bool(cancellation_role(user, r)) and r.get("finalStatus") in ["Applied", "Approved"],
+            "canCancel": bool(cancellation_role(user, r)) and r.get("finalStatus") in ["Applied", "Forwarded", "Forwarded by SIC", "Approved"],
             "canDeleteMaster": delete_allowed,
             "canSICAct": sic_allowed and r.get("finalStatus") == "Applied" and (organization_route or r.get("sicApprovalStatus") == "Pending"),
             "canFinalAct": authority_allowed and r.get("finalStatus") == "Applied" and r.get("deptApprovalStatus") == "Pending" and (organization_route or r.get("sicApprovalStatus") == "Forwarded"),
@@ -2978,8 +3053,8 @@ def cancel_leave(leave_id: str, user=Depends(get_authenticated_user)):
 
     actor_role = cancellation_role(user, leave)
     if not actor_role:
-        raise HTTPException(403, "Only the employee, assigned SIC, or Leave Approving Authority can cancel this leave")
-    if leave.get("finalStatus") not in {"Applied", "Approved"}:
+        raise HTTPException(403, "Only the employee, administrator, assigned SIC, or authorised reporting authority can cancel this leave")
+    if leave.get("finalStatus") not in {"Applied", "Forwarded", "Forwarded by SIC", "Approved"}:
         raise HTTPException(409, "Only an active or approved leave can be cancelled")
 
     clear_leave_operational_effects(leave)

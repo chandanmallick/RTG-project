@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect } from "react"
+import React, { useState, useEffect, useRef } from "react"
 import api from "./api"
 import { useMemo } from "react"
 
@@ -36,6 +36,8 @@ import { ExpandLess, ExpandMore  } from "@mui/icons-material"
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import { CalendarDays, ChevronLeft, ChevronRight, MapPin, Users } from "lucide-react";
 import { useAuth } from "../auth/AuthContext";
+import TrainingCalendarReview from "../components/crew/TrainingCalendarReview";
+import NominationMatrix from "../components/crew/NominationMatrix";
 import WorkflowHeader from "../components/crew/WorkflowHeader";
 
 export default function TrainingHolidayMaster({embeddedRequest=false,onRequestSubmitted,embeddedApproval=false,initialApprovalId="",onApprovalChanged,initialEmployeeId="",initialEmployeeName=""}={}){
@@ -71,6 +73,8 @@ const financialYears = generateFY()
 
 /* ================= STATES ================= */
 
+const [reviewNomination,setReviewNomination]=useState(null)
+const draggedNomination=useRef(null)
 const [holidayOpen,setHolidayOpen]=useState(true)
 const [trainingOpen,setTrainingOpen]=useState(true)
 const [assignOpen,setAssignOpen]=useState(true)
@@ -129,9 +133,12 @@ const [expandedApprovalId,setExpandedApprovalId]=useState(()=>initialApprovalId 
 /* ================= HISTORY ================= */
 
 const [history,setHistory]=useState([])
+const historyRequest=useRef(0)
+const [historyBusy,setHistoryBusy]=useState(false)
+const [historyError,setHistoryError]=useState("")
 const [historyFY,setHistoryFY]=useState("")
 const [historyEmployee,setHistoryEmployee]=useState("")
-const [historyView,setHistoryView]=useState("history")
+const [historyView,setHistoryView]=useState("matrix")
 const [matrixStatus,setMatrixStatus]=useState("All")
 const [matrixTrainingList,setMatrixTrainingList]=useState([])
 const [myApprovedTraining,setMyApprovedTraining]=useState([])
@@ -183,6 +190,7 @@ holidayNameHindi:""
 })
 
 fetchHoliday()
+window.dispatchEvent(new Event("crew-holidays-changed"))
 
 }catch(err){
 console.error(err)
@@ -573,24 +581,29 @@ fetchPending()
 /* ================= HISTORY ================= */
 
 const fetchHistory = async()=>{
-
-const res = await api.get("/training-assign/history",{
-params:{
-financialYear:historyFY,
-employeeId:historyEmployee
-}
-})
-
+const request=++historyRequest.current
+setHistoryBusy(true)
+setHistoryError("")
+try {
+const [res,programmeRes]=await Promise.all([
+api.get("/training-assign/history",{params:{financialYear:historyFY}}),
+api.get(`/Training_holiday/training/${historyFY || selectedFY}`)
+])
+if(request!==historyRequest.current) return
 setHistory(res.data || [])
-
-const programmeRes = await api.get(`/Training_holiday/training/${historyFY || selectedFY}`)
 setMatrixTrainingList(programmeRes.data || [])
-
+} catch(error) {
+if(request===historyRequest.current) setHistoryError(error.response?.data?.detail || "Unable to load nomination history")
+} finally {
+if(request===historyRequest.current) setHistoryBusy(false)
+}
 }
 
 useEffect(()=>{
 if(canViewTrainingPage) fetchHistory()
-},[historyFY,historyEmployee,selectedFY,canViewTrainingPage])
+},[historyFY,selectedFY,canViewTrainingPage])
+
+const visibleHistory=history.filter(row => `${row.employeeName || ""} ${row.employeeId || ""} ${row.groupName || ""}`.toLowerCase().includes(historyEmployee.toLowerCase()))
 
 const trainingHistory=useMemo(()=>(history || []).filter((row)=>(row.workflowKind || "Training")==="Training"),[history])
 
@@ -730,7 +743,7 @@ const currentTrainingSection=trainingSectionMeta[activeSection] || trainingSecti
 
 return(
 
-<Box sx={{p:embeddedRequest || embeddedApproval ? 0 : 3,background:embeddedRequest || embeddedApproval ? "transparent" : "#f4f6fb",minHeight:embeddedRequest || embeddedApproval ? 0 : "100vh"}}>
+<Box sx={{p:embeddedRequest || embeddedApproval ? 0 : activeSection==="history" ? 1.5 : 3,background:embeddedRequest || embeddedApproval ? "transparent" : "#f4f6fb",minHeight:embeddedRequest || embeddedApproval || activeSection==="history" ? 0 : "100vh"}}>
 
 {/* HEADER */}
 
@@ -1219,9 +1232,14 @@ return <Tooltip key={`${day.date}-${item.id || item.trainingName}`} title={`${it
 {/* ############### Duty Matrix Popup (Full Section) */}
 
 
+<Dialog open={Boolean(reviewNomination)} onClose={()=>setReviewNomination(null)} fullWidth maxWidth="sm">
+<DialogTitle>Manage training nomination</DialogTitle>
+<DialogContent dividers>{reviewNomination && <TrainingCalendarReview key={`${reviewNomination.id}-${reviewNomination.startDate || ""}`} requestId={reviewNomination.id} proposedStartDate={reviewNomination.startDate} onChanged={()=>{fetchPending();fetchHistory();if(selectedTraining)fetchCalendarDuty(selectedTraining,"","",false)}}/>}</DialogContent>
+<DialogActions><Button onClick={()=>setReviewNomination(null)}>Close</Button></DialogActions>
+</Dialog>
 <Dialog open={calendarOpen} maxWidth="xl" fullWidth>
 
-<DialogTitle sx={{pb:1}}>
+<DialogTitle sx={{pb:1}}><Typography variant="caption" color="text.secondary">Click a nomination to manage it. Drag an editable nomination along the same employee row to propose new dates; confirm before saving.</Typography>
 <Typography sx={{fontSize:20,fontWeight:900}}>Select shift or non-shift employees</Typography>
 {(()=>{const item=trainingList.find((entry)=>entry.trainingName===selectedTraining); return item ? <Typography variant="body2" color="text.secondary">{item.trainingName} · {item.startDate} to {item.endDate} · {item.location || "Location not specified"}</Typography> : null})()}
 </DialogTitle>
@@ -1297,6 +1315,8 @@ return(
 
 <TableCell
 key={date}
+onDragOver={event=>{if(draggedNomination.current?.employeeId===emp.employeeId)event.preventDefault()}}
+onDrop={event=>{event.preventDefault();const dragged=draggedNomination.current;draggedNomination.current=null;if(dragged?.employeeId===emp.employeeId)setReviewNomination({id:dragged.id,startDate:date})}}
 align="center"
 sx={{
 position:"relative",
@@ -1321,7 +1341,7 @@ minWidth:118
 </Typography>
 {isNonShiftHoliday && <Typography variant="caption" title={duty.holidayName} sx={{display:"block",color:"#6B21A8",fontWeight:900}}>{duty.holidayName}</Typography>}
 {uniqueTrainingLines.map((line)=><Tooltip key={`${line.id}-${line.trainingName}`} title={`${line.trainingName} · ${line.status || "Training"}`} arrow>
-<Box sx={{mt:.45,px:.65,py:.3,borderRadius:1,color:"#FFFFFF",background:trainingLineColor(line.trainingName),fontSize:9,fontWeight:900,lineHeight:1.2,whiteSpace:"normal"}}>{line.status==="Proposed" ? "Selected training" : "Already nominated"}</Box>
+<Box component={line.id==="proposed" ? "div" : "button"} type={line.id==="proposed" ? undefined : "button"} draggable={Boolean(line.canEdit)} onDragStart={event=>{if(!line.canEdit)return;draggedNomination.current={id:line.id,employeeId:emp.employeeId};event.dataTransfer.setData("text/plain",line.id);event.dataTransfer.effectAllowed="move"}} onDragEnd={()=>{draggedNomination.current=null}} onClick={()=>{if(line.id!=="proposed")setReviewNomination({id:line.id})}} sx={{border:0,cursor:line.canEdit ? "grab" : "pointer",width:"100%",mt:.45,px:.65,py:.3,borderRadius:1,color:"#FFFFFF",background:trainingLineColor(line.trainingName),fontSize:9,fontWeight:900,lineHeight:1.2,whiteSpace:"normal"}}>{line.status==="Proposed" ? "Selected training" : `${line.trainingName} - ${line.status}`}</Box>
 </Tooltip>)}
 {uniqueTrainingLines.length>1 && <Chip size="small" label={`${uniqueTrainingLines.length} training overlap`} sx={{mt:.5,height:19,background:"#FEE2E2",color:"#991B1B",fontSize:9,fontWeight:950}} />}
 {hasLeave && <Typography variant="caption" sx={{display:"block",color:"#DC2626",fontWeight:900}}>Leave: {duty.stationLeaveOnly ? "Station Leave" : `${duty.leaveType || duty.leaveStatus}${duty.stationLeave ? " + Station Leave" : ""}`}</Typography>}
@@ -1738,46 +1758,20 @@ Reject Selected
 <Collapse in={activeSection==="history"} timeout={420} unmountOnExit>
 <Box id="training-workspace-history" sx={{scrollMarginTop:110}}>
 {canViewTrainingPage && (
-<Accordion
-  defaultExpanded
-  sx={{
-    borderRadius: 3,
-    boxShadow: "0 4px 20px rgba(0,0,0,0.08)",
-    overflow: "hidden",
-    mt: 4
-  }}
->
-
-<AccordionSummary
-  expandIcon={<ExpandMoreIcon />}
-  sx={{
-    background: "linear-gradient(90deg,#6366f1,#818cf8)",
-    color: "white",
-    px:3
-  }}
->
-
-<Typography variant="h6" fontWeight={600}>
-Nomination History & Reports
-</Typography>
-
-</AccordionSummary>
-
-<AccordionDetails sx={{background:"#f8f9ff"}}>
-
-<Paper elevation={0} sx={{p:3,borderRadius:2}}>
+<Paper elevation={0} sx={{p:{xs:1,md:2},borderRadius:2}}>
 
 <Box sx={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:2,flexWrap:"wrap",mb:2.5}}>
 <Box sx={{display:"flex",gap:1,p:.6,borderRadius:2,background:"#EEF2FF"}}>
 <Button size="small" variant={historyView==="history" ? "contained" : "text"} onClick={()=>setHistoryView("history")} sx={{fontWeight:850,textTransform:"none"}}>Nomination History</Button>
 <Button size="small" variant={historyView==="matrix" ? "contained" : "text"} onClick={()=>setHistoryView("matrix")} sx={{fontWeight:850,textTransform:"none"}}>Training Nomination Matrix</Button>
 </Box>
-{historyView==="matrix" && <Button variant="outlined" onClick={exportNominationMatrix} disabled={!nominationMatrix.employees.length} sx={{fontWeight:850,textTransform:"none"}}>Export Excel-compatible CSV</Button>}
+{historyView==="matrix" && <Button variant="outlined" onClick={exportNominationMatrix} disabled={!nominationMatrix.employees.length} sx={{fontWeight:850,textTransform:"none"}}>Export full matrix CSV</Button>}
 </Box>
 
-<Box sx={{display:"flex",gap:2,flexWrap:"wrap",mb:3}}>
+<Box sx={{display:"flex",gap:1.5,flexWrap:"wrap",mb:2}}>
 
 <TextField
+size="small"
 select
 label="Financial Year"
 value={historyFY}
@@ -1796,20 +1790,21 @@ sx={{minWidth:200}}
 </TextField>
 
 <TextField
-label="Employee ID"
+size="small"
+label="Search name, ID or group"
 value={historyEmployee}
 onChange={(e)=>setHistoryEmployee(e.target.value)}
 sx={{minWidth:200}}
 />
 
-{historyView==="matrix" && <TextField select label="Nomination Status" value={matrixStatus} onChange={(e)=>setMatrixStatus(e.target.value)} sx={{minWidth:210}}>
+{historyView==="matrix" && <TextField size="small" select label="Nomination Status" value={matrixStatus} onChange={(e)=>setMatrixStatus(e.target.value)} sx={{minWidth:210}}>
 <MenuItem value="All">All statuses</MenuItem>
 {matrixStatuses.map((status)=><MenuItem key={status} value={status}>{status}</MenuItem>)}
 </TextField>}
 
 </Box>
 
-{historyView==="history" ? <>
+{historyError ? <Alert severity="error" action={<Button onClick={fetchHistory}>Retry</Button>}>{historyError}</Alert> : historyBusy ? <Box sx={{p:6,textAlign:"center"}}><CircularProgress size={28}/></Box> : historyView==="history" ? <>
 <Table size="small">
 
 <TableHead>
@@ -1828,7 +1823,7 @@ sx={{minWidth:200}}
 
 <TableBody>
 
-{history.length===0 ?
+{visibleHistory.length===0 ?
 
 <TableRow>
 <TableCell colSpan={5} align="center">
@@ -1838,7 +1833,7 @@ No history found
 
 :
 
-history.map(row => (
+visibleHistory.map(row => (
 
 <TableRow
 key={row.id}
@@ -1856,7 +1851,7 @@ sx={{
 
 <TableCell>{row.status}</TableCell>
 
-<TableCell>{row.approvalProgress || "-"}</TableCell>
+<TableCell>{row.approvalProgress || "-"}{!row.historicalImport && <Button size="small" onClick={()=>setReviewNomination({id:row.id})}>Manage nomination</Button>}</TableCell>
 
 </TableRow>
 
@@ -1868,57 +1863,11 @@ sx={{
 
 </Table>
 </> : <>
-<Grid container spacing={1.5} sx={{mb:2.5}}>
-{[
-{label:"Employees",value:nominationMatrix.employees.length,color:"#4338CA",background:"#EEF2FF"},
-{label:"Training programmes",value:nominationMatrix.programmes.length,color:"#0369A1",background:"#E0F2FE"},
-{label:"Nominations",value:nominationMatrix.nominationCount,color:"#9A3412",background:"#FFF7ED"},
-{label:"Approved",value:nominationMatrix.approvedCount,color:"#166534",background:"#DCFCE7"},
-].map((item)=><Grid item xs={6} md={3} key={item.label}><Box sx={{p:1.6,borderRadius:2,background:item.background,border:`1px solid ${item.color}22`}}><Typography sx={{fontSize:11.5,fontWeight:800,color:"#64748B"}}>{item.label}</Typography><Typography sx={{fontSize:24,fontWeight:950,color:item.color}}>{item.value}</Typography></Box></Grid>)}
-</Grid>
-
-<Box sx={{overflowX:"auto",border:"1px solid #DDE5F3",borderRadius:2}}>
-<Table size="small" sx={{minWidth:Math.max(1050,620+(nominationMatrix.programmes.length*230))}}>
-<TableHead>
-<TableRow sx={{background:"#E0E7FF"}}>
-<TableCell sx={{fontWeight:900,minWidth:260,position:"sticky",left:0,zIndex:3,background:"#E0E7FF"}}>Employee (training days / 7 days)</TableCell>
-<TableCell sx={{fontWeight:900,minWidth:140}}>Designation / Group</TableCell>
-{nominationMatrix.programmes.map((programme)=>{
-const noNominationUpcoming=nominationMatrix.zeroNominationUpcomingNames.includes(programme)
-const details=nominationMatrix.programmeDetails[programme] || {}
-return <TableCell key={programme} align="center" sx={{fontWeight:900,minWidth:230,borderLeft:"1px solid #C7D2FE",background:noNominationUpcoming ? "#FEE2E2" : "#E0E7FF",color:noNominationUpcoming ? "#991B1B" : "inherit"}}><Typography sx={{fontSize:12,fontWeight:950,color:"inherit"}}>{programme}</Typography>{noNominationUpcoming && <Chip size="small" label="Upcoming · No nomination" sx={{mt:.7,height:22,background:"#DC2626",color:"#FFFFFF",fontSize:10,fontWeight:900}}/>}{details.startDate && <Typography sx={{mt:.55,fontSize:10.5,fontWeight:750,color:noNominationUpcoming ? "#B91C1C" : "#64748B"}}>{details.startDate}{details.endDate && details.endDate!==details.startDate ? ` to ${details.endDate}` : ""}</Typography>}</TableCell>
-})}
-<TableCell align="center" sx={{fontWeight:900,minWidth:90}}>Total</TableCell>
-<TableCell align="center" sx={{fontWeight:900,minWidth:90}}>Approved</TableCell>
-<TableCell align="center" sx={{fontWeight:900,minWidth:90}}>Pending</TableCell>
-<TableCell align="center" sx={{fontWeight:900,minWidth:110}}>Rejected / Cancelled</TableCell>
-<TableCell align="center" sx={{fontWeight:900,minWidth:120}}>Approved Days</TableCell>
-</TableRow>
-</TableHead>
-<TableBody>
-{!nominationMatrix.employees.length ? <TableRow><TableCell colSpan={nominationMatrix.programmes.length+7} align="center" sx={{py:5,color:"#64748B"}}>No nomination data found for the selected filters.</TableCell></TableRow> : nominationMatrix.employees.map((employee)=><TableRow key={employee.employeeId} hover>
-<TableCell sx={{position:"sticky",left:0,zIndex:2,background:"#FFFFFF"}}><Stack direction="row" spacing={.8} alignItems="center" justifyContent="space-between"><Typography sx={{fontWeight:900,fontSize:13}}>{employee.employeeName}</Typography><Chip size="small" label={`${employee.approvedDays} days / 7 days`} sx={{height:23,fontSize:10.5,fontWeight:950,...trainingDaysSx(employee.approvedDays)}}/></Stack><Typography variant="caption" color="text.secondary">{employee.employeeId} · {employee.employeeType}</Typography></TableCell>
-<TableCell><Typography sx={{fontSize:12,fontWeight:750}}>{employee.designation}</Typography><Typography variant="caption" color="text.secondary">{employee.groupName}</Typography></TableCell>
-{nominationMatrix.programmes.map((programme)=><TableCell key={programme} sx={{borderLeft:"1px solid #EEF2FF",verticalAlign:"top",background:nominationMatrix.zeroNominationUpcomingNames.includes(programme) ? "#FFF5F5" : undefined}}>
-<Stack spacing={.7}>{(employee.cells[programme] || []).map((item)=><Box key={item.id} sx={{p:.8,borderRadius:1.5,background:"#F8FAFC"}}><Chip size="small" label={item.status || "Unknown"} sx={{height:21,fontSize:10,fontWeight:850,...statusChipSx(item.status)}}/><Typography sx={{mt:.45,fontSize:10.5,color:"#475569"}}>{item.startDate || item.trainingDate || item.financialYear || "FY only"}{item.endDate && item.endDate!==item.startDate ? ` to ${item.endDate}` : ""}{item.trainingDays ? ` · ${item.trainingDays} day(s)` : ""}</Typography></Box>)}</Stack>
-</TableCell>)}
-<TableCell align="center" sx={{fontWeight:900}}>{employee.total}</TableCell>
-<TableCell align="center" sx={{fontWeight:900,color:"#166534"}}>{employee.approved}</TableCell>
-<TableCell align="center" sx={{fontWeight:900,color:"#9A3412"}}>{employee.pending}</TableCell>
-<TableCell align="center" sx={{fontWeight:900,color:"#991B1B"}}>{employee.rejected}</TableCell>
-<TableCell align="center" sx={{fontWeight:900,color:"#4338CA"}}>{employee.approvedDays}</TableCell>
-</TableRow>)}
-</TableBody>
-</Table>
-</Box>
-<Typography sx={{mt:1.2,fontSize:11,color:"#64748B"}}>Each cell shows every nomination for that employee and training programme. Approved Days uses the imported duration when exact historical dates were not supplied.</Typography>
+<NominationMatrix onManage={item=>setReviewNomination({id:item.id})} matrix={nominationMatrix} search={historyEmployee} />
 </>}
 
 </Paper>
 
-</AccordionDetails>
-
-</Accordion>
 )}
 </Box>
 </Collapse>

@@ -34,6 +34,8 @@ import {
 import { CalendarDays, CheckCircle2, GraduationCap, GripVertical, RefreshCw, Send, ShieldCheck, User } from "lucide-react";
 import api from "./api";
 import DutyReassignmentPanel from "../components/crew/DutyReassignmentPanel";
+import LeaveTracking from "../components/crew/LeaveTracking";
+import LeaveBlockedPeriods from "../components/crew/LeaveBlockedPeriods";
 import WorkflowHeader from "../components/crew/WorkflowHeader";
 
 const employeeIdOf = (employee) => String(employee?.employeeId || employee?.userId || "").trim();
@@ -133,6 +135,7 @@ export default function LeaveManagement({ embeddedApproval = false, embeddedAppl
   const [approvalDates, setApprovalDates] = useState([]);
   const [approvalFrom, setApprovalFrom] = useState(() => initialApprovalDate || new URLSearchParams(window.location.search).get("from") || "");
   const [approvalTo, setApprovalTo] = useState(() => initialApprovalDate || new URLSearchParams(window.location.search).get("to") || "");
+  const [calendarRevision, setCalendarRevision] = useState(0);
   const [approvalCalendarLoading, setApprovalCalendarLoading] = useState(false);
   const [approvalCalendarError, setApprovalCalendarError] = useState("");
   const [approvalDepartment, setApprovalDepartment] = useState("");
@@ -230,6 +233,13 @@ export default function LeaveManagement({ embeddedApproval = false, embeddedAppl
   };
 
   useEffect(() => { loadPage(); }, []);
+  useEffect(() => {
+    const refresh = () => { setCalendarRevision(value => value + 1); loadLeaves().catch(() => {}); loadApprovedTraining(); };
+    window.addEventListener("crew-workflows-changed", refresh);
+    const storageRefresh = event => { if (event.key === "crew-workflows-changed") refresh(); };
+    window.addEventListener("storage", storageRefresh);
+    return () => { window.removeEventListener("crew-workflows-changed", refresh); window.removeEventListener("storage", storageRefresh); };
+  }, [completedFrom, completedTo]);
 
   const saveDelegation = async () => {
     try {
@@ -381,6 +391,8 @@ export default function LeaveManagement({ embeddedApproval = false, embeddedAppl
       setNotice({ severity: "success", text: data.message || successText });
       setSelectedWorkflowIds([]);
       await Promise.all([loadLeaves(), selectedEmployee ? api.get("/leave/comp-off/available", { params: { employeeId: employeeIdOf(selectedEmployee) } }).then(({ data: credits }) => setCompOffs(credits || [])) : Promise.resolve()]);
+      window.dispatchEvent(new Event("crew-workflows-changed"));
+      localStorage.setItem("crew-workflows-changed", String(Date.now()));
       onApprovalChanged?.();
     } catch (error) {
       setNotice({ severity: "error", text: error.response?.data?.detail || "Action could not be completed." });
@@ -616,7 +628,7 @@ export default function LeaveManagement({ embeddedApproval = false, embeddedAppl
     };
     loadApprovalRoster();
     return () => { cancelled = true; };
-  }, [workflowView, effectiveApprovalFrom, effectiveApprovalTo, role, embeddedApproval, initialEmployeeId]);
+  }, [workflowView, effectiveApprovalFrom, effectiveApprovalTo, role, embeddedApproval, initialEmployeeId, calendarRevision]);
   const approvalDepartments = useMemo(() => Array.from(new Set(
     approvalRoster.flatMap((group) => [
       ...(group.departments || []),
@@ -779,6 +791,7 @@ export default function LeaveManagement({ embeddedApproval = false, embeddedAppl
                                     <Typography noWrap sx={{ color: "#64748B", fontSize: 9.2, fontWeight: 700 }}>{leave.dutyType || leave.assignedDuty || "-"} · {stationLeaveLabel(leave)} · {stage}</Typography>
                                   </Box>
                                 </Stack>
+                                <LeaveTracking leave={leave} onCancel={cancelLeave} busy={working} />
                                 {leave.approvalMode !== "Organization" && <Stack direction="row" alignItems="center" spacing={.15} sx={{ pl: .3, mt: .15 }}>
                                   <Checkbox size="small" checked={replacementChoice(leave, leave.canSICAct ? "sic" : "dic")} onChange={(event) => setReplacementChoice(leave, leave.canSICAct ? "sic" : "dic", event.target.checked)} sx={{ p: .2 }} />
                                   <Typography sx={{ color: "#64748B", fontSize: 8.8, fontWeight: 800 }}>Replacement required</Typography>
@@ -929,6 +942,7 @@ export default function LeaveManagement({ embeddedApproval = false, embeddedAppl
                                 {leave?.replacementAssigned ? <ReplacementFlag required assigned title={`Replacement assigned: ${leave.replacementEmployee?.name || leave.replacementEmployee?.employeeId || "Employee"}`} /> : actionable ? <Tooltip title={`Replacement required: ${replacementChecked ? "Yes" : "No"}`} arrow><Box component="button" type="button" aria-label="Toggle replacement required" aria-pressed={replacementChecked} onClick={(event) => { event.stopPropagation(); setReplacementChoice(leave, replacementStage, !replacementChecked); }} sx={{ width: 17, minWidth: 17, height: 17, p: 0, borderRadius: .7, border: `1px solid ${replacementChecked ? "#D97706" : "#94A3B8"}`, color: replacementChecked ? "#FFFFFF" : "#64748B", background: replacementChecked ? "#D97706" : "#FFFFFF", fontSize: 8, fontWeight: 950, cursor: "pointer", animation:replacementChecked ? "replacementPulse 1.05s ease-in-out infinite" : "none", "@keyframes replacementPulse": { "0%,100%":{opacity:1}, "50%":{opacity:.4} } }}>R</Box></Tooltip> : <ReplacementFlag required={leave?.replacementRequired} assigned={leave?.replacementAssigned} />}
                               </Box>
                             </Tooltip>
+                            {leave && <LeaveTracking leave={leave} onCancel={cancelLeave} busy={working} />}
                           </TableCell>
                         );
                       })}
@@ -949,7 +963,7 @@ export default function LeaveManagement({ embeddedApproval = false, embeddedAppl
     const selectableItems = items.filter((leave) => leave.canSICAct || leave.canFinalAct);
     const hasSicActions = items.some((leave) => leave.canSICAct);
     const hasFinalActions = items.some((leave) => leave.canFinalAct);
-    const hasActionColumn = !completedTable || items.some((leave) => leave.canCancel || leave.canDeleteMaster || (leave.isSIC && leave.finalStatus === "Approved"));
+    const hasActionColumn = true;
     return (
       <Box sx={{ display: "grid", gap: 1.2 }}>
         {!completedTable && (
@@ -1070,7 +1084,8 @@ export default function LeaveManagement({ embeddedApproval = false, embeddedAppl
                   <TableCell><StatusChip value={leave.finalStatus} /></TableCell>
                   {hasActionColumn && <TableCell align="right" sx={{ minWidth: 280 }}>
                     <Stack direction="row" spacing={0.7} justifyContent="flex-end">
-                      {leave.canCancel && <Button size="small" color="warning" variant="outlined" onClick={() => cancelLeave(leave)}>Cancel leave</Button>}
+                      <LeaveTracking leave={leave} onCancel={cancelLeave} busy={working} />
+                      {leave.canCancel && <Button disabled={working} size="small" color="warning" variant="outlined" onClick={() => cancelLeave(leave)}>Cancel leave</Button>}
                       {completedTable && leave.isSIC && leave.finalStatus === "Approved" && (
                         <Button
                           size="small"
@@ -1140,6 +1155,8 @@ export default function LeaveManagement({ embeddedApproval = false, embeddedAppl
       {!embeddedApplication && <WorkflowHeader title={currentLeaveSection.title} subtitle={currentLeaveSection.subtitle} accent={currentLeaveSection.accent} count={currentLeaveSection.count} />}
 
       {notice && <Alert severity={notice.severity} onClose={() => setNotice(null)}>{notice.text}</Alert>}
+
+      {activeSection === "apply" && <LeaveBlockedPeriods isAdmin={Boolean(role.isAdmin) && !embeddedApplication} />}
 
       <Collapse in={activeSection === "apply"} timeout={420} unmountOnExit>
       <Box id="leave-workspace-apply" sx={{ display: "grid", gap: 2.5, scrollMarginTop: 110 }}>

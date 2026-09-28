@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 import { Alert, Box, Button, Checkbox, Chip, CircularProgress, FormControlLabel, MenuItem, Stack, TextField, Typography } from "@mui/material";
+import NominationEditor from "./NominationEditor";
 import api from "../../crewLegacy/api";
 
-export default function TrainingCalendarReview({ requestId, onChanged, onReplacement }) {
+export default function TrainingCalendarReview({ requestId, onChanged, onReplacement, proposedStartDate }) {
   const [record, setRecord] = useState(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -51,6 +52,8 @@ export default function TrainingCalendarReview({ requestId, onChanged, onReplace
       setRejecting(false);
       const updated = await load();
       setNotice({ severity: "success", text: action === "off" ? "OFF request submitted for approval." : action === "reject" ? "Request rejected." : updated.status === "Approved" ? "Final approval complete. Calendar updated." : `Approved and forwarded to ${updated.currentApproverName || "the next approver"}.` });
+      window.dispatchEvent(new Event("crew-workflows-changed"));
+      localStorage.setItem("crew-workflows-changed", String(Date.now()));
       onChanged?.();
     } catch (error) {
       setNotice({ severity: "error", text: error.response?.data?.detail || error.message || "The request could not be saved. Refresh to check its current status." });
@@ -59,7 +62,7 @@ export default function TrainingCalendarReview({ requestId, onChanged, onReplace
 
   if (loading) return <Box sx={{ p: 5, textAlign: "center" }}><CircularProgress /></Box>;
   const adjacent = record?.workflowKind === "Adjacent OFF";
-  const selector = (field, label) => <TextField select fullWidth size="small" label={label} value={coverage[field]} disabled={busy || candidateLoading} onChange={(event) => setCoverage((current) => ({ ...current, [field]: event.target.value }))} SelectProps={{ onOpen: loadCandidates }}>
+  const selector = (field, label) => <TextField select fullWidth size="small" label={label} value={coverage[field]} disabled={busy || candidateLoading} onChange={(event) => setCoverage((current) => ({ ...current, [field]: event.target.value }))} slotProps={{ select: { onOpen: loadCandidates } }}>
     <MenuItem value="">Select employee</MenuItem>
     {coverage[field] && !candidates.some((candidate) => candidate.employeeId === coverage[field]) && <MenuItem value={coverage[field]}>{record.replacementEmployee?.employeeId === coverage[field] ? record.replacementEmployee.name : record.actingSICEmployee?.name || coverage[field]}</MenuItem>}
     {candidates.map((candidate) => <MenuItem key={candidate.employeeId} value={candidate.employeeId} disabled={candidate.hasConflict}>{candidate.name} ({candidate.employeeId}) · {candidate.dutySummary}{candidate.hasConflict ? " · Unavailable" : ""}</MenuItem>)}
@@ -68,8 +71,8 @@ export default function TrainingCalendarReview({ requestId, onChanged, onReplace
   return <Stack spacing={2}>
     {notice && <Alert severity={notice.severity}>{notice.text}</Alert>}
     {record && <>
-      <Box><Typography variant="h6" fontWeight={900}>{record.employeeName || record.employeeId}</Typography><Typography>{record.trainingName}</Typography><Typography color="text.secondary">{record.startDate} to {record.endDate} · {record.trainingLocation || "Location not specified"}</Typography></Box>
-      <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap><Chip label={record.status} color={record.status === "Approved" ? "success" : "default"} /><Chip label={adjacent ? "OFF request" : "Training"} /></Stack>
+      <Box><Typography sx={{ fontWeight: 900 }} variant="h6" >{record.employeeName || record.employeeId}</Typography><Typography>{record.trainingName}</Typography><Typography color="text.secondary">{record.startDate} to {record.endDate} · {record.trainingLocation || "Location not specified"}</Typography></Box>
+      <Stack sx={{ flexWrap: "wrap" }} direction="row" spacing={1}  useFlexGap><Chip label={record.status} color={record.status === "Approved" ? "success" : "default"} /><Chip label={adjacent ? "OFF request" : "Training"} /></Stack>
       {adjacent && <Alert severity="info">Requested OFF: {[record.adjacentOff?.before && "day before training", record.adjacentOff?.after && "day after training"].filter(Boolean).join(" and ")}</Alert>}
       <Stack spacing={.5}>{(record.approvalChain || []).map((step, index) => <Typography key={`${step.employeeId}-${index}`} variant="body2" color={step.status === "Approved" ? "success.main" : "text.secondary"}>{index + 1}. {step.name} · {step.level} · {step.status}{record.currentApproverId === step.employeeId && record.status === "Pending Approval" ? " (current stage)" : ""}</Typography>)}</Stack>
       {!record.canApprove && ["Pending Approval", "Nominated"].includes(record.status) && <Alert severity="info">Awaiting {record.currentApproverName || "the assigned approver"}. Approval is available to the officer responsible for this stage.</Alert>}
@@ -90,10 +93,12 @@ export default function TrainingCalendarReview({ requestId, onChanged, onReplace
           {rejecting && <Button disabled={busy} onClick={() => setRejecting(false)}>Cancel</Button>}
         </Stack>
       </>}
+      <NominationEditor key={`${record.id}-${record.revision}`} record={record} proposedStartDate={proposedStartDate} onChanged={async () => { await load(); onChanged?.(); }} />
+      {(record.changeHistory || []).map((entry, index) => <Typography key={index} variant="caption" color="text.secondary">{entry.action} by {entry.by} on {new Date(entry.on).toLocaleString()}: {entry.reason}</Typography>)}
       {record.canManageReplacement && onReplacement && <Button variant="outlined" onClick={onReplacement}>{record.replacementEmployee?.employeeId ? "Change replacement" : "Assign replacement"}</Button>}
       {record.adjacentOffRequest && <Alert severity="info">OFF request: {record.adjacentOffRequest.status}{record.adjacentOffRequest.currentApproverName ? ` · awaiting ${record.adjacentOffRequest.currentApproverName}` : ""}</Alert>}
       {record.canRequestAdjacentOff && <Box>
-        <Typography fontWeight={800}>Request OFF beside this training</Typography>
+        <Typography sx={{ fontWeight: 800 }} >Request OFF beside this training</Typography>
         <Stack direction="row"><FormControlLabel label="Day before" control={<Checkbox disabled={busy} checked={off.before} onChange={(event) => setOff((current) => ({ ...current, before: event.target.checked }))} />} /><FormControlLabel label="Day after" control={<Checkbox disabled={busy} checked={off.after} onChange={(event) => setOff((current) => ({ ...current, after: event.target.checked }))} />} /></Stack>
         <Button variant="outlined" disabled={busy || (!off.before && !off.after)} onClick={() => act("off")}>Request OFF</Button>
       </Box>}

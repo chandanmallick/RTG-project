@@ -30,7 +30,7 @@ api.interceptors.request.use((config) => {
   // Training approval is a reporting-hierarchy workflow action, not a page edit.
   // The API verifies that the logged-in employee is the nomination's current
   // approver, so Crew Training Write access must not be required.
-  const isTrainingApproval = method === "POST" && (
+  const isTrainingApproval = (["PUT", "DELETE"].includes(method) && /^\/training-assign\/nomination\/[^/]+$/.test(requestUrl)) || method === "POST" && (
     requestUrl.includes("/training-assign/approve") ||
     requestUrl.includes("/training-assign/reject") ||
     requestUrl.includes("/training-assign/request-adjacent-off/") ||
@@ -39,6 +39,7 @@ api.interceptors.request.use((config) => {
   );
   // Leave approval is likewise controlled by the live SIC/DIC/reporting hierarchy.
   const isLeaveApproval = method === "PUT" && (
+    requestUrl.includes("/leave/cancel/") ||
     requestUrl.includes("/leave/sic-forward-bulk") ||
     requestUrl.includes("/leave/sic-reject-bulk") ||
     requestUrl.includes("/leave/approve-bulk") ||
@@ -49,12 +50,13 @@ api.interceptors.request.use((config) => {
   const isSportsApproval = method === "POST" && /^\/sports\/applications\/[^/]+\/(approve|reject)$/.test(requestUrl);
   // Calendar applications use the target workflow's server-side employee and
   // reporting-authority checks, independent of calendar layout edit access.
+  const isLeaveBlockAdministration = ["POST", "DELETE"].includes(method) && /^\/leave\/blocked-periods(?:\/[^/]+)?$/.test(requestUrl);
   const isLeaveApplication = method === "POST" && requestUrl === "/leave/apply";
   // Every signed-in employee owns this one profile preference. The backend
   // binds it to the authenticated employee, so page-level Write access is not
   // needed to choose a post-login landing page.
   const isLandingPagePreference = ["POST", "PUT"].includes(method) && requestUrl.includes("/profile/landing-page");
-  if (!["GET", "HEAD", "OPTIONS"].includes(method) && permissions[pageKeyForPath()]?.write === false && !isMasterDelete && !isDutyDecision && !isTrainingApproval && !isLeaveApproval && !isSportsApproval && !isLeaveApplication && !isLandingPagePreference) {
+  if (!["GET", "HEAD", "OPTIONS"].includes(method) && permissions[pageKeyForPath()]?.write === false && !isMasterDelete && !isDutyDecision && !isTrainingApproval && !isLeaveApproval && !isSportsApproval && !isLeaveApplication && !isLeaveBlockAdministration && !isLandingPagePreference) {
     return Promise.reject(new Error("This page is read-only for your account."));
   }
   return config;

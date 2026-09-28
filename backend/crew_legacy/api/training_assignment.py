@@ -17,12 +17,94 @@ from crew_legacy.database.database_mongo import (
     training_nomination_history_collection,
     training_master_collection,
     page_access_collection,
+    leave_request_collection,
 )
 
 
 router = APIRouter()
 PENDING_STATUSES = {"Nominated", "Pending Approval"}
 TRAINING_HR_POOL_ID = "TRAINING_HR_POOL"
+
+
+def can_edit_nomination(user: dict, record: dict) -> bool:
+    if record.get("status") == "Updating" and record.get("mutationFailed"):
+        record = {**record, "status": record.get("mutationPreviousStatus")}
+    if record.get("workflowKind") == "Adjacent OFF" or record.get("historicalImport"):
+        return False
+    if record.get("status") not in {"Nominated", "Pending Approval", "Approved"}:
+        return False
+    actor = clean_id(user.get("employeeId") or user.get("userId"))
+    if user.get("role") == "admin" or is_training_hr(user):
+        return True
+    employee = employee_collection.find_one({"$or": [
+        {"employeeId": record.get("employeeId")}, {"userId": record.get("employeeId")},
+    ]}) or {}
+    # Owners may change their own pending request; approved changes need authority.
+    if actor == clean_id(record.get("employeeId")):
+        return record.get("status") in PENDING_STATUSES
+    return bool(employee and can_nominate_target(user, employee))
+
+
+def release_nomination_effects(record: dict):
+    """Restore only daily fields still linked to this nomination; never delete a duty."""
+    nomination_id = str(record["_id"])
+    for marker, original, fields in [
+        ("trainingFinal", "trainingOriginalAssignment", ["trainingName", "replacementRequired"]),
+        ("trainingAdjacentOff", "trainingAdjacentOffOriginalAssignment", []),
+        ("trainingReplacement", "trainingReplacementPreviousAssignment",
+         ["replacementDuty", "replacementFor", "replacementMode", "replacementCreatedDaily"]),
+    ]:
+        for daily in employee_daily_collection.find({f"{marker}.nominationId": nomination_id}):
+            previous = daily.get(original) or {}
+            values = {key: previous.get(key) for key in ("assignedDuty", "actualStatus", "groupName")}
+            if "actualStatus" not in previous:
+                values["actualStatus"] = previous.get("assignedDuty")
+            # Keep identity/group on rows created for a training-only assignment.
+            if not previous.get("groupName"):
+                values.pop("groupName")
+            employee_daily_collection.update_one(
+                {"_id": daily["_id"], f"{marker}.nominationId": nomination_id},
+                {"$set": {**values, "updatedOn": datetime.utcnow()},
+                 "$unset": {field: "" for field in [marker, original, *fields]}},
+            )
+    employee_daily_collection.update_many(
+        {"trainingNomination.nominationId": nomination_id},
+        {"$unset": {"trainingNomination": ""}},
+    )
+    employee_daily_collection.update_many(
+        {"actingSICFor.nominationId": nomination_id},
+        {"$unset": {"isActingSIC": "", "actingSICFor": "", "actingSICGroup": ""}},
+    )
+
+
+def validate_nomination_change(record: dict, employee_id: str, dates: list[str]):
+    nomination_id = str(record["_id"])
+    for date in dates:
+        leave = leave_request_collection.find_one({
+            "employeeId": employee_id, "date": date,
+            "finalStatus": {"$nin": ["Cancelled", "Rejected", "Withdrawn"]},
+        })
+        if leave:
+            raise HTTPException(409, f"Employee has leave on {date}; resolve it before changing training")
+        daily = employee_daily_collection.find_one({"employeeId": employee_id, "date": date}) or {}
+        for field in ("trainingFinal", "trainingNomination", "trainingReplacement", "trainingAdjacentOff"):
+            linked = (daily.get(field) or {}).get("nominationId")
+            own_child = linked and training_nomination_history_collection.find_one({
+                "_id": ObjectId(linked), "parentNominationId": nomination_id,
+                "workflowKind": "Adjacent OFF",
+            }) if linked and ObjectId.is_valid(linked) else None
+            if linked and linked != nomination_id and not own_child:
+                raise HTTPException(409, f"Employee has another training or coverage assignment on {date}")
+        if daily.get("sportsFinal") or daily.get("sportsNomination") or daily.get("sportsName") or daily.get("replacementDuty") and not daily.get("trainingReplacement"):
+            raise HTTPException(409, f"Employee has a conflicting assignment on {date}")
+    overlapping = training_nomination_history_collection.find_one({
+        "_id": {"$ne": record["_id"]}, "employeeId": employee_id,
+        "workflowKind": {"$ne": "Adjacent OFF"},
+        "status": {"$nin": ["Rejected", "Cancelled"]},
+        "startDate": {"$lte": dates[-1]}, "endDate": {"$gte": dates[0]},
+    })
+    if overlapping:
+        raise HTTPException(409, "The employee already has training during these dates")
 
 
 def has_training_permission(user: dict, permission: str) -> bool:
@@ -422,6 +504,8 @@ def serialize_nomination(
                 or (is_hr and current and current.get("employeeId") == TRAINING_HR_POOL_ID)
             )
         ),
+        "revision": record.get("revision", 0),
+        "changeHistory": record.get("changeHistory") or [],
         "createdOn": record.get("createdOn"),
         "approvedOn": record.get("approvedOn"),
     }
@@ -449,6 +533,7 @@ def finalize_daily_records(record: dict):
             "date": date,
         }) or {}
         original_assignment = trainee_daily.get("trainingOriginalAssignment") or {
+            "actualStatus": trainee_daily.get("actualStatus"),
             "assignedDuty": trainee_daily.get("assignedDuty"),
             "groupName": trainee_daily.get("groupName"),
         }
@@ -702,7 +787,7 @@ def get_training_calendar(
                 {"endDate": {"$exists": False}, "trainingDate": {"$gte": window_start, "$lte": window_end}},
             ],
         },
-        {"employeeId": 1, "trainingName": 1, "startDate": 1, "endDate": 1, "trainingDate": 1, "status": 1},
+        {"employeeId": 1, "trainingName": 1, "startDate": 1, "endDate": 1, "trainingDate": 1, "status": 1, "historicalImport": 1, "workflowKind": 1},
     ):
         emp_key = clean_id(nomination.get("employeeId"))
         period_start = nomination.get("startDate") or nomination.get("trainingDate")
@@ -715,6 +800,7 @@ def get_training_calendar(
             "startDate": period_start,
             "endDate": period_end,
             "status": nomination.get("status"),
+            "canEdit": can_edit_nomination(user, nomination),
         }
         for duty_date in date_range(max(period_start, window_start), min(period_end, window_end)):
             training_lines_by_employee.setdefault(emp_key, {}).setdefault(duty_date, []).append(line)
@@ -983,6 +1069,7 @@ def get_calendar_training(nomination_id: str, user=Depends(get_authenticated_use
     if not (is_owner or in_chain or can_manage or has_training_permission(user, "view")):
         raise HTTPException(403, "This training request is outside your review scope")
     result = serialize_nomination(record, actor_id, is_admin, is_hr)
+    result["canEdit"] = can_edit_nomination(user, record)
     result["canManageReplacement"] = bool(can_manage and record.get("status") == "Approved" and record.get("workflowKind") != "Adjacent OFF")
     linked = training_nomination_history_collection.find_one({
         "workflowKind": "Adjacent OFF", "parentNominationId": nomination_id,
@@ -991,6 +1078,118 @@ def get_calendar_training(nomination_id: str, user=Depends(get_authenticated_use
     result["adjacentOffRequest"] = serialize_nomination(linked, actor_id, is_admin, is_hr) if linked else None
     result["canRequestAdjacentOff"] = bool(is_owner and record.get("status") == "Approved" and record.get("workflowKind") != "Adjacent OFF" and not linked)
     return result
+
+
+@router.put("/nomination/{nomination_id}")
+def change_nomination(nomination_id: str, data: dict, user=Depends(get_authenticated_user)):
+    """Edit or remove with an optimistic revision and retryable calendar cleanup."""
+    if not ObjectId.is_valid(nomination_id):
+        raise HTTPException(400, "Invalid training nomination")
+    record = training_nomination_history_collection.find_one({"_id": ObjectId(nomination_id)})
+    if not record:
+        raise HTTPException(404, "Training nomination not found")
+    if not can_edit_nomination(user, record):
+        raise HTTPException(403, "Only the authorised nomination manager or owner of a pending request may change it")
+    if data.get("revision") != record.get("revision", 0):
+        raise HTTPException(409, "This nomination changed. Close and reopen it before saving")
+    reason = str(data.get("reason") or "").strip()
+    if not reason or len(reason) > 1000:
+        raise HTTPException(400, "Enter a reason of 1 to 1000 characters")
+    removing = data.get("action") == "cancel"
+    actor = clean_id(user.get("employeeId") or user.get("userId"))
+    if record.get("mutationFailed"):
+        # A failed cleanup can be safely retried, but never replaced mid-operation.
+        desired = record["pendingMutation"]
+        removing = desired["status"] == "Cancelled"
+        reason = record.get("mutationReason") or reason
+    elif removing:
+        desired = {"status": "Cancelled", "cancelledBy": actor, "cancelledOn": datetime.utcnow()}
+    else:
+        emp_id = clean_id(data.get("employeeId") or record.get("employeeId"))
+        employee = employee_collection.find_one({"$or": [{"userId": emp_id}, {"employeeId": emp_id}]})
+        if not employee:
+            raise HTTPException(404, "Employee not found")
+        if not can_nominate_target(user, employee):
+            raise HTTPException(403, "The new employee is outside your nomination scope")
+        start = data.get("startDate") or record.get("startDate") or record.get("trainingDate")
+        end = data.get("endDate") or start
+        try:
+            dates = list(date_range(start, end))
+        except (ValueError, TypeError) as exc:
+            raise HTTPException(400, "Select valid start and end dates") from exc
+        start, end = dates[0], dates[-1]
+        validate_nomination_change(record, emp_id, dates)
+        snapshot = employee_snapshot(employee)
+        group = shift_group_context(emp_id)
+        chain = [*approval_chain(employee), hr_final_step()] if emp_id == actor else [hr_final_step()]
+        desired = {
+            "employeeId": emp_id, "employeeName": snapshot["name"],
+            "employeeDesignation": snapshot["designation"],
+            "employeeType": "Shift" if group else "Non-shift", "groupName": group.get("groupName"),
+            "isShiftEmployee": bool(group), "isGroupSIC": bool(group.get("isGroupSIC")),
+            "startDate": start, "endDate": end, "trainingDate": start,
+            "trainingDays": len(dates), "status": "Pending Approval", "approvalChain": chain,
+            "currentApprovalIndex": 0, "currentApproverId": chain[0]["employeeId"],
+            "replacementRequired": False, "replacementEmployee": None, "actingSICEmployee": None,
+            "adjacentOff": {"before": False, "after": False},
+        }
+    query = {"_id": record["_id"], "status": record["status"], "updatedOn": record.get("updatedOn")}
+    if record.get("mutationFailed"):
+        query["mutationFailed"] = True
+    claimed = training_nomination_history_collection.update_one(query, {"$set": {
+        "status": "Updating", "mutationFailed": False, "pendingMutation": desired,
+        "mutationPreviousStatus": record.get("mutationPreviousStatus") or record["status"],
+        "mutationReason": reason,
+    }})
+    if not claimed.modified_count:
+        raise HTTPException(409, "Another officer changed this nomination. Refresh and try again")
+    now = datetime.utcnow()
+    try:
+        children = list(training_nomination_history_collection.find({
+            "parentNominationId": nomination_id, "workflowKind": "Adjacent OFF",
+            "status": {"$nin": ["Cancelled", "Rejected"]},
+        }))
+        for child in children:
+            release_nomination_effects(child)
+            training_nomination_history_collection.update_one({"_id": child["_id"]}, {"$set": {
+                "status": "Cancelled", "cancelledBy": actor, "cancelledOn": now,
+                "cancellationReason": "Parent training nomination changed: " + reason,
+            }})
+        release_nomination_effects(record)
+        if not removing:
+            for date in date_range(desired["startDate"], desired["endDate"]):
+                employee_daily_collection.update_one({"employeeId": desired["employeeId"], "date": date}, {
+                    "$set": {"trainingNomination": {"trainingName": record.get("trainingName"),
+                        "status": "Pending Approval", "nominationId": nomination_id}, "updatedOn": now},
+                    "$setOnInsert": {"name": desired["employeeName"], "designation": desired["employeeDesignation"],
+                        "year": int(date[:4]), "month": int(date[5:7]),
+                        "groupName": desired.get("groupName") or "Other Employees", "createdOn": now},
+                }, upsert=True)
+        event = {"action": "Removed" if removing else "Changed", "by": actor, "on": now, "reason": reason,
+                 "previousEmployeeId": record.get("employeeId"), "previousStartDate": record.get("startDate"),
+                 "previousEndDate": record.get("endDate"), "previousStatus": record.get("mutationPreviousStatus") or record["status"],
+                 "previousApprovalChain": record.get("approvalChain") or [],
+                 "employeeId": desired.get("employeeId", record.get("employeeId")),
+                 "startDate": desired.get("startDate", record.get("startDate")), "endDate": desired.get("endDate", record.get("endDate"))}
+        training_nomination_history_collection.update_one({"_id": record["_id"]}, {
+            "$set": {**desired, "updatedOn": now}, "$inc": {"revision": 1}, "$push": {"changeHistory": event},
+            "$unset": {"pendingMutation": "", "mutationFailed": "", "mutationReason": "", "mutationPreviousStatus": "", "approvedOn": ""},
+        })
+    except Exception as exc:
+        training_nomination_history_collection.update_one({"_id": record["_id"]}, {"$set": {"mutationFailed": True}})
+        raise HTTPException(503, "Calendar update interrupted. Retry Save to complete the same change safely") from exc
+    return {"message": "Nomination removed. Calendars updated." if removing else "Nomination changed and returned for approval. Calendars updated."}
+
+
+@router.get("/nomination/{nomination_id}/candidates")
+def nomination_edit_candidates(nomination_id: str, user=Depends(get_authenticated_user)):
+    if not ObjectId.is_valid(nomination_id):
+        raise HTTPException(400, "Invalid training nomination")
+    record = training_nomination_history_collection.find_one({"_id": ObjectId(nomination_id)})
+    if not record or not can_edit_nomination(user, record):
+        raise HTTPException(403, "Nomination edit access is required")
+    return [employee_snapshot(employee) for employee in employee_collection.find({"status": {"$ne": "Inactive"}, "isActive": {"$ne": False}})
+            if can_nominate_target(user, employee)]
 
 
 @router.get("/my-approved")

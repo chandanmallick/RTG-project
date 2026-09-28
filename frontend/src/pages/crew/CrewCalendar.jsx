@@ -120,7 +120,7 @@ function PublicCalendarShell({ children }) {
   return <Box sx={{ height: "100dvh", p: 1, boxSizing: "border-box", background: "#F8FAFC", overflow: "hidden" }}>{children}</Box>;
 }
 
-const EmployeeRow = memo(({ person, groupName, active, dates, selectedColumn, onSelectRow, onSelectDuty, applicationMode = false, applicationKeys = new Set(), readOnly = false }) => {
+const EmployeeRow = memo(({ person, groupName, active, dates, selectedColumn, onSelectRow, onSelectDuty, onTrainingDrop, applicationMode = false, applicationKeys = new Set(), readOnly = false }) => {
   return (
     <TableRow hover={!readOnly} onClick={() => !readOnly && onSelectRow(person.employeeId)} sx={{ cursor: readOnly ? "default" : "pointer", background: active ? "#F0FDFA" : person.IsSIC ? "#F8FFFC" : "#FFF" }}>
       <TableCell sx={{ position: "sticky", left: 0, zIndex: 2, minWidth: 210, py: .65, background: active ? "#D1FAE5" : person.IsSIC ? "#ECFDF5" : "#FFF", borderRight: "1px solid #E2E8F0" }}>
@@ -159,6 +159,10 @@ const EmployeeRow = memo(({ person, groupName, active, dates, selectedColumn, on
               }
             }}
             className="crew-calendar-duty-cell"
+            draggable={!readOnly && !applicationMode && Boolean(duty.trainingNominationId) && !duty.trainingAdjacentOffRequestId}
+            onDragStart={event => { event.stopPropagation(); event.dataTransfer.setData("application/crew-training", JSON.stringify({ id: duty.trainingNominationId, employeeId: person.employeeId })); event.dataTransfer.effectAllowed = "move"; }}
+            onDragOver={event => { if (!readOnly && !applicationMode && event.dataTransfer.types.includes("application/crew-training")) event.preventDefault(); }}
+            onDrop={event => { event.preventDefault(); event.stopPropagation(); if (readOnly || applicationMode) return; try { const item = JSON.parse(event.dataTransfer.getData("application/crew-training")); if(item.employeeId === person.employeeId && item.id) onTrainingDrop({ person, groupName, date, duty: { trainingNominationId: item.id }, proposedStartDate: date }); } catch {} }}
             sx={{ position: "relative", minHeight: 42, width: "100%", boxSizing: "border-box", px: .5, py: .4, display: "grid", placeItems: "center", alignContent: "center", textAlign: "center", cursor: readOnly ? "default" : "pointer", borderRadius: 1.7, backgroundColor: palette.background, backgroundImage: isHoliday ? "linear-gradient(90deg,#A855F7 0 4px,transparent 4px)" : "none", color: palette.color, border: `1px solid ${applicationSelected ? "#0057B7" : isHoliday ? "#A855F7" : palette.border}`, boxShadow: applicationSelected ? "0 0 0 3px rgba(0,87,183,.24)" : "none", "& .MuiTypography-root": { color: "inherit", textAlign: "center" }, "&:hover": readOnly ? {} : { boxShadow: "0 0 0 2px rgba(0,87,183,.18)" } }}
           >
             {applicationMode && <Box sx={{ position: "absolute", top: 2, left: 2, width: 14, height: 14, borderRadius: "50%", display: "grid", placeItems: "center", color: "#FFF", background: applicationSelected ? "#0057B7" : "rgba(100,116,139,.55)", fontSize: 9, fontWeight: 950 }}>{applicationSelected ? "✓" : "+"}</Box>}
@@ -242,10 +246,10 @@ export default function CrewCalendar({ publicView = false }) {
     return output;
   }, [startDate, endDate]);
 
-  const load = async () => {
+  const load = async ({ quiet = false } = {}) => {
     const loadId = loadIdRef.current + 1;
     loadIdRef.current = loadId;
-    setLoading(true);
+    if (!quiet) setLoading(true);
     setError("");
     try {
       const response = await crewApi.calendar(startDate, endDate);
@@ -276,6 +280,21 @@ export default function CrewCalendar({ publicView = false }) {
   };
 
   useEffect(() => { load(); }, [startDate, endDate]);
+  useEffect(() => {
+    const refresh = () => { if (document.visibilityState === "visible") load({ quiet: true }); };
+    const timer = window.setInterval(refresh, 60000);
+    window.addEventListener("focus", refresh);
+    window.addEventListener("crew-holidays-changed", refresh);
+    window.addEventListener("crew-workflows-changed", refresh);
+    window.addEventListener("storage", refresh);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("focus", refresh);
+      window.removeEventListener("crew-holidays-changed", refresh);
+      window.removeEventListener("crew-workflows-changed", refresh);
+      window.removeEventListener("storage", refresh);
+    };
+  }, [startDate, endDate]);
   useEffect(() => {
     if (!publicView) crewApi.myRole().then(setCrewRole).catch(() => setCrewRole({}));
   }, [publicView, user?.employeeId]);
@@ -654,6 +673,7 @@ export default function CrewCalendar({ publicView = false }) {
                       selectedColumn={selectedColumn}
                       onSelectRow={handleSelectRow}
                       onSelectDuty={handleSelectDuty}
+                      onTrainingDrop={setTrainingApprovalPopup}
                       applicationMode={applicationMode}
                       applicationKeys={applicationKeys}
                       readOnly={publicView}
@@ -739,8 +759,8 @@ export default function CrewCalendar({ publicView = false }) {
               )}
               {(selectedDuty.duty.leaveStatus || selectedDuty.duty.trainingName || selectedDuty.duty.trainingAdjacentOffStatus || selectedDuty.duty.sportsName) && (
                 <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-                  {selectedDuty.duty.leaveStatus && <Button size="small" variant="contained" onClick={openLeaveWorkflow} sx={{ textTransform: "none", fontWeight: 900, background: "#0057B7" }}>Open leave approval</Button>}
-                  {(selectedDuty.duty.trainingName || selectedDuty.duty.trainingAdjacentOffStatus) && <Button size="small" variant="contained" onClick={openTrainingWorkflow} sx={{ textTransform: "none", fontWeight: 900, background: "#6A1B9A" }}>{selectedDuty.duty.trainingAdjacentOffStatus ? "Review OFF approval" : "Open training approval"}</Button>}
+                  {selectedDuty.duty.leaveStatus && <Button size="small" variant="contained" onClick={openLeaveWorkflow} sx={{ textTransform: "none", fontWeight: 900, background: "#0057B7" }}>Track / manage leave</Button>}
+                  {(selectedDuty.duty.trainingName || selectedDuty.duty.trainingAdjacentOffStatus) && <Button size="small" variant="contained" onClick={openTrainingWorkflow} sx={{ textTransform: "none", fontWeight: 900, background: "#6A1B9A" }}>{selectedDuty.duty.trainingAdjacentOffStatus ? "Review OFF approval" : "Manage training"}</Button>}
                   {selectedDuty.duty.sportsName && <Button size="small" variant="contained" onClick={() => navigate("/crew/sports?section=approval")} sx={{ textTransform: "none", fontWeight: 900, background: "#047857" }}>Open sports approval</Button>}
                   {canManageReplacement && String(selectedDuty.duty.leaveStatus || "").toLowerCase() === "approved" && <Button size="small" variant="outlined" onClick={openReplacementWorkflow} sx={{ textTransform: "none", fontWeight: 900, borderColor: "#D97706", color: "#B45309", ...(selectedDuty.duty.replacementRequired && !selectedDuty.duty.replacementEmployee?.name ? { animation: "calendarReplacementPulse 1s ease-in-out infinite" } : {}) }}>Assign replacement</Button>}
                   {canManageReplacement && selectedDuty.duty.trainingName && <Button size="small" variant="outlined" onClick={openReplacementWorkflow} sx={{ textTransform: "none", fontWeight: 900, borderColor: "#D97706", color: "#B45309", ...(selectedDuty.duty.replacementRequired && !selectedDuty.duty.replacementEmployee?.name ? { animation: "calendarReplacementPulse 1s ease-in-out infinite" } : {}) }}>Assign replacement</Button>}
@@ -809,6 +829,7 @@ export default function CrewCalendar({ publicView = false }) {
           {trainingApprovalPopup && <TrainingCalendarReview
             key={trainingApprovalPopup.duty.trainingAdjacentOffRequestId || trainingApprovalPopup.duty.trainingNominationId}
             requestId={trainingApprovalPopup.duty.trainingAdjacentOffRequestId || trainingApprovalPopup.duty.trainingNominationId}
+            proposedStartDate={trainingApprovalPopup.proposedStartDate}
             onChanged={load}
             onReplacement={() => { const selection = trainingApprovalPopup; setTrainingApprovalPopup(null); openReplacementCandidates(selection); }}
           />}

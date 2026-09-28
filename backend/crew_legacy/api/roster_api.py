@@ -1479,8 +1479,8 @@ def get_calendar_view(
 
         daily_map[(emp_id, date)] = {
             "shift": rec.get("assignedDuty") or "-",
-            "isHoliday": bool(date in holiday_map or str(rec.get("isHoliday") or "").upper() == "Y"),
-            "holidayName": holiday_map.get(date) or rec.get("holidayName"),
+            "isHoliday": date in holiday_map,
+            "holidayName": holiday_map.get(date),
             "replacementDuty": bool(rec.get("replacementDuty")),
             "replacementMode": rec.get("replacementMode"),
             "replacementFor": rec.get("replacementFor"),

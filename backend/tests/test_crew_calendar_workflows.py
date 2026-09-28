@@ -48,7 +48,9 @@ class TrainingReviewTests(unittest.TestCase):
         self.collection = Mock()
         self.collection.find_one.side_effect = lambda query: self.record if "_id" in query else None
         self.context = load_functions("crew_legacy/api/training_assignment.py",
-            {"get_calendar_training", "serialize_nomination", "get_pending"}, {
+            {"get_calendar_training", "serialize_nomination", "get_pending", "can_edit_nomination"}, {
+                "employee_collection": Mock(find_one=Mock(return_value={"employeeId": "employee"})),
+                "can_nominate_target": lambda user, employee: user.get("employeeId") in {"sic", "dic"},
                 "clean_id": lambda value: str(value or "").strip(),
                 "PENDING_STATUSES": {"Pending Approval", "Nominated"},
                 "TRAINING_HR_POOL_ID": "TRAINING_HR_POOL",
@@ -134,6 +136,7 @@ class CalendarOverlayTests(unittest.TestCase):
         context = load_functions("routes/crew_routes.py", {"calendar_view", "employee_id"}, {
             "datetime": datetime, "timedelta": timedelta, "defaultdict": defaultdict,
             "rosters": rosters, "employee_daily": daily, "leave_requests": leaves,
+            "holiday_master_collection": Mock(find=Mock(return_value=[{"date": "2026-09-21", "holidayName": "New holiday after publication"}])),
             "sports_application_collection": sports, "training_nomination_history_collection": training,
         })
         result = context["calendar_view"]("2026-09-20", "2026-09-21")
@@ -141,6 +144,9 @@ class CalendarOverlayTests(unittest.TestCase):
         self.assertEqual(duties["2026-09-20"]["shift"], "Evening")
         self.assertEqual(duties["2026-09-20"]["trainingAdjacentOffRequestId"], str(off_id))
         self.assertEqual(duties["2026-09-21"]["shift"], "Morning")
+        self.assertTrue(duties["2026-09-21"]["isHoliday"])
+        self.assertEqual(duties["2026-09-21"]["holidayName"], "New holiday after publication")
+        self.assertFalse(duties["2026-09-20"]["isHoliday"])
         self.assertEqual(duties["2026-09-21"]["trainingStatus"], "Pending Approval")
         self.assertEqual(duties["2026-09-21"]["trainingNominationId"], str(nomination_id))
         query = training.find.call_args_list[0].args[0]
