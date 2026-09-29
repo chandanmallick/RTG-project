@@ -124,10 +124,13 @@ class CalendarOverlayTests(unittest.TestCase):
         leaves, sports, training = Mock(), Mock(), Mock()
         leaves.find.return_value = []
         sports.find.return_value = []
-        nomination_id, off_id = ObjectId(), ObjectId()
+        nomination_id, legacy_approved_id, off_id = ObjectId(), ObjectId(), ObjectId()
         training.find.side_effect = [Cursor([{
             "_id": nomination_id, "employeeId": "employee", "trainingName": "Training",
             "startDate": "2026-09-21", "endDate": "2026-09-22", "status": "Pending Approval",
+        }, {
+            "_id": legacy_approved_id, "employeeId": "employee", "trainingName": "Legacy approved training",
+            "trainingDate": "2026-09-20", "status": "Approved", "replacementRequired": True,
         }]), Cursor([{
             "_id": off_id, "employeeId": "employee", "trainingName": "Other training",
             "startDate": "2026-09-21", "endDate": "2026-09-22", "status": "Pending Approval",
@@ -149,8 +152,32 @@ class CalendarOverlayTests(unittest.TestCase):
         self.assertFalse(duties["2026-09-20"]["isHoliday"])
         self.assertEqual(duties["2026-09-21"]["trainingStatus"], "Pending Approval")
         self.assertEqual(duties["2026-09-21"]["trainingNominationId"], str(nomination_id))
+        self.assertEqual(duties["2026-09-20"]["trainingStatus"], "Approved")
+        self.assertEqual(duties["2026-09-20"]["trainingNominationId"], str(legacy_approved_id))
+        self.assertTrue(duties["2026-09-20"]["replacementRequired"])
         query = training.find.call_args_list[0].args[0]
-        self.assertNotIn("Rejected", query["status"]["$in"])
+        self.assertEqual(query["status"]["$options"], "i")
+        self.assertIn("Approved", query["status"]["$regex"])
+
+    def test_event_calendar_combines_holidays_training_and_sports(self):
+        holiday_id, training_id, sports_id = ObjectId(), ObjectId(), ObjectId()
+        context = load_functions("routes/crew_routes.py", {"calendar_events"}, {
+            "datetime": datetime,
+            "holiday_master_collection": Mock(find=Mock(return_value=[{
+                "_id": holiday_id, "date": "2026-09-21", "holidayName": "Holiday", "type": "National",
+            }])),
+            "training_master_collection": Mock(find=Mock(return_value=[{
+                "_id": training_id, "startDate": "2026-09-20", "endDate": "2026-09-22",
+                "trainingName": "System training", "location": "Kolkata",
+            }])),
+            "sports_event_collection": Mock(find=Mock(return_value=[{
+                "_id": sports_id, "startDate": "2026-09-23", "endDate": "2026-09-24",
+                "name": "Football", "venue": "Ground",
+            }])),
+        })
+        result = context["calendar_events"]("2026-09-20", "2026-09-24")
+        self.assertEqual([item["kind"] for item in result], ["training", "holiday", "sports"])
+        self.assertEqual(result[1]["title"], "Holiday")
 
 
 class ReplacementValidationTests(unittest.TestCase):

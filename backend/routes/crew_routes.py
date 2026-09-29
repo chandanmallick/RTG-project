@@ -18,6 +18,8 @@ from crew_legacy.database.database_mongo import (
     roster_group_collection,
     roster_master_collection,
     sports_application_collection,
+    sports_event_collection,
+    training_master_collection,
     training_nomination_history_collection,
 )
 
@@ -635,14 +637,28 @@ def calendar_view(start_date: str = Query(...), end_date: str = Query(...)):
     nominations = training_nomination_history_collection.find({
         "employeeId": {"$in": list(roster_employee_ids)},
         "workflowKind": {"$ne": "Adjacent OFF"},
-        "status": {"$in": ["Nominated", "Pending Approval", "Approved"]},
-        "startDate": {"$lte": end_date},
-        "endDate": {"$gte": start_date},
+        "status": {"$regex": "^(Nominated|Pending Approval|Approved)$", "$options": "i"},
+        "$and": [
+            {"$or": [
+                {"startDate": {"$lte": end_date}},
+                {"startDate": {"$exists": False}, "trainingDate": {"$lte": end_date}},
+            ]},
+            {"$or": [
+                {"endDate": {"$gte": start_date}},
+                {"endDate": {"$in": [None, ""]}, "startDate": {"$gte": start_date}},
+                {"endDate": {"$exists": False}, "trainingDate": {"$gte": start_date}},
+            ]},
+        ],
     }).sort("createdOn", 1)
     for nomination in nominations:
         emp_id = employee_id(nomination)
-        cursor = datetime.strptime(max(nomination["startDate"], start_date), "%Y-%m-%d")
-        last = min(nomination["endDate"], end_date)
+        nomination_start = nomination.get("startDate") or nomination.get("trainingDate")
+        nomination_end = nomination.get("endDate") or nomination_start
+        try:
+            cursor = datetime.strptime(max(nomination_start, start_date), "%Y-%m-%d")
+            last = min(nomination_end, end_date)
+        except (TypeError, ValueError):
+            continue
         while cursor.strftime("%Y-%m-%d") <= last:
             date = cursor.strftime("%Y-%m-%d")
             duty = daily.setdefault((emp_id, date), {"shift": "-"})
@@ -651,7 +667,7 @@ def calendar_view(start_date: str = Query(...), end_date: str = Query(...)):
                 "trainingNominationId": str(nomination["_id"]),
                 "trainingStatus": nomination.get("status"),
             })
-            if nomination.get("status") == "Approved":
+            if str(nomination.get("status") or "").strip().lower() == "approved":
                 duty["replacementRequired"] = bool(nomination.get("replacementRequired"))
                 duty["replacementEmployee"] = nomination.get("replacementEmployee") or duty.get("replacementEmployee")
             cursor += timedelta(days=1)
@@ -769,3 +785,46 @@ def calendar_view(start_date: str = Query(...), end_date: str = Query(...)):
             })
         output.append({"groupName": group_name, "employees": crew})
     return output
+
+
+@router.get("/calendar-events")
+def calendar_events(start_date: str = Query(...), end_date: str = Query(...)):
+    """Return holiday, training and sports masters for the calendar event view."""
+    try:
+        start, end = datetime.strptime(start_date, "%Y-%m-%d"), datetime.strptime(end_date, "%Y-%m-%d")
+    except ValueError as exc:
+        raise HTTPException(400, "A valid start and end date are required") from exc
+    if end < start:
+        raise HTTPException(400, "End date cannot be before start date")
+    if (end - start).days > 92:
+        raise HTTPException(400, "Event calendar range cannot exceed 93 days")
+
+    active_status = {"$not": {"$regex": "^(inactive|deleted|cancelled|canceled)$", "$options": "i"}}
+    events = []
+    for item in holiday_master_collection.find(
+        {"date": {"$gte": start_date, "$lte": end_date}, "status": active_status},
+        {"holidayName": 1, "date": 1, "type": 1},
+    ):
+        events.append({
+            "id": str(item["_id"]), "kind": "holiday", "title": item.get("holidayName") or "Holiday",
+            "startDate": item.get("date"), "endDate": item.get("date"), "detail": item.get("type") or "Holiday",
+        })
+    for item in training_master_collection.find(
+        {"startDate": {"$lte": end_date}, "endDate": {"$gte": start_date}, "status": active_status},
+        {"trainingName": 1, "startDate": 1, "endDate": 1, "location": 1, "trainingType": 1},
+    ):
+        events.append({
+            "id": str(item["_id"]), "kind": "training", "title": item.get("trainingName") or "Training",
+            "startDate": item.get("startDate"), "endDate": item.get("endDate") or item.get("startDate"),
+            "detail": item.get("location") or item.get("trainingType") or "Training programme",
+        })
+    for item in sports_event_collection.find(
+        {"startDate": {"$lte": end_date}, "endDate": {"$gte": start_date}, "status": active_status},
+        {"name": 1, "startDate": 1, "endDate": 1, "venue": 1},
+    ):
+        events.append({
+            "id": str(item["_id"]), "kind": "sports", "title": item.get("name") or "Sports",
+            "startDate": item.get("startDate"), "endDate": item.get("endDate") or item.get("startDate"),
+            "detail": item.get("venue") or "Sports event",
+        })
+    return sorted(events, key=lambda item: (item.get("startDate") or "", item.get("kind") or "", item.get("title") or ""))

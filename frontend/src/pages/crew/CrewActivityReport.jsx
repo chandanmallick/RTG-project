@@ -4,7 +4,7 @@ import {
   IconButton, ListItemText, MenuItem, Paper, Stack, Tab, Table, TableBody, TableCell, TableHead,
   TableRow, Tabs, TextField, Typography,
 } from "@mui/material";
-import { Award, Briefcase, CalendarCheck2, RefreshCw, Repeat2, X } from "lucide-react";
+import { Award, Briefcase, CalendarCheck2, Medal, RefreshCw, Repeat2, X } from "lucide-react";
 
 import EmployeeMultiSelect from "../../components/crew/EmployeeMultiSelect";
 import CrewActivityComparison from "../../components/crew/CrewActivityComparison";
@@ -29,6 +29,7 @@ const displayDate = (value) => {
 const TILE = {
   leave: { tint: "#FDE8EC", color: "#C62828", icon: CalendarCheck2 },
   training: { tint: "#F0E7FA", color: "#6A1B9A", icon: Briefcase },
+  sports: { tint: "#FFF7ED", color: "#B45309", icon: Medal },
   coff: { tint: "#FFF4CC", color: "#9A6700", icon: Award },
   replacement: { tint: "#DCFCE7", color: "#15803D", icon: Repeat2 },
 };
@@ -48,7 +49,10 @@ export default function CrewActivityReport() {
   const [employeeIds, setEmployeeIds] = useState(currentEmployeeId ? [currentEmployeeId] : []);
   const [startDate, setStartDate] = useState(yearStart());
   const [endDate, setEndDate] = useState(today());
-  const [kind, setKind] = useState("All");
+  const [kind, setKind] = useState(() => {
+    const requested = new URLSearchParams(window.location.search).get("kind") || "All";
+    return ["All", "Leave", "Training", "Sports", "C-OFF", "Replacement duty"].includes(requested) ? requested : "All";
+  });
   const [matrixKind, setMatrixKind] = useState("All");
   const [matrixPeriod, setMatrixPeriod] = useState("Date range");
   const [matrixMonth, setMatrixMonth] = useState(currentMonth());
@@ -287,7 +291,7 @@ export default function CrewActivityReport() {
           <TextField slotProps={{ inputLabel: { shrink: true } }} size="small" type="date" label="To" value={endDate} onChange={(event) => { setEndDate(event.target.value); if (reportMode === "crms") clearCrmsReport(); }}  />
         </>}
         {reportMode === "detail" ? <TextField select size="small" label="Activity type" value={kind} onChange={(event) => setKind(event.target.value)} sx={{ minWidth: 170 }}>
-          {["All", "Leave", "Training", "C-OFF", "Replacement duty"].map((value) => <MenuItem key={value} value={value}>{value}</MenuItem>)}
+          {["All", "Leave", "Training", "Sports", "C-OFF", "Replacement duty"].map((value) => <MenuItem key={value} value={value}>{value}</MenuItem>)}
         </TextField> : reportMode === "matrix" ? <TextField select size="small" label="Activity category" value={matrixKind} onChange={(event) => { setMatrixKind(event.target.value); setMatrixActivitySubtype("All"); setMatrixEmployee([]); }} sx={{ minWidth: 165 }}>
           {["All", "Shift duty", "Leave", "Other"].map((value) => <MenuItem key={value} value={value}>{value}</MenuItem>)}
         </TextField> : null}
@@ -317,9 +321,10 @@ export default function CrewActivityReport() {
     </Paper>
 
     {error && <Alert severity="error">{error}</Alert>}
-    {reportMode === "detail" && <><Box sx={{ display: "grid", gridTemplateColumns: { xs: "repeat(2,minmax(0,1fr))", md: "repeat(4,minmax(0,1fr))" }, gap: 1.5 }}>
+    {reportMode === "detail" && <><Box sx={{ display: "grid", gridTemplateColumns: { xs: "repeat(2,minmax(0,1fr))", md: "repeat(5,minmax(0,1fr))" }, gap: 1.5 }}>
       <SummaryTile title="Leave" value={report.summary?.leave} detail={`${report.summary?.leaveApproved || 0} approved · ${report.summary?.leaveWeekend || 0} weekend · ${report.summary?.leaveHoliday || 0} holiday`} tone="leave" />
       <SummaryTile title="Training" value={report.summary?.training} detail={`${report.summary?.trainingDays || 0} approved day(s)`} tone="training" />
+      <SummaryTile title="Sports" value={report.summary?.sports} detail={`${report.summary?.sportsApproved || 0} approved application(s)`} tone="sports" />
       <SummaryTile title="C-OFF" value={report.summary?.compOff} detail={`${report.summary?.compOffAvailable || 0} available · ${report.summary?.compOffUsedDays || 0} used · ${(report.summary?.compOffDates || []).slice(0, 2).map(displayDate).join(", ") || "no dates"}`} tone="coff" />
       <SummaryTile title="Replacement duty" value={report.summary?.replacement} detail="Duties performed for leave coverage" tone="replacement" />
     </Box>

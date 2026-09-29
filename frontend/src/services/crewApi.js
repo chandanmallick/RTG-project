@@ -44,6 +44,9 @@ const crewApi = {
   calendar: (startDate, endDate) => client.get(url("/calendar"), {
     params: { start_date: startDate, end_date: endDate },
   }).then((response) => response.data),
+  calendarEvents: (startDate, endDate) => client.get(url("/calendar-events"), {
+    params: { start_date: startDate, end_date: endDate },
+  }).then((response) => response.data),
   pendingReplacements: () => client.get(url("/replacement/pending")).then((response) => response.data),
   replacementCandidates: (leaveId, roleFilter = "auto") => client.get(url(`/replacement/candidates/${leaveId}`), {
     params: { roleFilter },

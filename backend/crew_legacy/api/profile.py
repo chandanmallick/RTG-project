@@ -26,6 +26,7 @@ from crew_legacy.database.database_mongo import (
     employee_daily_collection,
     leave_request_collection,
     roster_master_collection,
+    sports_application_collection,
     training_nomination_history_collection,
     organization_unit_collection,
     organization_shift_group_collection,
@@ -429,6 +430,22 @@ def activity_report(
             "detail": item.get("location") or item.get("trainingLocation") or "", "groupName": item.get("groupName") or "",
         })
 
+    sports_query = ({"employeeId": target_ids[0]} if len(target_ids) == 1 else {"employeeId": {"$in": target_ids}}) if target_ids else {}
+    sports_records = list(sports_application_collection.find(sports_query).sort("startDate", -1).limit(2000))
+    filtered_sports = [
+        item for item in sports_records
+        if (not startDate or str(item.get("endDate") or item.get("startDate") or "") >= startDate)
+        and (not endDate or str(item.get("startDate") or "") <= endDate)
+    ]
+    for item in filtered_sports:
+        rows.append({
+            "id": str(item.get("_id")), "kind": "Sports", "date": item.get("startDate"),
+            "endDate": item.get("endDate"), "employeeId": item.get("employeeId"),
+            "employeeName": item.get("employeeName") or item.get("name"),
+            "title": item.get("eventName") or "Sports", "status": item.get("status") or "Pending",
+            "detail": item.get("venue") or item.get("reason") or "", "groupName": item.get("groupName") or "",
+        })
+
     coff_query = ({"employeeId": target_ids[0]} if len(target_ids) == 1 else {"employeeId": {"$in": target_ids}}) if target_ids else {}
     coff_records = list(compensatory_off_collection.find(coff_query).sort("earnedDate", -1).limit(2000))
     filtered_coff_records = []
@@ -497,6 +514,8 @@ def activity_report(
         "training": len(filtered_trainings),
         "trainingApproved": sum(1 for item in filtered_trainings if str(item.get("status") or "").lower() == "approved"),
         "trainingDays": sum(_inclusive_days(item.get("startDate"), item.get("endDate"), startDate, endDate) for item in filtered_trainings if str(item.get("status") or "").lower() == "approved"),
+        "sports": len(filtered_sports),
+        "sportsApproved": sum(1 for item in filtered_sports if str(item.get("status") or "").lower() == "approved"),
         "compOff": len(filtered_coff_records),
         "compOffAvailable": sum(1 for item in filtered_coff_records if str(item.get("status") or "Available").lower() == "available"),
         "compOffUsed": sum(1 for item in filtered_coff_records if str(item.get("status") or "").lower() == "used"),
