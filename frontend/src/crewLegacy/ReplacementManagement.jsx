@@ -32,7 +32,8 @@ import {
   FormControl,
   InputLabel,
   Select,
-  Collapse
+  Collapse,
+  Switch
 } from "@mui/material";
 
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
@@ -80,6 +81,8 @@ export default function ReplacementManagement() {
   const [canSwitchDuty, setCanSwitchDuty] = useState(true);
   const [historyVisible, setHistoryVisible] = useState(false);
   const [showOlderAssignments, setShowOlderAssignments] = useState(false);
+  const [futureLeaveOnly, setFutureLeaveOnly] = useState(true);
+  const [requiredReplacementOnly, setRequiredReplacementOnly] = useState(true);
   const sicShortcutHandled = React.useRef(false);
   const [activeWorkflow, setActiveWorkflow] = useState(() => {
     const params = new URLSearchParams(window.location.search);
@@ -466,6 +469,10 @@ export default function ReplacementManagement() {
   const visibleReplacementRows = showOlderAssignments
     ? mergedReplacementRows
     : mergedReplacementRows.filter((item) => !item.date || item.date >= dayjs().format("YYYY-MM-DD"));
+  const visiblePendingLeaves = pendingLeaves.filter((item) => (
+    (!futureLeaveOnly || String(item.date || "") >= dayjs().format("YYYY-MM-DD"))
+    && (!requiredReplacementOnly || item.replacementRequired)
+  ));
 
 
   const sourceLabel = (source) => ({
@@ -681,7 +688,15 @@ export default function ReplacementManagement() {
         <AccordionDetails>
           <Paper elevation={0} sx={{ p: 2 }}>
 
-            <TableContainer sx={{ maxHeight: 380, minHeight: pendingLeaves.length ? 150 : 72, border: "1px solid #D7E3F4", borderRadius: 2 }}>
+            <Box sx={{ mb: 1.4, px: 1.2, py: .7, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 1, flexWrap: "wrap", borderRadius: 2, background: "#F4FAF5", border: "1px solid #D5E8D8" }}>
+              <Typography sx={{ fontSize: 11, color: "#475569", fontWeight: 800 }}>{visiblePendingLeaves.length} of {pendingLeaves.length} approved leave duties shown</Typography>
+              <Stack direction="row" spacing={1.5} useFlexGap flexWrap="wrap">
+                <FormControlLabel control={<Switch size="small" checked={futureLeaveOnly} onChange={(event) => setFutureLeaveOnly(event.target.checked)} />} label="Future leave only" sx={{ m: 0, "& .MuiFormControlLabel-label": { fontSize: 11, fontWeight: 850 } }} />
+                <FormControlLabel control={<Switch size="small" checked={requiredReplacementOnly} onChange={(event) => setRequiredReplacementOnly(event.target.checked)} />} label="Required replacement only" sx={{ m: 0, "& .MuiFormControlLabel-label": { fontSize: 11, fontWeight: 850 } }} />
+              </Stack>
+            </Box>
+
+            <TableContainer sx={{ maxHeight: 380, minHeight: visiblePendingLeaves.length ? 150 : 72, border: "1px solid #D7E3F4", borderRadius: 2 }}>
               <Table size="small" stickyHeader>
 
                 <TableHead>
@@ -697,15 +712,15 @@ export default function ReplacementManagement() {
 
                 <TableBody>
 
-                  {pendingLeaves.length === 0 && (
+                  {visiblePendingLeaves.length === 0 && (
                     <TableRow>
                       <TableCell colSpan={6} align="center">
-                        No replacement required
+                        No approved leave matches the selected filters
                       </TableCell>
                     </TableRow>
                   )}
 
-                  {pendingLeaves.map((l) => (
+                  {visiblePendingLeaves.map((l) => (
                     <TableRow key={l.id} hover>
 
                       <TableCell>{l.name}</TableCell>

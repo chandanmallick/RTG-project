@@ -131,6 +131,7 @@ export default function LeaveManagement({ embeddedApproval = false, embeddedAppl
   const [completedFrom, setCompletedFrom] = useState(dayjs().subtract(1, "day").format("YYYY-MM-DD"));
   const [completedTo, setCompletedTo] = useState("");
   const [trackingSearch, setTrackingSearch] = useState("");
+  const [trackingScope, setTrackingScope] = useState("own");
   const [workflowView, setWorkflowView] = useState(() => embeddedApproval || new URLSearchParams(window.location.search).get("view") === "calendar" ? "calendar" : "table");
   const [approvalRoster, setApprovalRoster] = useState([]);
   const [approvalDates, setApprovalDates] = useState([]);
@@ -529,11 +530,15 @@ export default function LeaveManagement({ embeddedApproval = false, embeddedAppl
   const trackedLeaves = useMemo(
     () => {
       const query = trackingSearch.trim().toLowerCase();
-      return workflowLeaves.filter((leave) => `${leave.name || ""} ${leave.employeeId || ""} ${leave.groupName || ""} ${leave.date || ""} ${leave.finalStatus || ""}`.toLowerCase().includes(query))
+      return workflowLeaves
+        .filter((leave) => trackingScope === "own" ? String(leave.employeeId || "") === String(role.employeeId || "") : String(leave.employeeId || "") !== String(role.employeeId || ""))
+        .filter((leave) => `${leave.name || ""} ${leave.employeeId || ""} ${leave.groupName || ""} ${leave.date || ""} ${leave.finalStatus || ""}`.toLowerCase().includes(query))
         .sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")));
     },
-    [workflowLeaves, trackingSearch],
+    [workflowLeaves, trackingSearch, trackingScope, role.employeeId],
   );
+  const ownLeaveCount = useMemo(() => workflowLeaves.filter((leave) => String(leave.employeeId || "") === String(role.employeeId || "")).length, [workflowLeaves, role.employeeId]);
+  const subordinateLeaveCount = workflowLeaves.length - ownLeaveCount;
   const selectedWorkflowLeaves = useMemo(
     () => pending.filter((leave) => selectedWorkflowIds.includes(leave.id)),
     [pending, selectedWorkflowIds],
@@ -1208,7 +1213,11 @@ export default function LeaveManagement({ embeddedApproval = false, embeddedAppl
       <Collapse in={activeSection === "tracking"} timeout={420} unmountOnExit>
       <Box id="leave-workspace-tracking" sx={{ display: "grid", gap: 2, scrollMarginTop: 110 }}>
         <Paper sx={{ p: 2.5 }}>
-          <SectionTitle icon={ClipboardList} title="Leave requests" subtitle="Search by employee name or ID. Open Track leave for the complete approval path; cancellation follows your workflow authority." count={trackedLeaves.length} />
+          <SectionTitle icon={ClipboardList} title="Leave requests" subtitle="Track your own leave separately from all leave in your subordinate reporting scope." count={trackedLeaves.length} />
+          <Stack direction="row" spacing={1} sx={{ mb: 1.25 }} useFlexGap flexWrap="wrap">
+            <Button size="small" variant={trackingScope === "own" ? "contained" : "outlined"} onClick={() => setTrackingScope("own")} sx={{ textTransform: "none", fontWeight: 900 }}>My leave ({ownLeaveCount})</Button>
+            <Button size="small" variant={trackingScope === "subordinates" ? "contained" : "outlined"} onClick={() => setTrackingScope("subordinates")} sx={{ textTransform: "none", fontWeight: 900 }}>Subordinate leave ({subordinateLeaveCount})</Button>
+          </Stack>
           <TextField size="small" fullWidth label="Search employee name, ID, group, date or status" value={trackingSearch} onChange={(event) => setTrackingSearch(event.target.value)} sx={{ mb: 1.5 }} />
           {workflowTable(trackedLeaves, true)}
         </Paper>
@@ -1221,7 +1230,7 @@ export default function LeaveManagement({ embeddedApproval = false, embeddedAppl
           <SectionTitle icon={ShieldCheck} title="Temporary Leave-Approval Delegation" subtitle="The configured Reporting Officer/HOD remains the approver. The delegate may act only for the selected dates; every action is retained against the original approver." />
           <Alert severity="info" sx={{ mb: 2 }}>Use this when you are unavailable. A second overlapping delegation is blocked to avoid two people approving the same leave.</Alert>
           <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "2fr 1fr 1fr" }, gap: 1.5 }}>
-            <Autocomplete options={delegationEmployees} value={delegationEmployees.find((item) => employeeIdOf(item) === delegationForm.delegateEmployeeId) || null} onChange={(_, value) => setDelegationForm((current) => ({ ...current, delegateEmployeeId: employeeIdOf(value) }))} getOptionLabel={(item) => `${item.name || employeeIdOf(item)} (${employeeIdOf(item)})`} renderInput={(params) => <TextField {...params} label="Delegate approval to" helperText="Eligible employees from your reporting hierarchy" />} />
+            <Autocomplete options={delegationEmployees} value={delegationEmployees.find((item) => employeeIdOf(item) === delegationForm.delegateEmployeeId) || null} onChange={(_, value) => setDelegationForm((current) => ({ ...current, delegateEmployeeId: employeeIdOf(value) }))} getOptionLabel={(item) => `${item.name || employeeIdOf(item)} (${employeeIdOf(item)})${item.designation ? ` · ${item.designation}` : ""}`} isOptionEqualToValue={(option, value) => employeeIdOf(option) === employeeIdOf(value)} autoHighlight openOnFocus renderInput={(params) => <TextField {...params} label="Search employee name or ID" placeholder="Start typing a name" helperText={`${delegationEmployees.length} active employees available`} />} />
             <TextField label="From" type="date" value={delegationForm.startDate} onChange={(event) => setDelegationForm((current) => ({ ...current, startDate: event.target.value }))} InputLabelProps={{ shrink: true }} />
             <TextField label="To" type="date" value={delegationForm.endDate} onChange={(event) => setDelegationForm((current) => ({ ...current, endDate: event.target.value }))} InputLabelProps={{ shrink: true }} />
           </Box>

@@ -62,5 +62,22 @@ class LeaveBlockTests(unittest.TestCase):
         self.assertEqual(update["revokedBy"], "admin")
         self.settings.delete_one.assert_not_called()
 
+
+class LeaveDelegationDirectoryTests(unittest.TestCase):
+    def test_delegation_directory_uses_all_active_employees(self):
+        employees = Mock()
+        employees.find.return_value = Cursor([
+            {"userId": "subordinate", "name": "Subordinate"},
+            {"userId": "other-team", "name": "Other Team"},
+        ])
+        context = load_functions("crew_legacy/api/leave_api.py", {
+            "clean_id", "get_leave_delegation_employees",
+        }, {"employee_collection": employees})
+        result = context["get_leave_delegation_employees"]({"employeeId": "approver"})
+        self.assertEqual([item["employeeId"] for item in result], ["subordinate", "other-team"])
+        query = employees.find.call_args.args[0]
+        self.assertEqual(query["isActive"], {"$ne": False})
+        self.assertNotIn("$in", str(query))
+
 if __name__ == "__main__":
     unittest.main()

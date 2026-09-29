@@ -966,18 +966,20 @@ def get_leave_delegations(user=Depends(get_authenticated_user)):
 
 @router.get("/delegation-employees")
 def get_leave_delegation_employees(user=Depends(get_authenticated_user)):
-    """Active subordinates to whom this approver may temporarily delegate."""
+    """All active employees who may receive temporary approval authority."""
     actor = clean_id(user.get("employeeId") or user.get("userId"))
-    visible_ids = visible_leave_employee_ids(user)
-    visible_ids.discard(actor)
     employees = list(employee_collection.find(
         {"isActive": {"$ne": False}, "$or": [
-            {"userId": {"$in": sorted(visible_ids)}},
-            {"employeeId": {"$in": sorted(visible_ids)}},
+            {"userId": {"$exists": True, "$nin": [None, ""]}},
+            {"employeeId": {"$exists": True, "$nin": [None, ""]}},
         ]},
         {"_id": 0, "userId": 1, "employeeId": 1, "name": 1, "designation": 1},
     ).sort("name", 1))
-    return [{**employee, "employeeId": clean_id(employee.get("userId") or employee.get("employeeId"))} for employee in employees]
+    return [
+        {**employee, "employeeId": clean_id(employee.get("userId") or employee.get("employeeId"))}
+        for employee in employees
+        if clean_id(employee.get("userId") or employee.get("employeeId")) != actor
+    ]
 
 
 @router.post("/delegations")
