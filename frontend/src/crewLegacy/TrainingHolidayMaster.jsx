@@ -34,7 +34,7 @@ Tooltip,
 
 import { ExpandLess, ExpandMore  } from "@mui/icons-material"
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
-import { CalendarDays, ChevronLeft, ChevronRight, MapPin, Users } from "lucide-react";
+import { CalendarDays, ChevronLeft, ChevronRight, MapPin, Users, Pencil, Plus, Trash2, Medal } from "lucide-react";
 import { useAuth } from "../auth/AuthContext";
 import TrainingCalendarReview from "../components/crew/TrainingCalendarReview";
 import NominationMatrix from "../components/crew/NominationMatrix";
@@ -47,6 +47,9 @@ const canViewTrainingPage = Boolean(trainingAccess.view)
 const canManageTraining = Boolean(trainingAccess.write)
 const canManageTrainingPrograms = Boolean(trainingAccess.approve)
 const isTrainingHR = Boolean(trainingAccess.approve)
+// Sports events share the same backend authority as the sports workflow:
+// an HR training approver, a leave approver, or an administrator.
+const canManageSportsEvents = Boolean(trainingAccess.approve || user?.permissions?.crew_leave?.approve || String(user?.role || "").toLowerCase() === "admin")
 
 /* ================= BASIC VARIABLES ================= */
 
@@ -101,6 +104,19 @@ endDate:""
 })
 
 const [holidayDate, setHolidayDate] = useState(null);
+
+/* ================= PROGRAMME / SPORTS EDITOR ================= */
+
+const emptyProgrammeForm={trainingName:"",trainingNameHindi:"",location:"",startDate:"",endDate:""}
+const [programmeEditor,setProgrammeEditor]=useState(null)
+const [programmeForm,setProgrammeForm]=useState(emptyProgrammeForm)
+const [programmeBusy,setProgrammeBusy]=useState(false)
+const [programmeError,setProgrammeError]=useState("")
+const emptySportsForm={name:"",venue:"",startDate:"",endDate:"",description:""}
+const [sportsEditor,setSportsEditor]=useState(null)
+const [sportsForm,setSportsForm]=useState(emptySportsForm)
+const [sportsBusy,setSportsBusy]=useState(false)
+const [sportsError,setSportsError]=useState("")
 
 /* ================= ASSIGN ================= */
 
@@ -260,6 +276,116 @@ setEditingTrainingId(item.id)
 const cancelTrainingEdit=()=>{
 setEditingTrainingId("")
 setTraining({trainingName:"",trainingNameHindi:"",location:"",startDate:"",endDate:""})
+}
+
+/* ================= PROGRAMME EDITOR (from calendar) ================= */
+
+const openProgrammeEditor=(item, defaultDate="")=>{
+setProgrammeError("")
+setProgrammeForm(item ? {
+trainingName:item.trainingName || "",
+trainingNameHindi:item.trainingNameHindi || "",
+location:item.location || "",
+startDate:item.startDate || defaultDate || "",
+endDate:item.endDate || defaultDate || item.startDate || "",
+} : {
+...emptyProgrammeForm,
+startDate:defaultDate,
+endDate:defaultDate,
+})
+setProgrammeEditor(item ? {mode:"edit",id:item.id,title:item.trainingName || "Training programme"} : {mode:"create",id:"",title:"New training programme"})
+}
+
+const saveProgramme=async()=>{
+if(programmeBusy) return
+setProgrammeError("")
+if(!programmeForm.trainingName.trim()){
+setProgrammeError("Training name is required.")
+return
+}
+if(!programmeForm.startDate || !programmeForm.endDate || programmeForm.endDate<programmeForm.startDate){
+setProgrammeError("Provide valid start and end dates (end must not be before start).")
+return
+}
+setProgrammeBusy(true)
+try{
+const payload={...programmeForm,financialYear:selectedFY}
+if(programmeEditor?.mode==="edit"){
+await api.put(`/Training_holiday/training/${programmeEditor.id}`,payload)
+}else{
+await api.post(`/Training_holiday/training`,{...payload,status:"Scheduled"})
+}
+setNotice({severity:"success",text:programmeEditor?.mode==="edit" ? "Training programme updated." : "Training programme added."})
+setProgrammeEditor(null)
+setProgrammeForm(emptyProgrammeForm)
+await fetchTraining()
+}catch(err){
+setProgrammeError(err?.response?.data?.detail || err?.message || "The programme could not be saved.")
+}finally{
+setProgrammeBusy(false)
+}
+}
+
+const deleteProgramme=async()=>{
+if(programmeBusy || programmeEditor?.mode!=="edit") return
+if(!window.confirm(`Delete the training programme "${programmeForm.trainingName}"? Existing nominations are not removed automatically.`)) return
+setProgrammeBusy(true)
+setProgrammeError("")
+try{
+await api.delete(`/Training_holiday/training/${programmeEditor.id}`)
+setNotice({severity:"success",text:"Training programme deleted."})
+setProgrammeEditor(null)
+setProgrammeForm(emptyProgrammeForm)
+if(trainingList.find((entry)=>entry.id===programmeEditor.id)?.trainingName===selectedTraining) setSelectedTraining("")
+await fetchTraining()
+}catch(err){
+setProgrammeError(err?.response?.data?.detail || err?.message || "The programme could not be deleted.")
+}finally{
+setProgrammeBusy(false)
+}
+}
+
+const editProgrammeFromCard=(item, event)=>{
+event?.stopPropagation?.()
+openProgrammeEditor(item)
+}
+
+/* ================= SPORTS EVENT (from calendar) ================= */
+
+const openSportsEditor=(defaultDate="")=>{
+setSportsError("")
+setSportsForm({
+name:"",
+venue:"",
+startDate:defaultDate,
+endDate:defaultDate,
+description:"",
+})
+setSportsEditor({defaultDate:defaultDate || ""})
+}
+
+const saveSportsEvent=async()=>{
+if(sportsBusy) return
+setSportsError("")
+if(!sportsForm.name.trim()){
+setSportsError("Sports event name is required.")
+return
+}
+if(!sportsForm.startDate || !sportsForm.endDate || sportsForm.endDate<sportsForm.startDate){
+setSportsError("Provide valid start and end dates (end must not be before start).")
+return
+}
+setSportsBusy(true)
+try{
+await api.post("/sports/events",sportsForm)
+setNotice({severity:"success",text:"Sports event added to the calendar. Employees can now apply against it."})
+setSportsEditor(null)
+setSportsForm(emptySportsForm)
+}catch(err){
+setSportsError(err?.response?.data?.detail || err?.message || "The sports event could not be saved.")
+}finally{
+setSportsBusy(false)
+}
 }
 
 /* ================= DUTY MATRIX ================= */
@@ -1152,9 +1278,30 @@ return(
     </Box>
     <Box>
       <Typography sx={{fontSize:19,fontWeight:950}}>Training calendar</Typography>
-      <Typography sx={{fontSize:11.5,color:"rgba(255,255,255,.82)"}}>Select a programme directly from its date to assign employees.</Typography>
+      <Typography sx={{fontSize:11.5,color:"rgba(255,255,255,.82)"}}>Select a programme directly from its date to assign employees, edit it, or add sports &amp; nominations.</Typography>
     </Box>
   </Box>
+  <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
+  {canManageTrainingPrograms && (
+    <Button
+      variant="contained"
+      startIcon={<Plus size={16}/>}
+      onClick={()=>openProgrammeEditor(null,new Date().toISOString().slice(0,10))}
+      sx={{background:"#FFFFFF",color:"#0F766E",textTransform:"none",fontWeight:900,"&:hover":{background:"rgba(255,255,255,.9)"}}}
+    >
+      Add programme
+    </Button>
+  )}
+  {canManageSportsEvents && (
+    <Button
+      variant="outlined"
+      startIcon={<Medal size={16}/>}
+      onClick={()=>openSportsEditor(new Date().toISOString().slice(0,10))}
+      sx={{color:"#FFF",borderColor:"rgba(255,255,255,.72)",textTransform:"none",fontWeight:850,"&:hover":{borderColor:"#FFF",background:"rgba(255,255,255,.08)"}}}
+    >
+      Add sports
+    </Button>
+  )}
   {canAssignTraining && (
     <Button
       variant="outlined"
@@ -1173,6 +1320,7 @@ return(
       Delegate power
     </Button>
   )}
+  </Stack>
 </Box>
 
 <Box sx={{display:"grid",gridTemplateColumns:{xs:"1fr",lg:"minmax(0,1fr) 285px"},minHeight:650}}>
@@ -1186,13 +1334,13 @@ return(
 {["Sun","Mon","Tue","Wed","Thu","Fri","Sat"].map((day)=><Box key={day} sx={{py:.8,borderRight:"1px solid #D9E2EC",borderBottom:"1px solid #D9E2EC",background:"#F1F5F9",textAlign:"center",color:"#475569",fontSize:10.5,fontWeight:950,textTransform:"uppercase",letterSpacing:.5}}>{day}</Box>)}
 {assignCalendarDays.map((day)=>{
 const overflow=day.programmes.length>3
-return <Box key={day.date} sx={{minHeight:{xs:94,md:116},p:.7,borderRight:"1px solid #D9E2EC",borderBottom:"1px solid #D9E2EC",background:day.today ? "#EFF6FF" : day.currentMonth ? "#FFFFFF" : "#F8FAFC",opacity:day.currentMonth ? 1 : .58,overflow:"hidden"}}>
-<Box sx={{mb:.45,display:"flex",justifyContent:"space-between",alignItems:"center"}}><Box sx={{width:24,height:24,borderRadius:"50%",display:"grid",placeItems:"center",background:day.today ? "#2563EB" : "transparent",color:day.today ? "#FFF" : "#334155",fontSize:11,fontWeight:950}}>{day.day}</Box>{day.programmes.length>0 && <Typography sx={{fontSize:8.5,color:"#64748B",fontWeight:850}}>{day.programmes.length}</Typography>}</Box>
+return <Box key={day.date} sx={{position:"relative",minHeight:{xs:94,md:116},p:.7,borderRight:"1px solid #D9E2EC",borderBottom:"1px solid #D9E2EC",background:day.today ? "#EFF6FF" : day.currentMonth ? "#FFFFFF" : "#F8FAFC",opacity:day.currentMonth ? 1 : .58,overflow:"hidden","&:hover .day-quick-add":{opacity:1}}}>
+<Box sx={{mb:.45,display:"flex",justifyContent:"space-between",alignItems:"center"}}><Box sx={{width:24,height:24,borderRadius:"50%",display:"grid",placeItems:"center",background:day.today ? "#2563EB" : "transparent",color:day.today ? "#FFF" : "#334155",fontSize:11,fontWeight:950}}>{day.day}</Box><Stack direction="row" spacing={.3} alignItems="center">{day.programmes.length>0 && <Typography sx={{fontSize:8.5,color:"#64748B",fontWeight:850}}>{day.programmes.length}</Typography>}{canManageSportsEvents && <Tooltip title="Add sports event" arrow><IconButton className="day-quick-add" size="small" onClick={()=>openSportsEditor(day.date)} sx={{opacity:0,p:0.2,transition:"opacity .12s ease",color:"#6D28D9"}}><Medal size={13}/></IconButton></Tooltip>}{canManageTrainingPrograms && <Tooltip title="Add training programme" arrow><IconButton className="day-quick-add" size="small" onClick={()=>openProgrammeEditor(null,day.date)} sx={{opacity:0,p:0.2,transition:"opacity .12s ease",color:"#0F766E"}}><Plus size={13}/></IconButton></Tooltip>}</Stack></Box>
 <Stack spacing={.4}>{day.programmes.slice(0,3).map((item)=>{
 const selected=selectedTraining===item.trainingName
 const color=trainingLineColor(item.trainingName)
 const nomineeNames=selected ? (nominatedEmployeesByDate[day.date] || []).map((person)=>person.name).filter(Boolean) : []
-return <Tooltip key={`${day.date}-${item.id || item.trainingName}`} title={`${item.trainingName} · ${item.location || "Location not specified"} · ${item.startDate} to ${item.endDate || item.startDate}`} arrow><Box component="button" type="button" onClick={()=>setSelectedTraining(item.trainingName)} sx={{width:"100%",p:.55,border:selected ? `2px solid ${color}` : `1px solid ${color}33`,borderLeft:`4px solid ${color}`,borderRadius:1.2,background:selected ? `${color}18` : `${color}0D`,color:"#172033",textAlign:"left",cursor:"pointer",overflow:"hidden","&:hover":{background:`${color}20`,transform:"translateY(-1px)"},transition:"all .12s ease"}}><Typography sx={{fontSize:9.5,fontWeight:950,lineHeight:1.15,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{item.trainingName}</Typography><Typography sx={{mt:.2,fontSize:8.2,color:"#64748B",fontWeight:750,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{item.location || "Place not specified"}</Typography>{selected && nomineeNames.length>0 && <Typography sx={{mt:.35,fontSize:8,color:"#047857",fontWeight:900,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{nomineeNames.length} nominated · {nomineeNames.slice(0,2).join(", ")}{nomineeNames.length>2 ? "…" : ""}</Typography>}</Box></Tooltip>
+return <Tooltip key={`${day.date}-${item.id || item.trainingName}`} title={`${item.trainingName} · ${item.location || "Location not specified"} · ${item.startDate} to ${item.endDate || item.startDate}${canManageTrainingPrograms ? " · Click the pencil to edit" : ""}`} arrow><Box sx={{position:"relative"}}><Box component="button" type="button" onClick={()=>setSelectedTraining(item.trainingName)} sx={{width:"100%",p:.55,pr:canManageTrainingPrograms ? 2.4 : .55,border:selected ? `2px solid ${color}` : `1px solid ${color}33`,borderLeft:`4px solid ${color}`,borderRadius:1.2,background:selected ? `${color}18` : `${color}0D`,color:"#172033",textAlign:"left",cursor:"pointer",overflow:"hidden","&:hover":{background:`${color}20`,transform:"translateY(-1px)"},transition:"all .12s ease"}}><Typography sx={{fontSize:9.5,fontWeight:950,lineHeight:1.15,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{item.trainingName}</Typography><Typography sx={{mt:.2,fontSize:8.2,color:"#64748B",fontWeight:750,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{item.location || "Place not specified"}</Typography>{selected && nomineeNames.length>0 && <Typography sx={{mt:.35,fontSize:8,color:"#047857",fontWeight:900,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{nomineeNames.length} nominated · {nomineeNames.slice(0,2).join(", ")}{nomineeNames.length>2 ? "…" : ""}</Typography>}</Box>{canManageTrainingPrograms && <IconButton size="small" onClick={(event)=>editProgrammeFromCard(item,event)} sx={{position:"absolute",top:2,right:2,p:0.25,color,background:"rgba(255,255,255,.75)","&:hover":{background:"#FFFFFF"}}}><Pencil size={11}/></IconButton>}</Box></Tooltip>
 })}{overflow && <Typography sx={{pl:.5,fontSize:8.5,color:"#475569",fontWeight:900}}>+{day.programmes.length-3} more</Typography>}</Stack>
 </Box>
 })}
@@ -1201,7 +1349,7 @@ return <Tooltip key={`${day.date}-${item.id || item.trainingName}`} title={`${it
 
 <Box sx={{p:2,borderLeft:{lg:"1px solid #D9E2EC"},borderTop:{xs:"1px solid #D9E2EC",lg:0},background:"linear-gradient(180deg,#F8FAFC,#FFFFFF)"}}>
 <Typography sx={{fontSize:12,fontWeight:950,color:"#334155",textTransform:"uppercase",letterSpacing:.5}}>Selected training</Typography>
-{selectedTrainingProgramme ? <Paper variant="outlined" sx={{mt:1.2,p:1.6,borderRadius:2.5,borderColor:`${trainingLineColor(selectedTrainingProgramme.trainingName)}55`,borderTop:`5px solid ${trainingLineColor(selectedTrainingProgramme.trainingName)}`}}><Typography sx={{fontSize:15,fontWeight:950,color:"#0F172A",lineHeight:1.25}}>{selectedTrainingProgramme.trainingName}</Typography><Stack spacing={.8} sx={{mt:1.3}}><Stack direction="row" spacing={.8} alignItems="flex-start"><CalendarDays size={15} color="#64748B"/><Typography sx={{fontSize:11.5,fontWeight:800,color:"#475569"}}>{selectedTrainingProgramme.startDate} to {selectedTrainingProgramme.endDate || selectedTrainingProgramme.startDate}</Typography></Stack><Stack direction="row" spacing={.8} alignItems="flex-start"><MapPin size={15} color="#64748B"/><Typography sx={{fontSize:11.5,fontWeight:800,color:"#475569"}}>{selectedTrainingProgramme.location || "Place not specified"}</Typography></Stack></Stack><Button fullWidth variant="contained" startIcon={<Users size={16}/>} onClick={()=>fetchCalendarDuty(selectedTrainingProgramme.trainingName,selectedTrainingProgramme.startDate,selectedTrainingProgramme.endDate)} sx={{mt:1.7,py:1,textTransform:"none",fontWeight:950,borderRadius:2,background:"#0F766E","&:hover":{background:"#065F46"}}}>Assign employees</Button></Paper> : <Box sx={{mt:1.2,p:2.2,border:"1px dashed #94A3B8",borderRadius:2.5,textAlign:"center",color:"#64748B"}}><CalendarDays size={30}/><Typography sx={{mt:.8,fontSize:12,fontWeight:900}}>Select a training on the calendar</Typography><Typography sx={{mt:.4,fontSize:10.5}}>Training name and place are displayed directly against the scheduled dates.</Typography></Box>}
+{selectedTrainingProgramme ? <Paper variant="outlined" sx={{mt:1.2,p:1.6,borderRadius:2.5,borderColor:`${trainingLineColor(selectedTrainingProgramme.trainingName)}55`,borderTop:`5px solid ${trainingLineColor(selectedTrainingProgramme.trainingName)}`}}><Typography sx={{fontSize:15,fontWeight:950,color:"#0F172A",lineHeight:1.25}}>{selectedTrainingProgramme.trainingName}</Typography><Stack spacing={.8} sx={{mt:1.3}}><Stack direction="row" spacing={.8} alignItems="flex-start"><CalendarDays size={15} color="#64748B"/><Typography sx={{fontSize:11.5,fontWeight:800,color:"#475569"}}>{selectedTrainingProgramme.startDate} to {selectedTrainingProgramme.endDate || selectedTrainingProgramme.startDate}</Typography></Stack><Stack direction="row" spacing={.8} alignItems="flex-start"><MapPin size={15} color="#64748B"/><Typography sx={{fontSize:11.5,fontWeight:800,color:"#475569"}}>{selectedTrainingProgramme.location || "Place not specified"}</Typography></Stack></Stack><Button fullWidth variant="contained" startIcon={<Users size={16}/>} onClick={()=>fetchCalendarDuty(selectedTrainingProgramme.trainingName,selectedTrainingProgramme.startDate,selectedTrainingProgramme.endDate)} sx={{mt:1.7,py:1,textTransform:"none",fontWeight:950,borderRadius:2,background:"#0F766E","&:hover":{background:"#065F46"}}}>Assign employees</Button>{canManageTrainingPrograms && <Button fullWidth variant="outlined" startIcon={<Pencil size={15}/>} onClick={()=>openProgrammeEditor(selectedTrainingProgramme)} sx={{mt:1,textTransform:"none",fontWeight:850}}>Edit training details</Button>}</Paper> : <Box sx={{mt:1.2,p:2.2,border:"1px dashed #94A3B8",borderRadius:2.5,textAlign:"center",color:"#64748B"}}><CalendarDays size={30}/><Typography sx={{mt:.8,fontSize:12,fontWeight:900}}>Select a training on the calendar</Typography><Typography sx={{mt:.4,fontSize:10.5}}>Training name and place are displayed directly against the scheduled dates.</Typography></Box>}
 
 <Typography sx={{mt:2.2,mb:.8,fontSize:11,fontWeight:950,color:"#475569",textTransform:"uppercase",letterSpacing:.45}}>Programmes this month</Typography>
 <Stack spacing={.7} sx={{maxHeight:285,overflowY:"auto",pr:.3}}>{activeTrainingProgrammes.filter((item)=>item.startDate<=`${assignCalendarMonth}-31` && (item.endDate || item.startDate)>=`${assignCalendarMonth}-01`).sort((a,b)=>String(a.startDate).localeCompare(String(b.startDate))).map((item)=><Box component="button" type="button" key={item.id || item.trainingName} onClick={()=>setSelectedTraining(item.trainingName)} sx={{p:1,width:"100%",border:"1px solid #E2E8F0",borderLeft:`4px solid ${trainingLineColor(item.trainingName)}`,borderRadius:1.5,background:selectedTraining===item.trainingName ? "#ECFDF5" : "#FFF",textAlign:"left",cursor:"pointer"}}><Typography sx={{fontSize:10.5,fontWeight:950,color:"#1E293B"}}>{item.trainingName}</Typography><Typography sx={{mt:.15,fontSize:9.2,color:"#64748B",fontWeight:750}}>{item.startDate} · {item.location || "Place not specified"}</Typography></Box>)}{!activeTrainingProgrammes.some((item)=>item.startDate<=`${assignCalendarMonth}-31` && (item.endDate || item.startDate)>=`${assignCalendarMonth}-01`) && <Typography sx={{py:2,textAlign:"center",fontSize:11,color:"#94A3B8",fontWeight:750}}>No training scheduled this month.</Typography>}</Stack>
@@ -1230,6 +1378,49 @@ return <Tooltip key={`${day.date}-${item.id || item.trainingName}`} title={`${it
 
 
 {/* ############### Duty Matrix Popup (Full Section) */}
+
+
+<Dialog open={Boolean(programmeEditor)} onClose={()=>{if(!programmeBusy){setProgrammeEditor(null);setProgrammeError("")}}} maxWidth="sm" fullWidth>
+<DialogTitle sx={{fontWeight:900,display:"flex",alignItems:"center",gap:1}}><Pencil size={18}/>{programmeEditor?.mode==="edit" ? "Edit training programme" : "Add training programme"}</DialogTitle>
+<DialogContent dividers>
+<Stack spacing={2} sx={{pt:.5}}>
+{programmeError && <Alert severity="error" onClose={()=>setProgrammeError("")}>{programmeError}</Alert>}
+<TextField fullWidth size="small" label="Training name" value={programmeForm.trainingName} disabled={programmeBusy} onChange={(e)=>setProgrammeForm((v)=>({...v,trainingName:e.target.value}))} slotProps={{htmlInput:{maxLength:200}}}/>
+<TextField fullWidth size="small" label="Location / venue" value={programmeForm.location} disabled={programmeBusy} onChange={(e)=>setProgrammeForm((v)=>({...v,location:e.target.value}))} slotProps={{htmlInput:{maxLength:300}}}/>
+<Stack direction={{xs:"column",sm:"row"}} spacing={2}>
+<TextField fullWidth size="small" type="date" label="Start date" InputLabelProps={{shrink:true}} value={programmeForm.startDate} disabled={programmeBusy} onChange={(e)=>setProgrammeForm((v)=>({...v,startDate:e.target.value}))}/>
+<TextField fullWidth size="small" type="date" label="End date" InputLabelProps={{shrink:true}} inputProps={{min:programmeForm.startDate}} value={programmeForm.endDate} disabled={programmeBusy} onChange={(e)=>setProgrammeForm((v)=>({...v,endDate:e.target.value}))}/>
+</Stack>
+<Alert severity="info" sx={{py:0}}>Programme dates drive the calendar blocks. Editing the name, location or dates updates what every nominate view shows for this financial year ({selectedFY}).</Alert>
+<Stack direction="row" spacing={1}>
+<Button variant="contained" disabled={programmeBusy} onClick={saveProgramme}>{programmeBusy ? "Saving…" : programmeEditor?.mode==="edit" ? "Save changes" : "Add programme"}</Button>
+<Button disabled={programmeBusy} onClick={()=>setProgrammeEditor(null)}>Cancel</Button>
+{programmeEditor?.mode==="edit" && <Button color="error" variant="outlined" startIcon={<Trash2 size={15}/>} disabled={programmeBusy} onClick={deleteProgramme} sx={{ml:"auto"}}>Delete</Button>}
+</Stack>
+</Stack>
+</DialogContent>
+</Dialog>
+
+<Dialog open={Boolean(sportsEditor)} onClose={()=>{if(!sportsBusy){setSportsEditor(null);setSportsError("")}}} maxWidth="sm" fullWidth>
+<DialogTitle sx={{fontWeight:900,display:"flex",alignItems:"center",gap:1}}><Medal size={18}/>Add sports event</DialogTitle>
+<DialogContent dividers>
+<Stack spacing={2} sx={{pt:.5}}>
+{sportsError && <Alert severity="error" onClose={()=>setSportsError("")}>{sportsError}</Alert>}
+<Alert severity="info" sx={{py:0}}>Sports events are published to the sports workflow. Employees can then apply against this event; approved applications appear on the duty calendar.</Alert>
+<TextField fullWidth size="small" label="Event name" value={sportsForm.name} disabled={sportsBusy} onChange={(e)=>setSportsForm((v)=>({...v,name:e.target.value}))}/>
+<Stack direction={{xs:"column",sm:"row"}} spacing={2}>
+<TextField fullWidth size="small" type="date" label="From" InputLabelProps={{shrink:true}} value={sportsForm.startDate} disabled={sportsBusy} onChange={(e)=>setSportsForm((v)=>({...v,startDate:e.target.value}))}/>
+<TextField fullWidth size="small" type="date" label="To" InputLabelProps={{shrink:true}} inputProps={{min:sportsForm.startDate}} value={sportsForm.endDate} disabled={sportsBusy} onChange={(e)=>setSportsForm((v)=>({...v,endDate:e.target.value}))}/>
+</Stack>
+<TextField fullWidth size="small" label="Venue" value={sportsForm.venue} disabled={sportsBusy} onChange={(e)=>setSportsForm((v)=>({...v,venue:e.target.value}))}/>
+<TextField fullWidth size="small" label="Description" multiline minRows={2} value={sportsForm.description} disabled={sportsBusy} onChange={(e)=>setSportsForm((v)=>({...v,description:e.target.value}))}/>
+<Stack direction="row" spacing={1}>
+<Button variant="contained" disabled={sportsBusy} onClick={saveSportsEvent}>{sportsBusy ? "Saving…" : "Add event"}</Button>
+<Button disabled={sportsBusy} onClick={()=>setSportsEditor(null)}>Cancel</Button>
+</Stack>
+</Stack>
+</DialogContent>
+</Dialog>
 
 
 <Dialog open={Boolean(reviewNomination)} onClose={()=>setReviewNomination(null)} fullWidth maxWidth="sm">

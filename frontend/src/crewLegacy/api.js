@@ -51,12 +51,19 @@ api.interceptors.request.use((config) => {
   // Calendar applications use the target workflow's server-side employee and
   // reporting-authority checks, independent of calendar layout edit access.
   const isLeaveBlockAdministration = ["POST", "DELETE"].includes(method) && /^\/leave\/blocked-periods(?:\/[^/]+)?$/.test(requestUrl);
+  // Training programme maintenance (create/edit/delete a programme from the
+  // calendar) is authorized on the server by HR training-approval rights, which
+  // is a broader authority than the page's Write (nomination) permission.
+  const isTrainingMaster = ["POST", "PUT", "DELETE"].includes(method) && /^\/Training_holiday\/training(?:\/[^/]+)?$/.test(requestUrl);
+  // Sports event maintenance is a server-authorized HR/HOD action (crew_training
+  // or crew_leave approve) and is exposed from the training calendar as well.
+  const isSportsEventManagement = ["POST", "PUT", "DELETE"].includes(method) && /^\/sports\/events(?:\/[^/]+)?$/.test(requestUrl);
   const isLeaveApplication = method === "POST" && requestUrl === "/leave/apply";
   // Every signed-in employee owns this one profile preference. The backend
   // binds it to the authenticated employee, so page-level Write access is not
   // needed to choose a post-login landing page.
   const isLandingPagePreference = ["POST", "PUT"].includes(method) && requestUrl.includes("/profile/landing-page");
-  if (!["GET", "HEAD", "OPTIONS"].includes(method) && permissions[pageKeyForPath()]?.write === false && !isMasterDelete && !isDutyDecision && !isTrainingApproval && !isLeaveApproval && !isSportsApproval && !isLeaveApplication && !isLeaveBlockAdministration && !isLandingPagePreference) {
+  if (!["GET", "HEAD", "OPTIONS"].includes(method) && permissions[pageKeyForPath()]?.write === false && !isMasterDelete && !isDutyDecision && !isTrainingApproval && !isLeaveApproval && !isSportsApproval && !isLeaveApplication && !isLeaveBlockAdministration && !isTrainingMaster && !isSportsEventManagement && !isLandingPagePreference) {
     return Promise.reject(new Error("This page is read-only for your account."));
   }
   return config;
