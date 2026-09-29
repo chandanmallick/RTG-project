@@ -34,6 +34,21 @@ const addDays = (dateStr, amount) => {
   next.setDate(next.getDate() + amount);
   return iso(next);
 };
+const shiftMonth = (month, amount) => {
+  const [year, value] = String(month).split("-").map(Number);
+  const next = new Date(year, value - 1 + amount, 1);
+  return `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, "0")}`;
+};
+const monthGrid = (month) => {
+  const [year, value] = String(month).split("-").map(Number);
+  const first = new Date(year, value - 1, 1);
+  first.setDate(first.getDate() - first.getDay());
+  return Array.from({ length: 42 }, (_, index) => {
+    const date = new Date(first);
+    date.setDate(first.getDate() + index);
+    return iso(date);
+  });
+};
 const parseLocalDate = (dateStr) => {
   if (!dateStr || typeof dateStr !== "string" || !dateStr.includes("-")) {
     return new Date();
@@ -126,25 +141,36 @@ const eventTone = {
   sports: { label: "Sports", color: "#B45309", background: "#FFF7ED", border: "#FDBA74", icon: Medal },
 };
 
-function EventCalendar({ dates, events, loading, onAddHoliday, onOpenTraining, onOpenSports }) {
-  return <GlassCard hover={false} padding={0} sx={{ overflow: "hidden", flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
-    <Box sx={{ px: 1.4, py: 1, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 1, flexWrap: "wrap", borderBottom: "1px solid #E2E8F0", background: "#FFF" }}>
-      <Box><Typography sx={{ fontSize: 15, fontWeight: 950, color: "#0F172A" }}>Training, holiday &amp; sports events</Typography><Typography sx={{ fontSize: 10.5, color: "#64748B" }}>One event view for planning applications, approvals and replacement cover.</Typography></Box>
+function EventCalendar({ dates, month, events, loading, onAddHoliday, onOpenTraining, onOpenSports }) {
+  const [selected, setSelected] = useState(null);
+  const monthEvents = events.filter((item) => String(item.startDate || "").slice(0, 7) <= month && String(item.endDate || item.startDate || "").slice(0, 7) >= month);
+  return <GlassCard hover={false} padding={0} sx={{ overflow: "hidden", flex: 1, minHeight: 0, display: "flex", flexDirection: "column", border: "1px solid #B7E4D5" }}>
+    <Box sx={{ px: 1.5, py: .9, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 1, flexWrap: "wrap", color: "#FFF", background: "linear-gradient(90deg,#08624F,#12B981)" }}>
+      <Box><Typography sx={{ fontSize: 15.5, fontWeight: 950 }}>Event calendar</Typography><Typography sx={{ fontSize: 10, opacity: .9 }}>Training, holidays and sports in one calendar.</Typography></Box>
       <Stack direction="row" spacing={.7} useFlexGap flexWrap="wrap">
-        <Button size="small" variant="contained" startIcon={<CalendarDays size={15} />} onClick={onAddHoliday} sx={{ textTransform: "none", fontWeight: 900 }}>Add holiday</Button>
-        <Button size="small" variant="outlined" startIcon={<GraduationCap size={15} />} onClick={onOpenTraining} sx={{ textTransform: "none", fontWeight: 850 }}>Training programmes</Button>
-        <Button size="small" variant="outlined" startIcon={<Medal size={15} />} onClick={onOpenSports} sx={{ textTransform: "none", fontWeight: 850 }}>Sports programmes</Button>
+        <Button size="small" variant="outlined" startIcon={<CalendarDays size={14} />} onClick={onAddHoliday} sx={{ color: "#FFF", borderColor: "#FFFFFFAA", textTransform: "none", fontWeight: 900 }}>Add holiday</Button>
+        <Button size="small" variant="outlined" startIcon={<GraduationCap size={14} />} onClick={onOpenTraining} sx={{ color: "#FFF", borderColor: "#FFFFFFAA", textTransform: "none", fontWeight: 850 }}>Training</Button>
+        <Button size="small" variant="outlined" startIcon={<Medal size={14} />} onClick={onOpenSports} sx={{ color: "#FFF", borderColor: "#FFFFFFAA", textTransform: "none", fontWeight: 850 }}>Sports</Button>
       </Stack>
     </Box>
-    {loading ? <Box sx={{ flex: 1, minHeight: 280, display: "grid", placeItems: "center" }}><CircularProgress /></Box> : <Box sx={{ flex: 1, minHeight: 0, overflow: "auto", p: 1.1, background: "#F8FAFC" }}>
-      <Box sx={{ minWidth: Math.max(900, dates.length * 150), display: "grid", gridTemplateColumns: `repeat(${dates.length}, minmax(140px, 1fr))`, gap: .75, alignItems: "stretch" }}>
-        {dates.map((date) => {
-          const dayEvents = events.filter((item) => item.startDate <= date && item.endDate >= date);
-          return <Box key={date} sx={{ minHeight: 250, border: date === iso(new Date()) ? "2px solid #0284C7" : "1px solid #CBD5E1", borderRadius: 2.2, overflow: "hidden", background: "#FFF" }}>
-            <Box sx={{ px: 1, py: .8, background: date === iso(new Date()) ? "#E0F2FE" : "#F8FAFC", borderBottom: "1px solid #E2E8F0" }}><Typography sx={{ fontSize: 12.5, fontWeight: 950, color: "#0F172A" }}>{displayDate(date)}</Typography><Typography sx={{ fontSize: 9.5, fontWeight: 800, color: "#64748B" }}>{weekday(date)}</Typography></Box>
-            <Stack spacing={.65} sx={{ p: .7 }}>{dayEvents.map((item) => { const tone = eventTone[item.kind] || eventTone.training; const Icon = tone.icon; return <Box key={`${item.kind}-${item.id}`} sx={{ p: .8, borderRadius: 1.6, background: tone.background, border: `1px solid ${tone.border}`, color: tone.color }}><Stack direction="row" spacing={.55} alignItems="center"><Icon size={13} /><Typography sx={{ fontSize: 9, fontWeight: 950, textTransform: "uppercase" }}>{tone.label}</Typography></Stack><Typography sx={{ mt: .4, fontSize: 11, fontWeight: 950, lineHeight: 1.22 }}>{item.title}</Typography><Typography sx={{ mt: .25, fontSize: 9.2, color: "#475569", lineHeight: 1.25 }}>{item.detail}</Typography>{item.startDate !== item.endDate && <Typography sx={{ mt: .35, fontSize: 8.8, fontWeight: 800 }}>{displayDate(item.startDate)} – {displayDate(item.endDate)}</Typography>}</Box>; })}{!dayEvents.length && <Typography sx={{ py: 3, textAlign: "center", fontSize: 10, color: "#CBD5E1" }}>No event</Typography>}</Stack>
-          </Box>;
-        })}
+    {loading ? <Box sx={{ flex: 1, minHeight: 280, display: "grid", placeItems: "center" }}><CircularProgress /></Box> : <Box sx={{ flex: 1, minHeight: 0, display: "grid", gridTemplateColumns: { xs: "1fr", lg: "minmax(760px,1fr) 240px" }, overflow: "hidden" }}>
+      <Box sx={{ minWidth: 0, overflow: "auto", background: "#FFF" }}>
+        <Box sx={{ minWidth: 760, display: "grid", gridTemplateColumns: "repeat(7,minmax(105px,1fr))", borderTop: "1px solid #D9E4EC", borderLeft: "1px solid #D9E4EC" }}>
+          {["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"].map((day) => <Box key={day} sx={{ py: .55, textAlign: "center", fontSize: 9, fontWeight: 950, color: "#475569", background: "#F1F5F9", borderRight: "1px solid #D9E4EC", borderBottom: "1px solid #D9E4EC" }}>{day}</Box>)}
+          {dates.map((date) => {
+            const dayEvents = events.filter((item) => item.startDate <= date && item.endDate >= date);
+            const inMonth = date.slice(0, 7) === month;
+            const isToday = date === iso(new Date());
+            return <Box key={date} sx={{ minHeight: 100, p: .55, background: inMonth ? "#FFF" : "#F8FAFC", borderRight: "1px solid #D9E4EC", borderBottom: "1px solid #D9E4EC", opacity: inMonth ? 1 : .58 }}>
+              <Box sx={{ mb: .4, width: 22, height: 22, display: "grid", placeItems: "center", borderRadius: "50%", fontSize: 10, fontWeight: 950, color: isToday ? "#FFF" : "#334155", background: isToday ? "#2563EB" : "transparent" }}>{Number(date.slice(-2))}</Box>
+              <Stack spacing={.35}>{dayEvents.slice(0, 3).map((item) => { const tone = eventTone[item.kind] || eventTone.training; return <Button key={`${item.kind}-${item.id}`} onClick={() => setSelected(item)} title={item.title} sx={{ minWidth: 0, width: "100%", px: .55, py: .35, display: "block", overflow: "hidden", textAlign: "left", textTransform: "none", color: tone.color, background: tone.background, borderLeft: `3px solid ${tone.color}`, borderRadius: 1, "&:hover": { background: tone.background, filter: "brightness(.97)" } }}><Typography noWrap sx={{ fontSize: 9, fontWeight: 950 }}>{item.title}</Typography><Typography noWrap sx={{ fontSize: 7.5, color: "#64748B" }}>{item.detail}</Typography></Button>; })}{dayEvents.length > 3 && <Typography sx={{ pl: .4, fontSize: 8.5, fontWeight: 900, color: "#64748B" }}>+{dayEvents.length - 3} more</Typography>}</Stack>
+            </Box>;
+          })}
+        </Box>
+      </Box>
+      <Box sx={{ minHeight: 0, p: 1.2, overflowY: "auto", borderLeft: { lg: "1px solid #D9E4EC" }, background: "#FBFDFE" }}>
+        <Typography sx={{ fontSize: 9.5, fontWeight: 950, color: "#475569", textTransform: "uppercase", letterSpacing: ".05em" }}>{selected ? "Selected event" : "Events this month"}</Typography>
+        {selected ? <Box sx={{ mt: 1, p: 1.2, borderRadius: 2, border: `1px solid ${(eventTone[selected.kind] || eventTone.training).border}`, background: (eventTone[selected.kind] || eventTone.training).background }}><Chip size="small" label={(eventTone[selected.kind] || eventTone.training).label} sx={{ height: 21, fontWeight: 900 }} /><Typography sx={{ mt: .8, fontSize: 12, fontWeight: 950, color: "#0F172A" }}>{selected.title}</Typography><Typography sx={{ mt: .45, fontSize: 9.5, color: "#475569" }}>{displayDate(selected.startDate)}{selected.endDate !== selected.startDate ? ` – ${displayDate(selected.endDate)}` : ""}</Typography><Typography sx={{ mt: .35, fontSize: 9.5, color: "#64748B" }}>{selected.detail}</Typography><Button size="small" onClick={() => setSelected(null)} sx={{ mt: .7, px: 0, textTransform: "none" }}>Back to all events</Button></Box> : <Stack spacing={.65} sx={{ mt: 1 }}>{monthEvents.map((item) => { const tone = eventTone[item.kind] || eventTone.training; return <Button key={`${item.kind}-${item.id}-side`} onClick={() => setSelected(item)} sx={{ p: .8, display: "block", textAlign: "left", textTransform: "none", borderRadius: 1.7, color: "#0F172A", background: "#FFF", border: "1px solid #D9E4EC", borderLeft: `4px solid ${tone.color}`, "&:hover": { background: tone.background } }}><Typography sx={{ fontSize: 10, fontWeight: 950, lineHeight: 1.2 }}>{item.title}</Typography><Typography sx={{ mt: .25, fontSize: 8.4, color: "#64748B" }}>{displayDate(item.startDate)}{item.endDate !== item.startDate ? ` – ${displayDate(item.endDate)}` : ""}</Typography></Button>; })}{!monthEvents.length && <Typography sx={{ py: 3, textAlign: "center", color: "#94A3B8", fontSize: 10 }}>No events this month</Typography>}</Stack>}
       </Box>
     </Box>}
   </GlassCard>;
@@ -230,6 +256,7 @@ export default function CrewCalendar({ publicView = false }) {
   const [data, setData] = useState([]);
   const [events, setEvents] = useState([]);
   const [calendarView, setCalendarView] = useState(() => new URLSearchParams(window.location.search).get("view") === "events" ? "events" : "duty");
+  const [eventMonth, setEventMonth] = useState(today.slice(0, 7));
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [selectedRow, setSelectedRow] = useState("");
@@ -277,6 +304,7 @@ export default function CrewCalendar({ publicView = false }) {
     }
     return output;
   }, [startDate, endDate]);
+  const eventDates = useMemo(() => monthGrid(eventMonth), [eventMonth]);
 
   const load = async ({ quiet = false } = {}) => {
     const loadId = loadIdRef.current + 1;
@@ -285,7 +313,7 @@ export default function CrewCalendar({ publicView = false }) {
     setError("");
     try {
       const response = calendarView === "events"
-        ? await crewApi.calendarEvents(startDate, endDate)
+        ? await crewApi.calendarEvents(eventDates[0], eventDates[eventDates.length - 1])
         : await crewApi.calendar(startDate, endDate);
       if (loadId !== loadIdRef.current) return;
       if (calendarView === "events") {
@@ -310,13 +338,13 @@ export default function CrewCalendar({ publicView = false }) {
     } catch (requestError) {
       if (loadId !== loadIdRef.current) return;
       setData([]);
-      setError(requestError.response?.data?.detail || "Unable to load the duty calendar.");
+      setError(requestError.response?.data?.detail || `Unable to load the ${calendarView === "events" ? "event" : "duty"} calendar.`);
     } finally {
       if (loadId === loadIdRef.current) setLoading(false);
     }
   };
 
-  useEffect(() => { load(); }, [startDate, endDate, calendarView]);
+  useEffect(() => { load(); }, [startDate, endDate, eventMonth, calendarView]);
   useEffect(() => {
     const refresh = () => { if (document.visibilityState === "visible") load({ quiet: true }); };
     const timer = window.setInterval(refresh, 60000);
@@ -331,7 +359,7 @@ export default function CrewCalendar({ publicView = false }) {
       window.removeEventListener("crew-workflows-changed", refresh);
       window.removeEventListener("storage", refresh);
     };
-  }, [startDate, endDate, calendarView]);
+  }, [startDate, endDate, eventMonth, calendarView]);
   useEffect(() => {
     if (!publicView) crewApi.myRole().then(setCrewRole).catch(() => setCrewRole({}));
   }, [publicView, user?.employeeId]);
@@ -650,15 +678,15 @@ export default function CrewCalendar({ publicView = false }) {
           <Button size="small" onClick={() => { setCalendarView("duty"); window.history.replaceState(null, "", `${window.location.pathname}?view=duty`); }} sx={{ minHeight: 28, px: 1, color: calendarView === "duty" ? "#073B75" : "#FFF", background: calendarView === "duty" ? "#FFF" : "transparent", textTransform: "none", fontWeight: 900 }}>Duty view</Button>
           <Button size="small" onClick={() => { setCalendarView("events"); window.history.replaceState(null, "", `${window.location.pathname}?view=events`); }} sx={{ minHeight: 28, px: 1, color: calendarView === "events" ? "#073B75" : "#FFF", background: calendarView === "events" ? "#FFF" : "transparent", textTransform: "none", fontWeight: 900 }}>Event view</Button>
         </Stack><Stack direction="row" spacing={.35} alignItems="center">
-          <Tooltip title="Previous 7 days"><IconButton size="small" onClick={() => move(-7)} sx={{ color: "#FFF", border: "1px solid rgba(255,255,255,.35)" }}><ChevronLeft size={17} /></IconButton></Tooltip>
-          <Button onClick={() => { setStartDate(addDays(today, -7)); setEndDate(addDays(today, 7)); }} startIcon={<CalendarDays size={15} />} size="small" sx={{ minHeight: 32, color: "#073B75", background: "#FFF", borderRadius: 2, textTransform: "none", fontWeight: 900, "&:hover": { background: "#F1F5F9" } }}>Today</Button>
-          <Tooltip title="Next 7 days"><IconButton size="small" onClick={() => move(7)} sx={{ color: "#FFF", border: "1px solid rgba(255,255,255,.35)" }}><ChevronRight size={17} /></IconButton></Tooltip>
+          <Tooltip title={calendarView === "events" ? "Previous month" : "Previous 7 days"}><IconButton size="small" onClick={() => calendarView === "events" ? setEventMonth((value) => shiftMonth(value, -1)) : move(-7)} sx={{ color: "#FFF", border: "1px solid rgba(255,255,255,.35)" }}><ChevronLeft size={17} /></IconButton></Tooltip>
+          <Button onClick={() => calendarView === "events" ? setEventMonth(today.slice(0, 7)) : (setStartDate(addDays(today, -7)), setEndDate(addDays(today, 7)))} startIcon={<CalendarDays size={15} />} size="small" sx={{ minHeight: 32, color: "#073B75", background: "#FFF", borderRadius: 2, textTransform: "none", fontWeight: 900, "&:hover": { background: "#F1F5F9" } }}>Today</Button>
+          <Tooltip title={calendarView === "events" ? "Next month" : "Next 7 days"}><IconButton size="small" onClick={() => calendarView === "events" ? setEventMonth((value) => shiftMonth(value, 1)) : move(7)} sx={{ color: "#FFF", border: "1px solid rgba(255,255,255,.35)" }}><ChevronRight size={17} /></IconButton></Tooltip>
         </Stack>
-        <Stack direction="row" spacing={.55} alignItems="center">
+        {calendarView === "events" ? <input aria-label="Event month" type="month" value={eventMonth} onChange={(event) => setEventMonth(event.target.value)} style={{ width: 132, border: "1px solid rgba(255,255,255,.55)", borderRadius: 8, padding: "6px 8px", fontSize: 11, fontWeight: 750 }} /> : <Stack direction="row" spacing={.55} alignItems="center">
           <input aria-label="Start date" type="date" value={startDate} onChange={(event) => setStartDate(event.target.value)} style={{ width: 126, border: "1px solid rgba(255,255,255,.55)", borderRadius: 8, padding: "6px 8px", fontSize: 11, fontWeight: 750 }} />
           <Typography sx={{ color: "rgba(255,255,255,.8)", fontSize: 11 }}>to</Typography>
           <input aria-label="End date" type="date" min={startDate} value={endDate} onChange={(event) => setEndDate(event.target.value)} style={{ width: 126, border: "1px solid rgba(255,255,255,.55)", borderRadius: 8, padding: "6px 8px", fontSize: 11, fontWeight: 750 }} />
-        </Stack>
+        </Stack>}
         <Button size="small" startIcon={<RefreshCw size={15} />} onClick={load} sx={{ minHeight: 32, color: "#FFF", border: "1px solid rgba(255,255,255,.55)", borderRadius: 2, textTransform: "none", fontWeight: 850 }}>Refresh</Button>
         {calendarView === "duty" && <><Button size="small" startIcon={<MousePointer2 size={15} />} onClick={openCalendarApplication} sx={{ minHeight: 32, color: applicationMode ? "#073B75" : "#FFF", background: applicationMode ? "#FFF" : "transparent", border: "1px solid rgba(255,255,255,.65)", borderRadius: 2, textTransform: "none", fontWeight: 900 }}>{applicationMode ? `Continue application${applicationSelections.length ? ` (${applicationSelections.length})` : ""}` : "Apply from calendar"}</Button>
         {applicationMode && <Tooltip title="Cancel application selection"><IconButton size="small" onClick={() => { setApplicationMode(false); setApplicationSelections([]); setApplicationNotice(""); }} sx={{ color: "#FFF", border: "1px solid rgba(255,255,255,.55)" }}><X size={16} /></IconButton></Tooltip>}
@@ -669,7 +697,8 @@ export default function CrewCalendar({ publicView = false }) {
       {calendarNotice && <Alert severity="success" onClose={() => setCalendarNotice("")}>{calendarNotice}</Alert>}
       {applicationNotice && <Alert severity="info" sx={{ py: 0 }}>{applicationNotice}</Alert>}
       {calendarView === "events" ? <EventCalendar
-        dates={dates}
+        dates={eventDates}
+        month={eventMonth}
         events={events}
         loading={loading}
         onAddHoliday={() => navigate("/crew/training?section=holiday")}
