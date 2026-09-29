@@ -12,7 +12,11 @@ export default function LeaveBlockedPeriods({ isAdmin = false }) {
   const [form, setForm] = useState({ startDate: "", endDate: "", reason: "" });
   const load = async () => {
     try { setPeriods((await api.get("/leave/blocked-periods")).data || []); }
-    catch (e) { setError(e.response?.data?.detail || "Unable to load blocked leave periods."); }
+    catch (e) {
+      setError(e.response?.status === 404
+        ? "The backend is older than this page. Run start_server.bat on the server after git pull to load the updated leave API."
+        : e.response?.data?.detail || "Unable to load blocked leave periods.");
+    }
   };
   useEffect(() => { load(); }, []);
   const save = async () => {

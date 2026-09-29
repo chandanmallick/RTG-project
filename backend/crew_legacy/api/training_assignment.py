@@ -1106,6 +1106,12 @@ def change_nomination(nomination_id: str, data: dict, user=Depends(get_authentic
         desired = {"status": "Cancelled", "cancelledBy": actor, "cancelledOn": datetime.utcnow()}
     else:
         emp_id = clean_id(data.get("employeeId") or record.get("employeeId"))
+        training_name = str(data.get("trainingName") or record.get("trainingName") or "").strip()
+        training_location = str(data.get("trainingLocation") if data.get("trainingLocation") is not None else record.get("trainingLocation") or "").strip()
+        if not training_name or len(training_name) > 200:
+            raise HTTPException(400, "Training name is required and must not exceed 200 characters")
+        if len(training_location) > 300:
+            raise HTTPException(400, "Training location must not exceed 300 characters")
         employee = employee_collection.find_one({"$or": [{"userId": emp_id}, {"employeeId": emp_id}]})
         if not employee:
             raise HTTPException(404, "Employee not found")
@@ -1123,6 +1129,7 @@ def change_nomination(nomination_id: str, data: dict, user=Depends(get_authentic
         group = shift_group_context(emp_id)
         chain = [*approval_chain(employee), hr_final_step()] if emp_id == actor else [hr_final_step()]
         desired = {
+            "trainingName": training_name, "trainingLocation": training_location,
             "employeeId": emp_id, "employeeName": snapshot["name"],
             "employeeDesignation": snapshot["designation"],
             "employeeType": "Shift" if group else "Non-shift", "groupName": group.get("groupName"),
@@ -1159,17 +1166,20 @@ def change_nomination(nomination_id: str, data: dict, user=Depends(get_authentic
         if not removing:
             for date in date_range(desired["startDate"], desired["endDate"]):
                 employee_daily_collection.update_one({"employeeId": desired["employeeId"], "date": date}, {
-                    "$set": {"trainingNomination": {"trainingName": record.get("trainingName"),
+                    "$set": {"trainingNomination": {"trainingName": desired.get("trainingName"),
                         "status": "Pending Approval", "nominationId": nomination_id}, "updatedOn": now},
                     "$setOnInsert": {"name": desired["employeeName"], "designation": desired["employeeDesignation"],
                         "year": int(date[:4]), "month": int(date[5:7]),
                         "groupName": desired.get("groupName") or "Other Employees", "createdOn": now},
                 }, upsert=True)
         event = {"action": "Removed" if removing else "Changed", "by": actor, "on": now, "reason": reason,
+                 "previousTrainingName": record.get("trainingName"), "previousTrainingLocation": record.get("trainingLocation"),
                  "previousEmployeeId": record.get("employeeId"), "previousStartDate": record.get("startDate"),
                  "previousEndDate": record.get("endDate"), "previousStatus": record.get("mutationPreviousStatus") or record["status"],
                  "previousApprovalChain": record.get("approvalChain") or [],
                  "employeeId": desired.get("employeeId", record.get("employeeId")),
+                 "trainingName": desired.get("trainingName", record.get("trainingName")),
+                 "trainingLocation": desired.get("trainingLocation", record.get("trainingLocation")),
                  "startDate": desired.get("startDate", record.get("startDate")), "endDate": desired.get("endDate", record.get("endDate"))}
         training_nomination_history_collection.update_one({"_id": record["_id"]}, {
             "$set": {**desired, "updatedOn": now}, "$inc": {"revision": 1}, "$push": {"changeHistory": event},

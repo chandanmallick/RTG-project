@@ -61,13 +61,18 @@ class NominationChanges(unittest.TestCase):
         self.daily.update_many.assert_not_called()
 
     def test_change_restarts_approval_and_marks_new_dates(self):
-        self.change()
+        self.change(trainingName="Advanced Safety", trainingLocation="Training Centre")
         update = self.records.update_one.call_args.args[1]
         self.assertEqual(update["$set"]["status"], "Pending Approval")
+        self.assertEqual(update["$set"]["trainingName"], "Advanced Safety")
+        self.assertEqual(update["$set"]["trainingLocation"], "Training Centre")
         self.assertEqual(update["$set"]["startDate"], "2026-10-04")
         self.assertEqual(update["$inc"]["revision"], 1)
         self.assertEqual(update["$push"]["changeHistory"]["previousStartDate"], "2026-10-01")
+        self.assertEqual(update["$push"]["changeHistory"]["previousTrainingName"], "Safety")
         self.assertEqual(self.daily.update_one.call_count, 2)
+        first_daily_update = self.daily.update_one.call_args_list[0].args[1]
+        self.assertEqual(first_daily_update["$set"]["trainingNomination"]["trainingName"], "Advanced Safety")
 
     def test_remove_keeps_audit_and_cancels_linked_off(self):
         child = {"_id": ObjectId(), "workflowKind": "Adjacent OFF", "status": "Approved"}

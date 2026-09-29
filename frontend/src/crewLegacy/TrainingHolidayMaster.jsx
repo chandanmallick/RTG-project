@@ -587,7 +587,7 @@ setHistoryError("")
 try {
 const [res,programmeRes]=await Promise.all([
 api.get("/training-assign/history",{params:{financialYear:historyFY}}),
-api.get(`/Training_holiday/training/${historyFY || selectedFY}`)
+historyFY ? api.get(`/Training_holiday/training/${historyFY}`) : Promise.resolve({data:[]})
 ])
 if(request!==historyRequest.current) return
 setHistory(res.data || [])
@@ -1863,7 +1863,7 @@ sx={{
 
 </Table>
 </> : <>
-<NominationMatrix onManage={item=>setReviewNomination({id:item.id})} matrix={nominationMatrix} search={historyEmployee} />
+<NominationMatrix onManage={item=>setReviewNomination({id:item.id})} matrix={nominationMatrix} search={historyEmployee} showTarget={Boolean(historyFY)} />
 </>}
 
 </Paper>

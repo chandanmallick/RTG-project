@@ -31,7 +31,7 @@ import {
   Tooltip,
   Typography,
 } from "@mui/material";
-import { CalendarDays, CheckCircle2, GraduationCap, GripVertical, RefreshCw, Send, ShieldCheck, User } from "lucide-react";
+import { CalendarDays, CheckCircle2, ClipboardList, GraduationCap, GripVertical, RefreshCw, Send, ShieldCheck, User } from "lucide-react";
 import api from "./api";
 import DutyReassignmentPanel from "../components/crew/DutyReassignmentPanel";
 import LeaveTracking from "../components/crew/LeaveTracking";
@@ -130,6 +130,7 @@ export default function LeaveManagement({ embeddedApproval = false, embeddedAppl
   const [replacementChoices, setReplacementChoices] = useState({});
   const [completedFrom, setCompletedFrom] = useState(dayjs().subtract(1, "day").format("YYYY-MM-DD"));
   const [completedTo, setCompletedTo] = useState("");
+  const [trackingSearch, setTrackingSearch] = useState("");
   const [workflowView, setWorkflowView] = useState(() => embeddedApproval || new URLSearchParams(window.location.search).get("view") === "calendar" ? "calendar" : "table");
   const [approvalRoster, setApprovalRoster] = useState([]);
   const [approvalDates, setApprovalDates] = useState([]);
@@ -166,7 +167,7 @@ export default function LeaveManagement({ embeddedApproval = false, embeddedAppl
   const loadLeaves = async () => {
     const { data } = await api.get("/leave/list", {
       params: {
-        completedFrom: completedFrom || undefined,
+        completedFrom: activeSection === "tracking" ? "2000-01-01" : completedFrom || undefined,
         completedTo: completedTo || undefined,
         focusLeaveId: embeddedApproval ? initialLeaveId || undefined : undefined,
         focusEmployeeId: embeddedApproval ? initialEmployeeId || undefined : undefined,
@@ -210,7 +211,10 @@ export default function LeaveManagement({ embeddedApproval = false, embeddedAppl
         api.get("/leave/employees"),
         api.get("/leave/leave-types"),
         api.get("/leave/my-role"),
-        api.get("/leave/list", { params: { completedFrom, completedTo: completedTo || undefined } }),
+        api.get("/leave/list", { params: {
+          completedFrom: activeSection === "tracking" ? "2000-01-01" : completedFrom,
+          completedTo: completedTo || undefined,
+        } }),
       ]);
       const people = employeeResult.data || [];
       const currentId = initialEmployeeId || new URLSearchParams(window.location.search).get("employeeId") || roleResult.data?.employeeId;
@@ -522,6 +526,14 @@ export default function LeaveManagement({ embeddedApproval = false, embeddedAppl
   const workflowLeaves = embeddedApproval ? embeddedScopeLeaves : leaves;
   const pending = useMemo(() => workflowLeaves.filter((leave) => !["Approved", "Rejected", "Withdrawn", "Cancelled"].includes(leave.finalStatus)), [workflowLeaves]);
   const completed = useMemo(() => workflowLeaves.filter((leave) => ["Approved", "Rejected", "Withdrawn", "Cancelled"].includes(leave.finalStatus)), [workflowLeaves]);
+  const trackedLeaves = useMemo(
+    () => {
+      const query = trackingSearch.trim().toLowerCase();
+      return workflowLeaves.filter((leave) => `${leave.name || ""} ${leave.employeeId || ""} ${leave.groupName || ""} ${leave.date || ""} ${leave.finalStatus || ""}`.toLowerCase().includes(query))
+        .sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")));
+    },
+    [workflowLeaves, trackingSearch],
+  );
   const selectedWorkflowLeaves = useMemo(
     () => pending.filter((leave) => selectedWorkflowIds.includes(leave.id)),
     [pending, selectedWorkflowIds],
@@ -1142,6 +1154,7 @@ export default function LeaveManagement({ embeddedApproval = false, embeddedAppl
 
   const leaveSectionMeta = {
     apply: { title: "Apply leave", subtitle: "Select the employee, continuous dates and applicable leave type.", accent: "#0057B7" },
+    tracking: { title: "Leave tracking", subtitle: "See leave requests in your authorised scope, their approval stage and cancellation options.", accent: "#0369A1", count: trackedLeaves.length },
     pending: { title: "Leave approval inbox", subtitle: "Review only the leave records awaiting action in your approval scope.", accent: "#17876D", count: pending.length },
     completed: { title: "Leave records", subtitle: "Approved, rejected, cancelled and withdrawn applications.", accent: "#4338CA" },
     delegation: { title: "Approval delegation", subtitle: "Temporarily authorize another officer while the configured approver is unavailable.", accent: "#B45309" },
@@ -1161,7 +1174,10 @@ export default function LeaveManagement({ embeddedApproval = false, embeddedAppl
       <Collapse in={activeSection === "apply"} timeout={420} unmountOnExit>
       <Box id="leave-workspace-apply" sx={{ display: "grid", gap: 2.5, scrollMarginTop: 110 }}>
       <Paper sx={{ p: 2.5 }}>
-        <SectionTitle icon={User} title="Apply Leave" subtitle={role.isSIC && !role.isAdmin ? `As SIC, you may apply for members of ${role.groupName}.` : "Select one continuous duty-date range."} />
+        <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 1, flexWrap: "wrap" }}>
+          <SectionTitle icon={User} title="Apply Leave" subtitle={role.isSIC && !role.isAdmin ? `As SIC, you may apply for members of ${role.groupName}.` : "Select one continuous duty-date range."} />
+          {!embeddedApplication && <Button variant="outlined" startIcon={<ClipboardList size={16} />} onClick={() => window.location.assign("/crew/leave?section=tracking")}>Track leave</Button>}
+        </Box>
         <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "1fr 1fr auto" }, gap: 1.5, alignItems: "center" }}>
           <Autocomplete options={employees} value={selectedEmployee} disabled={employees.length === 1} onChange={(_, value) => { setSelectedEmployee(value); setRows([]); }} getOptionLabel={(item) => `${item.name || employeeIdOf(item)} — ${item.designation || "Employee"}`} isOptionEqualToValue={(a, b) => employeeIdOf(a) === employeeIdOf(b)} renderInput={(params) => <TextField {...params} label="Employee" helperText={employees.length === 1 ? "Only your own name is available" : "Current group members"} />} />
           <DatePicker range rangeHover minDate={role.isAdmin ? undefined : new Date()} value={dateRange} onChange={(value) => { setDateRange(value || []); setRows([]); }} format="DD MMM YYYY" numberOfMonths={2} showOtherDays render={(value, openCalendar) => <TextField fullWidth label="Continuous date range" value={value || ""} onClick={openCalendar} helperText={role.isAdmin ? "Administrators may enter earlier dates" : "Past dates are not allowed"} InputProps={{ readOnly: true }} />} />
@@ -1186,6 +1202,16 @@ export default function LeaveManagement({ embeddedApproval = false, embeddedAppl
         <Box sx={{ display: "flex", justifyContent: "flex-end", mt: 1.5 }}><Button variant="contained" startIcon={<Send size={16} />} onClick={submit} disabled={working}>Submit for approval</Button></Box>
       </Paper>}
 
+      </Box>
+      </Collapse>
+
+      <Collapse in={activeSection === "tracking"} timeout={420} unmountOnExit>
+      <Box id="leave-workspace-tracking" sx={{ display: "grid", gap: 2, scrollMarginTop: 110 }}>
+        <Paper sx={{ p: 2.5 }}>
+          <SectionTitle icon={ClipboardList} title="Leave requests" subtitle="Search by employee name or ID. Open Track leave for the complete approval path; cancellation follows your workflow authority." count={trackedLeaves.length} />
+          <TextField size="small" fullWidth label="Search employee name, ID, group, date or status" value={trackingSearch} onChange={(event) => setTrackingSearch(event.target.value)} sx={{ mb: 1.5 }} />
+          {workflowTable(trackedLeaves, true)}
+        </Paper>
       </Box>
       </Collapse>
 

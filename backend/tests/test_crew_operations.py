@@ -56,6 +56,9 @@ class OperationsTests(unittest.TestCase):
         for key in ("trainingEvents", "sportsEvents", "holidays", "applyLeave", "requestTraining", "applySports", "requestExchange"):
             self.assertFalse(actions[key]["enabled"], key)
         self.assertTrue(actions["myTraining"]["enabled"])
+        self.assertTrue(actions["leaveTracking"]["enabled"])
+        self.assertTrue(actions["sportsTracking"]["enabled"])
+        self.assertTrue(actions["exchangeTracking"]["enabled"])
 
     def test_write_does_not_grant_manager_or_approval_authority(self):
         actions = self.actions()
