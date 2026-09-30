@@ -3042,21 +3042,15 @@ def comp_off_history(
 ###############################################
 ################## Delete the leave trace #######################
 ##############################################################
-@router.put("/cancel/{leave_id}")
-def cancel_leave(leave_id: str, user=Depends(get_authenticated_user)):
-    try:
-        object_id = ObjectId(leave_id)
-    except Exception as exc:
-        raise HTTPException(400, "Invalid leave ID") from exc
+CANCELLABLE_LEAVE_STATUSES = {"Applied", "Forwarded", "Forwarded by SIC", "Approved"}
 
-    leave = leave_request_collection.find_one({"_id": object_id})
-    if not leave:
-        raise HTTPException(404, "Leave not found")
 
+def cancel_single_leave(leave: dict, user: dict) -> str:
+    """Cancel one stored leave row and return the acting role label."""
     actor_role = cancellation_role(user, leave)
     if not actor_role:
         raise HTTPException(403, "Only the employee, administrator, assigned SIC, or authorised reporting authority can cancel this leave")
-    if leave.get("finalStatus") not in {"Applied", "Forwarded", "Forwarded by SIC", "Approved"}:
+    if leave.get("finalStatus") not in CANCELLABLE_LEAVE_STATUSES:
         raise HTTPException(409, "Only an active or approved leave can be cancelled")
 
     clear_leave_operational_effects(leave)
@@ -3068,7 +3062,7 @@ def cancel_leave(leave_id: str, user=Depends(get_authenticated_user)):
         "previousFinalStatus": leave.get("finalStatus"),
     }
     leave_request_collection.update_one(
-        {"_id": object_id},
+        {"_id": leave["_id"]},
         {
             "$set": {
                 "finalStatus": "Cancelled",
@@ -3081,7 +3075,107 @@ def cancel_leave(leave_id: str, user=Depends(get_authenticated_user)):
             "$push": {"cancellationHistory": cancellation},
         },
     )
+    return actor_role
+
+
+@router.put("/cancel/{leave_id}")
+def cancel_leave(leave_id: str, user=Depends(get_authenticated_user)):
+    try:
+        object_id = ObjectId(leave_id)
+    except Exception as exc:
+        raise HTTPException(400, "Invalid leave ID") from exc
+
+    leave = leave_request_collection.find_one({"_id": object_id})
+    if not leave:
+        raise HTTPException(404, "Leave not found")
+
+    actor_role = cancel_single_leave(leave, user)
     return {"message": f"Leave cancelled by {actor_role}"}
+
+
+@router.put("/cancel-group")
+def cancel_leave_group(data: dict, user=Depends(get_authenticated_user)):
+    """Cancel a whole continuous application, or only the selected dates within it.
+
+    The client sends either ``leaveId`` (any row of the application) or
+    ``leaveGroupId`` plus an optional ``dates`` list. When ``dates`` is omitted
+    every active row in the group is cancelled; when supplied, only those dates
+    are cancelled so a multi-day application can be trimmed date-wise.
+    """
+    leave_group_id = clean_id(data.get("leaveGroupId"))
+    leave_id = clean_id(data.get("leaveId"))
+    requested_dates = [clean_id(value) for value in (data.get("dates") or []) if clean_id(value)]
+
+    reference = None
+    if leave_id:
+        try:
+            reference = leave_request_collection.find_one({"_id": ObjectId(leave_id)})
+        except Exception as exc:
+            raise HTTPException(400, "Invalid leave ID") from exc
+    if not reference and leave_group_id:
+        reference = leave_request_collection.find_one({"leaveGroupId": leave_group_id})
+    if not reference:
+        raise HTTPException(404, "Leave not found")
+
+    group_id = clean_id(reference.get("leaveGroupId"))
+    if group_id:
+        query = {"leaveGroupId": group_id}
+    else:
+        # Legacy single/multi date rows created before leaveGroupId existed:
+        # scope by the owning employee and the exact date set the client sees.
+        query = {"employeeId": reference.get("employeeId")}
+    records = list(leave_request_collection.find(query))
+    if not group_id:
+        same_kind = [
+            record for record in records
+            if (
+                clean_id(record.get("leaveType") or "") == clean_id(reference.get("leaveType") or "")
+                and bool(record.get("stationLeaveOnly")) == bool(reference.get("stationLeaveOnly"))
+            )
+        ]
+        # Restrict to the contiguous run of dates around the clicked row.
+        same_kind.sort(key=lambda item: clean_id(item.get("date")))
+        target_index = next(
+            (index for index, item in enumerate(same_kind) if item["_id"] == reference["_id"]),
+            0,
+        )
+        start = end = target_index
+        while start > 0 and (
+            datetime.strptime(same_kind[start].get("date"), "%Y-%m-%d")
+            - datetime.strptime(same_kind[start - 1].get("date"), "%Y-%m-%d")
+        ) == timedelta(days=1):
+            start -= 1
+        while end < len(same_kind) - 1 and (
+            datetime.strptime(same_kind[end + 1].get("date"), "%Y-%m-%d")
+            - datetime.strptime(same_kind[end].get("date"), "%Y-%m-%d")
+        ) == timedelta(days=1):
+            end += 1
+        records = same_kind[start:end + 1]
+
+    active_records = [record for record in records if record.get("finalStatus") in CANCELLABLE_LEAVE_STATUSES]
+    if not active_records:
+        raise HTTPException(409, "There is no active leave in this application to cancel")
+
+    if requested_dates:
+        requested_set = set(requested_dates)
+        targets = [record for record in active_records if clean_id(record.get("date")) in requested_set]
+        if not targets:
+            raise HTTPException(409, "None of the selected dates can be cancelled")
+    else:
+        targets = active_records
+
+    actor_role = ""
+    cancelled_dates = []
+    for record in targets:
+        actor_role = cancel_single_leave(record, user)
+        cancelled_dates.append(clean_id(record.get("date")))
+
+    scope = "application" if not requested_dates or len(targets) == len(active_records) else "selected dates"
+    return {
+        "message": f"Leave {scope} cancelled by {actor_role} ({len(cancelled_dates)} day(s))",
+        "cancelledDates": sorted(cancelled_dates),
+        "cancelledCount": len(cancelled_dates),
+    }
 
 
 @router.delete("/master/{leave_id}")

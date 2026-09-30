@@ -38,8 +38,9 @@ api.interceptors.request.use((config) => {
     requestUrl.includes("/training-assign/delegation")
   );
   // Leave approval is likewise controlled by the live SIC/DIC/reporting hierarchy.
-  const isLeaveApproval = method === "PUT" && (
+    const isLeaveApproval = method === "PUT" && (
     requestUrl.includes("/leave/cancel/") ||
+    requestUrl.includes("/leave/cancel-group") ||
     requestUrl.includes("/leave/sic-forward-bulk") ||
     requestUrl.includes("/leave/sic-reject-bulk") ||
     requestUrl.includes("/leave/approve-bulk") ||

@@ -130,8 +130,9 @@ export default function LeaveManagement({ embeddedApproval = false, embeddedAppl
   const [replacementChoices, setReplacementChoices] = useState({});
   const [completedFrom, setCompletedFrom] = useState(dayjs().subtract(1, "day").format("YYYY-MM-DD"));
   const [completedTo, setCompletedTo] = useState("");
-  const [trackingSearch, setTrackingSearch] = useState("");
+    const [trackingSearch, setTrackingSearch] = useState("");
   const [trackingScope, setTrackingScope] = useState("own");
+  const [trackingView, setTrackingView] = useState("table");
   const [workflowView, setWorkflowView] = useState(() => embeddedApproval || new URLSearchParams(window.location.search).get("view") === "calendar" ? "calendar" : "table");
   const [approvalRoster, setApprovalRoster] = useState([]);
   const [approvalDates, setApprovalDates] = useState([]);
@@ -143,7 +144,9 @@ export default function LeaveManagement({ embeddedApproval = false, embeddedAppl
   const [approvalDepartment, setApprovalDepartment] = useState("");
   const [rejectDialog, setRejectDialog] = useState({ open: false, stage: "sic", leaves: [] });
   const [rejectComment, setRejectComment] = useState("");
-  const [activeSection] = useState(() => embeddedApplication ? "apply" : new URLSearchParams(window.location.search).get("section") || "apply");
+    const [activeSection] = useState(() => embeddedApplication ? "apply" : new URLSearchParams(window.location.search).get("section") || "apply");
+  const [applyPopupOpen, setApplyPopupOpen] = useState(embeddedApplication);
+  const [trackingPopupOpen, setTrackingPopupOpen] = useState(() => !embeddedApplication && !embeddedApproval && new URLSearchParams(window.location.search).get("section") === "tracking");
   const notificationLeaveRef = useMemo(() => new URLSearchParams(window.location.search).get("leaveRef") || "", []);
   const notificationRequestId = useMemo(() => new URLSearchParams(window.location.search).get("requestId") || "", []);
   const [approvedTraining, setApprovedTraining] = useState([]);
@@ -406,9 +409,39 @@ export default function LeaveManagement({ embeddedApproval = false, embeddedAppl
     }
   };
 
-  const cancelLeave = (leave) => {
+    const cancelLeave = (leave) => {
     if (!window.confirm(`Cancel leave for ${leave.name} on ${dayjs(leave.date).format("DD MMM YYYY")}?`)) return;
     return act(`/leave/cancel/${leave.id}`, {}, "Leave cancelled.");
+  };
+  // Cancel a whole continuous application, or only the supplied dates when a
+  // multi-day request is trimmed date-wise. The server re-resolves the group,
+  // so a single date click never removes the wrong rows.
+  const cancelLeaveGroup = async ({ leave, dates = [], scope = "all" } = {}) => {
+    if (!leave) return;
+    setWorking(true);
+    try {
+      const { data } = await api.put("/leave/cancel-group", {
+        leaveId: leave.id,
+        leaveGroupId: leave.leaveGroupId || undefined,
+        dates: scope === "dates" ? dates : undefined,
+      });
+      setNotice({ severity: "success", text: data.message || "Leave cancelled." });
+      setSelectedWorkflowIds([]);
+      await loadLeaves();
+      if (selectedEmployee) {
+        try {
+          const { data: credits } = await api.get("/leave/comp-off/available", { params: { employeeId: employeeIdOf(selectedEmployee) } });
+          setCompOffs(credits || []);
+        } catch { /* non-critical refresh */ }
+      }
+      window.dispatchEvent(new Event("crew-workflows-changed"));
+      localStorage.setItem("crew-workflows-changed", String(Date.now()));
+      onApprovalChanged?.();
+    } catch (error) {
+      setNotice({ severity: "error", text: error.response?.data?.detail || "Leave could not be cancelled." });
+    } finally {
+      setWorking(false);
+    }
   };
   const requestTrainingOff = async (training) => {
     const choice = trainingOffChoices[training.id] || { before: false, after: false };
@@ -672,6 +705,72 @@ export default function LeaveManagement({ embeddedApproval = false, embeddedAppl
   }, [approvalRoster]);
   const usedCompOffIds = rows.map((row) => row.compOffId).filter(Boolean);
 
+  // Group the flat date-level leave rows back into the original applications so
+  // the tracking screen and tile view can show one row/card per continuous
+  // application while still allowing date-wise cancellation.
+  const leaveApplications = useMemo(() => {
+    const buckets = new Map();
+    workflowLeaves.forEach((leave) => {
+      const key = leave.leaveGroupId
+        ? `g:${leave.leaveGroupId}`
+        : `l:${leave.employeeId}:${leave.leaveType || ""}:${Boolean(leave.stationLeaveOnly)}:${leave.id}`;
+      if (!buckets.has(key)) buckets.set(key, []);
+      buckets.get(key).push(leave);
+    });
+    return Array.from(buckets.values()).map((rowsInGroup) => {
+      const sorted = [...rowsInGroup].sort((a, b) => String(a.date).localeCompare(String(b.date)));
+      const anchor = sorted[0];
+      const statuses = new Set(sorted.map((row) => row.finalStatus));
+      const overallStatus = statuses.has("Applied") ? "Applied"
+        : statuses.has("Forwarded by SIC") ? "Forwarded by SIC"
+          : statuses.has("Approved") && !statuses.has("Applied") ? "Approved"
+            : anchor.finalStatus;
+      return {
+        id: anchor.leaveGroupId || anchor.id,
+        leaveGroupId: anchor.leaveGroupId,
+        anchor,
+        rows: sorted,
+        name: anchor.name,
+        employeeId: anchor.employeeId,
+        groupName: anchor.groupName,
+        leaveType: anchor.leaveType,
+        stationLeave: sorted.some((row) => row.stationLeave),
+        stationLeaveOnly: sorted.every((row) => row.stationLeaveOnly),
+        startDate: anchor.date,
+        endDate: sorted[sorted.length - 1].date,
+        dayCount: sorted.length,
+        finalStatus: overallStatus,
+        canSICAct: sorted.some((row) => row.canSICAct),
+        canFinalAct: sorted.some((row) => row.canFinalAct),
+        canCancel: sorted.some((row) => row.canCancel),
+        isOwner: sorted.some((row) => row.isOwner),
+        othersOnLeave: [...new Set(sorted.flatMap((row) => (row.othersOnLeave || []).map((person) => person.name || person.employeeId)))].filter(Boolean),
+      };
+    }).sort((a, b) => String(b.startDate).localeCompare(String(a.startDate)));
+  }, [workflowLeaves]);
+
+  const groupRowsForLeave = (leave) => (
+    leave?.leaveGroupId
+      ? workflowLeaves.filter((row) => String(row.leaveGroupId || "") === String(leave.leaveGroupId))
+      : leaveApplications.find((application) => application.rows.some((row) => row.id === leave?.id))?.rows || [leave]
+  );
+
+  // Applications limited to the currently tracked scope/search so the grouped
+  // table and tile view honour the "My leave / Subordinate leave" filter.
+  const trackedApplications = useMemo(() => {
+    const trackedIds = new Set(trackedLeaves.map((leave) => leave.id));
+    return leaveApplications
+      .map((application) => ({ ...application, rows: application.rows.filter((row) => trackedIds.has(row.id)) }))
+      .filter((application) => application.rows.length)
+      .map((application) => ({
+        ...application,
+        startDate: application.rows[0].date,
+        endDate: application.rows[application.rows.length - 1].date,
+        dayCount: application.rows.length,
+        canCancel: application.rows.some((row) => row.canCancel),
+      }));
+  }, [leaveApplications, trackedLeaves]);
+
   const toggleWorkflowSelection = (leaveId, checked) => {
     setSelectedWorkflowIds((current) => (
       checked
@@ -808,7 +907,7 @@ export default function LeaveManagement({ embeddedApproval = false, embeddedAppl
                                     <Typography noWrap sx={{ color: "#64748B", fontSize: 9.2, fontWeight: 700 }}>{leave.dutyType || leave.assignedDuty || "-"} · {stationLeaveLabel(leave)} · {stage}</Typography>
                                   </Box>
                                 </Stack>
-                                <LeaveTracking leave={leave} onCancel={cancelLeave} busy={working} />
+                                <LeaveTracking leave={leave} onCancel={cancelLeave} onCancelGroup={cancelLeaveGroup} groupRows={groupRowsForLeave(leave)} busy={working} />
                                 {leave.approvalMode !== "Organization" && <Stack direction="row" alignItems="center" spacing={.15} sx={{ pl: .3, mt: .15 }}>
                                   <Checkbox size="small" checked={replacementChoice(leave, leave.canSICAct ? "sic" : "dic")} onChange={(event) => setReplacementChoice(leave, leave.canSICAct ? "sic" : "dic", event.target.checked)} sx={{ p: .2 }} />
                                   <Typography sx={{ color: "#64748B", fontSize: 8.8, fontWeight: 800 }}>Replacement required</Typography>
@@ -959,7 +1058,7 @@ export default function LeaveManagement({ embeddedApproval = false, embeddedAppl
                                 {leave?.replacementAssigned ? <ReplacementFlag required assigned title={`Replacement assigned: ${leave.replacementEmployee?.name || leave.replacementEmployee?.employeeId || "Employee"}`} /> : actionable ? <Tooltip title={`Replacement required: ${replacementChecked ? "Yes" : "No"}`} arrow><Box component="button" type="button" aria-label="Toggle replacement required" aria-pressed={replacementChecked} onClick={(event) => { event.stopPropagation(); setReplacementChoice(leave, replacementStage, !replacementChecked); }} sx={{ width: 17, minWidth: 17, height: 17, p: 0, borderRadius: .7, border: `1px solid ${replacementChecked ? "#D97706" : "#94A3B8"}`, color: replacementChecked ? "#FFFFFF" : "#64748B", background: replacementChecked ? "#D97706" : "#FFFFFF", fontSize: 8, fontWeight: 950, cursor: "pointer", animation:replacementChecked ? "replacementPulse 1.05s ease-in-out infinite" : "none", "@keyframes replacementPulse": { "0%,100%":{opacity:1}, "50%":{opacity:.4} } }}>R</Box></Tooltip> : <ReplacementFlag required={leave?.replacementRequired} assigned={leave?.replacementAssigned} />}
                               </Box>
                             </Tooltip>
-                            {leave && <LeaveTracking leave={leave} onCancel={cancelLeave} busy={working} />}
+                            {leave && <LeaveTracking leave={leave} onCancel={cancelLeave} onCancelGroup={cancelLeaveGroup} groupRows={groupRowsForLeave(leave)} busy={working} />}
                           </TableCell>
                         );
                       })}
@@ -1101,7 +1200,7 @@ export default function LeaveManagement({ embeddedApproval = false, embeddedAppl
                   <TableCell><StatusChip value={leave.finalStatus} /></TableCell>
                   {hasActionColumn && <TableCell align="right" sx={{ minWidth: 280 }}>
                     <Stack direction="row" spacing={0.7} justifyContent="flex-end">
-                      <LeaveTracking leave={leave} onCancel={cancelLeave} busy={working} />
+                      <LeaveTracking leave={leave} onCancel={cancelLeave} onCancelGroup={cancelLeaveGroup} groupRows={groupRowsForLeave(leave)} busy={working} />
                       {leave.canCancel && <Button disabled={working} size="small" color="warning" variant="outlined" onClick={() => cancelLeave(leave)}>Cancel leave</Button>}
                       {completedTable && leave.isSIC && leave.finalStatus === "Approved" && (
                         <Button
@@ -1132,10 +1231,80 @@ export default function LeaveManagement({ embeddedApproval = false, embeddedAppl
     );
   };
 
+    const groupedTrackingTable = (applications) => (
+    <TableContainer sx={{ maxHeight: 520, border: "1px solid #E2E8F0", borderRadius: 2 }}>
+      <Table size="small" stickyHeader>
+        <TableHead>
+          <TableRow>
+            <TableCell sx={{ fontWeight: 900 }}>Employee</TableCell>
+            <TableCell sx={{ fontWeight: 900 }}>Application dates</TableCell>
+            <TableCell sx={{ fontWeight: 900 }}>Days</TableCell>
+            <TableCell sx={{ fontWeight: 900 }}>Leave</TableCell>
+            <TableCell sx={{ fontWeight: 900 }}>Group</TableCell>
+            <TableCell sx={{ fontWeight: 900 }}>Status</TableCell>
+            <TableCell sx={{ fontWeight: 900 }}>Approval progress</TableCell>
+            <TableCell align="right" sx={{ fontWeight: 900, minWidth: 220 }}>Action</TableCell>
+          </TableRow>
+        </TableHead>
+        <TableBody>
+          {applications.map((application) => (
+            <TableRow key={application.id} hover>
+              <TableCell><Typography sx={{ fontSize: 12.5, fontWeight: 850 }}>{application.name}</Typography><Typography sx={{ fontSize: 10.5, color: "#64748B" }}>{application.employeeId}</Typography></TableCell>
+              <TableCell sx={{ whiteSpace: "nowrap" }}>{application.dayCount > 1 ? `${dayjs(application.startDate).format("DD MMM YYYY")} → ${dayjs(application.endDate).format("DD MMM YYYY")}` : dayjs(application.startDate).format("DD MMM YYYY")}</TableCell>
+              <TableCell><Chip size="small" label={application.dayCount} sx={{ fontWeight: 900 }} /></TableCell>
+              <TableCell sx={{ fontWeight: 800 }}>{application.stationLeaveOnly ? "Station Leave" : `${application.leaveType || "-"}${application.stationLeave ? " + Station Leave" : ""}`}</TableCell>
+              <TableCell>{application.groupName}</TableCell>
+              <TableCell><StatusChip value={application.finalStatus} /></TableCell>
+              <TableCell><Typography sx={{ fontSize: 11, color: "#64748B", fontWeight: 750 }}>{application.rows.map((row) => `${dayjs(row.date).format("DD MMM")}: ${row.finalStatus}`).join(" · ")}</Typography></TableCell>
+              <TableCell align="right">
+                <Stack direction="row" spacing={.7} justifyContent="flex-end">
+                  <LeaveTracking leave={application.anchor} onCancel={cancelLeave} onCancelGroup={cancelLeaveGroup} groupRows={application.rows} busy={working} />
+                  {application.canCancel && <Button size="small" color="warning" variant="outlined" onClick={() => cancelLeaveGroup({ leave: application.anchor, scope: "all" })}>Cancel all</Button>}
+                </Stack>
+              </TableCell>
+            </TableRow>
+          ))}
+          {!applications.length && <TableRow><TableCell colSpan={8} align="center" sx={{ py: 4, color: "#94A3B8" }}>No leave records</TableCell></TableRow>}
+        </TableBody>
+      </Table>
+    </TableContainer>
+  );
+
+  const trackingTiles = (applications) => (
+    <Box sx={{ display: "grid", gap: 1.4, gridTemplateColumns: { xs: "1fr", sm: "repeat(2, minmax(0, 1fr))", lg: "repeat(3, minmax(0, 1fr))" } }}>
+      {applications.map((application) => {
+        const accent = application.finalStatus === "Approved" ? "#15803D" : application.finalStatus === "Rejected" ? "#DC2626" : application.finalStatus === "Applied" ? "#D97706" : "#0057B7";
+        return (
+          <Paper key={application.id} variant="outlined" sx={{ p: 1.6, borderRadius: 2.5, borderTop: `5px solid ${accent}`, display: "grid", gap: .7 }}>
+            <Stack direction="row" alignItems="flex-start" justifyContent="space-between" spacing={1}>
+              <Box sx={{ minWidth: 0 }}>
+                <Typography noWrap sx={{ fontWeight: 950, fontSize: 13.5 }}>{application.name}</Typography>
+                <Typography noWrap sx={{ fontSize: 10.5, color: "#64748B" }}>{application.employeeId} · {application.groupName}</Typography>
+              </Box>
+              <StatusChip value={application.finalStatus} />
+            </Stack>
+            <Stack direction="row" spacing={.7} useFlexGap flexWrap="wrap">
+              <Chip size="small" label={application.dayCount > 1 ? `${dayjs(application.startDate).format("DD MMM")} → ${dayjs(application.endDate).format("DD MMM YYYY")}` : dayjs(application.startDate).format("DD MMM YYYY")} sx={{ fontWeight: 800 }} />
+              <Chip size="small" label={`${application.dayCount} day(s)`} variant="outlined" sx={{ fontWeight: 800 }} />
+              <Chip size="small" label={application.stationLeaveOnly ? "Station Leave" : `${application.leaveType || "-"}${application.stationLeave ? " + Station Leave" : ""}`} variant="outlined" sx={{ fontWeight: 800 }} />
+            </Stack>
+            {application.othersOnLeave.length > 0 && <Typography sx={{ fontSize: 10.5, color: "#B45309", fontWeight: 800 }}>Also on leave: {application.othersOnLeave.join(", ")}</Typography>}
+            <Typography sx={{ fontSize: 10.5, color: "#64748B", fontWeight: 700 }}>{application.rows.map((row) => `${dayjs(row.date).format("DD MMM")}: ${row.finalStatus}`).join(" · ")}</Typography>
+            <Stack direction="row" spacing={.7} sx={{ mt: .3 }}>
+              <LeaveTracking leave={application.anchor} onCancel={cancelLeave} onCancelGroup={cancelLeaveGroup} groupRows={application.rows} busy={working} />
+              {application.canCancel && <Button size="small" color="warning" variant="outlined" onClick={() => cancelLeaveGroup({ leave: application.anchor, scope: "all" })}>Cancel all</Button>}
+            </Stack>
+          </Paper>
+        );
+      })}
+      {!applications.length && <Paper variant="outlined" sx={{ gridColumn: "1 / -1", p: 4, textAlign: "center", color: "#94A3B8" }}>No leave records</Paper>}
+    </Box>
+  );
+
   if (loading) return <Box sx={{ minHeight: 420, display: "grid", placeItems: "center" }}><CircularProgress /></Box>;
 
-  if (embeddedApproval) return (
-    <Box sx={{ display: "grid", gap: 1.5 }}>
+    if (embeddedApproval) return (
+      <Box sx={{ display: "grid", gap: 1.5 }}>
       {notice && <Alert severity={notice.severity} onClose={() => setNotice(null)}>{notice.text}</Alert>}
       <Paper variant="outlined" sx={{ p: { xs: 1, md: 1.5 }, borderColor: "#B8CDEA" }}>
         {rosterWorkflowCalendar()}
@@ -1166,22 +1335,16 @@ export default function LeaveManagement({ embeddedApproval = false, embeddedAppl
     exchange: { title: "Duty exchange application", subtitle: "Select the affected duty and send the exchange through its approval route.", accent: "#0369A1" },
     training: { title: "Training approval", subtitle: "Training nominations awaiting action and approved adjacent-OFF requests.", accent: "#7C3AED", count: pendingTrainingApprovals.length },
   };
-  const currentLeaveSection = leaveSectionMeta[activeSection] || leaveSectionMeta.apply;
+    const currentLeaveSection = leaveSectionMeta[activeSection] || leaveSectionMeta.apply;
 
-  return (
-    <Box className="ui-kit-page" sx={{ display: "grid", gap: embeddedApplication ? 1.5 : 2.5 }}>
-      {!embeddedApplication && <WorkflowHeader title={currentLeaveSection.title} subtitle={currentLeaveSection.subtitle} accent={currentLeaveSection.accent} count={currentLeaveSection.count} />}
-
-      {notice && <Alert severity={notice.severity} onClose={() => setNotice(null)}>{notice.text}</Alert>}
-
-      {activeSection === "apply" && <LeaveBlockedPeriods isAdmin={Boolean(role.isAdmin) && !embeddedApplication} />}
-
-      <Collapse in={activeSection === "apply"} timeout={420} unmountOnExit>
-      <Box id="leave-workspace-apply" sx={{ display: "grid", gap: 2.5, scrollMarginTop: 110 }}>
+  // Apply form reused both inside the dedicated Apply-page popup and the
+  // calendar's embedded application dialog. Keeping it as one renderer keeps
+  // the two entry points visually identical.
+    const renderApplyForm = () => (
+    <Box sx={{ display: "grid", gap: 2.5 }}>
       <Paper sx={{ p: 2.5 }}>
         <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 1, flexWrap: "wrap" }}>
           <SectionTitle icon={User} title="Apply Leave" subtitle={role.isSIC && !role.isAdmin ? `As SIC, you may apply for members of ${role.groupName}.` : "Select one continuous duty-date range."} />
-          {!embeddedApplication && <Button variant="outlined" startIcon={<ClipboardList size={16} />} onClick={() => window.location.assign("/crew/leave?section=tracking")}>Track leave</Button>}
         </Box>
         <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "1fr 1fr auto" }, gap: 1.5, alignItems: "center" }}>
           <Autocomplete options={employees} value={selectedEmployee} disabled={employees.length === 1} onChange={(_, value) => { setSelectedEmployee(value); setRows([]); }} getOptionLabel={(item) => `${item.name || employeeIdOf(item)} — ${item.designation || "Employee"}`} isOptionEqualToValue={(a, b) => employeeIdOf(a) === employeeIdOf(b)} renderInput={(params) => <TextField {...params} label="Employee" helperText={employees.length === 1 ? "Only your own name is available" : "Current group members"} />} />
@@ -1206,20 +1369,57 @@ export default function LeaveManagement({ embeddedApproval = false, embeddedAppl
         <TextField fullWidth multiline minRows={2} label="Reason" value={reason} onChange={(event) => setReason(event.target.value)} sx={{ mt: 2 }} />
         <Box sx={{ display: "flex", justifyContent: "flex-end", mt: 1.5 }}><Button variant="contained" startIcon={<Send size={16} />} onClick={submit} disabled={working}>Submit for approval</Button></Box>
       </Paper>}
+    </Box>
+  );
 
+  // Tracking panel reused inside the popup-only tracking dialog. Content matches
+  // the previous inline section but is compact and self-contained.
+    const renderTrackingPanel = () => (
+    <Box sx={{ display: "grid", gap: 2 }}>
+      <SectionTitle icon={ClipboardList} title="Leave requests" subtitle="Track your own leave separately from all leave in your subordinate reporting scope." count={trackedLeaves.length} />
+      <Stack direction="row" spacing={1} sx={{ mb: 1.25 }} useFlexGap flexWrap="wrap" alignItems="center">
+        <Button size="small" variant={trackingScope === "own" ? "contained" : "outlined"} onClick={() => setTrackingScope("own")} sx={{ textTransform: "none", fontWeight: 900 }}>My leave ({ownLeaveCount})</Button>
+        <Button size="small" variant={trackingScope === "subordinates" ? "contained" : "outlined"} onClick={() => setTrackingScope("subordinates")} sx={{ textTransform: "none", fontWeight: 900 }}>Subordinate leave ({subordinateLeaveCount})</Button>
+        <Box sx={{ ml: "auto", display: "flex", gap: .6, p: .4, borderRadius: 2, background: "#EEF2FF" }}>
+          <Button size="small" variant={trackingView === "table" ? "contained" : "text"} onClick={() => setTrackingView("table")} sx={{ textTransform: "none", fontWeight: 900 }}>Grouped table</Button>
+          <Button size="small" variant={trackingView === "tiles" ? "contained" : "text"} onClick={() => setTrackingView("tiles")} sx={{ textTransform: "none", fontWeight: 900 }}>Tile view</Button>
+        </Box>
+      </Stack>
+      <TextField size="small" fullWidth label="Search employee name, ID, group, date or status" value={trackingSearch} onChange={(event) => setTrackingSearch(event.target.value)} sx={{ mb: 1.5 }} />
+      {trackingView === "tiles" ? trackingTiles(trackedApplications) : groupedTrackingTable(trackedApplications)}
+    </Box>
+  );
+
+  return (
+    <Box className="ui-kit-page" sx={{ display: "grid", gap: embeddedApplication ? 1.5 : 2.5 }}>
+      {!embeddedApplication && <WorkflowHeader title={currentLeaveSection.title} subtitle={currentLeaveSection.subtitle} accent={currentLeaveSection.accent} count={currentLeaveSection.count} />}
+
+      {notice && <Alert severity={notice.severity} onClose={() => setNotice(null)}>{notice.text}</Alert>}
+
+      {activeSection === "apply" && <LeaveBlockedPeriods isAdmin={Boolean(role.isAdmin) && !embeddedApplication} />}
+
+            <Collapse in={activeSection === "apply"} timeout={420} unmountOnExit>
+      <Box id="leave-workspace-apply" sx={{ display: "grid", gap: 2.5, scrollMarginTop: 110 }}>
+        {embeddedApplication ? renderApplyForm() : (
+          <Paper sx={{ p: 2.5, display: "grid", gap: 1.5 }}>
+            <SectionTitle icon={User} title="Apply Leave" subtitle="Open the guided application popup, the same minimal flow used from the duty calendar." />
+            <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
+              <Button variant="contained" startIcon={<Send size={16} />} onClick={() => { setRows([]); setReason(""); setApplyPopupOpen(true); }} sx={{ textTransform: "none", fontWeight: 900 }}>Apply Leave</Button>
+              <Button variant="outlined" startIcon={<ClipboardList size={16} />} onClick={() => setTrackingPopupOpen(true)} sx={{ textTransform: "none", fontWeight: 900 }}>Track Leave</Button>
+            </Stack>
+          </Paper>
+        )}
       </Box>
       </Collapse>
 
       <Collapse in={activeSection === "tracking"} timeout={420} unmountOnExit>
       <Box id="leave-workspace-tracking" sx={{ display: "grid", gap: 2, scrollMarginTop: 110 }}>
-        <Paper sx={{ p: 2.5 }}>
-          <SectionTitle icon={ClipboardList} title="Leave requests" subtitle="Track your own leave separately from all leave in your subordinate reporting scope." count={trackedLeaves.length} />
-          <Stack direction="row" spacing={1} sx={{ mb: 1.25 }} useFlexGap flexWrap="wrap">
-            <Button size="small" variant={trackingScope === "own" ? "contained" : "outlined"} onClick={() => setTrackingScope("own")} sx={{ textTransform: "none", fontWeight: 900 }}>My leave ({ownLeaveCount})</Button>
-            <Button size="small" variant={trackingScope === "subordinates" ? "contained" : "outlined"} onClick={() => setTrackingScope("subordinates")} sx={{ textTransform: "none", fontWeight: 900 }}>Subordinate leave ({subordinateLeaveCount})</Button>
+        <Paper sx={{ p: 2.5, display: "grid", gap: 1.5 }}>
+          <SectionTitle icon={ClipboardList} title="Leave tracking" subtitle="Open the leave tracking popup for a compact grouped or tile view with cancellation options." count={trackedLeaves.length} />
+          <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" alignItems="center">
+            <Button variant="contained" startIcon={<ClipboardList size={16} />} onClick={() => setTrackingPopupOpen(true)} sx={{ textTransform: "none", fontWeight: 900 }}>Open leave tracking</Button>
+            <Typography sx={{ fontSize: 11.5, color: "#64748B", fontWeight: 700 }}>My leave {ownLeaveCount} · Subordinate leave {subordinateLeaveCount}</Typography>
           </Stack>
-          <TextField size="small" fullWidth label="Search employee name, ID, group, date or status" value={trackingSearch} onChange={(event) => setTrackingSearch(event.target.value)} sx={{ mb: 1.5 }} />
-          {workflowTable(trackedLeaves, true)}
         </Paper>
       </Box>
       </Collapse>
@@ -1363,8 +1563,36 @@ export default function LeaveManagement({ embeddedApproval = false, embeddedAppl
         </DialogContent>
         <DialogActions sx={{ px: 3, pb: 2 }}>
           <Button onClick={() => setRejectDialog((current) => ({ ...current, open: false }))}>Cancel</Button>
-          <Button color="error" variant="contained" onClick={confirmReject}>Reject leave</Button>
+                    <Button color="error" variant="contained" onClick={confirmReject}>Reject leave</Button>
         </DialogActions>
+      </Dialog>
+
+      {/* Apply popup — same minimal flow as the calendar application dialog. */}
+      <Dialog open={!embeddedApplication && applyPopupOpen} onClose={() => setApplyPopupOpen(false)} fullWidth maxWidth="lg" PaperProps={{ sx: { maxHeight: "92dvh", borderRadius: 3 } }}>
+        <DialogTitle sx={{ px: { xs: 1.5, md: 2.5 }, py: 1.3, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 1, borderBottom: "1px solid #E2E8F0" }}>
+          <Box>
+            <Typography sx={{ color: "#0F172A", fontSize: 17, fontWeight: 950 }}>Apply leave</Typography>
+            <Typography sx={{ mt: .1, color: "#64748B", fontSize: 10.5 }}>Select the employee and a continuous date range, then load duty.</Typography>
+          </Box>
+          <Button onClick={() => setApplyPopupOpen(false)} size="small" sx={{ textTransform: "none", fontWeight: 850 }}>Close</Button>
+        </DialogTitle>
+        <DialogContent sx={{ p: { xs: 1.2, md: 2 }, background: "#F8FAFC" }}>
+          {renderApplyForm()}
+        </DialogContent>
+      </Dialog>
+
+      {/* Tracking popup — compact, popup-only tracking view. */}
+      <Dialog open={!embeddedApplication && !embeddedApproval && trackingPopupOpen} onClose={() => setTrackingPopupOpen(false)} fullWidth maxWidth="lg" PaperProps={{ sx: { maxHeight: "92dvh", borderRadius: 3 } }}>
+        <DialogTitle sx={{ px: { xs: 1.5, md: 2.5 }, py: 1.3, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 1, borderBottom: "1px solid #E2E8F0" }}>
+          <Box>
+            <Typography sx={{ color: "#0F172A", fontSize: 17, fontWeight: 950 }}>Leave tracking</Typography>
+            <Typography sx={{ mt: .1, color: "#64748B", fontSize: 10.5 }}>Grouped one-row-per-application view with tile option and date-wise cancellation.</Typography>
+          </Box>
+          <Button onClick={() => setTrackingPopupOpen(false)} size="small" sx={{ textTransform: "none", fontWeight: 850 }}>Close</Button>
+        </DialogTitle>
+        <DialogContent sx={{ p: { xs: 1.2, md: 2 }, background: "#F8FAFC" }}>
+          {renderTrackingPanel()}
+        </DialogContent>
       </Dialog>
       {working && <Box sx={{ position: "fixed", inset: 0, zIndex: 1700, display: "grid", placeItems: "center", background: "rgba(8,16,58,.16)", pointerEvents: "none" }}><CircularProgress /></Box>}
     </Box>
