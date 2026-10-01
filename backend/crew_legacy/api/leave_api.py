@@ -6,6 +6,7 @@ from bson import ObjectId
 from io import BytesIO
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Alignment, Font, PatternFill
+from openpyxl.utils import get_column_letter
 
 from crew_legacy.database.database_mongo import (
     leave_request_collection,
@@ -30,7 +31,7 @@ import re
 
 router = APIRouter()
 
-ACTIVE_LEAVE_STATUSES = ["Applied", "Forwarded by SIC", "Approved"]
+ACTIVE_LEAVE_STATUSES = ["Applied", "Forwarded", "Forwarded by SIC", "Approved"]
 
 
 def clean_id(value) -> str:
@@ -112,8 +113,11 @@ def ensure_leave_dates_open(dates):
 @router.get("/blocked-periods")
 def get_blocked_leave_periods(user=Depends(get_authenticated_user)):
     return [{"id": str(item["_id"]), "startDate": item["startDate"],
-             "endDate": item["endDate"], "reason": item.get("reason", "")}
-            for item in system_settings_collection.find({"type": "leave_block", "active": True}).sort("startDate", 1)]
+             "endDate": item["endDate"], "reason": item.get("reason", ""),
+             "active": item.get("active", True)}
+            for item in system_settings_collection.find(
+                {"type": "leave_block", **({} if is_admin(user) else {"active": True})}
+            ).sort("startDate", 1)]
 
 
 @router.post("/blocked-periods")
@@ -150,6 +154,47 @@ def revoke_blocked_leave_period(block_id: str, user=Depends(get_authenticated_us
     return {"message": "Leave period reopened"}
 
 
+@router.put("/blocked-periods/{block_id}/status")
+def set_blocked_leave_period_status(block_id: str, data: dict, user=Depends(get_authenticated_user)):
+    if not is_admin(user):
+        raise HTTPException(403, "Only an administrator can change a blocked period")
+    try:
+        object_id = ObjectId(block_id)
+    except Exception as exc:
+        raise HTTPException(400, "Invalid blocked period") from exc
+    if not isinstance(data.get("active"), bool):
+        raise HTTPException(400, "active must be true or false")
+    active = data["active"]
+    now = datetime.utcnow()
+    actor = clean_id(user.get("employeeId"))
+    result = system_settings_collection.update_one(
+        {"_id": object_id, "type": "leave_block"},
+        {"$set": {
+            "active": active,
+            "statusChangedBy": actor,
+            "statusChangedOn": now,
+            **({"reEnabledBy": actor, "reEnabledOn": now} if active else {"disabledBy": actor, "disabledOn": now}),
+        }},
+    )
+    if not result.matched_count:
+        raise HTTPException(404, "Blocked period not found")
+    return {"message": "Leave block enabled" if active else "Leave block temporarily disabled", "active": active}
+
+
+@router.delete("/blocked-periods/{block_id}/permanent")
+def delete_blocked_leave_period(block_id: str, user=Depends(get_authenticated_user)):
+    if not is_admin(user):
+        raise HTTPException(403, "Only an administrator can permanently delete a blocked period")
+    try:
+        object_id = ObjectId(block_id)
+    except Exception as exc:
+        raise HTTPException(400, "Invalid blocked period") from exc
+    result = system_settings_collection.delete_one({"_id": object_id, "type": "leave_block"})
+    if not result.deleted_count:
+        raise HTTPException(404, "Blocked period not found")
+    return {"message": "Blocked period permanently deleted"}
+
+
 def blocked_period_staffing(block: dict, additional_department: str = "") -> dict:
     start_date, end_date = block["startDate"], block["endDate"]
     dates = []
@@ -175,6 +220,8 @@ def blocked_period_staffing(block: dict, additional_department: str = "") -> dic
         if clean_id(value)
     })
     shifts = {shift: {value: [] for value in dates} for shift in ["Morning", "Evening", "Night"]}
+    leave_shifts = {shift: {value: [] for value in dates} for shift in ["Morning", "Evening", "Night"]}
+    replacement_shifts = {shift: {value: [] for value in dates} for shift in ["Morning", "Evening", "Night"]}
     additional = {value: [] for value in dates}
     selected_department = clean_id(additional_department)
     for record in records:
@@ -188,16 +235,23 @@ def blocked_period_staffing(block: dict, additional_department: str = "") -> dic
             "department": ", ".join(employee_departments),
         }
         group_name = clean_id(record.get("groupName")).lower()
-        if group_name != "general":
+        leave_status = clean_id(record.get("leaveStatus"))
+        on_leave = leave_status in ACTIVE_LEAVE_STATUSES
+        if on_leave:
+            leave_shifts[record["assignedDuty"]][record["date"]].append(entry)
+        elif group_name != "general":
             shifts[record["assignedDuty"]][record["date"]].append(entry)
-        if selected_department and selected_department in employee_departments:
+        if entry["replacement"]:
+            replacement_shifts[record["assignedDuty"]][record["date"]].append(entry)
+        if selected_department and selected_department in employee_departments and not on_leave:
             additional[record["date"]].append(entry)
     return {
         "id": str(block["_id"]), "startDate": start_date, "endDate": end_date,
         "reason": block.get("reason", ""), "dates": dates,
         "dayNames": {value: datetime.strptime(value, "%Y-%m-%d").strftime("%a") for value in dates},
         "departments": departments, "selectedDepartment": selected_department,
-        "shifts": shifts, "additionalStrength": additional,
+        "shifts": shifts, "leaveShifts": leave_shifts,
+        "replacementShifts": replacement_shifts, "additionalStrength": additional,
     }
 
 
@@ -223,30 +277,46 @@ def export_blocked_period_staffing(block_id: str, additionalDepartment: str = Qu
     workbook = Workbook()
     sheet = workbook.active
     sheet.title = "Blocked period staffing"
+    last_column = get_column_letter(len(report["dates"]) + 1)
+    sheet.append([f"Special Event roster · {report['startDate']} to {report['endDate']}"])
+    sheet.merge_cells(f"A1:{last_column}1")
+    sheet.append([f"Event / block reason: {report['reason']}"])
+    sheet.merge_cells(f"A2:{last_column}2")
     sheet.append(["Date", *report["dates"]])
     sheet.append(["Day", *[report["dayNames"][value] for value in report["dates"]]])
-    sheet.append(["Block reason", report["reason"]])
-    for shift in ["Morning", "Evening", "Night"]:
-        sheet.append([shift, *[
-            "\n".join(("[R] " if item["replacement"] else "") + item["name"] for item in report["shifts"][shift][value]) or "NR"
-            for value in report["dates"]
-        ]])
+
+    def append_section(title, source, empty="NR"):
+        sheet.append([title])
+        section_row = sheet.max_row
+        sheet.merge_cells(f"A{section_row}:{last_column}{section_row}")
+        for shift in ["Morning", "Evening", "Night"]:
+            sheet.append([shift, *[
+                "\n".join(item["name"] for item in source[shift][value]) or empty
+                for value in report["dates"]
+            ]])
+        return section_row
+
+    duty_header = append_section("1. Main duty strength · employees on leave excluded", report["shifts"])
     if report["selectedDepartment"]:
         sheet.append([f"Additional strength — {report['selectedDepartment']}", *[
             "\n".join(item["name"] for item in report["additionalStrength"][value]) or "-"
             for value in report["dates"]
         ]])
+    leave_header = append_section("2. Employees on leave · shift-wise", report["leaveShifts"], "-")
+    replacement_header = append_section("3. Replacement employees · shift-wise", report["replacementShifts"], "-")
     sheet.freeze_panes = "B2"
-    for column in sheet.columns:
-        sheet.column_dimensions[column[0].column_letter].width = 20
-        for cell in column:
+    for column_index in range(1, len(report["dates"]) + 2):
+        sheet.column_dimensions[get_column_letter(column_index)].width = 22 if column_index > 1 else 28
+        for cell in sheet[get_column_letter(column_index)]:
             cell.alignment = Alignment(wrap_text=True, vertical="top")
-    for cell in sheet[1]:
-        cell.font = Font(bold=True)
-        cell.fill = PatternFill("solid", fgColor="FFF200")
-    for cell in sheet[2]:
-        cell.font = Font(bold=True)
-        cell.fill = PatternFill("solid", fgColor="92D050")
+    for row_number, color in [(1, "1F4E78"), (2, "D9EAF7"), (duty_header, "DDEBF7"), (leave_header, "FCE4D6"), (replacement_header, "E2F0D9")]:
+        for cell in sheet[row_number]:
+            cell.font = Font(bold=True, color="FFFFFF" if row_number == 1 else "000000")
+            cell.fill = PatternFill("solid", fgColor=color)
+    for row_number, color in [(3, "FFF200"), (4, "92D050")]:
+        for cell in sheet[row_number]:
+            cell.font = Font(bold=True)
+            cell.fill = PatternFill("solid", fgColor=color)
     output = BytesIO()
     workbook.save(output)
     filename = f"blocked_leave_staffing_{report['startDate']}_{report['endDate']}.xlsx"

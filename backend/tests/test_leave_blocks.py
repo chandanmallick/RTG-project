@@ -12,7 +12,8 @@ class LeaveBlockTests(unittest.TestCase):
         self.settings.find.return_value = Cursor([self.block])
         self.ctx = load_functions("crew_legacy/api/leave_api.py", {
             "clean_id", "is_admin", "validate_block_dates", "ensure_leave_dates_open",
-            "create_blocked_leave_period", "revoke_blocked_leave_period", "apply_leave_v2",
+            "create_blocked_leave_period", "revoke_blocked_leave_period",
+            "set_blocked_leave_period_status", "delete_blocked_leave_period", "apply_leave_v2",
         }, {"date": date, "datetime": datetime, "system_settings_collection": self.settings})
 
     def test_both_boundaries_blocked(self):
@@ -61,6 +62,34 @@ class LeaveBlockTests(unittest.TestCase):
         self.assertFalse(update["active"])
         self.assertEqual(update["revokedBy"], "admin")
         self.settings.delete_one.assert_not_called()
+
+    def test_temporary_disable_and_enable_preserve_record(self):
+        self.settings.update_one.return_value.matched_count = 1
+        self.ctx["set_blocked_leave_period_status"](
+            "0123456789abcdef01234567", {"active": False},
+            {"role": "admin", "employeeId": "admin"},
+        )
+        disabled = self.settings.update_one.call_args.args[1]["$set"]
+        self.assertFalse(disabled["active"])
+        self.assertEqual(disabled["disabledBy"], "admin")
+        self.settings.delete_one.assert_not_called()
+
+        self.ctx["set_blocked_leave_period_status"](
+            "0123456789abcdef01234567", {"active": True},
+            {"role": "admin", "employeeId": "admin"},
+        )
+        enabled = self.settings.update_one.call_args.args[1]["$set"]
+        self.assertTrue(enabled["active"])
+        self.assertEqual(enabled["reEnabledBy"], "admin")
+
+    def test_permanent_delete_removes_selected_record(self):
+        self.settings.delete_one.return_value.deleted_count = 1
+        self.ctx["delete_blocked_leave_period"](
+            "0123456789abcdef01234567",
+            {"role": "admin", "employeeId": "admin"},
+        )
+        query = self.settings.delete_one.call_args.args[0]
+        self.assertEqual(query["type"], "leave_block")
 
 
 class LeaveDelegationDirectoryTests(unittest.TestCase):

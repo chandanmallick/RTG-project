@@ -51,7 +51,7 @@ api.interceptors.request.use((config) => {
   const isSportsApproval = method === "POST" && /^\/sports\/applications\/[^/]+\/(approve|reject)$/.test(requestUrl);
   // Calendar applications use the target workflow's server-side employee and
   // reporting-authority checks, independent of calendar layout edit access.
-  const isLeaveBlockAdministration = ["POST", "DELETE"].includes(method) && /^\/leave\/blocked-periods(?:\/[^/]+)?$/.test(requestUrl);
+  const isLeaveBlockAdministration = ["POST", "PUT", "DELETE"].includes(method) && /^\/leave\/blocked-periods(?:\/[^/]+(?:\/(?:status|permanent))?)?$/.test(requestUrl);
   // Training programme maintenance (create/edit/delete a programme from the
   // calendar) is authorized on the server by HR training-approval rights, which
   // is a broader authority than the page's Write (nomination) permission.

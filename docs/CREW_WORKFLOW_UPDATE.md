@@ -6,25 +6,31 @@ Open Crew Operations > Master / event > **Special Event roster**. Administrators
 can use **Block a period**, enter inclusive start/end dates and a reason, then
 save. The restriction applies to new leave
 applications for everyone, including applications entered by administrators.
-Existing requests are unchanged. **Reopen period** removes the restriction while
-preserving who created and revoked it. The Leave Apply page retains the read-only
+Existing requests are unchanged. **Disable temporarily** removes the restriction
+while preserving the period and its audit history; **Enable** restores it. **Delete
+permanently** removes only the selected period and cannot be undone, so it uses a
+separate explicit confirmation. The Leave Apply page retains the read-only
 availability notice for employees; management and staffing controls live in the
 Special Event roster tile. All mutations are checked by the backend.
 
 ### Blocked-period staffing view
 
-Every active block provides a date-wise staffing view and matching Excel export.
-Columns include the date and weekday; rows show Morning, Evening and Night shift
-staffing. Normal shift rows exclude the General group. A replacement employee
-remains in the applicable shift cell, with alternate shading applied only to that
-employee's name. Empty combinations display `NR`.
+Every active block provides three date-wise views and a matching Excel export.
+Disabled blocks remain visible to administrators but do not restrict applications
+and do not expose a staffing action until re-enabled.
+The first is Morning/Evening/Night duty strength with employees on active leave
+excluded, followed immediately by optional selected-department additional
+manpower. The second contains only employees on leave, shift-wise. The third
+contains only replacement employees, shift-wise. Columns include date and weekday;
+empty main-duty combinations display `NR`.
 
 Additional strength is hidden by default. Selecting a department adds only that
 department's staff as a separate row, and the Excel export reflects the same
-selection. The backing endpoints are
+selection. Excel keeps all names for one shift/date inside one multiline cell and
+uses merged title and section-master rows. The backing endpoints are
 `GET /leave/blocked-periods/{id}/staffing` and
-`GET /leave/blocked-periods/{id}/staffing.xlsx`; Excel prefixes replacement names
-with `[R]` and includes both date and weekday rows.
+`GET /leave/blocked-periods/{id}/staffing.xlsx`; the workbook includes both date
+and weekday rows.
 
 ## Pending leave after hierarchy changes
 
