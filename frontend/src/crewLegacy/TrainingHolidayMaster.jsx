@@ -169,6 +169,9 @@ return result
 },[calendarData])
 const requestedSection=new URLSearchParams(window.location.search).get("section")
 const [activeSection,setActiveSection]=useState(()=>embeddedRequest ? "request" : embeddedApproval ? "pending" : requestedSection || (canAssignTraining ? "assign" : canViewTrainingPage ? "request" : "pending"))
+// The dedicated Apply/Training page opens the request form as a popup — the same
+// minimal flow used when this component is embedded inside the duty calendar.
+const [requestPopupOpen,setRequestPopupOpen]=useState(()=>!embeddedRequest && !embeddedApproval && (requestedSection === "request"))
 useEffect(()=>{
 if(!embeddedRequest && !embeddedApproval && !requestedSection && canAssignTraining) setActiveSection("assign")
 },[canAssignTraining,embeddedApproval,embeddedRequest,requestedSection])
@@ -867,6 +870,26 @@ history:{title:"Training nomination history",subtitle:"Review nomination records
 }
 const currentTrainingSection=trainingSectionMeta[activeSection] || trainingSectionMeta.request
 
+// Request form reused both inside the dedicated Apply/Training page popup and the
+// calendar's embedded request dialog. Keeping it as one renderer keeps the two
+// entry points visually identical.
+const renderRequestForm=()=>(
+<Paper elevation={0} sx={{p:3,borderRadius:3,border:"1px solid #DDD6FE",background:"linear-gradient(135deg,#FFFFFF,#F5F3FF)"}}>
+<Typography variant="h6" sx={{fontWeight:900,color:"#5B21B6"}}>Request an available training</Typography>
+<Typography variant="body2" color="text.secondary" sx={{mt:.5,mb:2.5}}>For {initialEmployeeName || user?.name || "you"}{initialEmployeeId ? ` (${initialEmployeeId})` : ""}. Programme dates apply. Your request follows the configured approval route.</Typography>
+<Grid container spacing={2} alignItems="center">
+<Grid item xs={12} md={7}>
+<TextField select fullWidth label="Training programme" value={requestedTraining} onChange={(event)=>setRequestedTraining(event.target.value)}>
+{trainingList.filter((item)=>!["inactive","cancelled","deleted"].includes(String(item.status || "").toLowerCase()) && (!item.endDate || item.endDate>=new Date().toISOString().slice(0,10))).map((item)=><MenuItem key={item.id} value={item.trainingName}>
+{item.trainingName} · {item.startDate} to {item.endDate}{item.location ? ` · ${item.location}` : ""}
+</MenuItem>)}
+</TextField>
+</Grid>
+<Grid item xs={12} md={3}><Button fullWidth variant="contained" disabled={!requestedTraining || requestSaving} onClick={requestOwnTraining} sx={{height:56,borderRadius:2,background:"#6D28D9",fontWeight:900,"&:hover":{background:"#5B21B6"}}}>{requestSaving ? "Submitting…" : "Submit request"}</Button></Grid>
+</Grid>
+</Paper>
+)
+
 return(
 
 <Box sx={{p:embeddedRequest || embeddedApproval ? 0 : activeSection==="history" ? 1.5 : 3,background:embeddedRequest || embeddedApproval ? "transparent" : "#f4f6fb",minHeight:embeddedRequest || embeddedApproval || activeSection==="history" ? 0 : "100vh"}}>
@@ -1236,20 +1259,15 @@ return(
 
 <Collapse in={activeSection==="request"} timeout={420} unmountOnExit>
 <Box id="training-workspace-request" sx={{scrollMarginTop:110}}>
-<Paper elevation={0} sx={{p:3,mb:4,borderRadius:3,border:"1px solid #DDD6FE",background:"linear-gradient(135deg,#FFFFFF,#F5F3FF)"}}>
-<Typography variant="h6" sx={{fontWeight:900,color:"#5B21B6"}}>Request an available training</Typography>
-<Typography variant="body2" color="text.secondary" sx={{mt:.5,mb:2.5}}>For {initialEmployeeName || user?.name || "you"}{initialEmployeeId ? ` (${initialEmployeeId})` : ""}. Programme dates apply. Your request follows the configured approval route.</Typography>
-<Grid container spacing={2} alignItems="center">
-<Grid item xs={12} md={7}>
-<TextField select fullWidth label="Training programme" value={requestedTraining} onChange={(event)=>setRequestedTraining(event.target.value)}>
-{trainingList.filter((item)=>!["inactive","cancelled","deleted"].includes(String(item.status || "").toLowerCase()) && (!item.endDate || item.endDate>=new Date().toISOString().slice(0,10))).map((item)=><MenuItem key={item.id} value={item.trainingName}>
-{item.trainingName} · {item.startDate} to {item.endDate}{item.location ? ` · ${item.location}` : ""}
-</MenuItem>)}
-</TextField>
-</Grid>
-<Grid item xs={12} md={3}><Button fullWidth variant="contained" disabled={!requestedTraining || requestSaving} onClick={requestOwnTraining} sx={{height:56,borderRadius:2,background:"#6D28D9",fontWeight:900,"&:hover":{background:"#5B21B6"}}}>{requestSaving ? "Submitting…" : "Submit request"}</Button></Grid>
-</Grid>
+{embeddedRequest ? renderRequestForm() : (
+<Paper elevation={0} sx={{p:3,mb:4,borderRadius:3,border:"1px solid #DDD6FE",background:"linear-gradient(135deg,#FFFFFF,#F5F3FF)",display:"grid",gap:1.5}}>
+<Typography variant="h6" sx={{fontWeight:900,color:"#5B21B6"}}>Apply for training</Typography>
+<Typography variant="body2" color="text.secondary">Open the training request popup — the same minimal flow used from the duty calendar.</Typography>
+<Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
+<Button variant="contained" onClick={()=>setRequestPopupOpen(true)} sx={{textTransform:"none",fontWeight:900,background:"#6D28D9","&:hover":{background:"#5B21B6"}}}>Apply for training</Button>
+</Stack>
 </Paper>
+)}
 </Box>
 </Collapse>
 
@@ -2064,6 +2082,20 @@ sx={{
 )}
 </Box>
 </Collapse>
+
+{/* Request popup — same minimal flow as the calendar request dialog. */}
+<Dialog open={!embeddedRequest && !embeddedApproval && requestPopupOpen} onClose={()=>setRequestPopupOpen(false)} fullWidth maxWidth="md" PaperProps={{sx:{maxHeight:"92dvh",borderRadius:3}}}>
+<DialogTitle sx={{px:{xs:1.5,md:2.5},py:1.3,display:"flex",alignItems:"center",justifyContent:"space-between",gap:1,borderBottom:"1px solid #E2E8F0"}}>
+<Box>
+<Typography sx={{color:"#0F172A",fontSize:17,fontWeight:950}}>Apply for training</Typography>
+<Typography sx={{mt:.1,color:"#64748B",fontSize:10.5}}>Select an available programme and submit through your approval route.</Typography>
+</Box>
+<Button onClick={()=>setRequestPopupOpen(false)} size="small" sx={{textTransform:"none",fontWeight:850}}>Close</Button>
+</DialogTitle>
+<DialogContent sx={{p:{xs:1.2,md:2},background:"#F8FAFC"}}>
+{renderRequestForm()}
+</DialogContent>
+</Dialog>
 
 </Box>
 
