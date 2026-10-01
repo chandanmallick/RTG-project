@@ -148,6 +148,8 @@ export default function LeaveManagement({ embeddedApproval = false, embeddedAppl
   const [approvalDepartment, setApprovalDepartment] = useState("");
   const [rejectDialog, setRejectDialog] = useState({ open: false, stage: "sic", leaves: [] });
   const [rejectComment, setRejectComment] = useState("");
+  const [approveDialog, setApproveDialog] = useState({ open: false, stage: "sic", leaves: [] });
+  const [approveComment, setApproveComment] = useState("");
     const [activeSection] = useState(() => embeddedApplication ? "apply" : new URLSearchParams(window.location.search).get("section") || "apply");
   const [applyPopupOpen, setApplyPopupOpen] = useState(embeddedApplication);
   const [trackingPopupOpen, setTrackingPopupOpen] = useState(() => !embeddedApplication && !embeddedApproval && new URLSearchParams(window.location.search).get("section") === "tracking");
@@ -505,11 +507,26 @@ export default function LeaveManagement({ embeddedApproval = false, embeddedAppl
   const setReplacementChoice = (leave, stage, checked) => {
     setReplacementChoices((current) => ({ ...current, [`${stage}:${leave.id}`]: checked }));
   };
-  const sicForward = (leave) => act(
-    "/leave/sic-forward-bulk",
-    { leaves: [{ id: leave.id, replacementRequired: replacementChoice(leave, "sic") }] },
-    "Approved and forwarded to the next configured approver.",
-  );
+  const openApproveDialog = (stage, targetLeaves) => {
+    setApproveComment("");
+    setApproveDialog({ open: true, stage, leaves: targetLeaves });
+  };
+  const confirmApprove = async () => {
+    const targetLeaves = approveDialog.leaves || [];
+    if (!targetLeaves.length) return;
+    if (!approveComment.trim()) return setNotice({ severity: "warning", text: "Enter remarks before approving leave." });
+    const isSicStage = approveDialog.stage === "sic";
+    setApproveDialog((current) => ({ ...current, open: false }));
+    await act(
+      isSicStage ? "/leave/sic-forward-bulk" : "/leave/approve-bulk",
+      {
+        leaves: targetLeaves.map((leave) => ({ id: leave.id, replacementRequired: replacementChoice(leave, isSicStage ? "sic" : "dic") })),
+        comment: approveComment.trim(),
+      },
+      isSicStage ? "Approved and forwarded to the next configured approver." : "Leave approved.",
+    );
+  };
+  const sicForward = (leave) => openApproveDialog("sic", [leave]);
   const openRejectDialog = (stage, targetLeaves) => {
     setRejectComment("");
     setRejectDialog({ open: true, stage, leaves: targetLeaves });
@@ -517,6 +534,7 @@ export default function LeaveManagement({ embeddedApproval = false, embeddedAppl
   const confirmReject = async () => {
     const targetLeaves = rejectDialog.leaves || [];
     if (!targetLeaves.length) return;
+    if (!rejectComment.trim()) return setNotice({ severity: "warning", text: "Enter remarks before rejecting leave." });
     const isSicStage = rejectDialog.stage === "sic";
     setRejectDialog((current) => ({ ...current, open: false }));
     await act(
@@ -526,11 +544,7 @@ export default function LeaveManagement({ embeddedApproval = false, embeddedAppl
     );
   };
   const sicReject = (leave) => openRejectDialog("sic", [leave]);
-  const finalApprove = (leave) => act(
-    "/leave/approve-bulk",
-    { leaves: [{ id: leave.id, replacementRequired: replacementChoice(leave, "dic") }] },
-    "Leave approved.",
-  );
+  const finalApprove = (leave) => openApproveDialog("dic", [leave]);
   const finalReject = (leave) => openRejectDialog("dic", [leave]);
 
   const embeddedScopeLeaves = useMemo(() => {
@@ -820,6 +834,27 @@ export default function LeaveManagement({ embeddedApproval = false, embeddedAppl
       }));
   }, [leaveApplications, pending]);
 
+  const compactApprovalProgress = (application) => {
+    const row = application.anchor || application.rows?.[0] || {};
+    if (row.approvalMode === "Organization") {
+      const chain = row.approvalChain || [];
+      const approved = chain.filter((step) => step.status === "Approved").length;
+      return row.finalStatus === "Approved"
+        ? `${chain.length || approved}/${chain.length || approved} approved`
+        : `${approved}/${chain.length} approved · ${row.currentApproverLevel ? `Awaiting ${row.currentApproverLevel}` : row.organizationApprovalStatus || "In progress"}`;
+    }
+    const sicDone = application.rows.every((item) => item.sicApprovalStatus === "Forwarded" || item.deptApprovalStatus === "Approved");
+    const finalDone = application.rows.every((item) => item.deptApprovalStatus === "Approved" || item.finalStatus === "Approved");
+    return finalDone ? "2/2 approved" : sicDone ? "1/2 approved · Awaiting final authority" : "0/2 approved · Awaiting SIC";
+  };
+
+  const toggleApplicationSelection = (application, checked) => {
+    const ids = application.rows.filter((row) => row.canSICAct || row.canFinalAct).map((row) => row.id);
+    setSelectedWorkflowIds((current) => checked
+      ? Array.from(new Set([...current, ...ids]))
+      : current.filter((id) => !ids.includes(id)));
+  };
+
   const toggleWorkflowSelection = (leaveId, checked) => {
     setSelectedWorkflowIds((current) => (
       checked
@@ -857,11 +892,7 @@ export default function LeaveManagement({ embeddedApproval = false, embeddedAppl
   };
   const sicForwardBulk = () => {
     if (!selectedSicLeaves.length) return setNotice({ severity: "warning", text: "Select one or more SIC-pending leaves first." });
-    return act(
-      "/leave/sic-forward-bulk",
-      { leaves: selectedSicLeaves.map((leave) => ({ id: leave.id, replacementRequired: replacementChoice(leave, "sic") })) },
-      "Approved and forwarded to the next configured approver.",
-    );
+    return openApproveDialog("sic", selectedSicLeaves);
   };
   const sicRejectBulk = () => {
     if (!selectedSicLeaves.length) return setNotice({ severity: "warning", text: "Select one or more SIC-pending leaves first." });
@@ -869,27 +900,15 @@ export default function LeaveManagement({ embeddedApproval = false, embeddedAppl
   };
   const finalApproveBulk = () => {
     if (!selectedFinalLeaves.length) return setNotice({ severity: "warning", text: "Select one or more forwarded leaves first." });
-    return act(
-      "/leave/approve-bulk",
-      { leaves: selectedFinalLeaves.map((leave) => ({ id: leave.id, replacementRequired: replacementChoice(leave, "dic") })) },
-      "Leave approved.",
-    );
+    return openApproveDialog("dic", selectedFinalLeaves);
   };
     const finalRejectBulk = () => {
     if (!selectedFinalLeaves.length) return setNotice({ severity: "warning", text: "Select one or more forwarded leaves first." });
     return openRejectDialog("dic", selectedFinalLeaves);
   };
   // Day-wise approval/rejection for a single date row inside a clubbed application.
-  const sicForwardOne = (leave) => act(
-    "/leave/sic-forward-bulk",
-    { leaves: [{ id: leave.id, replacementRequired: replacementChoice(leave, "sic") }] },
-    "Approved and forwarded to the next configured approver.",
-  );
-  const finalApproveOne = (leave) => act(
-    "/leave/approve-bulk",
-    { leaves: [{ id: leave.id, replacementRequired: replacementChoice(leave, "dic") }] },
-    "Leave approved.",
-  );
+  const sicForwardOne = (leave) => openApproveDialog("sic", [leave]);
+  const finalApproveOne = (leave) => openApproveDialog("dic", [leave]);
   const sicRejectOne = (leave) => openRejectDialog("sic", [leave]);
   const finalRejectOne = (leave) => openRejectDialog("dic", [leave]);
   const refreshCompleted = async () => {
@@ -1362,8 +1381,17 @@ export default function LeaveManagement({ embeddedApproval = false, embeddedAppl
                       sx={(application.leaveGroupId && application.leaveGroupId === notificationLeaveRef) || application.anchor.id === notificationLeaveRef ? { background: "#FFF7D6", outline: "2px solid #F59E0B", outlineOffset: -2 } : undefined}
                     >
                       <TableCell padding="checkbox">
-                        <Tooltip title={actionable ? (expanded ? "Collapse days" : "Expand day-wise approval") : "No action available"} arrow>
-                          <span>
+                        <Stack direction="row" alignItems="center" spacing={.1}>
+                          <Checkbox
+                            size="small"
+                            disabled={!actionable}
+                            checked={actionable && application.rows.filter((row) => row.canSICAct || row.canFinalAct).every((row) => selectedWorkflowIds.includes(row.id))}
+                            indeterminate={application.rows.some((row) => selectedWorkflowIds.includes(row.id)) && !application.rows.filter((row) => row.canSICAct || row.canFinalAct).every((row) => selectedWorkflowIds.includes(row.id))}
+                            onChange={(event) => toggleApplicationSelection(application, event.target.checked)}
+                            inputProps={{ "aria-label": `Select all actionable dates for ${application.name}` }}
+                          />
+                          <Tooltip title={actionable ? (expanded ? "Collapse dates" : "Approve separate dates") : "No action available"} arrow>
+                            <span>
                             <Button
                               size="small"
                               disabled={!actionable}
@@ -1373,8 +1401,9 @@ export default function LeaveManagement({ embeddedApproval = false, embeddedAppl
                             >
                               {expanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
                             </Button>
-                          </span>
-                        </Tooltip>
+                            </span>
+                          </Tooltip>
+                        </Stack>
                       </TableCell>
                       <TableCell><Typography sx={{ fontSize: 12.5, fontWeight: 850 }}>{application.name}</Typography><Typography sx={{ fontSize: 10.5, color: "#64748B" }}>{application.employeeId}</Typography></TableCell>
                       <TableCell sx={{ whiteSpace: "nowrap" }}>{application.dayCount > 1 ? `${dayjs(application.startDate).format("DD MMM YYYY")} → ${dayjs(application.endDate).format("DD MMM YYYY")}` : dayjs(application.startDate).format("DD MMM YYYY")}</TableCell>
@@ -1382,10 +1411,13 @@ export default function LeaveManagement({ embeddedApproval = false, embeddedAppl
                       <TableCell>{application.groupName}</TableCell>
                       <TableCell sx={{ fontWeight: 800 }}>{application.stationLeaveOnly ? "Station Leave" : `${application.leaveType || "-"}${application.stationLeave ? " + Station Leave" : ""}`}</TableCell>
                       <TableCell sx={{ minWidth: 150 }}>{application.othersOnLeave.length ? <Typography sx={{ fontSize: 10.5, color: "#B45309", fontWeight: 800 }}>{application.othersOnLeave.join(", ")}</Typography> : <Typography sx={{ color: "#94A3B8", fontSize: 11 }}>None</Typography>}</TableCell>
-                      <TableCell><Typography sx={{ fontSize: 11, color: "#64748B", fontWeight: 750 }}>{application.rows.map((row) => `${dayjs(row.date).format("DD MMM")}: ${row.canSICAct ? "SIC" : row.canFinalAct ? "Final" : row.finalStatus}`).join(" · ")}</Typography></TableCell>
+                      <TableCell><Chip size="small" variant="outlined" label={compactApprovalProgress(application)} sx={{ maxWidth: 220, fontWeight: 850, color: "#334155", background: "#F8FAFC" }} /></TableCell>
                       <TableCell><StatusChip value={application.finalStatus} /></TableCell>
                       <TableCell align="right">
                         <Stack direction="row" spacing={.7} justifyContent="flex-end">
+                          {application.canSICAct && <Button size="small" variant="contained" onClick={() => openApproveDialog("sic", application.rows.filter((row) => row.canSICAct))}>Approve all</Button>}
+                          {application.canFinalAct && <Button size="small" color="success" variant="contained" onClick={() => openApproveDialog("dic", application.rows.filter((row) => row.canFinalAct))}>Approve all</Button>}
+                          {actionable && <Button size="small" variant="outlined" onClick={() => setExpandedWorkflowApp((current) => current === application.id ? "" : application.id)}>Separate dates</Button>}
                           <LeaveTracking leave={application.anchor} onCancel={cancelLeave} onCancelGroup={cancelLeaveGroup} groupRows={application.rows} busy={working} />
                           {application.canCancel && <Button size="small" color="warning" variant="outlined" onClick={() => cancelLeaveGroup({ leave: application.anchor, scope: "all" })}>Cancel all</Button>}
                         </Stack>
@@ -1433,6 +1465,39 @@ export default function LeaveManagement({ embeddedApproval = false, embeddedAppl
       </Box>
     );
   };
+
+  const workflowApplicationTiles = () => (
+    <Box sx={{ display: "grid", gap: 1.3, gridTemplateColumns: { xs: "1fr", sm: "repeat(2, minmax(0, 1fr))", xl: "repeat(3, minmax(0, 1fr))" } }}>
+      {pendingApplications.map((application) => {
+        const actionableRows = application.rows.filter((row) => row.canSICAct || row.canFinalAct);
+        const selectedCount = actionableRows.filter((row) => selectedWorkflowIds.includes(row.id)).length;
+        return <Paper key={application.id} variant="outlined" sx={{ p: 1.5, borderRadius: 2.5, borderTop: "5px solid #0057B7", display: "grid", gap: .8 }}>
+          <Stack direction="row" alignItems="flex-start" justifyContent="space-between" spacing={1}>
+            <Stack direction="row" alignItems="center" spacing={.4} sx={{ minWidth: 0 }}>
+              <Checkbox size="small" disabled={!actionableRows.length} checked={actionableRows.length > 0 && selectedCount === actionableRows.length} indeterminate={selectedCount > 0 && selectedCount < actionableRows.length} onChange={(event) => toggleApplicationSelection(application, event.target.checked)} />
+              <Box sx={{ minWidth: 0 }}><Typography noWrap sx={{ fontSize: 13.5, fontWeight: 950 }}>{application.name}</Typography><Typography noWrap sx={{ fontSize: 10.5, color: "#64748B" }}>{application.employeeId} · {application.groupName}</Typography></Box>
+            </Stack>
+            <StatusChip value={application.finalStatus} />
+          </Stack>
+          <Stack direction="row" spacing={.6} useFlexGap flexWrap="wrap">
+            <Chip size="small" label={application.dayCount > 1 ? `${dayjs(application.startDate).format("DD MMM")} → ${dayjs(application.endDate).format("DD MMM YYYY")}` : dayjs(application.startDate).format("DD MMM YYYY")} sx={{ fontWeight: 800 }} />
+            <Chip size="small" variant="outlined" label={`${application.dayCount} day(s)`} />
+            <Chip size="small" variant="outlined" label={application.stationLeaveOnly ? "Station Leave" : application.leaveType || "Leave"} />
+          </Stack>
+          <Typography sx={{ fontSize: 10.8, color: "#475569", fontWeight: 850 }}>{compactApprovalProgress(application)}</Typography>
+          {application.othersOnLeave.length > 0 && <Typography sx={{ fontSize: 10.3, color: "#B45309", fontWeight: 800 }}>Also on leave: {application.othersOnLeave.join(", ")}</Typography>}
+          <Stack direction="row" spacing={.6} useFlexGap flexWrap="wrap">
+            {application.canSICAct && <Button size="small" variant="contained" onClick={() => openApproveDialog("sic", application.rows.filter((row) => row.canSICAct))}>Approve all</Button>}
+            {application.canFinalAct && <Button size="small" color="success" variant="contained" onClick={() => openApproveDialog("dic", application.rows.filter((row) => row.canFinalAct))}>Approve all</Button>}
+            {application.canSICAct && <Button size="small" color="error" variant="outlined" onClick={() => openRejectDialog("sic", application.rows.filter((row) => row.canSICAct))}>Reject all</Button>}
+            {application.canFinalAct && <Button size="small" color="error" variant="outlined" onClick={() => openRejectDialog("dic", application.rows.filter((row) => row.canFinalAct))}>Reject all</Button>}
+            <Button size="small" variant="text" onClick={() => { setWorkflowView("table"); setExpandedWorkflowApp(application.id); }}>Separate dates</Button>
+          </Stack>
+        </Paper>;
+      })}
+      {!pendingApplications.length && <Paper variant="outlined" sx={{ gridColumn: "1 / -1", p: 4, textAlign: "center", color: "#94A3B8" }}>No leave is awaiting your approval.</Paper>}
+    </Box>
+  );
 
         const groupedTrackingTable = (applications) => (
         <TableContainer sx={{ maxHeight: 520, border: "1px solid #E2E8F0", borderRadius: 2 }}>
@@ -1518,7 +1583,7 @@ export default function LeaveManagement({ embeddedApproval = false, embeddedAppl
           <Typography sx={{ mb: 1.5, color: "#64748B", fontSize: 12 }}>
             {rejectDialog.leaves.length} leave record(s) selected. The comment will be recorded with the rejecting officer and timestamp.
           </Typography>
-          <TextField autoFocus fullWidth multiline minRows={3} label="Rejection comment (optional)" value={rejectComment} onChange={(event) => setRejectComment(event.target.value)} inputProps={{ maxLength: 1000 }} />
+          <TextField autoFocus required fullWidth multiline minRows={3} label="Rejection remarks" value={rejectComment} onChange={(event) => setRejectComment(event.target.value)} inputProps={{ maxLength: 1000 }} />
         </DialogContent>
         <DialogActions sx={{ px: 3, pb: 2 }}>
           <Button onClick={() => setRejectDialog((current) => ({ ...current, open: false }))}>Cancel</Button>
@@ -1735,6 +1800,7 @@ export default function LeaveManagement({ embeddedApproval = false, embeddedAppl
           <Stack direction="row" spacing={1} sx={{ mb: 1.5 }} useFlexGap flexWrap="wrap" alignItems="center">
             <Button size="small" variant={workflowView === "table" ? "contained" : "outlined"} onClick={() => setWorkflowView("table")}>Table view</Button>
             <Button size="small" variant={workflowView === "calendar" ? "contained" : "outlined"} startIcon={<CalendarDays size={14} />} onClick={() => setWorkflowView("calendar")}>Leave calendar</Button>
+            <Button size="small" variant={workflowView === "tiles" ? "contained" : "outlined"} onClick={() => setWorkflowView("tiles")}>Tile view</Button>
             {workflowView === "table" && (
               <Box sx={{ ml: "auto", display: "flex", gap: .6, p: .4, borderRadius: 2, background: "#EEF2FF" }}>
                 <Button size="small" variant={pendingClubbed ? "contained" : "text"} onClick={() => setPendingClubbed(true)} sx={{ textTransform: "none", fontWeight: 900 }}>Clubbed by application</Button>
@@ -1745,7 +1811,9 @@ export default function LeaveManagement({ embeddedApproval = false, embeddedAppl
         )}
         {workflowView === "calendar" && (role.isSIC || role.isDeptIC || role.isLeaveAuthority || role.isReportingOfficer || role.isAdmin)
           ? rosterWorkflowCalendar()
-          : (pendingClubbed ? workflowApplicationsTable() : workflowTable(pending))}
+          : workflowView === "tiles"
+            ? workflowApplicationTiles()
+            : (pendingClubbed ? workflowApplicationsTable() : workflowTable(pending))}
       </Paper>
       </Box>
       </Collapse>
@@ -1774,7 +1842,24 @@ export default function LeaveManagement({ embeddedApproval = false, embeddedAppl
         </DialogContent>
         <DialogActions sx={{ px: 3, pb: 2 }}>
           <Button onClick={() => setRejectDialog((current) => ({ ...current, open: false }))}>Cancel</Button>
-                    <Button color="error" variant="contained" onClick={confirmReject}>Reject leave</Button>
+                    <Button color="error" variant="contained" disabled={!rejectComment.trim()} onClick={confirmReject}>Reject leave</Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog open={approveDialog.open} onClose={() => setApproveDialog((current) => ({ ...current, open: false }))} fullWidth maxWidth="sm">
+        <DialogTitle sx={{ fontWeight: 950 }}>Approve leave at current stage</DialogTitle>
+        <DialogContent>
+          <Typography sx={{ mb: 1.2, color: "#64748B", fontSize: 12 }}>
+            {approveDialog.leaves.length} selected date(s). To approve only particular dates, select or expand those dates before opening this dialog.
+          </Typography>
+          <Stack direction="row" spacing={.6} useFlexGap flexWrap="wrap" sx={{ mb: 1.5 }}>
+            {approveDialog.leaves.map((leave) => <Chip key={leave.id} size="small" label={dayjs(leave.date).format("DD MMM YYYY")} />)}
+          </Stack>
+          <TextField autoFocus required fullWidth multiline minRows={3} label="Approval remarks" value={approveComment} onChange={(event) => setApproveComment(event.target.value)} inputProps={{ maxLength: 1000 }} />
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2 }}>
+          <Button onClick={() => setApproveDialog((current) => ({ ...current, open: false }))}>Cancel</Button>
+          <Button color="success" variant="contained" disabled={!approveComment.trim()} onClick={confirmApprove}>Approve selected dates</Button>
         </DialogActions>
       </Dialog>
 

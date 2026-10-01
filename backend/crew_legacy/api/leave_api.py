@@ -1817,6 +1817,7 @@ def get_all_leave(fromDate: str = Query(...), toDate: str = Query(...), user=Dep
 def sic_forward_bulk(data: dict, user=Depends(get_authenticated_user)):
 
     leaves = data.get("leaves", [])
+    comment = clean_id(data.get("comment"))[:1000]
     updated_count = 0
     notification_groups = {}
 
@@ -1843,6 +1844,7 @@ def sic_forward_bulk(data: dict, user=Depends(get_authenticated_user)):
                     f"approvalChain.{index}.status": "Approved",
                     f"approvalChain.{index}.actedBy": clean_id(user.get("employeeId")),
                     f"approvalChain.{index}.actedOn": now,
+                    f"approvalChain.{index}.comment": comment,
                     f"approvalChain.{index}.delegation": delegation_actor_metadata(user, step),
                     "currentApprovalIndex": next_index,
                     "organizationApprovalStatus": "In Progress",
@@ -1873,6 +1875,7 @@ def sic_forward_bulk(data: dict, user=Depends(get_authenticated_user)):
             "required": sic_replacement_required,
             "decidedBy": clean_id(user.get("employeeId")),
             "decidedOn": datetime.utcnow(),
+            "comment": comment,
         }
 
         leave_request_collection.update_one(
@@ -2110,6 +2113,7 @@ def approve_leave_bulk(data: dict, user=Depends(get_authenticated_user)):
     ]
     if not decision_items:
         raise HTTPException(400, "No leave selected")
+    comment = clean_id(data.get("comment"))[:1000]
 
     updated_count = 0
     advanced_count = 0
@@ -2139,6 +2143,7 @@ def approve_leave_bulk(data: dict, user=Depends(get_authenticated_user)):
                     {"$set": {
                         f"approvalChain.{index}.status": "Approved", f"approvalChain.{index}.actedBy": clean_id(user.get("employeeId")),
                         f"approvalChain.{index}.actedOn": now, "currentApprovalIndex": next_index,
+                        f"approvalChain.{index}.comment": comment,
                         f"approvalChain.{index}.delegation": delegation_actor_metadata(user, step),
                         "organizationApprovalStatus": "In Progress", "updatedOn": now,
                     }},
@@ -2189,6 +2194,7 @@ def approve_leave_bulk(data: dict, user=Depends(get_authenticated_user)):
             "changedFromSIC": dic_replacement_required != bool(leave.get("sicReplacementRequired", leave.get("replacementRequired", False))),
             "decidedBy": clean_id(user.get("employeeId")),
             "decidedOn": datetime.utcnow(),
+            "comment": comment,
         }
 
         # ðŸ”¥ APPROVE
@@ -2202,6 +2208,7 @@ def approve_leave_bulk(data: dict, user=Depends(get_authenticated_user)):
                 f"approvalChain.{current_index}.status": "Approved",
                 f"approvalChain.{current_index}.actedBy": clean_id(user.get("employeeId")),
                 f"approvalChain.{current_index}.actedOn": datetime.utcnow(),
+                f"approvalChain.{current_index}.comment": comment,
                 f"approvalChain.{current_index}.delegation": delegation_actor_metadata(user, current_step),
                 "currentApprovalIndex": len(leave.get("approvalChain") or []),
                 "organizationApprovalStatus": "Approved",

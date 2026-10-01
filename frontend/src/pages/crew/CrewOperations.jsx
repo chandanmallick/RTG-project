@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Alert, Box, Button, Chip, CircularProgress, Stack, Tooltip, Typography } from "@mui/material";
+import { Alert, Box, Button, Chip, CircularProgress, Dialog, DialogContent, DialogTitle, Stack, Tooltip, Typography } from "@mui/material";
 import { ArrowLeftRight, ArrowRight, BarChart3, CalendarDays, CheckCircle2, ChevronRight, ClipboardList, GraduationCap, LockKeyhole, Medal, RefreshCw, Settings2, Umbrella, Users } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import AppShell from "../../components/layout/AppShell";
 import { useAuth } from "../../auth/AuthContext";
 import api from "../../crewLegacy/api";
+import LeaveManagement from "../../crewLegacy/LeaveManagement";
+import TrainingHolidayMaster from "../../crewLegacy/TrainingHolidayMaster";
+import SportsManagement from "./SportsManagement";
 
 const stages = [
   { id: "prepare", eyebrow: "01 · Prepare", title: "Master / event", color: "#6D28D9", tint: "#F5F3FF" },
@@ -58,7 +61,7 @@ function ActionCard({ item, stage, actions, onOpen, checking }) {
   const access = fallbackAccess(item, actions);
   const enabled = Boolean(access?.enabled);
   return <Tooltip title={enabled ? "" : checking ? "Checking your access…" : "Access has not been granted for this action."}>
-    <span><Button fullWidth disabled={!enabled} onClick={() => enabled && onOpen(item.to)} aria-label={item.title + (access?.pending ? `, ${access.pending} pending` : "")} sx={{ px: .85, py: .55, minHeight: 46, justifyContent: "flex-start", textAlign: "left", textTransform: "none", border: access?.pending ? `1.5px solid ${stage.color}` : "1px solid #DCE5EE", borderRadius: 2.5, color: "#0F172A", background: "rgba(255,255,255,.82)", boxShadow: "0 1px 2px rgba(15,23,42,.025)", "&:hover": { borderColor: stage.color, background: "#FFF", boxShadow: "0 4px 12px rgba(15,23,42,.07)", transform: "translateY(-1px)" }, "&.Mui-disabled": { opacity: .4, filter: "grayscale(1)", color: "#64748B", background: "#F8FAFC" } }}>
+    <span><Button fullWidth disabled={!enabled} onClick={() => enabled && onOpen(item)} aria-label={item.title + (access?.pending ? `, ${access.pending} pending` : "")} sx={{ px: .85, py: .55, minHeight: 46, justifyContent: "flex-start", textAlign: "left", textTransform: "none", border: access?.pending ? `1.5px solid ${stage.color}` : "1px solid #DCE5EE", borderRadius: 2.5, color: "#0F172A", background: "rgba(255,255,255,.82)", boxShadow: "0 1px 2px rgba(15,23,42,.025)", "&:hover": { borderColor: stage.color, background: "#FFF", boxShadow: "0 4px 12px rgba(15,23,42,.07)", transform: "translateY(-1px)" }, "&.Mui-disabled": { opacity: .4, filter: "grayscale(1)", color: "#64748B", background: "#F8FAFC" } }}>
       <Box sx={{ mr: .75, color: stage.color, flexShrink: 0 }}><item.icon size={16} /></Box>
       <Box sx={{ minWidth: 0, flex: 1 }}><Typography sx={{ fontSize: 10.8, fontWeight: 950, lineHeight: 1.2 }}>{item.title}</Typography><Typography noWrap sx={{ mt: .1, fontSize: 8.5, lineHeight: 1.2, color: "#64748B" }}>{enabled ? item.note : checking ? "Checking access…" : "Access not granted"}</Typography></Box>
       {enabled ? access.pending > 0 ? <Chip component="span" size="small" color="warning" label={access.pending} sx={{ ml: .35, height: 21, fontWeight: 900 }} /> : <ChevronRight size={14} color="#94A3B8" /> : <LockKeyhole size={14} />}
@@ -72,6 +75,7 @@ export default function CrewOperations() {
   const [summary, setSummary] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [applicationPopup, setApplicationPopup] = useState("");
   const requestRef = useRef(0);
   const refresh = useCallback(async () => {
     const request = ++requestRef.current;
@@ -92,6 +96,12 @@ export default function CrewOperations() {
     window.addEventListener("focus", update);
     return () => { requestRef.current += 1; window.clearInterval(timer); window.removeEventListener("focus", update); };
   }, [refresh, user?.employeeId]);
+  const openAction = (item) => {
+    const popupByKey = { applyLeave: "leave", requestTraining: "training", applySports: "sports" };
+    if (popupByKey[item.key]) setApplicationPopup(popupByKey[item.key]);
+    else navigate(item.to);
+  };
+  const closeApplicationPopup = () => { setApplicationPopup(""); refresh(); };
   const actions = summary?.actions || {};
   return <AppShell>
     <Box sx={{ height: { md: "calc(100dvh - 116px)" }, overflow: { md: "auto" }, p: { xs: 1.2, md: 2 }, background: "#F8FAFC" }}>
@@ -113,11 +123,22 @@ export default function CrewOperations() {
           {stages.map((stage, index) => <Box key={stage.id} sx={{ position: "relative", p: 1.05, borderLeft: "1px solid #E2E8F0", borderTop: `4px solid ${stage.color}`, bgcolor: stage.tint }}><Typography sx={{ fontSize: 8.5, color: stage.color, fontWeight: 900, textTransform: "uppercase" }}>{stage.eyebrow}</Typography><Typography sx={{ mt: .1, fontSize: 12.2, color: "#0F172A", fontWeight: 900 }}>{stage.title}</Typography>{index < stages.length - 1 && <Box sx={{ position: "absolute", zIndex: 3, right: -11, top: "50%", mt: -.2, width: 21, height: 21, display: "grid", placeItems: "center", borderRadius: "50%", color: stage.color, bgcolor: "#FFF", border: "1px solid #D9E6F2" }}><ArrowRight size={12} /></Box>}</Box>)}
           {categories.map((category) => <Box key={category.id} sx={{ display: "contents" }}>
             <Box sx={{ p: 1.05, borderTop: "1px solid #D9E6F2", borderLeft: `4px solid ${category.color}`, bgcolor: category.tint }}><Box sx={{ display: "flex", alignItems: "center", gap: .7 }}><Box sx={{ width: 30, height: 30, borderRadius: "50%", display: "grid", placeItems: "center", color: category.color, bgcolor: "#FFF" }}><category.icon size={16} /></Box><Box><Typography sx={{ fontSize: 12.5, fontWeight: 950, color: category.color }}>{category.title}</Typography><Typography sx={{ fontSize: 8.4, color: "#64748B", lineHeight: 1.2 }}>{category.subtitle}</Typography></Box></Box></Box>
-            {stages.map((stage) => <Stack key={`${category.id}-${stage.id}`} spacing={.55} sx={{ minWidth: 0, p: .7, borderLeft: "1px solid #E7EDF3", borderTop: "1px solid #D9E6F2", bgcolor: `${category.color}0D` }}>{(category.actions[stage.id] || []).map((item) => <ActionCard key={`${category.id}-${item.key}-${item.title}`} item={item} stage={stage} actions={actions} onOpen={navigate} checking={loading && !summary} />)}{!(category.actions[stage.id] || []).length && <Typography sx={{ py: 1.6, textAlign: "center", color: `${category.color}45`, fontSize: 10 }}>—</Typography>}</Stack>)}
+            {stages.map((stage) => <Stack key={`${category.id}-${stage.id}`} spacing={.55} sx={{ minWidth: 0, p: .7, borderLeft: "1px solid #E7EDF3", borderTop: "1px solid #D9E6F2", bgcolor: `${category.color}0D` }}>{(category.actions[stage.id] || []).map((item) => <ActionCard key={`${category.id}-${item.key}-${item.title}`} item={item} stage={stage} actions={actions} onOpen={openAction} checking={loading && !summary} />)}{!(category.actions[stage.id] || []).length && <Typography sx={{ py: 1.6, textAlign: "center", color: `${category.color}45`, fontSize: 10 }}>—</Typography>}</Stack>)}
           </Box>)}
         </Box>
       </Box>
       <Typography sx={{ mt: 1.2, fontSize: 11, color: "#64748B" }}>Read every coloured row from left to right. Replacement is kept in one process column; tracking and reports are the final two steps.</Typography>
+      <Dialog open={Boolean(applicationPopup)} onClose={() => setApplicationPopup("")} fullWidth maxWidth="xl" PaperProps={{ sx: { maxHeight: "92dvh", borderRadius: 3 } }}>
+        <DialogTitle sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "1px solid #E2E8F0" }}>
+          <Box><Typography sx={{ fontSize: 18, fontWeight: 950 }}>New {applicationPopup || "crew"} application</Typography><Typography sx={{ fontSize: 10.5, color: "#64748B" }}>Complete the application without leaving Operations.</Typography></Box>
+          <Button onClick={() => setApplicationPopup("")} sx={{ textTransform: "none", fontWeight: 850 }}>Close</Button>
+        </DialogTitle>
+        <DialogContent sx={{ p: { xs: 1.2, md: 2 }, background: "#F8FAFC" }}>
+          {applicationPopup === "leave" && <LeaveManagement embeddedApplication onApplicationChanged={closeApplicationPopup} />}
+          {applicationPopup === "training" && <TrainingHolidayMaster embeddedRequest onRequestSubmitted={closeApplicationPopup} />}
+          {applicationPopup === "sports" && <SportsManagement embedded onSubmitted={closeApplicationPopup} />}
+        </DialogContent>
+      </Dialog>
     </Box>
   </AppShell>;
 }
