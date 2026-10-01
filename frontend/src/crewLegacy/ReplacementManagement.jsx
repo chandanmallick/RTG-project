@@ -1119,7 +1119,7 @@ export default function ReplacementManagement() {
             Candidate selection order · required duty: {candidates[0]?.requiredDuty || "-"}
           </Typography>
           <TableContainer sx={{ border: "1px solid #CBD5E1", borderRadius: 2, maxHeight: "62vh" }}>
-            <Table size="small" stickyHeader sx={{ minWidth: 1180 }}>
+            <Table size="small" stickyHeader sx={{ minWidth: 1280 }}>
               <TableHead>
                 <TableRow>
                   <TableCell sx={{ fontWeight: 900 }}>Order</TableCell>
@@ -1130,6 +1130,7 @@ export default function ReplacementManagement() {
                   <TableCell sx={{ fontWeight: 900 }}>Next day</TableCell>
                   <TableCell sx={{ fontWeight: 900 }}>Last matching duty</TableCell>
                   <TableCell sx={{ fontWeight: 900 }}>Days since</TableCell>
+                  <TableCell sx={{ fontWeight: 900 }}>This month</TableCell>
                   <TableCell sx={{ fontWeight: 900 }}>Denied</TableCell>
                   <TableCell sx={{ fontWeight: 900, textAlign: "right" }}>Action</TableCell>
                 </TableRow>
@@ -1154,11 +1155,12 @@ export default function ReplacementManagement() {
                     <TableCell sx={{ fontWeight: 800 }}>{candidate.nextDayDuty || "-"}</TableCell>
                     <TableCell sx={{ whiteSpace: "nowrap" }}>{lastDuty}{displayedDutyDate && <Typography sx={{ fontSize: 10.5, color: hasMatchingDuty ? "#15803D" : "#B45309", fontWeight: 750 }}>{hasMatchingDuty ? `${candidate.requiredDuty} · matching` : `${candidate.lastDutyType || "Shift"} · latest duty`}</Typography>}</TableCell>
                     <TableCell>{dutyAge ?? "-"}</TableCell>
+                    <TableCell sx={{ whiteSpace: "nowrap" }}>{candidate.replacementCountMonth ?? 0}{candidate.replacementMonthlyTarget ? ` / ${candidate.replacementMonthlyTarget}` : ""}{candidate.replacementMonthlyTarget && <Typography sx={{ fontSize: 10, color: candidate.replacementMonthlyRemaining ? "#B45309" : "#15803D", fontWeight: 750 }}>{candidate.replacementMonthlyRemaining ? `${candidate.replacementMonthlyRemaining} remaining` : "Monthly target met"}</Typography>}</TableCell>
                     <TableCell>{candidate.denialCount ?? candidate.denialCount90Days ?? 0}</TableCell>
-                    <TableCell align="right"><Button size="small" variant="contained" onClick={() => assignReplacement(candidate.employeeId)} sx={{ whiteSpace: "nowrap" }}>Assign</Button></TableCell>
+                    <TableCell align="right">{candidate.conflictReason && <Typography sx={{ mb: .5, fontSize: 10.5, color: "#B91C1C", fontWeight: 800 }}>{candidate.conflictReason}</Typography>}<Button size="small" variant="contained" disabled={candidate.hasConflict} onClick={() => assignReplacement(candidate.employeeId)} sx={{ whiteSpace: "nowrap" }}>Assign</Button></TableCell>
                   </TableRow>;
                 })}
-                {!orderedCandidates.length && <TableRow><TableCell colSpan={10} align="center" sx={{ py: 4, color: "#64748B" }}>No eligible candidates match the selected filter.</TableCell></TableRow>}
+                {!orderedCandidates.length && <TableRow><TableCell colSpan={11} align="center" sx={{ py: 4, color: "#64748B" }}>No eligible candidates match the selected filter.</TableCell></TableRow>}
               </TableBody>
             </Table>
           </TableContainer>

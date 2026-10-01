@@ -14,8 +14,25 @@ const valueAt = (row, index) => (
   String(row.cells[index]?.innerText || row.cells[index]?.textContent || "").replace(/\s+/g, " ").trim()
 );
 
+const parsedDateValue = (value) => {
+  const text = String(value || "").trim();
+  const iso = text.match(/\b(\d{4})-(\d{1,2})-(\d{1,2})\b/);
+  if (iso) return Date.UTC(Number(iso[1]), Number(iso[2]) - 1, Number(iso[3]));
+  const numeric = text.match(/\b(\d{1,2})[-/](\d{1,2})[-/](\d{4})\b/);
+  if (numeric) return Date.UTC(Number(numeric[3]), Number(numeric[2]) - 1, Number(numeric[1]));
+  const named = text.match(/\b(\d{1,2})\s+([A-Za-z]{3,9})\s+(\d{4})\b/);
+  if (named) {
+    const months = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
+    const month = months.indexOf(named[2].slice(0, 3).toLowerCase());
+    if (month >= 0) return Date.UTC(Number(named[3]), month, Number(named[1]));
+  }
+  return null;
+};
+
 const comparable = (value) => {
   const text = String(value || "").trim();
+  const parsedDate = parsedDateValue(text);
+  if (parsedDate !== null) return { type: "date", value: parsedDate };
   const normalizedNumber = text.replace(/,/g, "").replace(/[%₹$]/g, "");
   if (/^-?\d+(\.\d+)?$/.test(normalizedNumber)) return { type: "number", value: Number(normalizedNumber) };
   const date = Date.parse(text);

@@ -29,7 +29,7 @@ from crew_legacy.database.database_mongo import (
 
 router = APIRouter()
 
-ACTIVE_LEAVE_STATUSES = {"Applied", "Forwarded by SIC", "Approved"}
+ACTIVE_LEAVE_STATUSES = {"Applied", "Forwarded", "Forwarded by SIC", "Approved"}
 
 
 def organization_units():
@@ -2798,6 +2798,10 @@ def replacement_candidates(
     today = datetime.utcnow()
     last_90_days_date = today - timedelta(days=90)
     last_90_days_str = last_90_days_date.strftime("%Y-%m-%d")
+    leave_month = datetime.strptime(leave_date, "%Y-%m-%d").replace(day=1)
+    next_month = (leave_month.replace(day=28) + timedelta(days=4)).replace(day=1)
+    month_start = leave_month.strftime("%Y-%m-%d")
+    month_end = next_month.strftime("%Y-%m-%d")
 
     result = []
     effective_role_filter = (roleFilter or "auto").strip().lower()
@@ -2868,8 +2872,17 @@ def replacement_candidates(
             "date": leave_date
         })
 
-        if duty and duty.get("leaveStatus") == "Approved":
-            continue
+        active_leave = leave_request_collection.find_one({
+            "employeeId": candidate_id,
+            "date": leave_date,
+            "finalStatus": {"$in": list(ACTIVE_LEAVE_STATUSES)},
+        })
+        duty_leave_status = str((duty or {}).get("leaveStatus") or "").strip()
+        has_leave_conflict = bool(active_leave or duty_leave_status in ACTIVE_LEAVE_STATUSES)
+        conflict_reason = (
+            f"Excluded: on {duty_leave_status or (active_leave or {}).get('finalStatus') or 'active'} leave on {leave_date}"
+            if has_leave_conflict else ""
+        )
 
         # ==========================================
         # REPLACEMENT COUNT (LAST 90 DAYS)
@@ -2879,6 +2892,20 @@ def replacement_candidates(
             "replacementDuty": True,
             "date": {"$gte": last_90_days_str}
         })
+        monthly_replacement_count = employee_daily_collection.count_documents({
+            "employeeId": candidate_id,
+            "replacementDuty": True,
+            "date": {"$gte": month_start, "$lt": month_end},
+        })
+        organization_labels = " ".join(
+            current_organization.get("departments", [])
+            + current_organization.get("verticals", [])
+            + current_organization.get("sections", [])
+        ).upper()
+        monthly_quota_applicable = bool(
+            "SCADA" in organization_labels
+            or re.search(r"(^|[^A-Z])MO([^A-Z]|$)", organization_labels)
+        )
 
         # ==========================================
         # DENIAL COUNT (LAST 90 DAYS)
@@ -2936,6 +2963,11 @@ def replacement_candidates(
             ),
 
             "replacementCount90Days": replacement_count,
+            "replacementCountMonth": monthly_replacement_count,
+            "replacementMonthlyTarget": 5 if monthly_quota_applicable else None,
+            "replacementMonthlyRemaining": max(0, 5 - monthly_replacement_count) if monthly_quota_applicable else None,
+            "hasConflict": has_leave_conflict,
+            "conflictReason": conflict_reason,
             "denialCount90Days": denial_count,
             "denialCount": total_denial_count,
             "requiredDuty": required_duty,
@@ -2968,7 +3000,7 @@ def replacement_candidates(
     shift_people = list(employee_daily_collection.find({
         "date": leave_date,
         "assignedDuty": {"$in": ["Morning", "Evening", "Night"]},
-        "leaveStatus": {"$ne": "Approved"}
+        "leaveStatus": {"$nin": list(ACTIVE_LEAVE_STATUSES)}
     }).sort([("groupName", 1), ("employeeId", 1)]))
 
     existing_ids = {r["employeeId"] for r in result}
@@ -3029,15 +3061,21 @@ def replacement_candidates(
 
     def candidate_order(item):
         source = item.get("source")
+        conflict_order = 1 if item.get("hasConflict") else 0
+        quota_order = item.get("replacementCountMonth", 0) if item.get("replacementMonthlyTarget") else 999
         if source in {"replacement", "organization"}:
             days = item.get("daysSinceMatchingDuty")
             return (
+                conflict_order,
+                quota_order,
                 source_order[source],
                 0 if days is None else 1,
                 -(days if days is not None else 0),
                 employee_id_sort_key(item.get("employeeId")),
             )
         return (
+            conflict_order,
+            quota_order,
             source_order.get(source, 9),
             employee_id_sort_key(item.get("employeeId")),
         )
@@ -3077,6 +3115,23 @@ def assign_replacement(leave_id: str, payload: dict, user=Depends(get_authentica
         raise HTTPException(409, "Replacement can only be assigned after leave approval")
     if str(payload.get("replacementEmployeeId")) == str(leave.get("employeeId")):
         raise HTTPException(400, "An employee cannot replace their own leave duty")
+
+    leave_conflict = leave_request_collection.find_one({
+        "employeeId": str(replacement_id),
+        "date": leave.get("date"),
+        "finalStatus": {"$in": list(ACTIVE_LEAVE_STATUSES)},
+    })
+    daily_leave_conflict = employee_daily_collection.find_one({
+        "employeeId": str(replacement_id),
+        "date": leave.get("date"),
+        "leaveStatus": {"$in": list(ACTIVE_LEAVE_STATUSES)},
+    })
+    if leave_conflict or daily_leave_conflict:
+        conflict_type = (leave_conflict or daily_leave_conflict).get("leaveType") or "approved/pending"
+        raise HTTPException(
+            409,
+            f"Employee {replacement_id} is on {conflict_type} leave on {leave.get('date')} and cannot be assigned",
+        )
 
 
     # =============================

@@ -153,6 +153,10 @@ export default function LeaveManagement({ embeddedApproval = false, embeddedAppl
     const [activeSection] = useState(() => embeddedApplication ? "apply" : new URLSearchParams(window.location.search).get("section") || "apply");
   const [applyPopupOpen, setApplyPopupOpen] = useState(embeddedApplication);
   const [trackingPopupOpen, setTrackingPopupOpen] = useState(() => !embeddedApplication && !embeddedApproval && new URLSearchParams(window.location.search).get("section") === "tracking");
+  const [approvedPopupOpen, setApprovedPopupOpen] = useState(false);
+  const [approvedPopupLoading, setApprovedPopupLoading] = useState(false);
+  const [approvedPopupLeaves, setApprovedPopupLeaves] = useState([]);
+  const [approvedCancelDates, setApprovedCancelDates] = useState({});
   const notificationLeaveRef = useMemo(() => new URLSearchParams(window.location.search).get("leaveRef") || "", []);
   const notificationRequestId = useMemo(() => new URLSearchParams(window.location.search).get("requestId") || "", []);
   const [approvedTraining, setApprovedTraining] = useState([]);
@@ -185,6 +189,23 @@ export default function LeaveManagement({ embeddedApproval = false, embeddedAppl
       },
     });
     setLeaves(data || []);
+  };
+  const loadApprovedLeaveList = async () => {
+    setApprovedPopupLoading(true);
+    try {
+      const { data } = await api.get("/leave/list", { params: { completedFrom: "2000-01-01" } });
+      setApprovedPopupLeaves((data || []).filter((leave) => leave.finalStatus === "Approved" && leave.canCancel));
+    } catch (error) {
+      setNotice({ severity: "error", text: error.response?.data?.detail || "Approved leave could not be loaded." });
+      setApprovedPopupLeaves([]);
+    } finally {
+      setApprovedPopupLoading(false);
+    }
+  };
+  const openApprovedLeaveList = async () => {
+    setApprovedPopupOpen(true);
+    setApprovedCancelDates({});
+    await loadApprovedLeaveList();
   };
 
   const loadDelegations = async () => {
@@ -434,6 +455,7 @@ export default function LeaveManagement({ embeddedApproval = false, embeddedAppl
       setNotice({ severity: "success", text: data.message || "Leave cancelled." });
       setSelectedWorkflowIds([]);
       await loadLeaves();
+      if (approvedPopupOpen) await loadApprovedLeaveList();
       if (selectedEmployee) {
         try {
           const { data: credits } = await api.get("/leave/comp-off/available", { params: { employeeId: employeeIdOf(selectedEmployee) } });
@@ -811,6 +833,38 @@ export default function LeaveManagement({ embeddedApproval = false, embeddedAppl
         canCancel: application.rows.some((row) => row.canCancel),
       }));
   }, [leaveApplications, trackedLeaves]);
+
+  const approvedApplications = useMemo(() => {
+    const groups = new Map();
+    approvedPopupLeaves.forEach((leave) => {
+      const key = leave.leaveGroupId || `single:${leave.id}`;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(leave);
+    });
+    return Array.from(groups.entries()).map(([id, records]) => {
+      const rows = [...records].sort((a, b) => String(a.date).localeCompare(String(b.date)));
+      return { id, anchor: rows[0], rows };
+    }).sort((a, b) => String(b.anchor.date).localeCompare(String(a.anchor.date)));
+  }, [approvedPopupLeaves]);
+
+  const toggleApprovedCancelDate = (applicationId, date, checked) => {
+    setApprovedCancelDates((current) => {
+      const selected = new Set(current[applicationId] || []);
+      if (checked) selected.add(date); else selected.delete(date);
+      return { ...current, [applicationId]: Array.from(selected) };
+    });
+  };
+  const selectAllApprovedDates = (application, checked) => {
+    setApprovedCancelDates((current) => ({ ...current, [application.id]: checked ? application.rows.map((row) => row.date) : [] }));
+  };
+  const cancelApprovedSelection = async (application, all = false) => {
+    const dates = all ? application.rows.map((row) => row.date) : approvedCancelDates[application.id] || [];
+    if (!dates.length) return setNotice({ severity: "warning", text: "Select at least one approved date to cancel." });
+    const scopeText = all || dates.length === application.rows.length ? "the whole approved leave" : `${dates.length} selected approved date(s)`;
+    if (!window.confirm(`Cancel ${scopeText} for ${application.anchor.name}? Approved duties and linked replacement effects will be restored.`)) return;
+    await cancelLeaveGroup({ leave: application.anchor, dates, scope: "dates" });
+    setApprovedCancelDates((current) => ({ ...current, [application.id]: [] }));
+  };
 
   // Pending applications clubbed into one entry per continuous request so the
   // approval inbox can show a single row that expands into day-wise actions.
@@ -1616,7 +1670,21 @@ export default function LeaveManagement({ embeddedApproval = false, embeddedAppl
         </Box>
         <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "1fr 1fr auto" }, gap: 1.5, alignItems: "center" }}>
           <Autocomplete options={employees} value={selectedEmployee} disabled={employees.length === 1} onChange={(_, value) => { setSelectedEmployee(value); setRows([]); }} getOptionLabel={(item) => `${item.name || employeeIdOf(item)} — ${item.designation || "Employee"}`} isOptionEqualToValue={(a, b) => employeeIdOf(a) === employeeIdOf(b)} renderInput={(params) => <TextField {...params} label="Employee" helperText={employees.length === 1 ? "Only your own name is available" : "Current group members"} />} />
-          <DatePicker range rangeHover minDate={role.isAdmin ? undefined : new Date()} value={dateRange} onChange={(value) => { setDateRange(value || []); setRows([]); }} format="DD MMM YYYY" numberOfMonths={2} showOtherDays render={(value, openCalendar) => <TextField fullWidth label="Continuous date range" value={value || ""} onClick={openCalendar} helperText={role.isAdmin ? "Administrators may enter earlier dates" : "Past dates are not allowed"} InputProps={{ readOnly: true }} />} />
+          <DatePicker
+            range
+            rangeHover
+            portal
+            zIndex={1600}
+            calendarPosition="bottom-center"
+            fixMainPosition
+            minDate={role.isAdmin ? undefined : new Date()}
+            value={dateRange}
+            onChange={(value) => { setDateRange(value || []); setRows([]); }}
+            format="DD MMM YYYY"
+            numberOfMonths={2}
+            showOtherDays
+            render={(value, openCalendar) => <TextField fullWidth label="Continuous date range" value={value || ""} onClick={openCalendar} helperText={role.isAdmin ? "Administrators may enter earlier dates" : "Past dates are not allowed"} InputProps={{ readOnly: true }} />}
+          />
           <Button variant="contained" onClick={fetchDuty} disabled={working} startIcon={<RefreshCw size={16} />} sx={{ minHeight: 48, px: 3 }}>Load duty</Button>
         </Box>
       </Paper>
@@ -1660,7 +1728,13 @@ export default function LeaveManagement({ embeddedApproval = false, embeddedAppl
 
   return (
     <Box className="ui-kit-page" sx={{ display: "grid", gap: embeddedApplication ? 1.5 : 2.5 }}>
-      {!embeddedApplication && <WorkflowHeader title={currentLeaveSection.title} subtitle={currentLeaveSection.subtitle} accent={currentLeaveSection.accent} count={currentLeaveSection.count} />}
+      {!embeddedApplication && <>
+        <WorkflowHeader title={currentLeaveSection.title} subtitle={currentLeaveSection.subtitle} accent={currentLeaveSection.accent} count={currentLeaveSection.count} />
+        {!embeddedApproval && <Paper variant="outlined" sx={{ px: 1.5, py: 1, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 1.5, borderColor: "#86EFAC", background: "#F0FDF4" }}>
+          <Box><Typography sx={{ color: "#166534", fontSize: 12.5, fontWeight: 950 }}>Approved leave</Typography><Typography sx={{ color: "#475569", fontSize: 10.5 }}>Open the approved list and cancel a whole application or only selected dates.</Typography></Box>
+          <Button color="success" variant="contained" startIcon={<CheckCircle2 size={15} />} onClick={openApprovedLeaveList} sx={{ flexShrink: 0, textTransform: "none", fontWeight: 900 }}>View approved leave</Button>
+        </Paper>}
+      </>}
 
       {notice && <Alert severity={notice.severity} onClose={() => setNotice(null)}>{notice.text}</Alert>}
 
@@ -1861,6 +1935,35 @@ export default function LeaveManagement({ embeddedApproval = false, embeddedAppl
           <Button onClick={() => setApproveDialog((current) => ({ ...current, open: false }))}>Cancel</Button>
           <Button color="success" variant="contained" disabled={!approveComment.trim()} onClick={confirmApprove}>Approve selected dates</Button>
         </DialogActions>
+      </Dialog>
+
+      <Dialog open={approvedPopupOpen} onClose={() => setApprovedPopupOpen(false)} fullWidth maxWidth="md" PaperProps={{ sx: { maxHeight: "90dvh", borderRadius: 3 } }}>
+        <DialogTitle sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 1, borderBottom: "1px solid #E2E8F0" }}>
+          <Box><Typography sx={{ fontSize: 18, fontWeight: 950 }}>Approved leave available for cancellation</Typography><Typography sx={{ fontSize: 10.8, color: "#64748B" }}>Only approved leave in your authorised scope is shown.</Typography></Box>
+          <Button onClick={() => setApprovedPopupOpen(false)} sx={{ textTransform: "none", fontWeight: 850 }}>Close</Button>
+        </DialogTitle>
+        <DialogContent sx={{ p: { xs: 1.2, md: 2 }, background: "#F8FAFC" }}>
+          {approvedPopupLoading ? <Box sx={{ minHeight: 220, display: "grid", placeItems: "center" }}><CircularProgress /></Box> : <Stack spacing={1.2}>
+            {approvedApplications.map((application) => {
+              const selected = approvedCancelDates[application.id] || [];
+              const allSelected = application.rows.length > 0 && selected.length === application.rows.length;
+              return <Paper key={application.id} variant="outlined" sx={{ p: 1.5, borderRadius: 2.5, borderLeft: "5px solid #15803D" }}>
+                <Stack direction={{ xs: "column", sm: "row" }} justifyContent="space-between" spacing={1}>
+                  <Box><Typography sx={{ fontSize: 13.5, fontWeight: 950 }}>{application.anchor.name} <Typography component="span" sx={{ color: "#64748B", fontSize: 10.5 }}>({application.anchor.employeeId})</Typography></Typography><Typography sx={{ mt: .2, color: "#475569", fontSize: 10.8, fontWeight: 750 }}>{application.anchor.leaveType || "Leave"} · {application.anchor.groupName || "Group not recorded"}</Typography></Box>
+                  <Stack direction="row" spacing={.7} useFlexGap flexWrap="wrap">
+                    <Button size="small" color="warning" variant="outlined" disabled={!selected.length || working} onClick={() => cancelApprovedSelection(application)}>Cancel selected ({selected.length})</Button>
+                    <Button size="small" color="error" variant="contained" disabled={working} onClick={() => cancelApprovedSelection(application, true)}>Cancel whole leave</Button>
+                  </Stack>
+                </Stack>
+                <Stack direction="row" spacing={.6} useFlexGap flexWrap="wrap" sx={{ mt: 1 }}>
+                  <FormControlLabel control={<Checkbox size="small" checked={allSelected} indeterminate={selected.length > 0 && !allSelected} onChange={(event) => selectAllApprovedDates(application, event.target.checked)} />} label="All dates" sx={{ mr: .5, "& .MuiFormControlLabel-label": { fontSize: 11, fontWeight: 900 } }} />
+                  {application.rows.map((leave) => <FormControlLabel key={leave.id} control={<Checkbox size="small" checked={selected.includes(leave.date)} onChange={(event) => toggleApprovedCancelDate(application.id, leave.date, event.target.checked)} />} label={dayjs(leave.date).format("DD MMM YYYY")} sx={{ m: 0, px: .5, border: "1px solid #D7E3EE", borderRadius: 1.5, background: selected.includes(leave.date) ? "#FEF3C7" : "#FFF", "& .MuiFormControlLabel-label": { fontSize: 10.5, fontWeight: 800 } }} />)}
+                </Stack>
+              </Paper>;
+            })}
+            {!approvedApplications.length && <Paper variant="outlined" sx={{ p: 4, textAlign: "center", color: "#64748B" }}>No approved leave is currently available for cancellation in your scope.</Paper>}
+          </Stack>}
+        </DialogContent>
       </Dialog>
 
       {/* Apply popup — same minimal flow as the calendar application dialog. */}
