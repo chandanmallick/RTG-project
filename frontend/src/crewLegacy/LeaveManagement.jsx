@@ -1664,6 +1664,7 @@ export default function LeaveManagement({ embeddedApproval = false, embeddedAppl
   // the two entry points visually identical.
     const renderApplyForm = () => (
     <Box sx={{ display: "grid", gap: 2.5 }}>
+      <LeaveBlockedPeriods isAdmin={Boolean(role.isAdmin) && !embeddedApplication} />
       <Paper sx={{ p: 2.5 }}>
         <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 1, flexWrap: "wrap" }}>
           <SectionTitle icon={User} title="Apply Leave" subtitle={role.isSIC && !role.isAdmin ? `As SIC, you may apply for members of ${role.groupName}.` : "Select one continuous duty-date range."} />
@@ -1737,8 +1738,6 @@ export default function LeaveManagement({ embeddedApproval = false, embeddedAppl
       </>}
 
       {notice && <Alert severity={notice.severity} onClose={() => setNotice(null)}>{notice.text}</Alert>}
-
-      {activeSection === "apply" && <LeaveBlockedPeriods isAdmin={Boolean(role.isAdmin) && !embeddedApplication} />}
 
             <Collapse in={activeSection === "apply"} timeout={420} unmountOnExit>
       <Box id="leave-workspace-apply" sx={{ display: "grid", gap: 2.5, scrollMarginTop: 110 }}>

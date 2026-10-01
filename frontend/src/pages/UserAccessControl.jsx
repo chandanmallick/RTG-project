@@ -1,11 +1,21 @@
 import { useEffect, useMemo, useState } from "react";
 import axios from "axios";
-import { Alert, Autocomplete, Box, Button, Checkbox, Chip, CircularProgress, FormControlLabel, InputAdornment, Paper, Stack, TextField, Typography } from "@mui/material";
-import { Copy, Database, Save, Search, ShieldCheck, Users } from "lucide-react";
+import { Accordion, AccordionDetails, AccordionSummary, Alert, Autocomplete, Box, Button, Checkbox, Chip, CircularProgress, FormControlLabel, InputAdornment, Paper, Stack, TextField, Typography } from "@mui/material";
+import { ChevronDown, Copy, Database, Save, Search, ShieldCheck, Users } from "lucide-react";
 import AppShell from "../components/layout/AppShell";
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL || "/api";
 const authHeaders = () => ({ Authorization: `Bearer ${localStorage.getItem("portalToken") || ""}` });
+
+const ACCESS_GROUPS = [
+  { key: "home", label: "Homepage & dashboards", note: "Landing dashboards and PSP operational views", pages: ["rtg_dashboard", "psp_dashboard", "psp_report_checking"] },
+  { key: "analytics", label: "Analytics & data", note: "Analysis, validation, schedules and system data", pages: ["frequency_report", "data_validation", "outage_analysis", "mis_report", "nldc_plots", "schedule_data"] },
+  { key: "reports", label: "Report preparation", note: "Operational, reliability and historical reports", pages: ["dso_evening_report", "sri_report", "dso_morning_report", "psp_highlights_report", "plant_deviation_report", "old_logbook"] },
+  { key: "crew", label: "Crew management", note: "Calendar, roster, leave, replacement and team workflows", pages: ["crew_dashboard", "crew_calendar", "crew_roster", "crew_presentation", "crew_leave", "crew_replacement", "crew_training", "crew_threads", "crew_reports"] },
+  { key: "crew_admin", label: "Crew administration", note: "Sensitive crew masters, setup and special permissions", pages: ["leave_calendar_all", "leave_master_delete", "crew_setup", "crew_employees", "crew_admin"] },
+  { key: "portal_admin", label: "Portal administration", note: "Database, configuration, access and audit controls", pages: ["database_sync", "psp_admin", "user_access", "mail_settings", "audit_trail"] },
+  { key: "account", label: "Personal account", note: "Employee self-service profile", pages: ["profile"] },
+];
 
 export default function UserAccessControl() {
   const [data, setData] = useState({ pages: [], users: [] });
@@ -59,6 +69,17 @@ export default function UserAccessControl() {
     () => data.users.filter((item) => item.userId !== selectedId),
     [data.users, selectedId],
   );
+  const groupedPages = useMemo(() => ACCESS_GROUPS.map((group) => ({
+    ...group,
+    items: group.pages.map((key) => data.pages.find((page) => page.key === key)).filter(Boolean),
+  })).filter((group) => group.items.length), [data.pages]);
+  const accessSummary = useMemo(() => data.pages.reduce((summary, page) => {
+    const access = draft[page.key] || {};
+    if (access.view) summary.view += 1;
+    if (access.write) summary.write += 1;
+    if (access.approve) summary.approve += 1;
+    return summary;
+  }, { view: 0, write: 0, approve: 0 }), [data.pages, draft]);
 
   const chooseUser = (item) => {
     setSelectedId(item.userId);
@@ -94,6 +115,21 @@ export default function UserAccessControl() {
       if (field === "view" && !next.view) next.write = false;
       if (field === "view" && !next.view) next.approve = false;
       return { ...current, [key]: next };
+    });
+  };
+
+  const setGroupAccess = (pages, field, enabled) => {
+    if (selectedId === "50041") return;
+    setDraft((current) => {
+      const next = { ...current };
+      pages.forEach((page) => {
+        const access = { ...(next[page.key] || { view: false, write: false }) };
+        access[field] = enabled;
+        if (field === "write" && enabled) access.view = true;
+        if (field === "view" && !enabled) { access.write = false; access.approve = false; }
+        next[page.key] = access;
+      });
+      return next;
     });
   };
 
@@ -282,6 +318,11 @@ export default function UserAccessControl() {
                 <Box>
                   <Typography sx={{ fontWeight: 800 }}>{selected?.name || selectedId}</Typography>
                   <Typography sx={{ color: "#64748B", fontSize: 12 }}>User ID {selectedId}</Typography>
+                  <Stack direction="row" spacing={0.7} sx={{ mt: 1 }}>
+                    <Chip size="small" label={`${accessSummary.view}/${data.pages.length} view`} color="primary" variant="outlined" />
+                    <Chip size="small" label={`${accessSummary.write} write`} color="success" variant="outlined" />
+                    {!!accessSummary.approve && <Chip size="small" label={`${accessSummary.approve} approve`} color="warning" variant="outlined" />}
+                  </Stack>
                 </Box>
                 <Button variant="contained" startIcon={<Save size={16} />} onClick={save} disabled={saving || selectedId === "50041"}>
                   {saving ? "Saving…" : "Save access"}
@@ -343,8 +384,38 @@ export default function UserAccessControl() {
                 </Alert>
               )}
 
-              <Box sx={{ overflow: "auto", maxHeight: "62vh" }}>
-                <table className="table theme-table mb-0">
+              <Box sx={{ p: 1.5, overflow: "auto", maxHeight: "62vh", background: "#F8FAFC" }}>
+                <Stack spacing={1.2}>
+                  {groupedPages.map((group, groupIndex) => {
+                    const viewCount = group.items.filter((page) => draft[page.key]?.view).length;
+                    const writeCount = group.items.filter((page) => draft[page.key]?.write).length;
+                    return <Accordion key={group.key} defaultExpanded={groupIndex === 0 || group.key === "crew"} disableGutters elevation={0} sx={{ border: "1px solid #DCE6F2", borderRadius: "12px !important", overflow: "hidden", "&:before": { display: "none" } }}>
+                      <AccordionSummary expandIcon={<ChevronDown size={18} />} sx={{ px: 2, py: .5, background: "#FFFFFF", "& .MuiAccordionSummary-content": { alignItems: "center", gap: 1.5 } }}>
+                        <Box sx={{ width: 38, height: 38, borderRadius: 2, display: "grid", placeItems: "center", color: "#0057B7", background: "#EAF2FF", flexShrink: 0 }}><ShieldCheck size={18} /></Box>
+                        <Box sx={{ minWidth: 0, flex: 1 }}><Typography sx={{ fontWeight: 900, color: "#0F172A" }}>{group.label}</Typography><Typography sx={{ fontSize: 11.5, color: "#64748B" }}>{group.note}</Typography></Box>
+                        <Stack direction="row" spacing={.6} sx={{ mr: 1 }}><Chip size="small" label={`${viewCount}/${group.items.length} view`} color={viewCount ? "primary" : "default"} variant="outlined" /><Chip size="small" label={`${writeCount} write`} color={writeCount ? "success" : "default"} variant="outlined" /></Stack>
+                      </AccordionSummary>
+                      <AccordionDetails sx={{ p: 0, borderTop: "1px solid #E2E8F0" }}>
+                        {selectedId !== "50041" && <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" sx={{ px: 2, py: 1.2, background: "#F8FAFC", borderBottom: "1px solid #E2E8F0" }}>
+                          <Button size="small" variant="outlined" onClick={() => setGroupAccess(group.items, "view", true)}>View all</Button>
+                          <Button size="small" variant="outlined" color="success" onClick={() => setGroupAccess(group.items, "write", true)}>View + write all</Button>
+                          <Button size="small" variant="text" color="inherit" onClick={() => setGroupAccess(group.items, "view", false)}>Clear group</Button>
+                        </Stack>}
+                        {group.items.map((page) => {
+                          const access = draft[page.key] || {};
+                          const supportsApproval = ["crew_threads", "crew_training"].includes(page.key);
+                          return <Box key={page.key} sx={{ px: 2, py: 1.35, display: "grid", gridTemplateColumns: { xs: "1fr", sm: "minmax(220px,1fr) repeat(3, 105px)" }, gap: 1, alignItems: "center", borderBottom: "1px solid #EDF2F7", "&:last-child": { borderBottom: 0 }, background: access.view ? "#FCFEFF" : "#FFFFFF" }}>
+                            <Box><Typography sx={{ fontSize: 13, fontWeight: 850, color: "#0F172A" }}>{page.label}</Typography><Typography sx={{ fontSize: 10.5, color: "#94A3B8" }}>{page.path}</Typography>{page.key === "leave_calendar_all" && <Typography sx={{ fontSize: 10.5, color: "#B45309", mt: .25 }}>Sensitive: permits viewing every employee's leave calendar.</Typography>}{page.key === "crew_training" && <Typography sx={{ fontSize: 10.5, color: "#B45309", mt: .25 }}>Write controls nomination; Approve grants HR final approval.</Typography>}{page.key === "user_access" && <Typography sx={{ fontSize: 10.5, color: "#B91C1C", mt: .25 }}>Write permits managing other users' portal access.</Typography>}</Box>
+                            <FormControlLabel sx={{ m: 0 }} control={<Checkbox checked={Boolean(access.view)} disabled={selectedId === "50041"} onChange={() => toggle(page.key, "view")} />} label={<Typography sx={{ fontSize: 11.5, fontWeight: 750 }}>View</Typography>} />
+                            <FormControlLabel sx={{ m: 0 }} control={<Checkbox checked={Boolean(access.write)} disabled={selectedId === "50041"} onChange={() => toggle(page.key, "write")} color="success" />} label={<Typography sx={{ fontSize: 11.5, fontWeight: 750 }}>Write</Typography>} />
+                            {supportsApproval ? <FormControlLabel sx={{ m: 0 }} control={<Checkbox checked={Boolean(access.approve)} disabled={selectedId === "50041"} onChange={() => toggle(page.key, "approve")} color="warning" />} label={<Typography sx={{ fontSize: 11.5, fontWeight: 750 }}>Approve</Typography>} /> : <Typography sx={{ pl: 1.2, fontSize: 11, color: "#CBD5E1" }}>No approval role</Typography>}
+                          </Box>;
+                        })}
+                      </AccordionDetails>
+                    </Accordion>;
+                  })}
+                </Stack>
+                {false && <table className="table theme-table mb-0">
                   <thead>
                     <tr>
                       <th>Page / Module</th>
@@ -377,7 +448,7 @@ export default function UserAccessControl() {
                       );
                     })}
                   </tbody>
-                </table>
+                </table>}
               </Box>
             </Paper>
           </Box>

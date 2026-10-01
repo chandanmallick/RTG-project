@@ -150,6 +150,109 @@ def revoke_blocked_leave_period(block_id: str, user=Depends(get_authenticated_us
     return {"message": "Leave period reopened"}
 
 
+def blocked_period_staffing(block: dict, additional_department: str = "") -> dict:
+    start_date, end_date = block["startDate"], block["endDate"]
+    dates = []
+    current = datetime.strptime(start_date, "%Y-%m-%d")
+    through = datetime.strptime(end_date, "%Y-%m-%d")
+    while current <= through:
+        dates.append(current.strftime("%Y-%m-%d"))
+        current += timedelta(days=1)
+
+    records = list(employee_daily_collection.find({
+        "date": {"$gte": start_date, "$lte": end_date},
+        "assignedDuty": {"$in": ["Morning", "Evening", "Night"]},
+    }))
+    employee_ids = list({clean_id(item.get("employeeId")) for item in records if clean_id(item.get("employeeId"))})
+    employees = {
+        clean_id(item.get("userId") or item.get("employeeId")): item
+        for item in employee_collection.find({"$or": [{"userId": {"$in": employee_ids}}, {"employeeId": {"$in": employee_ids}}]})
+    }
+    departments = sorted({
+        clean_id(value)
+        for employee in employees.values()
+        for value in (employee.get("departments") or [employee.get("department")])
+        if clean_id(value)
+    })
+    shifts = {shift: {value: [] for value in dates} for shift in ["Morning", "Evening", "Night"]}
+    additional = {value: [] for value in dates}
+    selected_department = clean_id(additional_department)
+    for record in records:
+        employee_id = clean_id(record.get("employeeId"))
+        employee = employees.get(employee_id) or {}
+        employee_departments = [clean_id(value) for value in (employee.get("departments") or [employee.get("department")]) if clean_id(value)]
+        entry = {
+            "employeeId": employee_id,
+            "name": record.get("name") or employee.get("name") or employee_id,
+            "replacement": bool(record.get("replacementDuty")),
+            "department": ", ".join(employee_departments),
+        }
+        group_name = clean_id(record.get("groupName")).lower()
+        if group_name != "general":
+            shifts[record["assignedDuty"]][record["date"]].append(entry)
+        if selected_department and selected_department in employee_departments:
+            additional[record["date"]].append(entry)
+    return {
+        "id": str(block["_id"]), "startDate": start_date, "endDate": end_date,
+        "reason": block.get("reason", ""), "dates": dates,
+        "dayNames": {value: datetime.strptime(value, "%Y-%m-%d").strftime("%a") for value in dates},
+        "departments": departments, "selectedDepartment": selected_department,
+        "shifts": shifts, "additionalStrength": additional,
+    }
+
+
+def get_leave_block(block_id: str) -> dict:
+    try:
+        object_id = ObjectId(block_id)
+    except Exception as exc:
+        raise HTTPException(400, "Invalid blocked period") from exc
+    block = system_settings_collection.find_one({"_id": object_id, "type": "leave_block", "active": True})
+    if not block:
+        raise HTTPException(404, "Blocked period not found")
+    return block
+
+
+@router.get("/blocked-periods/{block_id}/staffing")
+def get_blocked_period_staffing(block_id: str, additionalDepartment: str = Query(""), user=Depends(get_authenticated_user)):
+    return blocked_period_staffing(get_leave_block(block_id), additionalDepartment)
+
+
+@router.get("/blocked-periods/{block_id}/staffing.xlsx")
+def export_blocked_period_staffing(block_id: str, additionalDepartment: str = Query(""), user=Depends(get_authenticated_user)):
+    report = blocked_period_staffing(get_leave_block(block_id), additionalDepartment)
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Blocked period staffing"
+    sheet.append(["Date", *report["dates"]])
+    sheet.append(["Day", *[report["dayNames"][value] for value in report["dates"]]])
+    sheet.append(["Block reason", report["reason"]])
+    for shift in ["Morning", "Evening", "Night"]:
+        sheet.append([shift, *[
+            "\n".join(("[R] " if item["replacement"] else "") + item["name"] for item in report["shifts"][shift][value]) or "NR"
+            for value in report["dates"]
+        ]])
+    if report["selectedDepartment"]:
+        sheet.append([f"Additional strength — {report['selectedDepartment']}", *[
+            "\n".join(item["name"] for item in report["additionalStrength"][value]) or "-"
+            for value in report["dates"]
+        ]])
+    sheet.freeze_panes = "B2"
+    for column in sheet.columns:
+        sheet.column_dimensions[column[0].column_letter].width = 20
+        for cell in column:
+            cell.alignment = Alignment(wrap_text=True, vertical="top")
+    for cell in sheet[1]:
+        cell.font = Font(bold=True)
+        cell.fill = PatternFill("solid", fgColor="FFF200")
+    for cell in sheet[2]:
+        cell.font = Font(bold=True)
+        cell.fill = PatternFill("solid", fgColor="92D050")
+    output = BytesIO()
+    workbook.save(output)
+    filename = f"blocked_leave_staffing_{report['startDate']}_{report['endDate']}.xlsx"
+    return Response(output.getvalue(), media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+
+
 def can_view_all_leaves(user: dict) -> bool:
     """Global leave visibility is intentionally separate from page access."""
     # 50041 is the portal's configured leave-calendar administrator.  Other
@@ -348,27 +451,21 @@ def migrate_pending_nonshift_leave_workflows() -> int:
 
 
 def refresh_unacted_organization_leave_workflows() -> int:
-    """Refresh untouched pending chains after an employee hierarchy change.
+    """Redirect every unacted approval stage to the employee's live hierarchy.
 
-    Approval steps that have already been acted upon remain immutable audit
-    snapshots. Only requests still at their first, entirely pending step are
-    eligible to follow the employee's current configured approval route.
+    Completed steps remain immutable audit evidence. The current and future
+    pending stages are rebuilt whenever Organization Master changes.
     """
     refreshed = 0
     records = leave_request_collection.find({
         "finalStatus": "Applied",
         "approvalMode": "Organization",
-        "organizationApprovalStatus": "Pending",
-        "$or": [
-            {"currentApprovalIndex": 0},
-            {"currentApprovalIndex": None},
-            {"currentApprovalIndex": {"$exists": False}},
-        ],
+        "organizationApprovalStatus": {"$in": ["Pending", "In Progress"]},
     })
     for leave in records:
         old_chain = leave.get("approvalChain") or []
-        if any(step.get("status") != "Pending" or step.get("actedBy") or step.get("actedOn") for step in old_chain):
-            continue
+        current_index = int(leave.get("currentApprovalIndex") or 0)
+        completed_steps = old_chain[:current_index]
         employee = employee_by_id(leave.get("employeeId"))
         if not employee:
             continue
@@ -383,15 +480,23 @@ def refresh_unacted_organization_leave_workflows() -> int:
                 for step in chain
             ]
 
-        if signature(old_chain) == signature(new_chain):
+        completed_levels = {step.get("level") for step in completed_steps}
+        completed_actors = {actor for step in completed_steps for actor in step_approver_ids(step)}
+        pending_steps = [
+            step for step in new_chain
+            if step.get("level") not in completed_levels
+            and not completed_actors.intersection(step_approver_ids(step))
+        ]
+        refreshed_chain = completed_steps + pending_steps
+        if signature(old_chain) == signature(refreshed_chain):
             continue
         result = leave_request_collection.update_one(
-            {"_id": leave["_id"], "currentApprovalIndex": {"$in": [0, None]}},
+            {"_id": leave["_id"], "finalStatus": "Applied"},
             {"$set": {
-                "approvalChain": new_chain,
+                "approvalChain": refreshed_chain,
                 "configuredApprovalLevels": configured_levels,
-                "currentApprovalIndex": 0,
-                "organizationApprovalStatus": "Pending",
+                "currentApprovalIndex": len(completed_steps),
+                "organizationApprovalStatus": "In Progress" if completed_steps else "Pending",
                 "approvalHierarchyRefreshedOn": datetime.utcnow(),
                 "updatedOn": datetime.utcnow(),
             }},

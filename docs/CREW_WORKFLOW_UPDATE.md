@@ -8,6 +8,43 @@ applications for everyone, including applications entered by administrators.
 Existing requests are unchanged. **Reopen period** removes the restriction while
 preserving who created and revoked it. All mutations are checked by the backend.
 
+### Blocked-period staffing view
+
+Every active block provides a date-wise staffing view and matching Excel export.
+Columns include the date and weekday; rows show Morning, Evening and Night shift
+staffing. Normal shift rows exclude the General group. A replacement employee
+remains in the applicable shift cell, with alternate shading applied only to that
+employee's name. Empty combinations display `NR`.
+
+Additional strength is hidden by default. Selecting a department adds only that
+department's staff as a separate row, and the Excel export reflects the same
+selection. The backing endpoints are
+`GET /leave/blocked-periods/{id}/staffing` and
+`GET /leave/blocked-periods/{id}/staffing.xlsx`; Excel prefixes replacement names
+with `[R]` and includes both date and weekday rows.
+
+## Pending leave after hierarchy changes
+
+Organization-based leave approval follows the employee's current Organization
+Master hierarchy for every stage that has not yet been acted upon.
+`refresh_unacted_organization_leave_workflows` runs before leave lists are
+returned and rebuilds the current and future pending stages from
+`organization_leave_approval_chain`.
+
+Completed stages remain immutable audit evidence: actor, timestamp, comment and
+delegation metadata are never rewritten. If the Reporting Officer, intermediary
+officer, HOD or configured approval-level count changes, the next inbox owner is
+the newly configured officer. Duplicate actors and already-completed levels are
+not reintroduced.
+
+Primary implementation anchors are `ensure_leave_dates_open`,
+`blocked_period_staffing`, `get_blocked_period_staffing`,
+`export_blocked_period_staffing`, and
+`refresh_unacted_organization_leave_workflows` in
+`backend/crew_legacy/api/leave_api.py`; the shared frontend is
+`frontend/src/components/crew/LeaveBlockedPeriods.jsx` hosted by
+`frontend/src/crewLegacy/LeaveManagement.jsx`.
+
 ## Published holidays
 
 Both calendar endpoints read the current active Holiday Master for the requested

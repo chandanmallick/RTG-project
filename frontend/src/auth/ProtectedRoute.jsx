@@ -1,19 +1,31 @@
+import { useEffect, useRef, useState } from "react";
 import { Alert, Box, Button, CircularProgress, Paper, Stack, Typography } from "@mui/material";
 import { Navigate, useLocation, useNavigate } from "react-router-dom";
 import { HelpCircle, LogOut, LockKeyhole, Mail } from "lucide-react";
 import { useAuth } from "./AuthContext";
 
 export default function ProtectedRoute({ pageKey, children, allowWorkflowAccess = false }) {
-  const { user, loading, logout } = useAuth();
+  const { user, loading, logout, refreshSession } = useAuth();
+  const [refreshingAccess, setRefreshingAccess] = useState(false);
+  const refreshedKey = useRef("");
   const location = useLocation();
   const navigate = useNavigate();
   const supportEmail = "chandan.mallick@grid-india.in";
   const supportPhone = "9007059660";
 
-  if (loading) return <Box sx={{ minHeight: "100vh", display: "grid", placeItems: "center", background: "#F8FAFC" }}><CircularProgress size={28} sx={{ color: "#03624C" }} /></Box>;
-  if (!user) return <Navigate to="/login" replace state={{ from: location.pathname }} />;
-  const access = user.permissions?.[pageKey];
+  const access = user?.permissions?.[pageKey];
   const availableToAllEmployees = pageKey === "crew_reports";
+  useEffect(() => {
+    const refreshKey = `${user?.employeeId || ""}:${pageKey}`;
+    if (!loading && user && !access?.view && !availableToAllEmployees && refreshedKey.current !== refreshKey) {
+      refreshedKey.current = refreshKey;
+      setRefreshingAccess(true);
+      refreshSession().finally(() => setRefreshingAccess(false));
+    }
+  }, [access?.view, availableToAllEmployees, loading, pageKey, refreshSession, user]);
+
+  if (loading || refreshingAccess) return <Box sx={{ minHeight: "100vh", display: "grid", placeItems: "center", background: "#F8FAFC" }}><CircularProgress size={28} sx={{ color: "#03624C" }} /></Box>;
+  if (!user) return <Navigate to="/login" replace state={{ from: location.pathname }} />;
   if (!access?.view && !availableToAllEmployees) {
     if (allowWorkflowAccess) {
       return (

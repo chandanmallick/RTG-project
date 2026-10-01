@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import { Alert, Box, Button, Chip, Collapse, Dialog, DialogActions, DialogContent, DialogTitle, Paper, Stack, TextField, Typography } from "@mui/material";
-import { CalendarRange, Plus, ShieldCheck } from "lucide-react";
+import { Alert, Box, Button, Chip, Collapse, Dialog, DialogActions, DialogContent, DialogTitle, MenuItem, Paper, Stack, Table, TableBody, TableCell, TableHead, TableRow, TextField, Typography } from "@mui/material";
+import { CalendarRange, Download, Eye, Plus, ShieldCheck } from "lucide-react";
 import api from "../../crewLegacy/api";
 
 export default function LeaveBlockedPeriods({ isAdmin = false }) {
@@ -10,6 +10,9 @@ export default function LeaveBlockedPeriods({ isAdmin = false }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [form, setForm] = useState({ startDate: "", endDate: "", reason: "" });
+  const [staffing, setStaffing] = useState(null);
+  const [staffingBusy, setStaffingBusy] = useState(false);
+  const [additionalDepartment, setAdditionalDepartment] = useState("");
   const load = async () => {
     try { setPeriods((await api.get("/leave/blocked-periods")).data || []); }
     catch (e) {
@@ -19,6 +22,22 @@ export default function LeaveBlockedPeriods({ isAdmin = false }) {
     }
   };
   useEffect(() => { load(); }, []);
+  const viewStaffing = async (period, department = "") => {
+    setStaffingBusy(true); setError("");
+    try {
+      const { data } = await api.get(`/leave/blocked-periods/${period.id}/staffing`, { params: { additionalDepartment: department } });
+      setStaffing(data); setAdditionalDepartment(department);
+    } catch (e) { setError(e.response?.data?.detail || "Unable to load blocked-period staffing."); }
+    finally { setStaffingBusy(false); }
+  };
+  const downloadStaffing = async () => {
+    if (!staffing) return;
+    const response = await api.get(`/leave/blocked-periods/${staffing.id}/staffing.xlsx`, { params: { additionalDepartment }, responseType: "blob" });
+    const url = URL.createObjectURL(response.data);
+    const link = document.createElement("a");
+    link.href = url; link.download = `blocked_leave_staffing_${staffing.startDate}_${staffing.endDate}.xlsx`; link.click();
+    URL.revokeObjectURL(url);
+  };
   const save = async () => {
     setBusy(true); setError("");
     try {
@@ -40,6 +59,7 @@ export default function LeaveBlockedPeriods({ isAdmin = false }) {
     {error && <Alert severity="error" sx={{ mt: 1.5 }}>{error}</Alert>}
     <Collapse in={current.length > 0}><Stack  sx={{ ...({ mt: 1.5, maxHeight: 220, overflow: "auto" }), gap: 1 }}>{current.map(p => <Stack key={p.id} direction={{ xs: "column", sm: "row" }}   sx={{ ...({ p: 1.5, border: "1px solid #FED7AA", borderRadius: 2, bgcolor: "#FFF7ED" }), gap: 1.5, alignItems: { sm: "center" } }}>
       <CalendarRange size={19} color="#B45309" /><Box sx={{ flex: 1 }}><Typography sx={{ fontWeight: 800, fontSize: 13 }}  >{p.startDate} — {p.endDate} <Chip size="small" label="Blocked" sx={{ ml: 1, height: 21, bgcolor: "#FFEDD5", color: "#9A3412" }} /></Typography><Typography sx={{ fontSize: 12 }}  color="text.secondary">{p.reason}</Typography></Box>
+      <Button size="small" startIcon={<Eye size={15} />} onClick={() => viewStaffing(p)}>Staffing view</Button>
       {isAdmin && <Button size="small" onClick={() => { setError(""); setRevoke(p); }}>Reopen period</Button>}
     </Stack>)}</Stack></Collapse>
     <Dialog open={open || Boolean(revoke)} onClose={() => { if (!busy) { setOpen(false); setRevoke(null); } }} fullWidth maxWidth="sm">
@@ -53,6 +73,26 @@ export default function LeaveBlockedPeriods({ isAdmin = false }) {
         </>}
       </Stack></DialogContent>
       <DialogActions sx={{ p: 2 }}><Button disabled={busy} onClick={() => { setOpen(false); setRevoke(null); }}>Cancel</Button><Button variant="contained" disabled={busy || (!revoke && (!form.startDate || !form.endDate || form.endDate < form.startDate || !form.reason.trim()))} onClick={save}>{busy ? "Saving…" : revoke ? "Reopen period" : "Block leave"}</Button></DialogActions>
+    </Dialog>
+    <Dialog open={Boolean(staffing)} onClose={() => !staffingBusy && setStaffing(null)} fullWidth maxWidth="xl">
+      <DialogTitle sx={{ fontWeight: 900 }}>Blocked-period staffing · {staffing?.startDate} to {staffing?.endDate}</DialogTitle>
+      <DialogContent dividers>
+        {staffing && <Stack spacing={1.5}>
+          <Alert severity="warning">{staffing.reason}</Alert>
+          <Stack direction={{ xs: "column", sm: "row" }} spacing={1} alignItems={{ sm: "center" }}>
+            <TextField select size="small" label="Additional department strength" value={additionalDepartment} onChange={(event) => viewStaffing(staffing, event.target.value)} sx={{ minWidth: 280 }}><MenuItem value="">Do not show</MenuItem>{staffing.departments.map((department) => <MenuItem key={department} value={department}>{department}</MenuItem>)}</TextField>
+            <Button variant="outlined" startIcon={<Download size={16} />} onClick={downloadStaffing}>Download Excel</Button>
+            <Chip label="Replacement names are shaded" sx={{ bgcolor: "#DBEAFE", color: "#1D4ED8", fontWeight: 800 }} />
+          </Stack>
+          <Box sx={{ overflow: "auto", border: "1px solid #CBD5E1" }}><Table size="small" sx={{ minWidth: Math.max(760, staffing.dates.length * 145) }}>
+            <TableHead><TableRow><TableCell sx={{ fontWeight: 900, position: "sticky", left: 0, zIndex: 2, bgcolor: "#FFF" }}>Date</TableCell>{staffing.dates.map((value) => <TableCell key={value} align="center" sx={{ bgcolor: "#FFF200", fontWeight: 900 }}>{value}<Typography sx={{ fontSize: 11, fontWeight: 900, color: "#C2410C" }}>{staffing.dayNames[value]}</Typography></TableCell>)}</TableRow></TableHead>
+            <TableBody>{["Morning", "Evening", "Night"].map((shift) => <TableRow key={shift}><TableCell sx={{ fontWeight: 900, position: "sticky", left: 0, bgcolor: "#FFF", zIndex: 1 }}>{shift}</TableCell>{staffing.dates.map((value) => <TableCell key={value} sx={{ verticalAlign: "top" }}>{staffing.shifts[shift][value].length ? <Stack spacing={.4}>{staffing.shifts[shift][value].map((person) => <Box key={person.employeeId} sx={{ px: .65, py: .35, borderRadius: 1, bgcolor: person.replacement ? "#DBEAFE" : "transparent", color: person.replacement ? "#1D4ED8" : "#0F172A", fontSize: 11, fontWeight: person.replacement ? 900 : 650 }}>{person.name}</Box>)}</Stack> : <Typography sx={{ textAlign: "center", color: "#64748B", fontSize: 11 }}>NR</Typography>}</TableCell>)}</TableRow>)}
+            {additionalDepartment && <TableRow><TableCell sx={{ fontWeight: 900, bgcolor: "#F3E8FF" }}>Additional · {additionalDepartment}</TableCell>{staffing.dates.map((value) => <TableCell key={value} sx={{ bgcolor: "#FAF5FF", verticalAlign: "top" }}>{staffing.additionalStrength[value].map((person) => <Typography key={person.employeeId} sx={{ fontSize: 11 }}>{person.name}</Typography>)}</TableCell>)}</TableRow>}
+            </TableBody>
+          </Table></Box>
+        </Stack>}
+      </DialogContent>
+      <DialogActions><Button onClick={() => setStaffing(null)}>Close</Button></DialogActions>
     </Dialog>
   </Paper>;
 }

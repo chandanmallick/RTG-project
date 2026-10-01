@@ -126,8 +126,11 @@ def _ensure_access(user_id: str) -> dict:
     return merged
 
 
-def _require_access_admin(user: dict):
-    if user.get("employeeId") != "50041":
+def _require_access_admin(user: dict, write: bool = False):
+    employee_id = str(user.get("employeeId") or "").strip()
+    access = (_ensure_access(employee_id).get("user_access") or {}) if employee_id else {}
+    permitted = access.get("write") if write else access.get("view")
+    if employee_id != "50041" and not permitted:
         raise HTTPException(status_code=403, detail="User access administration is required")
 
 
@@ -320,7 +323,7 @@ class BulkPageAccessRequest(BaseModel):
 
 @router.put("/admin/access/{user_id}")
 def update_user_access(user_id: str, data: AccessUpdateRequest, user=Depends(get_authenticated_user)):
-    _require_access_admin(user)
+    _require_access_admin(user, write=True)
     if user_id == "50041":
         pages = {key: {"view": True, "write": True, **({"approve": True} if key in {"crew_threads", "crew_training"} else {})} for key, _, _ in PAGE_CATALOG}
     else:
@@ -347,7 +350,7 @@ def update_page_access_for_all(
     user=Depends(get_authenticated_user),
 ):
     """Grant or revoke one page for every active portal employee."""
-    _require_access_admin(user)
+    _require_access_admin(user, write=True)
     valid_keys = {key for key, _, _ in PAGE_CATALOG}
     if page_key not in valid_keys:
         raise HTTPException(status_code=404, detail="Page permission not found")
