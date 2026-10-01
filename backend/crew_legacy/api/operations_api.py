@@ -29,6 +29,7 @@ def operation_actions(pages, role, nomination_access, counts, sports_manager=Fal
         "calendar": view("crew_calendar"),
         "trainingEvents": write("crew_training") and training_hr,
         "holidays": write("crew_training"),
+        "specialEventRoster": bool(role.get("isAdmin")),
         "sportsEvents": write("crew_leave") and sports_manager,
         "applyLeave": write("crew_leave"),
         "leaveTracking": view("crew_leave"),

@@ -8,6 +8,7 @@ import api from "../../crewLegacy/api";
 import LeaveManagement from "../../crewLegacy/LeaveManagement";
 import TrainingHolidayMaster from "../../crewLegacy/TrainingHolidayMaster";
 import SportsManagement from "./SportsManagement";
+import LeaveBlockedPeriods from "../../components/crew/LeaveBlockedPeriods";
 
 const stages = [
   { id: "prepare", eyebrow: "01 · Prepare", title: "Master / event", color: "#6D28D9", tint: "#F5F3FF" },
@@ -20,7 +21,7 @@ const stages = [
 
 const categories = [
   { id: "leave", title: "Leave", subtitle: "Holiday to final reporting", icon: Umbrella, color: "#0369A1", tint: "#F0F9FF", actions: {
-    prepare: [{ key: "holidays", title: "Holiday calendar", note: "Create and maintain holidays", icon: CalendarDays, to: "/crew/training?section=holiday" }],
+    prepare: [{ key: "holidays", title: "Holiday calendar", note: "Create and maintain holidays", icon: CalendarDays, to: "/crew/training?section=holiday" }, { key: "specialEventRoster", title: "Special Event roster", note: "Block leave and review staffing", icon: Users, to: "/crew/operations" }],
     request: [{ key: "applyLeave", title: "Apply leave", note: "Leave and station leave", icon: Umbrella, to: "/crew/leave?section=apply" }],
     decide: [{ key: "leaveApproval", title: "Approve leave", note: "Requests awaiting decision", icon: CheckCircle2, to: "/crew/leave?section=pending" }, { key: "delegate", title: "Delegate approval", note: "Temporary approval power", icon: Settings2, to: "/crew/leave?section=delegation" }],
     cover: [{ key: "leaveReplacement", title: "Replacement", note: "Assign leave duty cover", icon: Users, to: "/crew/replacement?section=leave" }],
@@ -97,7 +98,7 @@ export default function CrewOperations() {
     return () => { requestRef.current += 1; window.clearInterval(timer); window.removeEventListener("focus", update); };
   }, [refresh, user?.employeeId]);
   const openAction = (item) => {
-    const popupByKey = { applyLeave: "leave", requestTraining: "training", applySports: "sports" };
+    const popupByKey = { applyLeave: "leave", requestTraining: "training", applySports: "sports", specialEventRoster: "special-event" };
     if (popupByKey[item.key]) setApplicationPopup(popupByKey[item.key]);
     else navigate(item.to);
   };
@@ -130,13 +131,14 @@ export default function CrewOperations() {
       <Typography sx={{ mt: 1.2, fontSize: 11, color: "#64748B" }}>Read every coloured row from left to right. Replacement is kept in one process column; tracking and reports are the final two steps.</Typography>
       <Dialog open={Boolean(applicationPopup)} onClose={() => setApplicationPopup("")} fullWidth maxWidth="xl" PaperProps={{ sx: { maxHeight: "92dvh", borderRadius: 3 } }}>
         <DialogTitle sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "1px solid #E2E8F0" }}>
-          <Box><Typography sx={{ fontSize: 18, fontWeight: 950 }}>New {applicationPopup || "crew"} application</Typography><Typography sx={{ fontSize: 10.5, color: "#64748B" }}>Complete the application without leaving Operations.</Typography></Box>
+          <Box><Typography sx={{ fontSize: 18, fontWeight: 950 }}>{applicationPopup === "special-event" ? "Special Event roster" : `New ${applicationPopup || "crew"} application`}</Typography><Typography sx={{ fontSize: 10.5, color: "#64748B" }}>{applicationPopup === "special-event" ? "Manage leave-block periods, date-wise staffing and Excel export." : "Complete the application without leaving Operations."}</Typography></Box>
           <Button onClick={() => setApplicationPopup("")} sx={{ textTransform: "none", fontWeight: 850 }}>Close</Button>
         </DialogTitle>
         <DialogContent sx={{ p: { xs: 1.2, md: 2 }, background: "#F8FAFC" }}>
           {applicationPopup === "leave" && <LeaveManagement embeddedApplication onApplicationChanged={closeApplicationPopup} />}
           {applicationPopup === "training" && <TrainingHolidayMaster embeddedRequest onRequestSubmitted={closeApplicationPopup} />}
           {applicationPopup === "sports" && <SportsManagement embedded onSubmitted={closeApplicationPopup} />}
+          {applicationPopup === "special-event" && <LeaveBlockedPeriods isAdmin />}
         </DialogContent>
       </Dialog>
     </Box>

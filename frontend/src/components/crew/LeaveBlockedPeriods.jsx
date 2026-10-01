@@ -57,6 +57,7 @@ export default function LeaveBlockedPeriods({ isAdmin = false }) {
       {isAdmin && <Button startIcon={<Plus size={16} />} variant="outlined" onClick={() => { setError(""); setOpen(true); }}>Block a period</Button>}
     </Stack>
     {error && <Alert severity="error" sx={{ mt: 1.5 }}>{error}</Alert>}
+    {isAdmin && !current.length && <Alert severity="info" sx={{ mt: 1.5 }}>Create a blocked period first. Its row will then show <strong>Staffing view</strong>, where the date-wise roster and Excel download are available.</Alert>}
     <Collapse in={current.length > 0}><Stack  sx={{ ...({ mt: 1.5, maxHeight: 220, overflow: "auto" }), gap: 1 }}>{current.map(p => <Stack key={p.id} direction={{ xs: "column", sm: "row" }}   sx={{ ...({ p: 1.5, border: "1px solid #FED7AA", borderRadius: 2, bgcolor: "#FFF7ED" }), gap: 1.5, alignItems: { sm: "center" } }}>
       <CalendarRange size={19} color="#B45309" /><Box sx={{ flex: 1 }}><Typography sx={{ fontWeight: 800, fontSize: 13 }}  >{p.startDate} — {p.endDate} <Chip size="small" label="Blocked" sx={{ ml: 1, height: 21, bgcolor: "#FFEDD5", color: "#9A3412" }} /></Typography><Typography sx={{ fontSize: 12 }}  color="text.secondary">{p.reason}</Typography></Box>
       <Button size="small" startIcon={<Eye size={15} />} onClick={() => viewStaffing(p)}>Staffing view</Button>

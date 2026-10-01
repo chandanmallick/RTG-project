@@ -2,11 +2,14 @@
 
 ## Leave availability
 
-Open Leave > Apply. Administrators can use **Block a period**, enter inclusive
-start/end dates and a reason, then save. The restriction applies to new leave
+Open Crew Operations > Master / event > **Special Event roster**. Administrators
+can use **Block a period**, enter inclusive start/end dates and a reason, then
+save. The restriction applies to new leave
 applications for everyone, including applications entered by administrators.
 Existing requests are unchanged. **Reopen period** removes the restriction while
-preserving who created and revoked it. All mutations are checked by the backend.
+preserving who created and revoked it. The Leave Apply page retains the read-only
+availability notice for employees; management and staffing controls live in the
+Special Event roster tile. All mutations are checked by the backend.
 
 ### Blocked-period staffing view
 
