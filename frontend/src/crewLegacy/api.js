@@ -52,6 +52,7 @@ api.interceptors.request.use((config) => {
   const isSportsApproval = method === "POST" && /^\/sports\/applications\/[^/]+\/(approve|reject)$/.test(requestUrl);
   // Calendar applications use the target workflow's server-side employee and
   // reporting-authority checks, independent of calendar layout edit access.
+  const isSpecialEventManagement = ["POST", "PUT"].includes(method) && /^\/special-events(?:\/[^/]+\/blocking)?$/.test(requestUrl);
   const isLeaveBlockAdministration = ["POST", "PUT", "DELETE"].includes(method) && /^\/leave\/blocked-periods(?:\/[^/]+(?:\/(?:status|permanent))?)?$/.test(requestUrl);
   // Training programme maintenance (create/edit/delete a programme from the
   // calendar) is authorized on the server by HR training-approval rights, which
@@ -65,7 +66,7 @@ api.interceptors.request.use((config) => {
   // binds it to the authenticated employee, so page-level Write access is not
   // needed to choose a post-login landing page.
   const isLandingPagePreference = ["POST", "PUT"].includes(method) && requestUrl.includes("/profile/landing-page");
-  if (!["GET", "HEAD", "OPTIONS"].includes(method) && permissions[pageKeyForPath()]?.write === false && !isMasterDelete && !isDutyDecision && !isTrainingApproval && !isLeaveApproval && !isSportsApproval && !isLeaveApplication && !isLeaveBlockAdministration && !isTrainingMaster && !isSportsEventManagement && !isLandingPagePreference) {
+  if (!["GET", "HEAD", "OPTIONS"].includes(method) && permissions[pageKeyForPath()]?.write === false && !isMasterDelete && !isDutyDecision && !isTrainingApproval && !isLeaveApproval && !isSportsApproval && !isLeaveApplication && !isLeaveBlockAdministration && !isSpecialEventManagement && !isTrainingMaster && !isSportsEventManagement && !isLandingPagePreference) {
     return Promise.reject(new Error("This page is read-only for your account."));
   }
   return config;

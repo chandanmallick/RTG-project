@@ -3,7 +3,7 @@ import { Alert, Box, Button, Chip, Collapse, Dialog, DialogActions, DialogConten
 import { CalendarRange, Download, Eye, Plus, Power, RotateCcw, ShieldCheck, Trash2 } from "lucide-react";
 import api from "../../crewLegacy/api";
 
-export default function LeaveBlockedPeriods({ isAdmin = false }) {
+export default function LeaveBlockedPeriods({ isAdmin = false, allowCreate = true }) {
   const [periods, setPeriods] = useState([]);
   const [open, setOpen] = useState(false);
   const [revoke, setRevoke] = useState(null);
@@ -68,10 +68,10 @@ export default function LeaveBlockedPeriods({ isAdmin = false }) {
   return <Paper elevation={0} sx={{ p: 2, borderRadius: 3, border: "1px solid #E2E8F0", background: "#FAFCFF" }}>
     <Stack sx={{ gap: 1.5, alignItems: { sm: "center" }, justifyContent: "space-between" }} direction={{ xs: "column", sm: "row" }}   >
       <Stack sx={{ gap: 1.5, alignItems: "center" }} direction="row"  ><Box sx={{ p: 1, display: "flex", borderRadius: 2, bgcolor: "#EEF2FF", color: "#4338CA" }}><ShieldCheck size={22} /></Box><Box><Typography sx={{ fontWeight: 850 }} >Leave availability</Typography><Typography variant="body2" color="text.secondary">{activeCount ? `${activeCount} active blocked period(s) · applies to everyone` : "Leave applications are open"}</Typography></Box></Stack>
-      {isAdmin && <Button startIcon={<Plus size={16} />} variant="outlined" onClick={() => { setError(""); setOpen(true); }}>Block a period</Button>}
+      {isAdmin && allowCreate && <Button startIcon={<Plus size={16} />} variant="outlined" onClick={() => { setError(""); setOpen(true); }}>Block a period</Button>}
     </Stack>
     {error && <Alert severity="error" sx={{ mt: 1.5 }}>{error}</Alert>}
-    {isAdmin && !current.length && <Alert severity="info" sx={{ mt: 1.5 }}>Create a blocked period first. Its row will then show <strong>Staffing view</strong>, where the date-wise roster and Excel download are available.</Alert>}
+    {isAdmin && allowCreate && !current.length && <Alert severity="info" sx={{ mt: 1.5 }}>Create a blocked period first. Its row will then show <strong>Staffing view</strong>, where the date-wise roster and Excel download are available.</Alert>}
     <Collapse in={current.length > 0}><Stack  sx={{ ...({ mt: 1.5, maxHeight: 220, overflow: "auto" }), gap: 1 }}>{current.map(p => <Stack key={p.id} direction={{ xs: "column", sm: "row" }}   sx={{ ...({ p: 1.5, border: "1px solid #FED7AA", borderRadius: 2, bgcolor: "#FFF7ED" }), gap: 1.5, alignItems: { sm: "center" } }}>
       <CalendarRange size={19} color={p.active === false ? "#64748B" : "#B45309"} /><Box sx={{ flex: 1 }}><Typography sx={{ fontWeight: 800, fontSize: 13 }}  >{p.startDate} — {p.endDate} <Chip size="small" label={p.active === false ? "Temporarily disabled" : "Active block"} sx={{ ml: 1, height: 21, bgcolor: p.active === false ? "#E2E8F0" : "#FFEDD5", color: p.active === false ? "#475569" : "#9A3412" }} /></Typography><Typography sx={{ fontSize: 12 }} color="text.secondary">{p.reason}</Typography></Box>
       {p.active !== false && <Button size="small" startIcon={<Eye size={15} />} onClick={() => viewStaffing(p)}>Staffing view</Button>}

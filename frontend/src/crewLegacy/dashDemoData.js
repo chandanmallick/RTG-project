@@ -6,7 +6,7 @@ export function createDashDemo(today) {
   const dates = Array.from({ length: 9 }, (_, i) => dayjs(today).add(i - 1, "day").format("YYYY-MM-DD"));
   const groups = Array.from({ length: 4 }, (_, g) => ({ groupName: `Group ${g + 1}`, employees: names.map((name, i) => ({
     employeeId: g === 0 && i === 0 ? demoEmployeeId : `DEMO${g}${i}`, name: g === 0 ? name : `${["Suresh", "Kavita", "Rahul", "Ananya", "Vikram", "Sonal"][i]} ${["Gupta", "Bose", "Nair", "Patel"][g]}`, IsSIC: i === 0,
-    duties: Object.fromEntries(dates.map((date, d) => [date, { shift: ["Evening", "Evening", "Morning", "Morning", "Night", "Night", "OFF", "OFF"][(d + g * 2) % 8], ...(g === 0 && i === 1 && d === 3 ? { leaveStatus: "Applied", leaveType: "CL" } : {}), ...(g === 1 && i === 2 && d === 4 ? { trainingName: "Safety refresher", trainingStatus: "Approved" } : {}) }]))
+    duties: Object.fromEntries(dates.map((date, d) => [date, { shift: ["Evening", "Evening", "Morning", "Morning", "Night", "Night", "OFF", "OFF"][(d + g * 2) % 8], ...(g === 0 && i === 2 && d === 2 ? { leaveStatus: "Approved", leaveType: "CL", replacementRequired: true } : {}), ...(g === 0 && i === 1 && d === 3 ? { leaveStatus: "Applied", leaveType: "CL" } : {}), ...(g === 1 && i === 2 && d === 4 ? { trainingName: "Safety refresher", trainingStatus: "Approved" } : {}) }]))
   })) }));
   const records = [
     { id: "demo-leave", leaveGroupId: "demo-leave-group", kind: "Leave", employeeId: demoEmployeeId, name: names[0], leaveType: "Casual leave", date: dayjs(today).add(2, "day").format("YYYY-MM-DD"), finalStatus: "Applied", sicApprovalStatus: "Pending", isOwner: true, canCancel: true },

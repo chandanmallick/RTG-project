@@ -21,7 +21,7 @@ const stages = [
 
 const categories = [
   { id: "leave", title: "Leave", subtitle: "Holiday to final reporting", icon: Umbrella, color: "#0369A1", tint: "#F0F9FF", actions: {
-    prepare: [{ key: "holidays", title: "Holiday calendar", note: "Create and maintain holidays", icon: CalendarDays, to: "/crew/training?section=holiday" }, { key: "specialEventRoster", title: "Special Event roster", note: "Block leave and review staffing", icon: Users, to: "/crew/operations" }],
+    prepare: [{ key: "holidays", title: "Holiday calendar", note: "Create and maintain holidays", icon: CalendarDays, to: "/crew/training?section=holiday" }, { key: "specialEventRoster", title: "Special Event roster", note: "Block leave and review staffing", icon: Users, to: "/crew/roster" }],
     request: [{ key: "applyLeave", title: "Apply leave", note: "Leave and station leave", icon: Umbrella, to: "/crew/leave?section=apply" }],
     decide: [{ key: "leaveApproval", title: "Approve leave", note: "Requests awaiting decision", icon: CheckCircle2, to: "/crew/leave?section=pending" }, { key: "delegate", title: "Delegate approval", note: "Temporary approval power", icon: Settings2, to: "/crew/leave?section=delegation" }],
     cover: [{ key: "leaveReplacement", title: "Replacement", note: "Assign leave duty cover", icon: Users, to: "/crew/replacement?section=leave" }],
@@ -98,7 +98,7 @@ export default function CrewOperations() {
     return () => { requestRef.current += 1; window.clearInterval(timer); window.removeEventListener("focus", update); };
   }, [refresh, user?.employeeId]);
   const openAction = (item) => {
-    const popupByKey = { applyLeave: "leave", requestTraining: "training", applySports: "sports", specialEventRoster: "special-event" };
+    const popupByKey = { applyLeave: "leave", requestTraining: "training", applySports: "sports" };
     if (popupByKey[item.key]) setApplicationPopup(popupByKey[item.key]);
     else navigate(item.to);
   };

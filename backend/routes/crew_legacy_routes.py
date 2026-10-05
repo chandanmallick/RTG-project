@@ -15,6 +15,7 @@ from crew_legacy.api.morning_presentation import router as morning_presentation_
 from crew_legacy.api.crew_threads import router as crew_threads_router
 from crew_legacy.api.audit_trail import router as audit_trail_router
 from crew_legacy.api.sports_api import router as sports_router
+from crew_legacy.api.special_events import router as special_events_router
 from crew_legacy.api.operations_api import router as operations_router
 
 
@@ -35,3 +36,5 @@ router.include_router(crew_threads_router, prefix="/threads")
 router.include_router(audit_trail_router, prefix="/audit-trail")
 router.include_router(sports_router, prefix="/sports")
 router.include_router(operations_router, prefix="/operations")
+
+router.include_router(special_events_router, prefix="/special-events")

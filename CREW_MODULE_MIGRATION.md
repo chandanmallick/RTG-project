@@ -100,6 +100,18 @@ The dashboard changes are integrated on `main` with the five fetched commits thr
 
 ## Dash Test dashboard and sample preview
 
+Special Event and coverage update (5 October 2026): Top actions now include Report linking to `/crew/reports`; cards are trimmed to fit six actions and pending approval counts use a larger bold badge. Upcoming shifts display a slow blinking Replacement required badge and affected personnel when `replacementRequired` is true with no assigned cover; clicking opens calendar coverage. Reduced-motion settings retain a static visible warning. The sample roster includes an uncovered duty.
+
+Special Event management lives on `/crew/roster` via `SpecialEventRoster.jsx`. Mark special event creates an active announcement, optional last application submission date and immutable department scope, with leave still open. A separate confirmed Block leave action enables the restriction; Reopen leave keeps the announcement. Existing applications are unchanged. Administrators may choose one/multiple departments or all; HODs may manage only departments for which Organization Master identifies them as a head. Server validation applies to creation, blocking, staffing and export. Dates are inclusive, and the optional deadline must be on/before event start. The deadline is announced information; it does not automatically block submissions.
+
+`SpecialEventNotice.jsx`, mounted by AppShell on authenticated Crew pages, displays relevant current/future announcements as a left-to-right strip on profile, duty, leave and other Crew pages. It includes dates, department names and deadline, then changes to No leave application in this period once blocking is enabled. It refreshes on event save, window focus and each minute; hover pauses scrolling, and reduced motion uses static scrollable text. Public sample routes do not query these APIs.
+
+Backend ownership: `/api/crew/special-events` (list/mark), `/access`, `/{id}/blocking` and `/{id}/staffing` in `special_events.py`; records use existing internal `system_settings_collection` with `type=leave_block`, explicit `leaveBlocked` and department IDs. Legacy records without `leaveBlocked` remain global blocks and retain their disable/enable/delete controls. Department leave enforcement runs before any application/duty write in `apply_leave_v2`. New and legacy staffing retain the Excel endpoint. Browser and 39 isolated backend checks cover announcement separation, deadlines, HOD scope, all-department admin scope, affected employee filtering, blocking audit and the existing workflows. Live database validation remains separate.
+
+Profile/navigation update (5 October 2026): Removed the menubar Contact button and dashboard test-title banner. The dashboard has no permanent profile sidebar. Clicking the menubar profile image opens a temporary left drawer with a blurred backdrop, large saved profile photo (initial fallback), identity and authority-gated Delegation of power link. Closing or clicking the backdrop restores the current page; View full profile navigates to `/crew/profile`, which has a large-photo left sidebar alongside its editable profile/statistics tiles. Drawer profile/access data loads only when opened. Below the dashboard are compact permission-filtered Duty Roster, Morning presentation, Crew reports, roster setup, employee, organization and user-access tiles, arranged in one desktop row and wrapping on mobile. Public previews use local workspaces without API requests and do not mount the authenticated menubar. Browser checks cover drawer blur/close, full-profile navigation, authority delegation and desktop/mobile dashboard interactions.
+
+Approval and history refinement (5 October 2026): Admin sessions (including permanent administrator 50041) can open the approval chooser while dashboard data loads. Other users see Checking approval access until loading completes; failed permission loads display Approval access unavailable and never imply a confirmed restriction. Server authorization remains authoritative for each destination/action. Popups share rounded peach/pink styling, and the approval chooser includes a review illustration. History supports inclusive From/To overlap filtering after application grouping, All dates reset and matching counts. Links name their actual destinations: Leave tracking, Training history, Sports approval, Exchange history and Replacement duty board. Browser checks passed for delayed admin permissions, date filters and existing workflow interactions using mocked responses.
+
 Updated 5 October 2026: Replacement opens a two-tab popup: Exchange (`duty`) and Replacement by other employees (`leave`), reusing `ReplacementManagement` with an explicit initial workflow. Approval opens a five-option chooser: Leave approval (`/crew/leave?section=pending`), Training Assignment (`/crew/training?section=assign`), Training approval (`/crew/training?section=pending`), Sports approval (`/crew/sports?section=approval`) and Replacement approval (`/crew/replacement?section=duty&focus=approvals`). Existing authority checks remain; training assignment authority also permits the chooser. Upcoming shifts use larger labels, personnel text, badges and padded tiles in a taller five-day scrolling panel. Public samples mirror both replacement tabs without API access. Production build and desktop/mobile browser checks passed, including switching both live replacement workflows, five approval choices, the leave-approval destination, and public samples with zero API requests.
 
 Rechecked on 2 October 2026 against the five synced commits dated 1 October, through `2ec3b6e`. Browser checks confirm the roster link opens the existing Calendar menu page (`/crew/calendar`, Daily Duty Calendar), and the event link opens that same page in its existing Event view (`/crew/calendar?view=events`, Crew Event Calendar). Shared application-only, replacement, leave tracking/cancellation, training nomination editing and Special Event roster popups passed with mocked API responses. This verifies the synced checkout; live database workflows and any changes not committed/synced from another PC are outside this check.
@@ -122,7 +134,7 @@ For the normal development server on port 3001, use that port instead. A static 
 3. Tracking: applications from D−2 onward, own/authorised scope and amber pending rows.
 4. History: leave, training, sports, exchange and replacement records; shared grouped leave applications, whole/date-wise cancellation, eligible single-date withdrawal and direct training nomination management.
 5. Replacement: Exchange and Replacement by other employees tabs in a popup, both using the existing workspace.
-6. Event Calendar: admin-only Special Event roster opens the existing blocked-period/staffing/export workspace; month navigation and hover details; red holidays, purple training, green sports; full-calendar navigation.
+6. Event Calendar: Special Event roster links to the Roster management page; month navigation and hover details; red holidays, purple training, green sports; full-calendar navigation.
 7. Roster Calendar: D−1 through D+7, grouped personnel, abbreviated names and M/E/N/O shifts; full-calendar navigation.
 8. Leader Board: top replacement duties over the existing 60-day period, with horizontal bars.
 9. Stat of leave: monthly approved leave days by group. Statistics navigation is deferred as requested.
@@ -143,7 +155,9 @@ The preview skips auth-session refresh and dashboard API requests. It does not r
 - `frontend/src/crewLegacy/DashDemoWorkspace.jsx`: sample forms and linked workspaces.
 - `frontend/src/components/crew/groupLeaveApplications.js`: shared leave grouping used by the dashboard and LeaveManagement.
 - `frontend/src/components/crew/TrainingCalendarReview.jsx`: live nomination editor, approval and adjacent OFF controls.
-- `frontend/src/components/crew/LeaveBlockedPeriods.jsx`: live Special Event roster/staffing/export controls.
+- `frontend/src/components/crew/SpecialEventRoster.jsx`: Roster event announcement, deadline, scope and separate leave-blocking controls.
+- `frontend/src/components/crew/SpecialEventNotice.jsx`: scoped announcement strip across Crew pages.
+- `frontend/src/components/crew/LeaveBlockedPeriods.jsx`: legacy global block controls and staffing/export compatibility.
 - `frontend/src/pages/crew/CrewCalendar.jsx`: live `applicationOnly` popup mode.
 - `frontend/src/App.jsx`: protected live routes and public sample route.
 - `frontend/src/auth/AuthContext.jsx`: skips server session refresh on the public preview route.
@@ -178,22 +192,15 @@ interactions, usable without a backend/database. Details and testing instruction
 
 Dash Test shares `groupLeaveApplications.js` with LeaveManagement, including legacy contiguous-date applications. Its history/tracking rows retain whole-application and selected-date cancellation through `LeaveTracking` and the existing cancel-group API. Approval navigation keeps the synced approval-remarks dialogs and their audit history. Training records open `TrainingCalendarReview`, including the existing nomination editor and adjacent OFF controls.
 
-The Event Calendar card exposes Special Event roster only when `specialEventRoster.enabled` is returned by the server. It reuses `LeaveBlockedPeriods` for temporary disable/enable, staffing matrices, Excel export and confirmed permanent deletion. Replacement and calendar popups reuse the updated candidate tables, monthly targets and conflict reasons. Operations summary refreshes unacted organization approval stages before calculating access and counts, so a changed reporting hierarchy takes effect in the dashboard too.
+The Event Calendar card exposes Special Event roster only when `specialEventRoster.enabled` is returned by the server. It navigates to Duty Roster, where `SpecialEventRoster` separates announcement and scoped blocking; legacy `LeaveBlockedPeriods` controls retain staffing, Excel export and confirmed permanent deletion. Replacement and calendar popups reuse the updated candidate tables, monthly targets and conflict reasons. Operations summary refreshes unacted organization approval stages before calculating access and counts, so a changed reporting hierarchy takes effect in the dashboard too.
 
 ### Leave availability
 
-Open Crew Operations > Master / event > **Special Event roster**. Administrators
-can use **Block a period**, enter inclusive start/end dates and a reason, then
-save. The restriction applies to new leave
-applications for everyone, including applications entered by administrators.
-Existing requests are unchanged. **Disable temporarily** removes the restriction
-while preserving the period and its audit history; **Enable** restores it. **Delete
-permanently** removes only the selected period and cannot be undone, so it uses a
-separate explicit confirmation. The Leave Apply page retains the read-only
-availability notice for employees; management and staffing controls live in the
-Special Event roster tile. All mutations are checked by the backend.
+Open Crew > Duty Roster > **Special Event roster**. Administrators and department HODs use **Mark special event** to announce inclusive dates, scope and optional submission deadline. This initially leaves applications open. Select **Block leave** and confirm to prevent new applications in the event period for the selected departments; **Reopen leave** removes the restriction while keeping the announcement. Existing requests are unchanged. HODs cannot affect other departments or all departments. The server verifies scope against the current Organization Master. Relevant notices appear across Crew pages.
 
-#### Blocked-period staffing view
+Older global blocks remain under the legacy Leave availability controls on Roster for administrators. Their temporary disable/enable and confirmed permanent delete actions retain their original audit/history behavior. New events use the separated announcement and blocking controls.
+
+### Blocked-period staffing view
 
 Every active block provides three date-wise views and a matching Excel export.
 Disabled blocks remain visible to administrators but do not restrict applications

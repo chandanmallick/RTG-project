@@ -94,7 +94,7 @@ def validate_block_dates(start_date, end_date):
         raise HTTPException(400, "Enter valid start and end dates; end must not precede start")
 
 
-def ensure_leave_dates_open(dates):
+def ensure_leave_dates_open(dates, employee=None):
     dates = sorted(set(str(value or "").strip() for value in dates))
     for value in dates:
         validate_block_dates(value, value)
@@ -105,6 +105,15 @@ def ensure_leave_dates_open(dates):
         "startDate": {"$lte": dates[-1]}, "endDate": {"$gte": dates[0]},
     })
     for block in blocks:
+        if block.get("leaveBlocked", True) is False:
+            continue
+        scope = set(block.get("departmentIds") or [])
+        if scope:
+            if not employee:
+                raise HTTPException(400, "Employee is required to check department leave restrictions")
+            from crew_legacy.api.special_events import department_ids
+            if not scope.intersection(department_ids(employee)):
+                continue
         affected = [value for value in dates if block["startDate"] <= value <= block["endDate"]]
         if affected:
             raise HTTPException(409, f"Leave applications are blocked for {', '.join(affected)}: {block.get('reason', 'Administrative restriction')}")
@@ -116,8 +125,8 @@ def get_blocked_leave_periods(user=Depends(get_authenticated_user)):
              "endDate": item["endDate"], "reason": item.get("reason", ""),
              "active": item.get("active", True)}
             for item in system_settings_collection.find(
-                {"type": "leave_block", **({} if is_admin(user) else {"active": True})}
-            ).sort("startDate", 1)]
+                {"type": "leave_block", "leaveBlocked": {"$exists": False}, **({} if is_admin(user) else {"active": True})}
+            ).sort("startDate", 1) if not item.get("departmentIds")]
 
 
 @router.post("/blocked-periods")
@@ -227,6 +236,10 @@ def blocked_period_staffing(block: dict, additional_department: str = "") -> dic
     for record in records:
         employee_id = clean_id(record.get("employeeId"))
         employee = employees.get(employee_id) or {}
+        if block.get("departmentIds"):
+            from crew_legacy.api.special_events import department_ids
+            if not set(block["departmentIds"]).intersection(department_ids(employee)):
+                continue
         employee_departments = [clean_id(value) for value in (employee.get("departments") or [employee.get("department")]) if clean_id(value)]
         entry = {
             "employeeId": employee_id,
@@ -268,12 +281,20 @@ def get_leave_block(block_id: str) -> dict:
 
 @router.get("/blocked-periods/{block_id}/staffing")
 def get_blocked_period_staffing(block_id: str, additionalDepartment: str = Query(""), user=Depends(get_authenticated_user)):
-    return blocked_period_staffing(get_leave_block(block_id), additionalDepartment)
+    block = get_leave_block(block_id)
+    if block.get("departmentIds"):
+        from crew_legacy.api.special_events import require_scope
+        require_scope(user, block["departmentIds"])
+    return blocked_period_staffing(block, additionalDepartment)
 
 
 @router.get("/blocked-periods/{block_id}/staffing.xlsx")
 def export_blocked_period_staffing(block_id: str, additionalDepartment: str = Query(""), user=Depends(get_authenticated_user)):
-    report = blocked_period_staffing(get_leave_block(block_id), additionalDepartment)
+    block = get_leave_block(block_id)
+    if block.get("departmentIds"):
+        from crew_legacy.api.special_events import require_scope
+        require_scope(user, block["departmentIds"])
+    report = blocked_period_staffing(block, additionalDepartment)
     workbook = Workbook()
     sheet = workbook.active
     sheet.title = "Blocked period staffing"
@@ -1701,7 +1722,7 @@ def apply_leave_v2(data: dict, user=Depends(get_authenticated_user)):
     if not applications:
         raise HTTPException(400, "Select at least one leave date")
 
-    ensure_leave_dates_open([item.get("date") for item in applications])
+    ensure_leave_dates_open([item.get("date") for item in applications], employee=employee)
 
     reason = str(data.get("reason") or "").strip()
     if not reason:

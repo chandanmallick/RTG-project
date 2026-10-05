@@ -1,8 +1,11 @@
+import { useLocation } from "react-router-dom";
+import SpecialEventNotice from "../crew/SpecialEventNotice";
 import { Box } from "@mui/material";
 import TopNavbar from "./TopNavbar";
 import CrewTableTools from "../crew/CrewTableTools";
 
 export default function AppShell({ children, viewportLocked = false }) {
+  const { pathname } = useLocation();
   return (
     <Box
       className="ui-kit-app"
@@ -22,6 +25,7 @@ export default function AppShell({ children, viewportLocked = false }) {
       <CrewTableTools />
       {/* Top Navigation Menu Bar */}
       <TopNavbar />
+      {pathname.startsWith("/crew/") && <SpecialEventNotice />}
 
       {/* Main Content Area */}
       <Box

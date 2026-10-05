@@ -8,6 +8,8 @@ import {
   IconButton,
   Avatar,
   Badge,
+  Drawer,
+  Stack,
   Dialog,
   DialogTitle,
   DialogContent,
@@ -45,6 +47,7 @@ import {
   MessageSquare,
   ClipboardList,
 } from "lucide-react";
+import crewApi from "../../crewLegacy/api";
 import { useAuth } from "../../auth/AuthContext";
 import { pageKeyForPath } from "../../auth/pageAccess";
 import { DutyNotificationBell } from "../crew/DutyNotifications";
@@ -116,7 +119,18 @@ export default function TopNavbar() {
   const adminRef = useRef(null);
 
   // Contact Dialog state
-  const [isContactOpen, setIsContactOpen] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(false);
+  const [drawerProfile, setDrawerProfile] = useState({});
+  const [drawerCanDelegate, setDrawerCanDelegate] = useState(false);
+  useEffect(() => {
+    if (!profileOpen) return;
+    let active = true;
+    const id = user?.employeeId || localStorage.getItem("crewEmployeeId");
+    if (id) crewApi.get(`/profile/${id}`).then(({ data }) => { if (active) setDrawerProfile(data || {}); }).catch(() => {});
+    crewApi.get("/operations/summary").then(({ data }) => { if (active) setDrawerCanDelegate(Boolean(data.actions?.delegate?.enabled)); }).catch(() => {});
+    return () => { active = false; };
+  }, [profileOpen, user?.employeeId]);
+  useEffect(() => { setProfileOpen(false); }, [location.pathname]);
 
   // Toggle helper
   const toggleDropdown = (menuName) => {
@@ -1017,31 +1031,11 @@ export default function TopNavbar() {
         {/* Actionable replacement-duty notifications */}
         <DutyNotificationBell />
 
-        {/* Contact CTA Button (Mockup style) */}
-        <Button
-          onClick={() => setIsContactOpen(true)}
-          sx={{
-            textTransform: "none",
-            fontSize: 14,
-            fontWeight: 700,
-            color: "#FFFFFF",
-            backgroundColor: "#03624C",
-            px: 2.8,
-            py: 1.1,
-            borderRadius: "12px",
-            boxShadow: "0 4px 12px rgba(3, 98, 76, 0.15)",
-            "&:hover": {
-              backgroundColor: "#024c3b",
-              boxShadow: "0 6px 16px rgba(3, 98, 76, 0.25)",
-            },
-          }}
-        >
-          Contact
-        </Button>
-
         {/* User Profile Avatar with square-rounded mockup styling */}
         <Box
-          onClick={() => handleNavigate("/crew/profile")}
+          component="button"
+          aria-label="Open profile panel"
+          onClick={() => { setOpenMenu(null); setProfileOpen(true); }}
           sx={{
             width: 40,
             height: 40,
@@ -1079,116 +1073,15 @@ export default function TopNavbar() {
         </Button>
       </Box>
 
-      {/* CONTACT DIALOG (Provides support contact details + navigation to User Switcher) */}
-      <Dialog
-        open={isContactOpen}
-        onClose={() => setIsContactOpen(false)}
-        PaperProps={{
-          sx: {
-            borderRadius: "20px",
-            p: 1.5,
-            width: "100%",
-            maxWidth: 420,
-            border: "1px solid #E2E8F0"
-          }
-        }}
-      >
-        <DialogTitle sx={{ fontWeight: 800, fontSize: 20, color: "#03624C", pb: 1 }}>
-          COMPASS System Support
-        </DialogTitle>
-        <DialogContent sx={{ display: "flex", flexDirection: "column", gap: 2.5, pt: 1.5 }}>
-          <Typography sx={{ fontSize: 13.5, color: "#64748B", fontWeight: 550, lineHeight: 1.5 }}>
-            Reach out to the system administrator or control room supervisor for access context and permission queries.
-          </Typography>
-
-          <Box sx={{ display: "flex", flexDirection: "column", gap: 1.8 }}>
-            <Box sx={{ display: "flex", alignItems: "center", gap: 1.5 }}>
-              <Box sx={{ width: 36, height: 36, borderRadius: "8px", backgroundColor: "#E8F5F1", color: "#03624C", display: "flex", alignItems: "center", justify: "center", flexShrink: 0, pl: 1.1 }}>
-                <PhoneCall size={16} />
-              </Box>
-              <Box>
-                <Typography sx={{ fontSize: 10, color: "#94A3B8", fontWeight: 700, uppercase: true }}>CONTROL ROOM DIRECT</Typography>
-                <Typography sx={{ fontSize: 13.5, color: "#334155", fontWeight: 700 }}>9007059660</Typography>
-              </Box>
-            </Box>
-
-            <Box sx={{ display: "flex", alignItems: "center", gap: 1.5 }}>
-              <Box sx={{ width: 36, height: 36, borderRadius: "8px", backgroundColor: "#E8F5F1", color: "#03624C", display: "flex", alignItems: "center", justify: "center", flexShrink: 0, pl: 1.1 }}>
-                <Mail size={16} />
-              </Box>
-              <Box>
-                <Typography sx={{ fontSize: 10, color: "#94A3B8", fontWeight: 700, uppercase: true }}>EMAIL HELPDESK</Typography>
-                <Typography sx={{ fontSize: 13.5, color: "#334155", fontWeight: 700 }}>chandan.mallick@grid-india.in</Typography>
-              </Box>
-            </Box>
-
-            <Box sx={{ display: "flex", alignItems: "center", gap: 1.5 }}>
-              <Box sx={{ width: 36, height: 36, borderRadius: "8px", backgroundColor: "#FEF4EA", color: "#E67E22", display: "flex", alignItems: "center", justify: "center", flexShrink: 0, pl: 1.1 }}>
-                <MapPin size={16} />
-              </Box>
-              <Box>
-                <Typography sx={{ fontSize: 10, color: "#94A3B8", fontWeight: 700, uppercase: true }}>LOCATION</Typography>
-                <Typography sx={{ fontSize: 13.5, color: "#334155", fontWeight: 700 }}>State Load Despatch Centre (SLDC)</Typography>
-              </Box>
-            </Box>
-          </Box>
-
-          <Divider sx={{ my: 1 }} />
-
-          <Box
-            onClick={() => {
-              setIsContactOpen(false);
-              handleNavigate("/admin/user-access");
-            }}
-            sx={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              p: 1.5,
-              borderRadius: "12px",
-              border: "1px solid #E2E8F0",
-              backgroundColor: "#F8FAFC",
-              cursor: "pointer",
-              transition: "all 0.2s",
-              "&:hover": {
-                borderColor: "#03624C",
-                backgroundColor: "#F1F7F6"
-              }
-            }}
-          >
-            <Box>
-              <Typography sx={{ fontSize: 13.5, fontWeight: 700, color: "#334155" }}>
-                User Access Control
-              </Typography>
-              <Typography sx={{ fontSize: 11, color: "#64748B", fontWeight: 550, mt: 0.2 }}>
-                Manage page-level View and Write permissions
-              </Typography>
-            </Box>
-            <ArrowRight size={16} color="#03624C" />
-          </Box>
-
-          <Box
-            onClick={async () => { setIsContactOpen(false); await logout(); navigate("/login", { replace: true }); }}
-            sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", p: 1.5, borderRadius: "12px", border: "1px solid #FECACA", backgroundColor: "#FFF7F7", cursor: "pointer" }}
-          >
-            <Box><Typography sx={{ fontSize: 13.5, fontWeight: 700, color: "#991B1B" }}>Sign out</Typography><Typography sx={{ fontSize: 11, color: "#64748B" }}>{user?.name || user?.employeeId}</Typography></Box>
-            <LogOut size={16} color="#B91C1C" />
-          </Box>
-        </DialogContent>
-        <DialogActions sx={{ p: 2 }}>
-          <Button
-            onClick={() => setIsContactOpen(false)}
-            sx={{
-              textTransform: "none",
-              color: "#64748B",
-              fontWeight: 700,
-              "&:hover": { backgroundColor: "#F1F5F9" }
-            }}
-          >
-            Close
-          </Button>
-        </DialogActions>
-      </Dialog>
+      <Drawer anchor="left" open={profileOpen} onClose={() => setProfileOpen(false)} slotProps={{ backdrop: { sx: { backdropFilter: "blur(6px)", backgroundColor: "rgba(20,40,40,.28)" } }, paper: { sx: { width: { xs: "min(340px,90vw)", sm: 360 }, boxSizing: "border-box", p: 3, background: "linear-gradient(160deg,#BDE7E3,#EAF4DE 60%,#DFEFB8) !important", borderRadius: "0 28px 28px 0" } } }}>
+        <Stack direction="row" justifyContent="space-between" alignItems="center"><Typography sx={{ fontSize: 22, fontWeight: 900 }}>My Profile</Typography><Button aria-label="Close profile panel" onClick={() => setProfileOpen(false)} sx={{ minWidth: 40 }}>Close</Button></Stack>
+        <Avatar src={drawerProfile.profilePhoto || user?.profilePhoto} sx={{ width: 156, height: 156, mx: "auto", mt: 5, mb: 2, border: "6px solid white", bgcolor: "#178B7A", fontSize: 52 }}>{(drawerProfile.name || user?.name || "User").slice(0,1)}</Avatar>
+        <Typography sx={{ textAlign: "center", fontSize: 25, fontWeight: 900 }}>{drawerProfile.name || user?.name || "Crew member"}</Typography>
+        <Typography sx={{ textAlign: "center", mt: 1, color: "#456A64" }}>{drawerProfile.designation || user?.designation || "Crew member"}</Typography>
+        <Typography sx={{ textAlign: "center", mt: 1, color: "#456A64" }}>ID {user?.employeeId || drawerProfile.employeeId}</Typography>
+        <Stack spacing={1.5} sx={{ mt: 4 }}><Button variant="contained" onClick={() => { setProfileOpen(false); handleNavigate("/crew/profile"); }} sx={{ py: 1.6, borderRadius: 3, textTransform: "none", bgcolor: "#178B7A" }}>View full profile</Button>{drawerCanDelegate && <Button variant="outlined" onClick={() => { setProfileOpen(false); handleNavigate("/crew/leave?section=delegation"); }} sx={{ py: 1.6, borderRadius: 3, textTransform: "none" }}>Delegation of power</Button>}</Stack>
+        <Box component="svg" viewBox="0 0 260 110" aria-hidden="true" sx={{ mt: "auto", pt: 5, width: "100%" }}><path d="M0 65Q60 0 130 50T260 30V110H0Z" fill="#8FCBB5"/><path d="M0 80Q90 30 160 75T260 50V110H0Z" fill="#BCD973"/><path d="M0 100Q100 55 260 95V110H0Z" fill="#7BA65D"/></Box>
+      </Drawer>
     </Box>
   );
 }

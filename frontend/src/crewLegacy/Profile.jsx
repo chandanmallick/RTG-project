@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import api from "./api";
+import { useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
 
 import {
@@ -95,6 +96,9 @@ function MiniListCard({ title, items, emptyText, renderItem, action }) {
 
 export default function Profile() {
   const { user, refreshSession } = useAuth();
+  const navigate = useNavigate();
+  const [canDelegate, setCanDelegate] = useState(false);
+  useEffect(() => { let active = true; api.get("/operations/summary").then(({ data }) => { if (active) setCanDelegate(Boolean(data.actions?.delegate?.enabled)); }).catch(() => {}); return () => { active = false; }; }, []);
   const employeeId = currentEmployeeId();
   const [profile, setProfile] = useState({});
   const [photo, setPhoto] = useState(null);
@@ -316,17 +320,13 @@ export default function Profile() {
 
   return (
     <Box className="ui-kit-page ui-kit-profile" sx={{ minHeight: "calc(100vh - 120px)", borderRadius: 3, background: "#F8FAFC", p: { xs: 1.5, md: 2.5 } }}>
-      <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", lg: "150px minmax(0,1fr) 230px" }, gap: 2.4 }}>
-        <Paper elevation={0} sx={{ display: { xs: "none", lg: "flex" }, flexDirection: "column", minHeight: 620, borderRadius: 0, borderTopLeftRadius: 28, borderBottomLeftRadius: 28, background: "#5B55B2", color: "#FFFFFF", overflow: "hidden" }}>
-          <Box sx={{ px: 2.2, pt: 2.5, pb: 3, fontSize: 22, fontWeight: 950, letterSpacing: "-.03em" }}>COMPASS</Box>
-          {["Profile", "Duty", "Leave", "Training", "C-OFF", "Login"].map((item, index) => (
-            <Box key={item} sx={{ mx: 1.5, mb: 0.7, px: 1.3, py: 1, borderRadius: 999, background: index === 0 ? "#FFFFFF" : "transparent", color: index === 0 ? "#2F2B73" : "rgba(255,255,255,.86)", fontSize: 12, fontWeight: 900 }}>
-              {item}
-            </Box>
-          ))}
-          <Box sx={{ mt: "auto", p: 2 }}>
-            <Box sx={{ height: 120, borderRadius: 5, background: "linear-gradient(145deg,#6EE7B7,#8B5CF6)", opacity: 0.85 }} />
-          </Box>
+      <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", lg: "260px minmax(0,1fr) 230px" }, gap: 2.4 }}>
+        <Paper component="aside" elevation={0} sx={{ p: 2.5, borderRadius: 6, background: "linear-gradient(160deg,#BDE7E3,#EAF4DE 60%,#DFEFB8) !important", alignSelf: "start", position: { lg: "sticky" }, top: 20 }}>
+          <Typography sx={{ fontSize: 20, fontWeight: 950, mb: 3 }}>My Profile</Typography>
+          <Avatar src={profileImage} sx={{ width: 152, height: 152, mx: "auto", border: "6px solid white", bgcolor: "#178B7A", fontSize: 50 }}>{(profile.name || employeeId || "?").slice(0,1)}</Avatar>
+          <Typography sx={{ textAlign: "center", fontSize: 22, fontWeight: 950, mt: 2 }}>{profile.name || "Crew member"}</Typography>
+          <Typography sx={{ textAlign: "center", color: "#456A64", fontSize: 13, mt: .7 }}>{profile.designation || "Crew member"}</Typography>
+          <Stack spacing={1.3} sx={{ mt: 3 }}><Button onClick={() => navigate("/crew/dashboard")} sx={{ bgcolor: "#FFFFFFCC", p: 1.5, textTransform: "none", borderRadius: 3 }}>Crew dashboard</Button>{canDelegate && <Button startIcon={<ShieldCheck size={18} />} onClick={() => navigate("/crew/leave?section=delegation")} sx={{ bgcolor: "#FFFFFFCC", p: 1.5, textTransform: "none", borderRadius: 3 }}>Delegation of power</Button>}<Box sx={{ p: 2, bgcolor: "#FFFFFFAA", borderRadius: 3 }}><Typography sx={{ fontSize: 12, color: "#456A64" }}>Employee ID</Typography><Typography fontWeight={900}>{employeeId}</Typography></Box></Stack>
         </Paper>
 
         <Box sx={{ display: "grid", gap: 2.4, minWidth: 0 }}>
@@ -338,7 +338,7 @@ export default function Profile() {
           <Paper elevation={0} sx={{ p: 2.6, borderRadius: 5, background: "#FFFFFF", boxShadow: "0 18px 45px rgba(72, 83, 140, 0.08)" }}>
             <Stack direction={{ xs: "column", md: "row" }} spacing={2.5} alignItems={{ xs: "flex-start", md: "center" }}>
               <Box sx={{ position: "relative" }}>
-                <Avatar src={profileImage} sx={{ width: 112, height: 112, background: "#EDE9FE", color: "#5B55B2", fontSize: 36, fontWeight: 950 }}>
+                <Avatar src={profileImage} sx={{ width: 148, height: 148, background: "#EDE9FE", color: "#5B55B2", fontSize: 36, fontWeight: 950 }}>
                   {(profile.name || employeeId || "?").slice(0, 1)}
                 </Avatar>
                 {editingProfile && canEdit("profilePhoto") && (

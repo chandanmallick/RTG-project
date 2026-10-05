@@ -42,6 +42,7 @@ import {
   GraduationCap
 } from "lucide-react";
 
+import SpecialEventRoster from "../../components/crew/SpecialEventRoster";
 import AppShell from "../../components/layout/AppShell";
 import GlassCard from "../../components/ui/GlassCard";
 import crewApi from "../../services/crewApi";
@@ -294,6 +295,7 @@ export default function CrewDutyRoster() {
 
   return (
     <AppShell>
+      <Box sx={{ "@media print": { display: "none" } }}><SpecialEventRoster /></Box>
       {/* Hidden section designed purely for paper print preview */}
       {!!rosterData.length && (
         <section className="crew-roster-print">
