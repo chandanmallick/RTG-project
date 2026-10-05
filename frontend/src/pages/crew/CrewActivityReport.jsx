@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import {
   Alert, Box, Button, Checkbox, Chip, CircularProgress, Dialog, DialogContent, DialogTitle,
   IconButton, ListItemText, MenuItem, Paper, Stack, Tab, Table, TableBody, TableCell, TableHead,
@@ -10,6 +11,10 @@ import EmployeeMultiSelect from "../../components/crew/EmployeeMultiSelect";
 import CrewActivityComparison from "../../components/crew/CrewActivityComparison";
 import AppShell from "../../components/layout/AppShell";
 import api from "../../crewLegacy/api";
+
+const TrainingReports = lazy(() => import("../../crewLegacy/TrainingHolidayMaster"));
+const reportTabs = { detail: {label:"Detailed activity report",color:"#0057B7",tint:"#EAF3FC"}, matrix: {label:"Consolidated activity matrix",color:"#0F766E",tint:"#E5F4F0"}, crms: {label:"CRMS duty reconciliation",color:"#B45309",tint:"#FFF3E3"}, "training-history": {label:"Training nomination history",color:"#7C3AED",tint:"#F3EBFF"}, "training-matrix": {label:"Training nomination matrix",color:"#5B21B6",tint:"#EEE8FF"} };
+const activityTone = kind => TILE[{Leave:"leave",Training:"training",Sports:"sports","C-OFF":"coff","Replacement duty":"replacement"}[kind]] || {tint:"#F1F5F9",color:"#475569"};
 
 const today = () => new Date().toISOString().slice(0, 10);
 const yearStart = () => `${new Date().getFullYear()}-01-01`;
@@ -29,9 +34,9 @@ const displayDate = (value) => {
 const TILE = {
   leave: { tint: "#FDE8EC", color: "#C62828", icon: CalendarCheck2 },
   training: { tint: "#F0E7FA", color: "#6A1B9A", icon: Briefcase },
-  sports: { tint: "#FFF7ED", color: "#B45309", icon: Medal },
+  sports: { tint: "#E5F7ED", color: "#16834E", icon: Medal },
   coff: { tint: "#FFF4CC", color: "#9A6700", icon: Award },
-  replacement: { tint: "#DCFCE7", color: "#15803D", icon: Repeat2 },
+  replacement: { tint: "#E8F1FF", color: "#3466B5", icon: Repeat2 },
 };
 
 function SummaryTile({ title, value, detail, tone }) {
@@ -73,7 +78,12 @@ export default function CrewActivityReport() {
   const [crmsOnly, setCrmsOnly] = useState(false);
   const [trainingDetails, setTrainingDetails] = useState(null);
   const [compOffDetails, setCompOffDetails] = useState(null);
-  const [reportMode, setReportMode] = useState("detail");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const reportMode = Object.hasOwn(reportTabs, searchParams.get("tab")) ? searchParams.get("tab") : "detail";
+  const setReportMode = value => setSearchParams(previous => { const next = new URLSearchParams(previous); next.set("tab", value); return next; }, { replace: true });
+  const isTrainingReport = reportMode.startsWith("training-");
+  const [trainingRefresh, setTrainingRefresh] = useState(0);
+  const reportTone = reportTabs[reportMode];
   const [report, setReport] = useState({ summary: {}, rows: [], employees: [], canViewAll: false });
   const [matrix, setMatrix] = useState({ dutyCategories: [], shiftDutyCategories: [], leaveCategories: [], otherCategories: [], departments: [], subDepartments: [], departmentSubDepartments: {}, subDepartmentGroups: {}, groupNames: [], rows: [] });
   const [crms, setCrms] = useState({ summary: {}, rows: [], details: [], rosterEntries: [], statuses: [], deskRoles: [] });
@@ -94,7 +104,7 @@ export default function CrewActivityReport() {
     }
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { if (reportMode === "detail") load(); }, [reportMode]);
   const loadMatrix = async () => {
     setLoading(true);
     setError("");
@@ -262,10 +272,10 @@ export default function CrewActivityReport() {
   };
 
   return <AppShell>
-    <Box sx={{ p: { xs: 1.75, md: 2.1 }, borderRadius: 3, color: "#fff", bgcolor: "#0057B7", backgroundImage: "linear-gradient(105deg,#08103A 0%,#0057B7 62%,#1378DD 100%) !important", boxShadow: "0 12px 28px rgba(0,87,183,.18)" }}>
+    <Box sx={{ p: { xs: 1.75, md: 2.1 }, borderRadius: 3, color: "#fff", bgcolor: "#0057B7", backgroundImage: `linear-gradient(105deg,#08103A 0%,${reportTone.color} 80%) !important`, boxShadow: "0 12px 28px rgba(0,87,183,.18)" }}>
       <Stack sx={{ justifyContent: "space-between", alignItems: { md: "center" } }} direction={{ xs: "column", md: "row" }} spacing={2}  >
         <Box><Typography sx={{ fontWeight: 950, fontSize: 22 }}>Crew Activity Report</Typography><Typography sx={{ opacity: .9, fontSize: 12, fontWeight: 700 }}>Detailed history and consolidated duty, replacement, training and leave reporting.</Typography></Box>
-        <Button variant="outlined" startIcon={<RefreshCw size={16} />} onClick={reportMode === "matrix" ? loadMatrix : reportMode === "crms" ? () => loadCrms(true) : load} sx={{ color: "#fff", borderColor: "rgba(255,255,255,.72)", textTransform: "none", fontWeight: 900 }}>{reportMode === "crms" && !(crms.rows || []).length ? "Load report" : "Refresh"}</Button>
+        <Button variant="outlined" startIcon={<RefreshCw size={16} />} onClick={isTrainingReport ? () => setTrainingRefresh(value => value + 1) : reportMode === "matrix" ? loadMatrix : reportMode === "crms" ? () => loadCrms(true) : load} sx={{ color: "#fff", borderColor: "rgba(255,255,255,.72)", textTransform: "none", fontWeight: 900 }}>{reportMode === "crms" && !(crms.rows || []).length ? "Load report" : "Refresh"}</Button>
       </Stack>
     </Box>
 
@@ -273,13 +283,12 @@ export default function CrewActivityReport() {
       <Tabs value={reportMode} onChange={(_, value) => {
         setReportMode(value);
         if (value === "matrix" && !(matrix.rows || []).length) loadMatrix();
-      }} sx={{ px: 1.25, borderBottom: "1px solid #E2E8F0" }}>
-        <Tab value="detail" label="Detailed activity report" sx={{ textTransform: "none", fontWeight: 900 }} />
-        <Tab value="matrix" label="Consolidated activity matrix" sx={{ textTransform: "none", fontWeight: 900 }} />
-        <Tab value="crms" label="CRMS duty reconciliation" sx={{ textTransform: "none", fontWeight: 900 }} />
+      }} variant="scrollable" scrollButtons="auto" sx={{ px: 1.25, borderBottom: "1px solid #E2E8F0", "& .MuiTabs-indicator": { background: reportTone.color } }}>
+        {Object.entries(reportTabs).map(([value, tone]) => <Tab key={value} value={value} label={tone.label} sx={{ textTransform: "none", fontWeight: 900, "&&": { color: `${tone.color} !important` }, "&&.Mui-selected": { color: `${tone.color} !important`, background: `${tone.tint} !important`, boxShadow: `inset 0 -3px 0 ${tone.color}` } }} />)}
       </Tabs>
     </Paper>
 
+    {isTrainingReport ? <Suspense fallback={<Box sx={{ p: 4, textAlign: "center" }}><CircularProgress /></Box>}><TrainingReports embeddedReport reportView={reportMode === "training-history" ? "history" : "matrix"} reportRefresh={trainingRefresh} /></Suspense> : <>
     <Paper elevation={0} sx={{ p: 2, borderRadius: 3 }}>
       <Stack direction="row" spacing={1}  useFlexGap sx={{ ...({ flexWrap: "wrap", gap: 1.5, "& .MuiTextField-root": { minWidth: 130 } }), alignItems: "center" }}>
         {reportMode === "detail" && report.canViewAll && <EmployeeMultiSelect options={report.employees || []} value={employeeIds} onChange={setEmployeeIds} allOption />}
@@ -344,11 +353,11 @@ export default function CrewActivityReport() {
           <TableCell sx={{ fontWeight: 900 }}>Date</TableCell><TableCell sx={{ fontWeight: 900 }}>Applied on</TableCell><TableCell sx={{ fontWeight: 900 }}>Day</TableCell><TableCell sx={{ fontWeight: 900 }}>Type</TableCell><TableCell sx={{ fontWeight: 900 }}>Employee</TableCell><TableCell sx={{ fontWeight: 900 }}>Particular</TableCell><TableCell sx={{ fontWeight: 900 }}>Status</TableCell><TableCell sx={{ fontWeight: 900 }}>Details</TableCell>
         </TableRow></TableHead><TableBody>
           {!rows.length && <TableRow><TableCell colSpan={8} align="center" sx={{ py: 7, color: "#64748B" }}>No activity found for the selected period.</TableCell></TableRow>}
-          {rows.map((row) => <TableRow key={`${row.kind}-${row.id}`} hover>
+          {rows.map((row) => <TableRow key={`${row.kind}-${row.id}`} hover sx={{ "& td": { background: `${activityTone(row.kind).tint}80` }, "& td:first-of-type": { borderLeft: `3px solid ${activityTone(row.kind).color}` } }}>
             <TableCell sx={{ whiteSpace: "nowrap", fontWeight: 750 }}>{displayDate(row.date)}{row.endDate && row.endDate !== row.date && <Typography sx={{ display: "block" }} variant="caption" >to {displayDate(row.endDate)}</Typography>}</TableCell>
             <TableCell sx={{ whiteSpace: "nowrap" }}>{row.appliedOn ? new Date(row.appliedOn).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "—"}</TableCell>
             <TableCell>{row.dayLabel ? <Chip size="small" label={row.dayLabel} sx={{ fontWeight: 800, ...(row.isHoliday ? { background: "#FDE8EC", color: "#C62828" } : row.isWeekend ? { background: "#FFF4CC", color: "#9A6700" } : { background: "#F1F5F9", color: "#475569" }) }} /> : "—"}</TableCell>
-            <TableCell><Chip size="small" label={row.kind} sx={{ fontWeight: 850, ...(row.kind === "Leave" ? { background: "#FDE8EC", color: "#C62828" } : row.kind === "Training" ? { background: "#F0E7FA", color: "#6A1B9A" } : row.kind === "C-OFF" ? { background: "#FFF4CC", color: "#9A6700" } : { background: "#DCFCE7", color: "#15803D" }) }} /></TableCell>
+            <TableCell><Chip size="small" label={row.kind} sx={{ fontWeight: 850, background: activityTone(row.kind).tint, color: activityTone(row.kind).color }} /></TableCell>
             <TableCell><Stack spacing={.1}><Typography sx={{ fontSize: 13, fontWeight: 750 }}>{row.employeeName || row.employeeId || "—"}</Typography>{row.employeeId && <Typography variant="caption">{row.employeeId}</Typography>}</Stack></TableCell>
             <TableCell sx={{ fontWeight: 800 }}>{row.title || "—"}</TableCell>
             <TableCell><Chip size="small" label={row.status || "—"} variant="outlined" /></TableCell>
@@ -361,19 +370,19 @@ export default function CrewActivityReport() {
       {loading ? <Box sx={{ minHeight: 300, display: "grid", placeItems: "center" }}><CircularProgress /></Box> : <Box sx={{ overflow: "auto", maxHeight: "calc(100vh - 365px)" }}><Table stickyHeader size="small" sx={{ minWidth: 900 }}><TableHead><TableRow>
         <TableCell sx={{ fontWeight: 900, minWidth: 230, position: "sticky", left: 0, zIndex: 4, bgcolor: "#F8FAFC" }}>Employee</TableCell>
         {showDuties && <><TableCell align="right" sx={{ fontWeight: 900 }}>Shift duty total</TableCell>{visibleDutyCategories.map((category) => <TableCell key={category} align="right" sx={{ fontWeight: 900 }}>{category}</TableCell>)}</>}
-        {showReplacement && <TableCell align="right" sx={{ fontWeight: 900 }}>Replacement duties</TableCell>}
-        {showTraining && <TableCell align="right" sx={{ fontWeight: 900 }}>Training days (of 7)</TableCell>}
-        {showCompOff && <TableCell align="right" sx={{ fontWeight: 900 }}>C-OFF<Typography component="span" sx={{ display: "block", fontSize: 9.5, color: "#64748B", fontWeight: 750 }}>Usable / non-expired</Typography></TableCell>}
-        {showLeave && <><TableCell align="right" sx={{ fontWeight: 900 }}>Total leave days</TableCell>{visibleLeaveCategories.map((category) => <TableCell key={category} align="right" sx={{ fontWeight: 900 }}>{category}</TableCell>)}</>}
+        {showReplacement && <TableCell align="right" sx={{ fontWeight: 900, background: TILE.replacement.tint, color: TILE.replacement.color }}>Replacement duties</TableCell>}
+        {showTraining && <TableCell align="right" sx={{ fontWeight: 900, background: TILE.training.tint, color: TILE.training.color }}>Training days (of 7)</TableCell>}
+        {showCompOff && <TableCell align="right" sx={{ fontWeight: 900, background: TILE.coff.tint, color: TILE.coff.color }}>C-OFF<Typography component="span" sx={{ display: "block", fontSize: 9.5, color: "#64748B", fontWeight: 750 }}>Usable / non-expired</Typography></TableCell>}
+        {showLeave && <><TableCell align="right" sx={{ fontWeight: 900, background: TILE.leave.tint, color: TILE.leave.color }}>Total leave days</TableCell>{visibleLeaveCategories.map((category) => <TableCell key={category} align="right" sx={{ fontWeight: 900 }}>{category}</TableCell>)}</>}
       </TableRow></TableHead><TableBody>
         {!matrixRows.length && <TableRow><TableCell colSpan={matrixColumnCount} align="center" sx={{ py: 7, color: "#64748B" }}>No {matrixKind === "All" ? "employee activity" : matrixKind.toLowerCase()} found for the selected filters.</TableCell></TableRow>}
         {matrixRows.map((row) => <TableRow key={row.employeeId} hover>
           <TableCell sx={{ position: "sticky", left: 0, zIndex: 2, bgcolor: "white" }}><Typography sx={{ fontWeight: 850 }}>{row.employeeName || row.employeeId}</Typography><Typography sx={{ display: "block" }} variant="caption" >{row.designation || "—"} · {row.employeeId}</Typography><Typography variant="caption" sx={{ color: "#64748B" }}>{(row.departments || []).join(", ") || "No department"}{(row.subDepartments || []).length ? ` / ${row.subDepartments.join(", ")}` : ""}{(row.periodGroupNames || []).length ? ` · ${row.periodGroupNames.join(", ")}` : ""}</Typography></TableCell>
           {showDuties && <><TableCell align="right" sx={{ fontWeight: 850 }}>{row.shiftDutyDays || 0}</TableCell>{visibleDutyCategories.map((category) => <TableCell key={category} align="right">{row.dutyCounts?.[category] || 0}</TableCell>)}</>}
-          {showReplacement && <TableCell align="right" sx={{ fontWeight: 850, color: row.replacementDutyDays ? "#15803D" : "inherit" }}>{row.replacementDutyDays || 0}</TableCell>}
-          {showTraining && <TableCell align="right"><Button size="small" variant="outlined" disabled={!(row.trainings || []).length} onClick={() => setTrainingDetails(row)} sx={{ minWidth: 72, textTransform: "none", fontWeight: 900, color: "#6A1B9A", borderColor: "#CDB4EA" }}>{row.trainingDays || 0} / {row.trainingTargetDays || matrix.trainingTargetDays || 7}</Button></TableCell>}
-          {showCompOff && <TableCell align="right"><Button size="small" variant="text" disabled={!(row.compOffCredits || []).length} onClick={() => setCompOffDetails(row)} sx={{ minWidth: 54, px: .6, textTransform: "none", fontWeight: 950, color: row.compOffNonExpired ? "#9A6700" : "#64748B" }}>{row.compOffUsable || 0} / {row.compOffNonExpired || 0}</Button></TableCell>}
-          {showLeave && <><TableCell align="right" sx={{ fontWeight: 850 }}>{row.leaveTotal || 0}</TableCell>{visibleLeaveCategories.map((category) => <TableCell key={category} align="right">{row.leaveByType?.[category] || 0}</TableCell>)}</>}
+          {showReplacement && <TableCell align="right" sx={{ fontWeight: 850, background: TILE.replacement.tint, color: TILE.replacement.color }}>{row.replacementDutyDays || 0}</TableCell>}
+          {showTraining && <TableCell align="right" sx={{ background: TILE.training.tint }}><Button size="small" variant="outlined" disabled={!(row.trainings || []).length} onClick={() => setTrainingDetails(row)} sx={{ minWidth: 72, textTransform: "none", fontWeight: 900, color: "#6A1B9A", borderColor: "#CDB4EA" }}>{row.trainingDays || 0} / {row.trainingTargetDays || matrix.trainingTargetDays || 7}</Button></TableCell>}
+          {showCompOff && <TableCell align="right" sx={{ background: TILE.coff.tint }}><Button size="small" variant="text" disabled={!(row.compOffCredits || []).length} onClick={() => setCompOffDetails(row)} sx={{ minWidth: 54, px: .6, textTransform: "none", fontWeight: 950, color: row.compOffNonExpired ? "#9A6700" : "#64748B" }}>{row.compOffUsable || 0} / {row.compOffNonExpired || 0}</Button></TableCell>}
+          {showLeave && <><TableCell align="right" sx={{ fontWeight: 850, background: TILE.leave.tint, color: TILE.leave.color }}>{row.leaveTotal || 0}</TableCell>{visibleLeaveCategories.map((category) => <TableCell key={category} align="right">{row.leaveByType?.[category] || 0}</TableCell>)}</>}
         </TableRow>)}
         {!!matrixRows.length && <TableRow sx={{ "& td": { position: "sticky", bottom: 0, background: "#E8F5F1", fontWeight: 950, borderTop: "2px solid #9FD8C8" } }}>
           <TableCell>Total ({matrixRows.length})</TableCell>
@@ -521,5 +530,6 @@ export default function CrewActivityReport() {
         </Stack>
       </DialogContent>
     </Dialog>
+    </>}
   </AppShell>;
 }

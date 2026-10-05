@@ -8,6 +8,8 @@ export function createDashDemo(today) {
     employeeId: g === 0 && i === 0 ? demoEmployeeId : `DEMO${g}${i}`, name: g === 0 ? name : `${["Suresh", "Kavita", "Rahul", "Ananya", "Vikram", "Sonal"][i]} ${["Gupta", "Bose", "Nair", "Patel"][g]}`, IsSIC: i === 0,
     duties: Object.fromEntries(dates.map((date, d) => [date, { shift: ["Evening", "Evening", "Morning", "Morning", "Night", "Night", "OFF", "OFF"][(d + g * 2) % 8], ...(g === 0 && i === 2 && d === 2 ? { leaveStatus: "Approved", leaveType: "CL", replacementRequired: true } : {}), ...(g === 0 && i === 1 && d === 3 ? { leaveStatus: "Applied", leaveType: "CL" } : {}), ...(g === 1 && i === 2 && d === 4 ? { trainingName: "Safety refresher", trainingStatus: "Approved" } : {}) }]))
   })) }));
+  const coveredDate = dayjs(today).add(4, "day").format("YYYY-MM-DD");
+  groups[0].employees[3].duties[coveredDate] = { shift: "Night", leaveStatus: "Approved", leaveType: "CL", replacementRequired: true, replacementEmployee: { employeeId: "DEMO-COVER", name: "Kiran Rao", shift: "Night" } };
   const records = [
     { id: "demo-leave", leaveGroupId: "demo-leave-group", kind: "Leave", employeeId: demoEmployeeId, name: names[0], leaveType: "Casual leave", date: dayjs(today).add(2, "day").format("YYYY-MM-DD"), finalStatus: "Applied", sicApprovalStatus: "Pending", isOwner: true, canCancel: true },
     { id: "demo-training", kind: "Training", employeeId: demoEmployeeId, employeeName: names[0], trainingName: "Grid operations refresher", startDate: dayjs(today).add(4, "day").format("YYYY-MM-DD"), endDate: dayjs(today).add(6, "day").format("YYYY-MM-DD"), status: "Pending Approval" },

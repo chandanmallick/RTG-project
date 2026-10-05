@@ -33,7 +33,7 @@ const categories = [
     request: [{ key: "requestTraining", title: "Request training", note: "Submit through reporting hierarchy", icon: GraduationCap, to: "/crew/training?section=request" }, { key: "myTraining", title: "Training OFF request", note: "Adjacent OFF for approved training", icon: CalendarDays, to: "/crew/training?section=mytraining" }],
     decide: [{ key: "trainingAssignment", title: "Training assignment", note: "Nominate eligible employees", icon: Users, to: "/crew/training?section=assign" }, { key: "trainingApproval", title: "Training & OFF approval", note: "Current approval stage", icon: CheckCircle2, to: "/crew/training?section=pending" }],
     cover: [{ key: "calendarCoverage", title: "Replacement", note: "Assign cover from duty calendar", icon: Users, to: "/crew/calendar?filter=coverage" }],
-    track: [{ key: "trainingHistory", title: "Track training", note: "History and nomination matrix", icon: ClipboardList, to: "/crew/training?section=history" }],
+    track: [{ key: "trainingHistory", title: "Track training", note: "History and nomination matrix", icon: ClipboardList, to: "/crew/reports?tab=training-history" }],
     report: [{ key: "categoryReport", title: "Training report", note: "Attendance and employee analysis", icon: BarChart3, to: "/crew/reports?kind=Training" }],
   } },
   { id: "sports", title: "Sports", subtitle: "Event to final reporting", icon: Medal, color: "#B45309", tint: "#FFF7ED", actions: {

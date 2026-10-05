@@ -515,6 +515,7 @@ def calendar_view(start_date: str = Query(...), end_date: str = Query(...)):
             "assignedDuty": 1,
             "groupName": 1,
             "replacementMode": 1,
+            "isActingSIC": 1,
             "replacementDuty": 1,
             "replacementFor": 1,
         },
@@ -530,6 +531,7 @@ def calendar_view(start_date: str = Query(...), end_date: str = Query(...)):
                 "employeeId": replacement_id,
                 "name": record.get("name"),
                 "mode": record.get("replacementMode"),
+                "isActingSIC": bool(record.get("isActingSIC")),
                 "shift": record.get("assignedDuty"),
                 "groupName": record.get("groupName"),
             }

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from "react"
+import { Navigate } from "react-router-dom"
 import api from "./api"
 import { useMemo } from "react"
 
@@ -40,7 +41,7 @@ import TrainingCalendarReview from "../components/crew/TrainingCalendarReview";
 import NominationMatrix from "../components/crew/NominationMatrix";
 import WorkflowHeader from "../components/crew/WorkflowHeader";
 
-export default function TrainingHolidayMaster({embeddedRequest=false,onRequestSubmitted,embeddedApproval=false,initialApprovalId="",onApprovalChanged,initialEmployeeId="",initialEmployeeName=""}={}){
+export default function TrainingHolidayMaster({embeddedReport=false,reportView="matrix",reportRefresh=0,embeddedRequest=false,onRequestSubmitted,embeddedApproval=false,initialApprovalId="",onApprovalChanged,initialEmployeeId="",initialEmployeeName=""}={}){
 const { user } = useAuth()
 const trainingAccess = user?.permissions?.crew_training || {}
 const canViewTrainingPage = Boolean(trainingAccess.view)
@@ -154,7 +155,8 @@ const [historyBusy,setHistoryBusy]=useState(false)
 const [historyError,setHistoryError]=useState("")
 const [historyFY,setHistoryFY]=useState("")
 const [historyEmployee,setHistoryEmployee]=useState("")
-const [historyView,setHistoryView]=useState("matrix")
+const [historyView,setHistoryView]=useState(reportView)
+useEffect(()=>{ if(embeddedReport) setHistoryView(reportView) },[embeddedReport,reportView])
 const [matrixStatus,setMatrixStatus]=useState("All")
 const [matrixTrainingList,setMatrixTrainingList]=useState([])
 const [myApprovedTraining,setMyApprovedTraining]=useState([])
@@ -168,12 +170,12 @@ if(duty?.isHoliday) result[date]=duty.holidayName || "Holiday"
 return result
 },[calendarData])
 const requestedSection=new URLSearchParams(window.location.search).get("section")
-const [activeSection,setActiveSection]=useState(()=>embeddedRequest ? "request" : embeddedApproval ? "pending" : requestedSection || (canAssignTraining ? "assign" : canViewTrainingPage ? "request" : "pending"))
+const [activeSection,setActiveSection]=useState(()=>embeddedReport ? "history" : embeddedRequest ? "request" : embeddedApproval ? "pending" : requestedSection || (canAssignTraining ? "assign" : canViewTrainingPage ? "request" : "pending"))
 // The dedicated Apply/Training page opens the request form as a popup — the same
 // minimal flow used when this component is embedded inside the duty calendar.
 const [requestPopupOpen,setRequestPopupOpen]=useState(()=>!embeddedRequest && !embeddedApproval && (requestedSection === "request"))
 useEffect(()=>{
-if(!embeddedRequest && !embeddedApproval && !requestedSection && canAssignTraining) setActiveSection("assign")
+if(!embeddedReport && !embeddedRequest && !embeddedApproval && !requestedSection && canAssignTraining) setActiveSection("assign")
 },[canAssignTraining,embeddedApproval,embeddedRequest,requestedSection])
 const selectedApprovalDetail = pendingList.find((row)=>row.id===expandedApprovalId)
 
@@ -189,7 +191,7 @@ console.error(err)
 }
 
 useEffect(()=>{
-if(canViewTrainingPage) fetchHoliday()
+if(canViewTrainingPage && !embeddedReport) fetchHoliday()
 },[selectedYear,canViewTrainingPage])
 
 /* ================= SAVE HOLIDAY ================= */
@@ -231,7 +233,7 @@ console.error(err)
 }
 
 useEffect(()=>{
-if(canViewTrainingPage || embeddedRequest) fetchTraining()
+if(!embeddedReport && (canViewTrainingPage || embeddedRequest)) fetchTraining()
 },[selectedFY,canViewTrainingPage,embeddedRequest])
 
 /* ================= SAVE TRAINING ================= */
@@ -484,7 +486,7 @@ setDelegationLoading(false)
 }
 
 useEffect(()=>{
-if(!canViewTrainingPage) return
+if(!canViewTrainingPage || embeddedReport) return
 api.get("/training-assign/nomination-access").then((res)=>{
 setCanAssignTraining(Boolean(res.data?.canAssign))
 setCanDelegateTraining(Boolean(res.data?.canDelegate))
@@ -632,8 +634,8 @@ console.error(err)
 }
 
 useEffect(()=>{
-fetchPending()
-},[])
+if(!embeddedReport) fetchPending()
+},[embeddedReport])
 
 const loadReplacementCandidates = async(row)=>{
 if(replacementCandidates[row.id] || candidateLoading[row.id]) return
@@ -730,7 +732,7 @@ if(request===historyRequest.current) setHistoryBusy(false)
 
 useEffect(()=>{
 if(canViewTrainingPage) fetchHistory()
-},[historyFY,selectedFY,canViewTrainingPage])
+},[historyFY,selectedFY,canViewTrainingPage,reportRefresh])
 
 const visibleHistory=history.filter(row => `${row.employeeName || ""} ${row.employeeId || ""} ${row.groupName || ""}`.toLowerCase().includes(historyEmployee.toLowerCase()))
 
@@ -842,8 +844,8 @@ console.error(err)
 }
 
 useEffect(()=>{
-fetchMyApprovedTraining()
-},[])
+if(!embeddedReport) fetchMyApprovedTraining()
+},[embeddedReport])
 
 const requestAdjacentOff=async(row)=>{
 const choice=myOffChoices[row.id] || {before:false,after:false}
@@ -890,13 +892,16 @@ const renderRequestForm=()=>(
 </Paper>
 )
 
+if(!embeddedReport && !embeddedRequest && !embeddedApproval && requestedSection==="history") return <Navigate replace to="/crew/reports?tab=training-matrix" />
+if(embeddedReport && !canViewTrainingPage) return <Alert severity="info">Training report access is restricted for your account.</Alert>
+
 return(
 
-<Box sx={{p:embeddedRequest || embeddedApproval ? 0 : activeSection==="history" ? 1.5 : 3,background:embeddedRequest || embeddedApproval ? "transparent" : "#f4f6fb",minHeight:embeddedRequest || embeddedApproval || activeSection==="history" ? 0 : "100vh"}}>
+<Box sx={{p:embeddedReport || embeddedRequest || embeddedApproval ? 0 : activeSection==="history" ? 1.5 : 3,background:embeddedReport || embeddedRequest || embeddedApproval ? "transparent" : "#f4f6fb",minHeight:embeddedRequest || embeddedApproval || activeSection==="history" ? 0 : "100vh"}}>
 
 {/* HEADER */}
 
-{!embeddedRequest && !embeddedApproval && <Box sx={{mb:2}}><WorkflowHeader title={currentTrainingSection.title} subtitle={currentTrainingSection.subtitle} accent={currentTrainingSection.accent} count={currentTrainingSection.count} /></Box>}
+{!embeddedReport && !embeddedRequest && !embeddedApproval && <Box sx={{mb:2}}><WorkflowHeader title={currentTrainingSection.title} subtitle={currentTrainingSection.subtitle} accent={currentTrainingSection.accent} count={currentTrainingSection.count} /></Box>}
 
 {notice && <Alert severity={notice.severity} onClose={()=>setNotice(null)} sx={{mb:2}}>{notice.text}</Alert>}
 
@@ -1323,7 +1328,7 @@ return(
   {canAssignTraining && (
     <Button
       variant="outlined"
-      onClick={()=>window.location.assign("/crew/training?section=history")}
+      onClick={()=>window.location.assign("/crew/reports?tab=training-matrix")}
       sx={{color:"#FFF",borderColor:"rgba(255,255,255,.72)",textTransform:"none",fontWeight:850,"&:hover":{borderColor:"#FFF",background:"rgba(255,255,255,.08)"}}}
     >
       Employee matrix
@@ -1445,7 +1450,7 @@ return <Tooltip key={`${day.date}-${item.id || item.trainingName}`} title={`${it
 
 <Dialog open={Boolean(reviewNomination)} onClose={()=>setReviewNomination(null)} fullWidth maxWidth="sm">
 <DialogTitle>Manage training nomination</DialogTitle>
-<DialogContent dividers>{reviewNomination && <TrainingCalendarReview key={`${reviewNomination.id}-${reviewNomination.startDate || ""}`} requestId={reviewNomination.id} proposedStartDate={reviewNomination.startDate} onChanged={()=>{fetchPending();fetchHistory();if(selectedTraining)fetchCalendarDuty(selectedTraining,"","",false)}}/>}</DialogContent>
+<DialogContent dividers>{reviewNomination && <TrainingCalendarReview key={`${reviewNomination.id}-${reviewNomination.startDate || ""}`} requestId={reviewNomination.id} proposedStartDate={reviewNomination.startDate} onChanged={()=>{if(!embeddedReport)fetchPending();fetchHistory();if(selectedTraining)fetchCalendarDuty(selectedTraining,"","",false)}}/>}</DialogContent>
 <DialogActions><Button onClick={()=>setReviewNomination(null)}>Close</Button></DialogActions>
 </Dialog>
 <Dialog open={calendarOpen} maxWidth="xl" fullWidth>
@@ -1972,10 +1977,10 @@ Reject Selected
 <Paper elevation={0} sx={{p:{xs:1,md:2},borderRadius:2}}>
 
 <Box sx={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:2,flexWrap:"wrap",mb:2.5}}>
-<Box sx={{display:"flex",gap:1,p:.6,borderRadius:2,background:"#EEF2FF"}}>
+{!embeddedReport && <Box sx={{display:"flex",gap:1,p:.6,borderRadius:2,background:"#EEF2FF"}}>
 <Button size="small" variant={historyView==="history" ? "contained" : "text"} onClick={()=>setHistoryView("history")} sx={{fontWeight:850,textTransform:"none"}}>Nomination History</Button>
 <Button size="small" variant={historyView==="matrix" ? "contained" : "text"} onClick={()=>setHistoryView("matrix")} sx={{fontWeight:850,textTransform:"none"}}>Training Nomination Matrix</Button>
-</Box>
+</Box>}
 {historyView==="matrix" && <Button variant="outlined" onClick={exportNominationMatrix} disabled={!nominationMatrix.employees.length} sx={{fontWeight:850,textTransform:"none"}}>Export full matrix CSV</Button>}
 </Box>
 
@@ -2056,7 +2061,7 @@ sx={{
 
 <TableCell>{row.trainingName}</TableCell>
 
-<TableCell>{row.trainingDate}</TableCell>
+<TableCell>{row.trainingDate || row.startDate || row.financialYear}{row.endDate && row.endDate!==row.startDate ? ` to ${row.endDate}` : ""}</TableCell>
 
 <TableCell>{row.employeeName || row.employeeId}<br/><Typography variant="caption">{row.employeeId}</Typography></TableCell>
 
