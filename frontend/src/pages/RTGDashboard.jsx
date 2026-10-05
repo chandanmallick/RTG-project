@@ -167,6 +167,8 @@ export default function RTGDashboard() {
   const [crmsOutageLoading, setCrmsOutageLoading] = useState(false);
   const [crmsTransmissionOutages, setCrmsTransmissionOutages] = useState({ total: 0, over_15_days: 0, rows: [], type_summary: {} });
   const [stateSchedules, setStateSchedules] = useState({ generators: [], rows: [] });
+  const [showStateScheduleDetails, setShowStateScheduleDetails] = useState(false);
+  const [scheduleSourceDetails, setScheduleSourceDetails] = useState(null);
   const [stateScheduleLoading, setStateScheduleLoading] = useState(false);
   const [stateScheduleError, setStateScheduleError] = useState("");
   const [scheduleNow, setScheduleNow] = useState(new Date());
@@ -363,11 +365,15 @@ export default function RTGDashboard() {
         end_date: today,
         kind: "state",
         frequency: 15,
+        refresh: true,
       });
       if (!res?.success) throw new Error(res?.message || "WBES schedule could not be loaded.");
       setStateSchedules({
         generators: res.generators || [],
         rows: res.rows || [],
+        source_path: res.source_path,
+        source_details: res.source_details || [],
+        diagnostics: res.diagnostics || [],
       });
     } catch (err) {
       setStateSchedules({ generators: [], rows: [] });
@@ -1473,7 +1479,7 @@ export default function RTGDashboard() {
         </Paper>
 
         <Paper elevation={0} sx={{ gridArea: "wbes", minHeight: 300, p: 1.4, borderRadius: "24px", border: "1px solid #D9E5EC", bgcolor: "#FFFFFF", boxShadow: "0 14px 36px rgba(8,50,71,.08)", "@keyframes compactSchedulePulse": { "50%": { boxShadow: "inset 0 0 0 2px #EF4444" } } }}>
-          <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 1, mb: 1 }}><Box><Typography sx={{ color: "#083247", fontSize: 16, fontWeight: 950 }}>WBES State Schedule</Typography><Typography sx={{ mt: .2, color: "#718096", fontSize: 8.5 }}>Four blocks from current position · changes above 200 MW highlighted</Typography></Box><IconButton disabled={stateScheduleLoading} onClick={loadTodayStateSchedules} size="small" sx={{ bgcolor: "#E7F3F6", color: "#0E6686" }}><RefreshRoundedIcon sx={{ fontSize: 16 }} /></IconButton></Box>
+          <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 1, mb: 1 }}><Box><Typography sx={{ color: "#083247", fontSize: 16, fontWeight: 950 }}>WBES State Schedule</Typography><Typography sx={{ mt: .2, color: "#718096", fontSize: 8.5 }}>Four blocks from current position · changes above 200 MW highlighted</Typography></Box><GradientButton onClick={() => setShowStateScheduleDetails(true)}>All blocks / source</GradientButton><IconButton disabled={stateScheduleLoading} onClick={loadTodayStateSchedules} size="small" sx={{ bgcolor: "#E7F3F6", color: "#0E6686" }}><RefreshRoundedIcon sx={{ fontSize: 16 }} /></IconButton></Box>
           {stateScheduleError ? <Typography sx={{ p: 2, color: "#B91C1C", fontSize: 10 }}>{stateScheduleError}</Typography> : (
             <Box sx={{ overflowX: "auto" }}>
               <Box sx={{ minWidth: 520, display: "grid", gridTemplateColumns: "130px repeat(4,minmax(82px,1fr))", gap: .4 }}>
@@ -2932,6 +2938,22 @@ export default function RTGDashboard() {
       </Dialog>
       )}
 
+      <Dialog open={showStateScheduleDetails} onClose={() => setShowStateScheduleDetails(false)} maxWidth="xl" fullWidth>
+        <DialogTitle>All state schedules ? {stateSchedules.rows?.[0]?.timestamp?.slice(0, 10)}<IconButton onClick={() => setShowStateScheduleDetails(false)} sx={{ float: "right" }}><CloseRoundedIcon /></IconButton></DialogTitle>
+        <DialogContent>
+          <Typography sx={{ fontSize: 12, mb: 1 }}>{stateSchedules.source_path}</Typography>
+          {(stateSchedules.diagnostics || []).map((item, index) => <Typography key={index} color="error">{item.message}</Typography>)}
+          <TableContainer sx={{ maxHeight: "50vh" }}><Table stickyHeader size="small">
+            <TableHead><TableRow><TableCell>Block</TableCell><TableCell>Time (IST)</TableCell>{stateSchedules.generators.map(state => <TableCell key={state.id}>{state.label}<br />{state.id} (MW)</TableCell>)}</TableRow></TableHead>
+            <TableBody>{stateSchedules.rows.map((row, index) => <TableRow key={row.timestamp}><TableCell>{index + 1}</TableCell><TableCell>{row.timestamp.slice(11, 16)}</TableCell>{stateSchedules.generators.map(state => <TableCell key={state.id}>{row[state.id] == null ? "?" : formatMW(row[state.id])}</TableCell>)}</TableRow>)}</TableBody>
+          </Table></TableContainer>
+          <Box component="details" sx={{ mt: 2 }}><summary>API response portion used for this table</summary><Box component="pre" sx={{ fontSize: 11, maxHeight: 300, overflow: "auto", whiteSpace: "pre-wrap" }}>{JSON.stringify(stateSchedules.source_details, null, 2)}</Box></Box>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={Boolean(scheduleSourceDetails)} onClose={() => setScheduleSourceDetails(null)} maxWidth="md" fullWidth>
+        <DialogTitle>Comparison source<IconButton onClick={() => setScheduleSourceDetails(null)} sx={{ float: "right" }}><CloseRoundedIcon /></IconButton></DialogTitle>
+        <DialogContent><Box component="pre" sx={{ fontSize: 12, whiteSpace: "pre-wrap" }}>{JSON.stringify(scheduleSourceDetails, null, 2)}</Box></DialogContent>
+      </Dialog>
       <Dialog open={showISGSComparisonDialog} onClose={() => setShowISGSComparisonDialog(false)} maxWidth="lg" fullWidth PaperProps={{ sx: { borderRadius: "24px", overflow: "hidden" } }}>
         <DialogTitle sx={{ px: 2.5, py: 1.6, display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid #E2E8F0" }}>
           <Box><Typography sx={{ color: "#083247", fontSize: 18, fontWeight: 950 }}>All ISGS Schedule Comparisons</Typography><Typography sx={{ color: "#64748B", fontSize: 10 }}>WBES generator injection is sign-normalised before comparison · flagged only when difference is more than {isgsScheduleCheck.report?.tolerance_mw ?? isgsScheduleCheck.config?.tolerance_mw ?? 1} MW</Typography></Box>
@@ -2939,7 +2961,7 @@ export default function RTGDashboard() {
         </DialogTitle>
         <DialogContent sx={{ p: 0 }}>
           <TableContainer sx={{ maxHeight: "70vh" }}><Table stickyHeader size="small"><TableHead><TableRow>{["ISGS", "RTG plant ID", "WBES name", "Block", "WBES (MW)", "RTG (MW)", "Difference (MW)", "Status / remark"].map((label) => <TableCell key={label} sx={{ bgcolor: "#EAF2FF !important", color: "#0057B7", fontSize: 10.5, fontWeight: 950, whiteSpace: "nowrap" }}>{label}</TableCell>)}</TableRow></TableHead>
-            <TableBody>{(isgsScheduleCheck.report?.rows || []).map((row) => { const issue = row.status !== "MATCHED"; return <TableRow key={`${row.plant_id}-${row.wbes_name}`} sx={{ bgcolor: issue ? "#FFF1F2" : "#F0FDF4" }}><TableCell sx={{ fontSize: 10.5, fontWeight: 900 }}>{row.plant_name}<Typography sx={{ color: "#64748B", fontSize: 8 }}>{row.stage_name ? `Stage ${row.stage_name}` : ""}</Typography></TableCell><TableCell sx={{ fontSize: 10 }}>{row.plant_id || "—"}</TableCell><TableCell sx={{ fontSize: 10 }}>{row.wbes_name || "—"}</TableCell><TableCell sx={{ fontSize: 10 }}>{isgsScheduleCheck.report?.block} ({isgsScheduleCheck.report?.block_start})</TableCell><TableCell sx={{ fontSize: 10 }}>{row.wbes_schedule_mw == null ? "—" : formatMW(row.wbes_schedule_mw)}</TableCell><TableCell sx={{ fontSize: 10 }}>{row.rtg_schedule_mw == null ? "—" : formatMW(row.rtg_schedule_mw)}</TableCell><TableCell sx={{ color: issue ? "#B42318" : "#067647", fontSize: 10, fontWeight: 900 }}>{row.difference_mw == null ? "—" : formatMW(row.difference_mw)}</TableCell><TableCell><Chip size="small" label={row.status.replaceAll("_", " ")} sx={{ mr: .6, bgcolor: issue ? "#FEE2E2" : "#DCFCE7", color: issue ? "#B42318" : "#067647", fontSize: 8, fontWeight: 950 }} /><Typography component="span" sx={{ fontSize: 9, color: issue ? "#B42318" : "#475569" }}>{row.remark}</Typography></TableCell></TableRow>; })}</TableBody>
+            <TableBody>{(isgsScheduleCheck.report?.rows || []).map((row) => { const issue = row.status !== "MATCHED"; return <TableRow key={`${row.plant_id}-${row.wbes_name}`} sx={{ bgcolor: issue ? "#FFF1F2" : "#F0FDF4" }}><TableCell sx={{ fontSize: 10.5, fontWeight: 900 }}>{row.plant_name}<Typography sx={{ color: "#64748B", fontSize: 8 }}>{row.stage_name ? `Stage ${row.stage_name}` : ""}</Typography></TableCell><TableCell sx={{ fontSize: 10 }}>{row.plant_id || "—"}</TableCell><TableCell sx={{ fontSize: 10 }}>{row.wbes_name || "—"}</TableCell><TableCell sx={{ fontSize: 10 }}>{isgsScheduleCheck.report?.block} ({isgsScheduleCheck.report?.block_start})</TableCell><TableCell sx={{ fontSize: 10 }}>{row.wbes_schedule_mw == null ? "—" : formatMW(row.wbes_schedule_mw)}</TableCell><TableCell sx={{ fontSize: 10 }}>{row.rtg_schedule_mw == null ? "—" : formatMW(row.rtg_schedule_mw)}</TableCell><TableCell sx={{ color: issue ? "#B42318" : "#067647", fontSize: 10, fontWeight: 900 }}>{row.difference_mw == null ? "—" : formatMW(row.difference_mw)}</TableCell><TableCell><Chip size="small" label={row.status.replaceAll("_", " ")} sx={{ mr: .6, bgcolor: issue ? "#FEE2E2" : "#DCFCE7", color: issue ? "#B42318" : "#067647", fontSize: 8, fontWeight: 950 }} /><Typography component="span" sx={{ fontSize: 9, color: issue ? "#B42318" : "#475569" }}>{row.remark}</Typography><Box component="button" onClick={() => setScheduleSourceDetails({ plant: row.plant_name, date: isgsScheduleCheck.report?.date, block: isgsScheduleCheck.report?.block, raw_wbes_mw: row.wbes_raw_schedule_mw, ...row.source_details })}>Inspect source</Box></TableCell></TableRow>; })}</TableBody>
           </Table></TableContainer>
         </DialogContent>
       </Dialog>
