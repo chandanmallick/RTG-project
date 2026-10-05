@@ -97,6 +97,7 @@ const resolveAuthorityId = (authority, people) => {
 };
 
 export default function CrewDutyRoster() {
+  const [specialEventOpen, setSpecialEventOpen] = useState(false);
   const [startDate, setStartDate] = useState(today());
   const [endDate, setEndDate] = useState(addDays(today(), 7));
   const [rosterData, setRosterData] = useState([]);
@@ -295,7 +296,10 @@ export default function CrewDutyRoster() {
 
   return (
     <AppShell>
-      <Box sx={{ "@media print": { display: "none" } }}><SpecialEventRoster /></Box>
+      <Dialog open={specialEventOpen} onClose={() => setSpecialEventOpen(false)} fullWidth maxWidth="lg" slotProps={{ paper: { sx: { borderRadius: "24px !important", background: "#F4F3FF !important" } } }}>
+        <DialogTitle sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontWeight: 900 }}>Special Event roster<Button onClick={() => setSpecialEventOpen(false)}>Close</Button></DialogTitle>
+        <DialogContent sx={{ p: { xs: 1.5, md: 3 } }}><Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "220px minmax(0,1fr)" }, gap: 2.5 }}><Paper sx={{ p: 2.5, borderRadius: "20px !important", background: "linear-gradient(155deg,#EEEBFF,#DCECFB) !important", alignSelf: "start" }}><Typography sx={{ fontSize: 11, fontWeight: 900, color: "#6555C0", letterSpacing: 1, mb: 2 }}>EVENT PLANNING</Typography>{["Dates & department", "Announce event", "Block leave", "Review staffing"].map((label,index)=><Box key={label} sx={{ display: "flex", alignItems: "center", gap: 1.2, py: 1.6, borderBottom: index < 3 ? "1px solid #CBC5EF" : undefined }}><Box sx={{ width: 30, height: 30, flexShrink: 0, borderRadius: "50%", bgcolor: index === 0 ? "#5C43DC" : "#FFF", color: index === 0 ? "#FFF" : "#6555C0", display: "grid", placeItems: "center", fontWeight: 850 }}>{index+1}</Box><Typography sx={{ fontSize: 13, fontWeight: 800 }}>{label}</Typography></Box>)}<Typography sx={{ mt: 2, fontSize: 12, color: "#756A99", lineHeight: 1.7 }}>Announce first. Enable the leave restriction separately when ready.</Typography></Paper><Box sx={{ minWidth: 0 }}>{specialEventOpen && <SpecialEventRoster />}</Box></Box></DialogContent>
+      </Dialog>
       {/* Hidden section designed purely for paper print preview */}
       {!!rosterData.length && (
         <section className="crew-roster-print">
@@ -477,6 +481,7 @@ export default function CrewDutyRoster() {
           </Typography>
         </Box>
         <Stack direction="row" spacing={1} alignItems="center">
+          <Button onClick={() => setSpecialEventOpen(true)} startIcon={<Sparkles size={20} />} sx={{ px: 2, py: 1.2, borderRadius: "14px !important", background: "linear-gradient(120deg,#5A3FDF,#8270EE) !important", color: "#FFF !important", textTransform: "none", boxShadow: "0 6px 18px #5A3FDF30" }}><Box sx={{ textAlign: "left" }}><Typography sx={{ fontSize: 13, fontWeight: 900 }}>Special Event roster</Typography><Typography sx={{ fontSize: 10, opacity: .85 }}>Announce ? Plan ? Manage</Typography></Box></Button>
           <Chip
             label={isFinal ? "FINAL" : rosterId ? "DRAFT" : "UNSAVED"}
             color={isFinal ? "success" : "default"}

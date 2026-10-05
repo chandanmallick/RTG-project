@@ -13,7 +13,7 @@ class LeaveBlockTests(unittest.TestCase):
         self.ctx = load_functions("crew_legacy/api/leave_api.py", {
             "clean_id", "is_admin", "validate_block_dates", "ensure_leave_dates_open",
             "create_blocked_leave_period", "revoke_blocked_leave_period",
-            "set_blocked_leave_period_status", "delete_blocked_leave_period", "apply_leave_v2",
+            "set_blocked_leave_period_status", "delete_blocked_leave_period", "apply_leave_v2", "prepare_leave_applications",
         }, {"date": date, "datetime": datetime, "system_settings_collection": self.settings})
 
     def test_both_boundaries_blocked(self):

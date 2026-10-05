@@ -41,6 +41,7 @@ api.interceptors.request.use((config) => {
     const isLeaveApproval = method === "PUT" && (
     requestUrl.includes("/leave/cancel/") ||
     requestUrl.includes("/leave/withdraw/") ||
+    requestUrl.includes("/leave/period/") ||
     requestUrl.includes("/leave/cancel-group") ||
     requestUrl.includes("/leave/sic-forward-bulk") ||
     requestUrl.includes("/leave/sic-reject-bulk") ||

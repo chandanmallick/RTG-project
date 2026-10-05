@@ -1690,9 +1690,193 @@ def apply_leave(data: dict, user=Depends(get_authenticated_user)):
     }
 
 
-@router.post("/apply")
-def apply_leave_v2(data: dict, user=Depends(get_authenticated_user)):
-    """Create date-level leave rows after validating the authenticated employee scope."""
+def leave_application_records(reference):
+    group_id = clean_id(reference.get("leaveGroupId"))
+    if group_id:
+        query = {"leaveGroupId": group_id}
+    else:
+        # Legacy single/multi date rows created before leaveGroupId existed:
+        # scope by the owning employee and the exact date set the client sees.
+        query = {"employeeId": reference.get("employeeId")}
+    records = list(leave_request_collection.find(query))
+    if not group_id:
+        same_kind = [
+            record for record in records
+            if (
+                clean_id(record.get("leaveType") or "") == clean_id(reference.get("leaveType") or "")
+                and bool(record.get("stationLeaveOnly")) == bool(reference.get("stationLeaveOnly"))
+            )
+        ]
+        # Restrict to the contiguous run of dates around the clicked row.
+        same_kind.sort(key=lambda item: clean_id(item.get("date")))
+        target_index = next(
+            (index for index, item in enumerate(same_kind) if item["_id"] == reference["_id"]),
+            0,
+        )
+        start = end = target_index
+        while start > 0 and (
+            datetime.strptime(same_kind[start].get("date"), "%Y-%m-%d")
+            - datetime.strptime(same_kind[start - 1].get("date"), "%Y-%m-%d")
+        ) == timedelta(days=1):
+            start -= 1
+        while end < len(same_kind) - 1 and (
+            datetime.strptime(same_kind[end + 1].get("date"), "%Y-%m-%d")
+            - datetime.strptime(same_kind[end].get("date"), "%Y-%m-%d")
+        ) == timedelta(days=1):
+            end += 1
+        records = same_kind[start:end + 1]
+
+    return records
+
+
+def update_reviewed_leave(leave, update):
+    result = leave_request_collection.update_one({**leave, "editToken": {"$exists": False}}, update)
+    if result.matched_count == 0:
+        raise HTTPException(409, "This leave changed during review. Reload before acting")
+    return result
+
+
+def leave_period_is_editable(record):
+    """Editing never resets an approval, rejection or replacement decision."""
+    return (
+        record.get("finalStatus") == "Applied"
+        and record.get("sicApprovalStatus") in {None, "Pending", "Not Applicable"}
+        and record.get("deptApprovalStatus") in {None, "Pending", "Not Applicable"}
+        and not record.get("currentApprovalIndex", 0)
+        and all(step.get("status") == "Pending" and not step.get("actedOn") and not step.get("actedBy") for step in record.get("approvalChain") or [])
+        and not any(record.get(key) for key in ("rejectionHistory", "replacementDecisionHistory", "sicApprovedOn", "approvedOn", "editToken"))
+    )
+
+
+@router.put("/period/{leave_id}")
+def edit_leave_period(leave_id: str, data: dict, user=Depends(get_authenticated_user)):
+    try:
+        reference = leave_request_collection.find_one({"_id": ObjectId(leave_id)})
+    except Exception as exc:
+        raise HTTPException(400, "Invalid leave ID") from exc
+    if not reference:
+        raise HTTPException(404, "Leave not found")
+    if clean_id(reference.get("employeeId")) != clean_id(user.get("employeeId")):
+        raise HTTPException(403, "Only the applicant can edit the leave period")
+    records = leave_application_records(reference)
+    if not all(leave_period_is_editable(record) for record in records):
+        raise HTTPException(409, "The period can only be edited before any approver has acted")
+    ids = [record["_id"] for record in records]
+    reusable = {str(record["compOffId"]): str(record["_id"]) for record in records if record.get("compOffId")}
+    employee_id, employee, reason, prepared = prepare_leave_applications(
+        {**data, "employeeId": reference["employeeId"]}, user, ids, reusable,
+    )
+    if len(prepared) > 93:
+        raise HTTPException(400, "Select a period of at most 93 dates")
+    token = str(uuid.uuid4())
+    now = datetime.utcnow()
+    group_id = reference.get("leaveGroupId") or str(uuid.uuid4())
+    old_by_date = {record["date"]: record for record in records}
+    touched_dates = sorted(set(old_by_date) | {item["date"] for item in prepared})
+    daily_fields = ("leaveRequestId", "leaveType", "leaveStatus", "stationLeave", "stationLeaveOnly")
+    daily_before = {day: daily_record(employee_id, day) or {} for day in touched_dates}
+    credit_ids = set(reusable) | {item["compOffId"] for item in prepared if item.get("compOffId")}
+    credits_before = {credit_id: compensatory_off_collection.find_one({"_id": ObjectId(credit_id)}) for credit_id in credit_ids}
+    new_ids = []
+    claimed_ids = []
+    changed_credit_ids = []
+    daily_changed = False
+    try:
+        # Compare the complete original document so an approval racing validation wins safely.
+        for record in records:
+            result = leave_request_collection.update_one(record, {"$set": {"finalStatus": "Editing", "editToken": token}})
+            if result.modified_count != 1:
+                raise HTTPException(409, "This application changed during editing. Reload tracking and try again")
+            claimed_ids.append(record["_id"])
+        next_records = []
+        for item in prepared:
+            original = old_by_date.get(item["date"])
+            document = {**reference, **{key: item[key] for key in ("date", "leaveType", "stationLeave", "stationLeaveOnly", "groupName")},
+                        "reason": reason, "leaveGroupId": group_id, "compOffId": item.get("compOffId"),
+                        "finalStatus": "Editing", "editToken": token, "updatedOn": now}
+            document.pop("_id", None)
+            duty = item.get("duty") or {}
+            document.update(name=duty.get("name") or employee.get("name") or reference.get("name"),
+                            designation=duty.get("designation") or employee.get("designation") or reference.get("designation"),
+                            isSIC=bool(duty.get("isSIC")))
+            chain, levels = organization_leave_approval_chain(employee) if not item["isShiftEmployee"] else ([], None)
+            document.update(approvalMode="Shift" if item["isShiftEmployee"] else "Organization", approvalChain=chain,
+                            configuredApprovalLevels=levels, currentApprovalIndex=0,
+                            organizationApprovalStatus="Pending" if chain else None,
+                            sicApprovalStatus="Pending", deptApprovalStatus="Pending")
+            document["periodEditHistory"] = [*(reference.get("periodEditHistory") or []), {
+                "editedBy": employee_id, "editedOn": now, "previousDates": sorted(old_by_date),
+                "newDates": sorted(entry["date"] for entry in prepared), "previousReason": reference.get("reason"),
+            }]
+            if original:
+                row_id = original["_id"]
+                leave_request_collection.update_one({"_id": row_id, "editToken": token}, {"$set": document})
+            else:
+                row_id = leave_request_collection.insert_one(document).inserted_id
+                new_ids.append(row_id)
+            next_records.append((row_id, item))
+        # Reserve all required credits before changing the duty board.
+        for row_id, item in next_records:
+            credit_id = item.get("compOffId")
+            if not credit_id:
+                continue
+            before = credits_before[credit_id]
+            query = {"_id": ObjectId(credit_id), "status": before.get("status", {"$exists": False}), "periodEditToken": {"$exists": False}}
+            if before.get("linkedLeaveId"):
+                query["linkedLeaveId"] = before["linkedLeaveId"]
+            result = compensatory_off_collection.update_one(query, {"$set": {
+                "status": "Reserved", "linkedLeaveId": str(row_id), "usedDate": item["date"], "periodEditToken": token,
+            }})
+            if result.matched_count != 1:
+                raise HTTPException(409, "A selected C-OFF credit is no longer available")
+            changed_credit_ids.append(credit_id)
+        used_credits = {item.get("compOffId") for _, item in next_records}
+        for credit_id in set(reusable) - used_credits:
+            result = compensatory_off_collection.update_one({"_id": ObjectId(credit_id), "linkedLeaveId": reusable[credit_id], "status": "Reserved"},
+                {"$set": {"status": "Available", "periodEditToken": token}, "$unset": {"linkedLeaveId": "", "usedDate": ""}})
+            if result.matched_count != 1:
+                raise HTTPException(409, "An existing C-OFF reservation changed. Reload tracking")
+            changed_credit_ids.append(credit_id)
+        daily_changed = True
+        new_dates = {item["date"] for _, item in next_records}
+        for day, original in old_by_date.items():
+            if day in new_dates:
+                continue
+            leave_request_collection.update_one({"_id": original["_id"], "editToken": token}, {"$set": {
+                "finalStatus": "Withdrawn", "leaveGroupId": f"{group_id}:before:{token}",
+                "withdrawalReason": "Leave period edited by applicant", "updatedOn": now,
+            }})
+            employee_daily_collection.update_one({"employeeId": employee_id_filter(employee_id), "date": day, "leaveRequestId": str(original["_id"])},
+                {"$unset": {key: "" for key in daily_fields}})
+        for row_id, item in next_records:
+            employee_daily_collection.update_one({"employeeId": employee_id_filter(employee_id), "date": item["date"]}, {"$set": {
+                "leaveRequestId": str(row_id), "leaveType": item["leaveType"], "leaveStatus": "Applied",
+                "stationLeave": item["stationLeave"], "stationLeaveOnly": item["stationLeaveOnly"],
+            }})
+        leave_request_collection.update_many({"editToken": token, "finalStatus": "Editing"}, {"$set": {"finalStatus": "Applied"}})
+        leave_request_collection.update_many({"editToken": token}, {"$unset": {"editToken": ""}})
+        compensatory_off_collection.update_many({"periodEditToken": token}, {"$unset": {"periodEditToken": ""}})
+    except Exception:
+        # Compensating writes also work on standalone MongoDB without transactions.
+        if daily_changed:
+            for day, before in daily_before.items():
+                update = {"$set": {key: before[key] for key in daily_fields if key in before},
+                          "$unset": {key: "" for key in daily_fields if key not in before}}
+                employee_daily_collection.update_one({"employeeId": employee_id_filter(employee_id), "date": day}, {key: value for key, value in update.items() if value})
+        for credit_id in changed_credit_ids:
+            compensatory_off_collection.replace_one({"_id": ObjectId(credit_id), "periodEditToken": token}, credits_before[credit_id])
+        leave_request_collection.delete_many({"_id": {"$in": new_ids}, "editToken": token})
+        for record in records:
+            if record["_id"] in claimed_ids:
+                leave_request_collection.replace_one({"_id": record["_id"], "editToken": token}, record)
+        raise
+    return {"message": "Leave period updated", "leaveGroupId": group_id}
+
+
+def prepare_leave_applications(data, user, excluded_ids=None, reusable_credits=None):
+    """Shared apply/edit validation, before any leave or credit changes."""
+    excluded_ids = excluded_ids or []
+    reusable_credits = reusable_credits or {}
     employee_id = clean_id(data.get("employeeId") or user.get("employeeId"))
     if not employee_id:
         raise HTTPException(400, "Employee is required")
@@ -1781,6 +1965,7 @@ def apply_leave_v2(data: dict, user=Depends(get_authenticated_user)):
             "employeeId": employee_id,
             "date": date_str,
             "finalStatus": {"$nin": ["Rejected", "Withdrawn"]},
+            "_id": {"$nin": excluded_ids},
         })
         if duplicate:
             raise HTTPException(400, f"Leave already applied for {date_str}")
@@ -1809,7 +1994,7 @@ def apply_leave_v2(data: dict, user=Depends(get_authenticated_user)):
                 "_id": comp_object_id,
                 "employeeId": employee_id_filter(employee_id),
             })
-            if not comp or (comp.get("status") or "Available") != "Available":
+            if not comp or comp.get("periodEditToken") or ((comp.get("status") or "Available") != "Available" and not (comp.get("status") == "Reserved" and str(comp.get("linkedLeaveId")) == reusable_credits.get(comp_off_id))):
                 raise HTTPException(400, f"Selected C-OFF is not available for {date_str}")
             earned_date = comp.get("earnedDate") or comp.get("date")
             expiry_date = comp.get("expiryDate") or (calculate_expiry(earned_date) if earned_date else None)
@@ -1827,6 +2012,13 @@ def apply_leave_v2(data: dict, user=Depends(get_authenticated_user)):
             "isShiftEmployee": is_shift_employee,
         })
 
+    return employee_id, employee, reason, prepared
+
+
+@router.post("/apply")
+def apply_leave_v2(data: dict, user=Depends(get_authenticated_user)):
+    """Create date-level leave rows after validating the authenticated employee scope."""
+    employee_id, employee, reason, prepared = prepare_leave_applications(data, user)
     leave_group_id = str(uuid.uuid4())
     inserted_ids = []
     notified_sics = set()
@@ -1887,6 +2079,7 @@ def apply_leave_v2(data: dict, user=Depends(get_authenticated_user)):
             reservation = compensatory_off_collection.update_one(
                 {
                     "_id": ObjectId(item["compOffId"]),
+                    "periodEditToken": {"$exists": False},
                     "$or": [{"status": "Available"}, {"status": {"$exists": False}}],
                 },
                 {"$set": {"status": "Reserved", "linkedLeaveId": str(leave_id), "usedDate": item["date"]}},
@@ -2034,8 +2227,7 @@ def sic_forward_bulk(data: dict, user=Depends(get_authenticated_user)):
             now = datetime.utcnow()
             next_index = index + 1
             chain = leave.get("approvalChain") or []
-            leave_request_collection.update_one(
-                {"_id": leave["_id"]},
+            update_reviewed_leave(leave,
                 {"$set": {
                     f"approvalChain.{index}.status": "Approved",
                     f"approvalChain.{index}.actedBy": clean_id(user.get("employeeId")),
@@ -2074,8 +2266,7 @@ def sic_forward_bulk(data: dict, user=Depends(get_authenticated_user)):
             "comment": comment,
         }
 
-        leave_request_collection.update_one(
-            {"_id": leave["_id"]},
+        update_reviewed_leave(leave,
             {
                 "$set": {
                     "sicApprovalStatus": "Forwarded",
@@ -2181,8 +2372,7 @@ def sic_reject_bulk(data: dict, user=Depends(get_authenticated_user)):
             rejected_on = datetime.utcnow()
             actor = clean_id(user.get("employeeId"))
             rejection = {"stage": step.get("level") or "Reporting Officer", "comment": comment, "rejectedBy": actor, "rejectedByRole": step.get("level") or "Reporting Officer", "rejectedOn": rejected_on}
-            leave_request_collection.update_one(
-                {"_id": leave["_id"]},
+            update_reviewed_leave(leave,
                 {"$set": {
                     f"approvalChain.{index}.status": "Rejected", f"approvalChain.{index}.actedBy": actor,
                     f"approvalChain.{index}.actedOn": rejected_on, "organizationApprovalStatus": "Rejected",
@@ -2233,8 +2423,7 @@ def sic_reject_bulk(data: dict, user=Depends(get_authenticated_user)):
             "rejectedByRole": "Administrator" if is_admin(user) else "SIC",
             "rejectedOn": rejected_on,
         }
-        leave_request_collection.update_one(
-            {"_id": leave["_id"]},
+        update_reviewed_leave(leave,
             {
                 "$set": {
                     "sicApprovalStatus": "Rejected",
@@ -2334,8 +2523,7 @@ def approve_leave_bulk(data: dict, user=Depends(get_authenticated_user)):
             now = datetime.utcnow()
             next_index = index + 1
             if next_index < len(chain):
-                leave_request_collection.update_one(
-                    {"_id": leave["_id"]},
+                update_reviewed_leave(leave,
                     {"$set": {
                         f"approvalChain.{index}.status": "Approved", f"approvalChain.{index}.actedBy": clean_id(user.get("employeeId")),
                         f"approvalChain.{index}.actedOn": now, "currentApprovalIndex": next_index,
@@ -2409,8 +2597,7 @@ def approve_leave_bulk(data: dict, user=Depends(get_authenticated_user)):
                 "currentApprovalIndex": len(leave.get("approvalChain") or []),
                 "organizationApprovalStatus": "Approved",
             })
-        leave_request_collection.update_one(
-            {"_id": leave["_id"]},
+        update_reviewed_leave(leave,
             {
                 "$set": final_set,
                 "$push": {"replacementDecisionHistory": decision},
@@ -2544,8 +2731,7 @@ def reject_bulk(data: dict, user=Depends(get_authenticated_user)):
                 f"approvalChain.{approval_index}.delegation": delegation_actor_metadata(user, approval_step),
                 "organizationApprovalStatus": "Rejected",
             })
-        leave_request_collection.update_one(
-            {"_id": leave["_id"]},
+        update_reviewed_leave(leave,
             {
                 "$set": rejection_set,
                 "$push": {"rejectionHistory": rejection},
@@ -3256,7 +3442,6 @@ def cancel_single_leave(leave: dict, user: dict) -> str:
     if leave.get("finalStatus") not in CANCELLABLE_LEAVE_STATUSES:
         raise HTTPException(409, "Only an active or approved leave can be cancelled")
 
-    clear_leave_operational_effects(leave)
     cancelled_on = datetime.utcnow()
     cancellation = {
         "cancelledBy": clean_id(user.get("employeeId")),
@@ -3264,8 +3449,7 @@ def cancel_single_leave(leave: dict, user: dict) -> str:
         "cancelledOn": cancelled_on,
         "previousFinalStatus": leave.get("finalStatus"),
     }
-    leave_request_collection.update_one(
-        {"_id": leave["_id"]},
+    update_reviewed_leave(leave,
         {
             "$set": {
                 "finalStatus": "Cancelled",
@@ -3278,6 +3462,7 @@ def cancel_single_leave(leave: dict, user: dict) -> str:
             "$push": {"cancellationHistory": cancellation},
         },
     )
+    clear_leave_operational_effects(leave)
     return actor_role
 
 
@@ -3320,41 +3505,7 @@ def cancel_leave_group(data: dict, user=Depends(get_authenticated_user)):
     if not reference:
         raise HTTPException(404, "Leave not found")
 
-    group_id = clean_id(reference.get("leaveGroupId"))
-    if group_id:
-        query = {"leaveGroupId": group_id}
-    else:
-        # Legacy single/multi date rows created before leaveGroupId existed:
-        # scope by the owning employee and the exact date set the client sees.
-        query = {"employeeId": reference.get("employeeId")}
-    records = list(leave_request_collection.find(query))
-    if not group_id:
-        same_kind = [
-            record for record in records
-            if (
-                clean_id(record.get("leaveType") or "") == clean_id(reference.get("leaveType") or "")
-                and bool(record.get("stationLeaveOnly")) == bool(reference.get("stationLeaveOnly"))
-            )
-        ]
-        # Restrict to the contiguous run of dates around the clicked row.
-        same_kind.sort(key=lambda item: clean_id(item.get("date")))
-        target_index = next(
-            (index for index, item in enumerate(same_kind) if item["_id"] == reference["_id"]),
-            0,
-        )
-        start = end = target_index
-        while start > 0 and (
-            datetime.strptime(same_kind[start].get("date"), "%Y-%m-%d")
-            - datetime.strptime(same_kind[start - 1].get("date"), "%Y-%m-%d")
-        ) == timedelta(days=1):
-            start -= 1
-        while end < len(same_kind) - 1 and (
-            datetime.strptime(same_kind[end + 1].get("date"), "%Y-%m-%d")
-            - datetime.strptime(same_kind[end].get("date"), "%Y-%m-%d")
-        ) == timedelta(days=1):
-            end += 1
-        records = same_kind[start:end + 1]
-
+    records = leave_application_records(reference)
     active_records = [record for record in records if record.get("finalStatus") in CANCELLABLE_LEAVE_STATUSES]
     if not active_records:
         raise HTTPException(409, "There is no active leave in this application to cancel")
@@ -3559,6 +3710,7 @@ def get_available_comp_off(employeeId: Optional[str] = Query(None), user=Depends
 
     records = compensatory_off_collection.find({
         "employeeId": employee_id_filter(emp_id),
+        "periodEditToken": {"$exists": False},
         "$or": [{"status": "Available"}, {"status": {"$exists": False}}],
     }).sort("earnedDate", 1)
 
@@ -3602,8 +3754,7 @@ def withdraw_leave(leave_id: str, user=Depends(get_authenticated_user)):
         raise HTTPException(400, "Leave cannot be withdrawn after the first approver has acted")
 
     # âœ… UPDATE LEAVE
-    leave_request_collection.update_one(
-        {"_id": ObjectId(leave_id)},
+    update_reviewed_leave(leave,
         {
             "$set": {
                 "finalStatus": "Withdrawn",
