@@ -42,7 +42,7 @@ import ExpandLessIcon from "@mui/icons-material/ExpandLess";
 import DutyReassignmentPanel from "../components/crew/DutyReassignmentPanel";
 import WorkflowHeader from "../components/crew/WorkflowHeader";
 
-export default function ReplacementManagement() {
+export default function ReplacementManagement({ initialWorkflow } = {}) {
 
   const [pendingLeaves, setPendingLeaves] = useState([]);
   const [assignedReplacements, setAssignedReplacements] = useState([]);
@@ -86,6 +86,7 @@ export default function ReplacementManagement() {
   const [requiredReplacementOnly, setRequiredReplacementOnly] = useState(true);
   const sicShortcutHandled = React.useRef(false);
   const [activeWorkflow, setActiveWorkflow] = useState(() => {
+    if (["duty", "leave", "board", "sic"].includes(initialWorkflow)) return initialWorkflow;
     const params = new URLSearchParams(window.location.search);
     if (["duty", "leave", "board", "sic"].includes(params.get("section"))) return params.get("section");
     if (params.get("action") === "assign-sic") return "sic";

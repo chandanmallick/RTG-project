@@ -3,13 +3,13 @@ import { Alert, Box, Button, MenuItem, Stack, Tab, Tabs, TextField, Typography }
 import dayjs from "dayjs";
 
 export default function DashDemoWorkspace({ workspace, records, events, groups, onSubmit }) {
-  const [activity, setActivity] = useState("Leave");
+  const [activity, setActivity] = useState(workspace === "apply-exchange" ? "Exchange" : "Leave");
   const [from, setFrom] = useState(dayjs().add(1, "day").format("YYYY-MM-DD"));
   const [to, setTo] = useState(from);
   const [reason, setReason] = useState("");
   const [notice, setNotice] = useState("");
   if (workspace === "special-event") return <Stack spacing={2}><Alert severity="info">Sample Special Event roster. The live workspace includes period blocking, temporary disable/enable, permanent deletion, staffing matrices and Excel export.</Alert><Typography fontWeight={800}>Special operations period</Typography><Typography>{from} to {dayjs(from).add(3, "day").format("YYYY-MM-DD")}</Typography><Button onClick={() => setNotice(notice === "Period temporarily disabled in this preview." ? "Period enabled in this preview." : "Period temporarily disabled in this preview.")}>{notice === "Period temporarily disabled in this preview." ? "Enable" : "Disable temporarily"}</Button>{notice && <Alert severity="success">{notice}</Alert>}{groups.map(group => <Box key={group.groupName} sx={{ p: 2, bgcolor: "#F5F7F9", borderRadius: 2 }}><Typography fontWeight={800}>{group.groupName} · Sample staffing</Typography><Typography variant="body2">{group.employees.map(person => person.name).join(" · ")}</Typography></Box>)}</Stack>;
-  if (workspace === "apply" || workspace === "replacement") return <Stack spacing={2}>
+  if (workspace === "apply" || workspace === "apply-exchange" || workspace === "replacement") return <Stack spacing={2}>
     <Alert severity="info">Sample data preview. Changes stay in this page until it is reloaded.</Alert>
     {notice && <Alert severity="success">{notice}</Alert>}
     {workspace === "apply" && <Tabs value={activity} onChange={(_, value) => setActivity(value)} variant="scrollable">{["Leave", "Training", "Sports", "Exchange"].map(kind => <Tab key={kind} value={kind} label={kind} />)}</Tabs>}

@@ -100,6 +100,8 @@ The dashboard changes are integrated on `main` with the five fetched commits thr
 
 ## Dash Test dashboard and sample preview
 
+Updated 5 October 2026: Replacement opens a two-tab popup: Exchange (`duty`) and Replacement by other employees (`leave`), reusing `ReplacementManagement` with an explicit initial workflow. Approval opens a five-option chooser: Leave approval (`/crew/leave?section=pending`), Training Assignment (`/crew/training?section=assign`), Training approval (`/crew/training?section=pending`), Sports approval (`/crew/sports?section=approval`) and Replacement approval (`/crew/replacement?section=duty&focus=approvals`). Existing authority checks remain; training assignment authority also permits the chooser. Upcoming shifts use larger labels, personnel text, badges and padded tiles in a taller five-day scrolling panel. Public samples mirror both replacement tabs without API access. Production build and desktop/mobile browser checks passed, including switching both live replacement workflows, five approval choices, the leave-approval destination, and public samples with zero API requests.
+
 Rechecked on 2 October 2026 against the five synced commits dated 1 October, through `2ec3b6e`. Browser checks confirm the roster link opens the existing Calendar menu page (`/crew/calendar`, Daily Duty Calendar), and the event link opens that same page in its existing Event view (`/crew/calendar?view=events`, Crew Event Calendar). Shared application-only, replacement, leave tracking/cancellation, training nomination editing and Special Event roster popups passed with mocked API responses. This verifies the synced checkout; live database workflows and any changes not committed/synced from another PC are outside this check.
 
 Updated: 2 October 2026.
@@ -116,10 +118,10 @@ For the normal development server on port 3001, use that port instead. A static 
 ### Dashboard blocks
 
 1. Apply: the live calendar application popup for leave, training, sports and exchange.
-2. Approval: workflow navigation, reporting/delegation access checks and pending counts; unavailable users see Access Restricted.
+2. Approval: five-option popup with direct links to existing approval/assignment pages, reporting/delegation access checks and pending counts; unavailable users see Access Restricted.
 3. Tracking: applications from D−2 onward, own/authorised scope and amber pending rows.
 4. History: leave, training, sports, exchange and replacement records; shared grouped leave applications, whole/date-wise cancellation, eligible single-date withdrawal and direct training nomination management.
-5. Replacement: existing replacement workspace in a popup.
+5. Replacement: Exchange and Replacement by other employees tabs in a popup, both using the existing workspace.
 6. Event Calendar: admin-only Special Event roster opens the existing blocked-period/staffing/export workspace; month navigation and hover details; red holidays, purple training, green sports; full-calendar navigation.
 7. Roster Calendar: D−1 through D+7, grouped personnel, abbreviated names and M/E/N/O shifts; full-calendar navigation.
 8. Leader Board: top replacement duties over the existing 60-day period, with horizontal bars.
