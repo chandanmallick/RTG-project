@@ -44,7 +44,11 @@ export function AuthProvider({ children }) {
     }
   }, []);
 
-  useEffect(() => { refreshSession(); }, [refreshSession]);
+  useEffect(() => {
+    // The standalone sample dashboard has no dependency on an auth server.
+    if (window.location.pathname === "/crew/dash-test-preview") { setLoading(false); return; }
+    refreshSession();
+  }, [refreshSession]);
 
   const establishSession = useCallback((data) => {
     localStorage.setItem("portalToken", data.access_token);

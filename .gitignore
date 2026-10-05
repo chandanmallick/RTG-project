@@ -3,4 +3,6 @@ node_modules/
 __pycache__/
 backend/.env
 .runtime/
+.cache/
+frontend/.dash-test-build/
 .venv/

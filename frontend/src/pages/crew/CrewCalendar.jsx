@@ -247,7 +247,9 @@ const EmployeeRow = memo(({ person, groupName, active, dates, selectedColumn, on
   );
 });
 
-export default function CrewCalendar({ publicView = false }) {
+const ApplicationOnlyShell = ({ children }) => <>{children}</>;
+
+export default function CrewCalendar({ publicView = false, applicationOnly = false, onApplicationClose }) {
   const { user } = useAuth();
   const navigate = useNavigate();
   const today = iso(new Date());
@@ -276,7 +278,7 @@ export default function CrewCalendar({ publicView = false }) {
   const [applicationMode, setApplicationMode] = useState(false);
   const [applicationSelections, setApplicationSelections] = useState([]);
   const [applicationNotice, setApplicationNotice] = useState("");
-  const [applicationDialogOpen, setApplicationDialogOpen] = useState(false);
+  const [applicationDialogOpen, setApplicationDialogOpen] = useState(applicationOnly);
   const [applicationActivity, setApplicationActivity] = useState("leave");
   const [applicationFrom, setApplicationFrom] = useState(today);
   const [applicationTo, setApplicationTo] = useState(today);
@@ -344,8 +346,9 @@ export default function CrewCalendar({ publicView = false }) {
     }
   };
 
-  useEffect(() => { load(); }, [startDate, endDate, eventMonth, calendarView]);
+  useEffect(() => { if (!applicationOnly) load(); }, [startDate, endDate, eventMonth, calendarView, applicationOnly]);
   useEffect(() => {
+    if (applicationOnly) return;
     const refresh = () => { if (document.visibilityState === "visible") load({ quiet: true }); };
     const timer = window.setInterval(refresh, 60000);
     window.addEventListener("focus", refresh);
@@ -366,6 +369,7 @@ export default function CrewCalendar({ publicView = false }) {
 
   useEffect(() => {
     const previousBodyOverflow = document.body.style.overflow;
+    if (applicationOnly) return;
     const previousHtmlOverflow = document.documentElement.style.overflow;
     document.body.style.overflow = "hidden";
     document.documentElement.style.overflow = "hidden";
@@ -653,6 +657,7 @@ export default function CrewCalendar({ publicView = false }) {
     setApplicationDialogOpen(true);
   };
   const dismissCalendarApplication = () => {
+    if (applicationOnly) onApplicationClose?.();
     setApplicationDialogOpen(false);
     setApplicationMode(false);
     setApplicationSelections([]);
@@ -661,14 +666,15 @@ export default function CrewCalendar({ publicView = false }) {
   };
   const closeCalendarApplication = () => {
     dismissCalendarApplication();
+    if (applicationOnly) return;
     setCalendarNotice("Request saved. The calendar has been refreshed.");
     load();
   };
 
-  const CalendarPageShell = publicView ? PublicCalendarShell : AppShell;
+  const CalendarPageShell = applicationOnly ? ApplicationOnlyShell : publicView ? PublicCalendarShell : AppShell;
   return (
     <CalendarPageShell viewportLocked={!publicView}>
-      <Box sx={{ height: publicView ? "calc(100dvh - 16px)" : "100%", minHeight: 0, overflow: "hidden", display: "flex", flexDirection: "column", gap: 1.15 }}>
+      {!applicationOnly && <Box sx={{ height: publicView ? "calc(100dvh - 16px)" : "100%", minHeight: 0, overflow: "hidden", display: "flex", flexDirection: "column", gap: 1.15 }}>
       <Box sx={{ px: { xs: 1.5, md: 2 }, py: 1.25, borderRadius: 3, background: "linear-gradient(105deg,#081F5C 0%,#075DB8 62%,#1678D4 100%)", color: "#FFF", display: "flex", alignItems: "center", gap: 1.2, flexWrap: { xs: "wrap", xl: "nowrap" } }}>
         <Box sx={{ minWidth: { md: 220 }, mr: { xl: "auto" } }}>
           <Typography sx={{ fontSize: 19, fontWeight: 950, lineHeight: 1.05 }}>{calendarView === "events" ? "Crew Event Calendar" : "Daily Duty Calendar"}</Typography>
@@ -763,8 +769,7 @@ export default function CrewCalendar({ publicView = false }) {
         )}
       </GlassCard>
       </>}
-      </Box>
-
+      </Box>}
       <Dialog open={applicationDialogOpen} onClose={dismissCalendarApplication} fullWidth maxWidth="xl" PaperProps={{ sx: { maxHeight: "92dvh", borderRadius: 3 } }}>
         <DialogTitle sx={{ px: { xs: 1.5, md: 2.5 }, py: 1.4, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 1, borderBottom: "1px solid #E2E8F0" }}>
           <Box><Typography sx={{ color: "#0F172A", fontSize: 19, fontWeight: 950 }}>New crew application</Typography><Typography sx={{ mt: .15, color: "#64748B", fontSize: 10.8 }}>Complete the selected activity without leaving the duty calendar.</Typography></Box>
@@ -794,7 +799,7 @@ export default function CrewCalendar({ publicView = false }) {
         </DialogContent>
         <DialogActions sx={{ px: 2, py: 1, borderTop: "1px solid #E2E8F0", justifyContent: "space-between" }}>
           <Stack direction="row" spacing={.7}>
-            <Button onClick={() => { setApplicationDialogOpen(false); setApplicationMode(true); setApplicationNotice("Select one or more duty cells for one employee, then click Continue application."); }} startIcon={<MousePointer2 size={14} />} sx={{ textTransform: "none", fontWeight: 850 }}>Pick dates on calendar</Button>
+            {!applicationOnly && <Button onClick={() => { setApplicationDialogOpen(false); setApplicationMode(true); setApplicationNotice("Select one or more duty cells for one employee, then click Continue application."); }} startIcon={<MousePointer2 size={14} />} sx={{ textTransform: "none", fontWeight: 850 }}>Pick dates on calendar</Button>}
             {!!applicationSelections.length && <Button color="inherit" onClick={() => setApplicationSelections([])} sx={{ textTransform: "none", fontWeight: 800 }}>Clear dates</Button>}
           </Stack>
           <Button onClick={dismissCalendarApplication} sx={{ textTransform: "none", fontWeight: 850 }}>Close</Button>

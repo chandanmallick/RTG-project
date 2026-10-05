@@ -33,7 +33,7 @@ const MorningPresentationRoster = lazy(() => import("./pages/crew/MorningPresent
 const CrewSetup = lazy(() => import("./pages/crew/CrewSetup"));
 const CrewOperations = lazy(() => import("./pages/crew/CrewOperations"));
 const SportsManagement = lazy(() => import("./pages/crew/SportsManagement"));
-const CrewDashboard = lazy(() => import("./crewLegacy/Dashboard"));
+const CrewDashboard = lazy(() => import("./crewLegacy/DashTest"));
 const CrewLeave = lazy(() => import("./crewLegacy/LeaveManagement"));
 const CrewReplacement = lazy(() => import("./crewLegacy/ReplacementManagement"));
 const CrewTraining = lazy(() => import("./crewLegacy/TrainingHolidayMaster"));
@@ -222,6 +222,8 @@ export default function App() {
         <Route path="/admin/audit-trail" element={protectedPage("audit_trail", <AuditTrail />)} />
         <Route path="/admin/past-comp-off" element={protectedPage("crew_setup", <PastCompOffAdmin />)} />
         <Route path="/crew/dashboard" element={protectedPage("crew_dashboard", <CrewLegacyShell><CrewDashboard /></CrewLegacyShell>)} />
+        <Route path="/crew/dash-test" element={protectedPage("crew_dashboard", <CrewLegacyShell><CrewDashboard /></CrewLegacyShell>)} />
+        <Route path="/crew/dash-test-preview" element={<div className="ui-kit-app"><CrewDashboard demo /></div>} />
         <Route path="/crew/leave" element={protectedPage("crew_leave", <CrewLegacyShell><CrewLeave /></CrewLegacyShell>)} />
         <Route
           path="/crew/replacement"

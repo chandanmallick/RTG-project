@@ -22,6 +22,7 @@ export const ROUTE_PAGE_KEYS = {
   "/admin/audit-trail": "audit_trail",
   "/admin/past-comp-off": "crew_setup",
   "/crew/dashboard": "crew_dashboard",
+  "/crew/dash-test": "crew_dashboard",
   "/crew/operations": "crew_dashboard",
   "/crew/sports": "crew_leave",
   "/crew/calendar": "crew_calendar",

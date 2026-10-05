@@ -224,6 +224,8 @@ export default function TopNavbar() {
         display: "flex",
         alignItems: "center",
         justifyContent: "space-between",
+        flexWrap: "wrap",
+        gap: 1.5,
         backgroundColor: "#FFFFFF",
         borderRadius: "12px",
         boxShadow: "0 4px 14px rgba(15, 23, 42, 0.04)",
@@ -237,7 +239,7 @@ export default function TopNavbar() {
       }}
     >
       {/* LEFT BRAND SECTION */}
-      <Box sx={{ display: "flex", alignItems: "center", gap: 1.5, minWidth: 330 }}>
+      <Box sx={{ display: "flex", alignItems: "center", gap: 1.5, minWidth: { xs: 0, md: 330 } }}>
         <Box component="img" src="/logo.png" alt="GRID-INDIA" sx={{ width: 108, height: 46, objectFit: "contain" }} />
         <Box>
           <Typography
@@ -268,7 +270,7 @@ export default function TopNavbar() {
       </Box>
 
       {/* MIDDLE NAVIGATION PILLS (Reorganized Modular Main Menus) */}
-      <Box sx={{ display: "flex", alignItems: "center", gap: 1.2 }}>
+      <Box sx={{ display: "flex", alignItems: "center", gap: 1.2, flexWrap: "wrap", minWidth: 0 }}>
         {/* 1. Homepage Link */}
         <Button
           onClick={() => handleNavigate("/")}
@@ -960,7 +962,7 @@ export default function TopNavbar() {
       </Box>
 
       {/* RIGHT UTILITIES SECTION */}
-      <Box sx={{ display: "flex", alignItems: "center", gap: 1.5 }}>
+      <Box sx={{ display: "flex", alignItems: "center", gap: 1.5, flexWrap: "wrap", minWidth: 0 }}>
         {/* Search bar */}
         <Box
           sx={{

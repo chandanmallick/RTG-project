@@ -4,7 +4,7 @@ from datetime import datetime
 from fastapi import APIRouter, Depends
 
 from crew_legacy.admin_logic.auth_utils import get_authenticated_user
-from crew_legacy.api.leave_api import can_sic_act, can_authority_act, get_my_role, is_organization_leave
+from crew_legacy.api.leave_api import can_sic_act, can_authority_act, get_my_role, is_organization_leave, refresh_unacted_organization_leave_workflows
 from crew_legacy.api.replacement import has_replacement_authority, exchange_request_summary
 from crew_legacy.api.sports_api import applications as sports_applications, can_manage_events
 from crew_legacy.api.training_assignment import get_training_nomination_access, is_training_hr, TRAINING_HR_POOL_ID
@@ -53,6 +53,8 @@ def operation_actions(pages, role, nomination_access, counts, sports_manager=Fal
 
 @router.get("/summary")
 def operations_summary(user=Depends(get_authenticated_user)):
+    # Counts and inbox ownership must use the same current hierarchy as leave lists.
+    refresh_unacted_organization_leave_workflows()
     actor = str(user.get("employeeId") or user.get("userId") or "").strip()
     pages = (page_access_collection.find_one({"userId": actor}) or {}).get("pages") or {}
     role = get_my_role(user=user)

@@ -1,4 +1,15 @@
-# Crew Management module migration
+# Software documentation
+
+This is the single software document for the repository. Update its relevant sections for future work; keep source ownership and AI navigation in [AI_CODE_MAP.md](AI_CODE_MAP.md). Do not create separate Markdown documents for individual changes.
+
+## Contents
+
+- [Crew module architecture and migration](#integrated-scope)
+- [Dash Test dashboard and sample preview](#dash-test-dashboard-and-sample-preview)
+- [Crew workflow update](#crew-workflow-update)
+- [Crew Management internal storage](#crew-management-internal-storage)
+- [URL Based Deployment](#url-based-deployment)
+- [WBES schedule fetch reference](#wbes-schedule-fetch-reference)
 
 ## Integrated scope
 
@@ -8,7 +19,7 @@ route loading, shared Axios base URL, and FastAPI application.
 
 Menu routes:
 
-- `/crew/dashboard` — Crew KPI dashboard, alerts and operational summaries
+- `/crew/dashboard` — Dash Test: ten-block crew dashboard (also `/crew/dash-test`)
 - `/crew/calendar` — daily shift, leave, training and replacement calendar
 - `/crew/roster` — generate, edit, save draft/final, publish, print and view history
 - `/crew/setup` — roster-group management and eight-day cycle configuration
@@ -23,6 +34,8 @@ Menu routes:
 - `/crew/profile` — acting employee profile, duty, leave, training and C-OFF statistics
 - `/crew/login-audit` — legacy Crew login history and summary
 - `/crew/user-context` — temporary acting-employee selection
+
+Public sample route: `/crew/dash-test-preview` uses local demo fixtures and simulated interactions; it requires no login, backend or database. Live routes retain authentication and existing access checks. See [Dash Test preview](#dash-test-dashboard-and-sample-preview).
 
 API root: `/api/crew`
 
@@ -62,20 +75,15 @@ calendar/roster endpoints. This retains the existing leave, replacement, trainin
 notification, employee, profile, dashboard, audit, PDF and shift-history behavior while
 preventing route collisions with DHRUV APIs.
 
-There are 118 Crew API routes in the combined redesigned and compatibility layers.
+Crew API routes are mounted by the combined redesigned and compatibility layers; consult the current FastAPI route definitions for the inventory.
 
 ## Authentication boundary and acting employee
 
-DHRUV currently has no shared login/authorization layer. All screens are migrated, and an
-acting-employee selector supplies `X-Crew-Employee-ID` to identity-dependent APIs. Legacy
-screens also receive compatible local-storage identity values.
+Live Crew routes use the shared AuthProvider, bearer token and ProtectedRoute page permissions. Identity and decision authority are verified by the backend. Personal or delegated workflow actions retain their server-side authorization even when page editing is read-only. Legacy identity headers are compatibility metadata, not an authentication replacement.
 
-This mechanism preserves functional behavior but is not authentication. Administration is
-temporarily available to the selected internal operator. Deploy the module only on the
-trusted internal network until DHRUV authentication supplies a verified employee ID and role.
-At that point, replace the acting-user header with server-verified identity claims.
+The standalone `/crew/dash-test-preview` is a public sample route with generated fixtures. It skips auth-session refresh and makes no API/database requests. Its local forms and changes do not grant access to live workflows.
 
-## Verification
+## Historical migration verification
 
 - FastAPI application and Crew router compile and import successfully.
 - MongoDB connection, group reads and cycle reads were verified against `crew_management`.
@@ -83,3 +91,444 @@ At that point, replace the acting-user header with server-verified identity clai
   shift-history and login-audit APIs returned HTTP 200 against the live database.
 - Vite production build completes successfully with every Crew submodule emitted as a lazy
   page chunk.
+
+
+## Dash Test integration verification (2 October 2026)
+
+The dashboard changes are integrated on `main` with the five fetched commits through `2ec3b6e`. Shared application grouping/cancellation, nomination management, approval remarks, monthly replacement candidate targets/conflicts, Special Event roster controls and current-hierarchy inbox ownership are retained. Current verification uses isolated fixtures and a login-free browser preview; no live database is required. See [Dash Test preview](#dash-test-dashboard-and-sample-preview).
+
+
+## Dash Test dashboard and sample preview
+
+Rechecked on 2 October 2026 against the five synced commits dated 1 October, through `2ec3b6e`. Browser checks confirm the roster link opens the existing Calendar menu page (`/crew/calendar`, Daily Duty Calendar), and the event link opens that same page in its existing Event view (`/crew/calendar?view=events`, Crew Event Calendar). Shared application-only, replacement, leave tracking/cancellation, training nomination editing and Special Event roster popups passed with mocked API responses. This verifies the synced checkout; live database workflows and any changes not committed/synced from another PC are outside this check.
+
+Updated: 2 October 2026.
+
+### Routes
+
+- `/crew/dashboard` and `/crew/dash-test`: live dashboard, protected by the existing `crew_dashboard` permission. Data comes from the Crew APIs and requires the configured backend/database.
+- `/crew/dash-test-preview`: public, interactive sample dashboard. No login, backend or database is required. Open this route directly to preview the design.
+
+With the local Vite preview server on port 3012, open:
+`http://localhost:3012/crew/dash-test-preview`.
+For the normal development server on port 3001, use that port instead. A static production server must serve a frontend build containing this route.
+
+### Dashboard blocks
+
+1. Apply: the live calendar application popup for leave, training, sports and exchange.
+2. Approval: workflow navigation, reporting/delegation access checks and pending counts; unavailable users see Access Restricted.
+3. Tracking: applications from D−2 onward, own/authorised scope and amber pending rows.
+4. History: leave, training, sports, exchange and replacement records; shared grouped leave applications, whole/date-wise cancellation, eligible single-date withdrawal and direct training nomination management.
+5. Replacement: existing replacement workspace in a popup.
+6. Event Calendar: admin-only Special Event roster opens the existing blocked-period/staffing/export workspace; month navigation and hover details; red holidays, purple training, green sports; full-calendar navigation.
+7. Roster Calendar: D−1 through D+7, grouped personnel, abbreviated names and M/E/N/O shifts; full-calendar navigation.
+8. Leader Board: top replacement duties over the existing 60-day period, with horizontal bars.
+9. Stat of leave: monthly approved leave days by group. Statistics navigation is deferred as requested.
+10. Upcoming shift: tomorrow through the next five days, grouped by shift in a scrollable list.
+
+### Sample behavior
+
+The public preview renders the same dashboard component with `demo` enabled. Dates are relative to the day the preview opens; sample events are generated for the selected month. A sample reporting officer, four roster groups and all application categories populate the dashboard.
+
+Apply and Replacement show local sample forms. Saving adds a record to Tracking and History. Leave cancellation/withdrawal updates the local sample record. Calendar, approval and record links open sample workspaces rather than protected live pages. Refresh resets the fixtures; reload discards all sample changes. Nothing is written to local storage or a database.
+
+The preview skips auth-session refresh and dashboard API requests. It does not remove authentication from live routes or alter backend permissions. Preview forms demonstrate the design; they do not reproduce all live workflow validation.
+
+### Source owners
+
+- `frontend/src/crewLegacy/DashTest.jsx`: shared dashboard layout, live loading, tracking/history and preview branching.
+- `frontend/src/crewLegacy/dashDemoData.js`: generated sample records, rosters, charts and events.
+- `frontend/src/crewLegacy/DashDemoWorkspace.jsx`: sample forms and linked workspaces.
+- `frontend/src/components/crew/groupLeaveApplications.js`: shared leave grouping used by the dashboard and LeaveManagement.
+- `frontend/src/components/crew/TrainingCalendarReview.jsx`: live nomination editor, approval and adjacent OFF controls.
+- `frontend/src/components/crew/LeaveBlockedPeriods.jsx`: live Special Event roster/staffing/export controls.
+- `frontend/src/pages/crew/CrewCalendar.jsx`: live `applicationOnly` popup mode.
+- `frontend/src/App.jsx`: protected live routes and public sample route.
+- `frontend/src/auth/AuthContext.jsx`: skips server session refresh on the public preview route.
+
+### Validation
+
+The live dashboard production build and browser checks covered desktop/mobile layout, approval access/navigation, pending counts, D−2/future tracking, personal scope, history, withdrawal, application-only and replacement popups, event month navigation and hover details using representative mocked API responses. Live database/account validation remains separate.
+
+The public preview was checked in a fresh browser session with all `/api/` requests monitored or blocked: it rendered with zero API requests, no login screen or local-storage writes, supported sample submission and grouped cancellation, retained Special Event preview interactions and fit a mobile viewport. Reload was verified.
+
+
+### Synced development baseline
+
+Integrated the five fetched commits `289cd12`, `f022b18`, `777caed`, `6841982` and `2ec3b6e` into existing `main`; no new branch was created. The dashboard reuses their shared workflow components and APIs. The operations summary now refreshes hierarchy changes before counting pending applications. A safeguard Git stash retains the pre-integration dashboard edits. Changes remain uncommitted for review.
+
+Post-integration verification passed: 32 isolated backend tests (8 operations, 10 leave-block/staffing/export, 14 calendar/workflow), browser checks for exact grouped-cancellation payloads, nomination-name editing through the shared editor, admin Special Event roster access, and the earlier dashboard interactions. The public sample passed with zero API requests and no local-storage writes in a fresh session. Production build validation uses `.dash-test-build` so the existing deployment output is not overwritten.
+
+
+## Crew workflow update
+
+### Dash Test dashboard
+
+The Crew dashboard now uses the ten-block Dash Test layout: application, approval,
+tracking, history and replacement actions; compact roster; event calendar;
+replacement leader board; group leave statistics; and five-day upcoming shifts.
+Live routes `/crew/dashboard` and `/crew/dash-test` retain authentication.
+`/crew/dash-test-preview` is a login-free sample with local data and simulated
+interactions, usable without a backend/database. Details and testing instructions:
+[Dash Test preview](#dash-test-dashboard-and-sample-preview).
+
+### Dashboard integration with synced workflows
+
+Dash Test shares `groupLeaveApplications.js` with LeaveManagement, including legacy contiguous-date applications. Its history/tracking rows retain whole-application and selected-date cancellation through `LeaveTracking` and the existing cancel-group API. Approval navigation keeps the synced approval-remarks dialogs and their audit history. Training records open `TrainingCalendarReview`, including the existing nomination editor and adjacent OFF controls.
+
+The Event Calendar card exposes Special Event roster only when `specialEventRoster.enabled` is returned by the server. It reuses `LeaveBlockedPeriods` for temporary disable/enable, staffing matrices, Excel export and confirmed permanent deletion. Replacement and calendar popups reuse the updated candidate tables, monthly targets and conflict reasons. Operations summary refreshes unacted organization approval stages before calculating access and counts, so a changed reporting hierarchy takes effect in the dashboard too.
+
+### Leave availability
+
+Open Crew Operations > Master / event > **Special Event roster**. Administrators
+can use **Block a period**, enter inclusive start/end dates and a reason, then
+save. The restriction applies to new leave
+applications for everyone, including applications entered by administrators.
+Existing requests are unchanged. **Disable temporarily** removes the restriction
+while preserving the period and its audit history; **Enable** restores it. **Delete
+permanently** removes only the selected period and cannot be undone, so it uses a
+separate explicit confirmation. The Leave Apply page retains the read-only
+availability notice for employees; management and staffing controls live in the
+Special Event roster tile. All mutations are checked by the backend.
+
+#### Blocked-period staffing view
+
+Every active block provides three date-wise views and a matching Excel export.
+Disabled blocks remain visible to administrators but do not restrict applications
+and do not expose a staffing action until re-enabled.
+The first is Morning/Evening/Night duty strength with employees on active leave
+excluded, followed immediately by optional selected-department additional
+manpower. The second contains only employees on leave, shift-wise. The third
+contains only replacement employees, shift-wise. Columns include date and weekday;
+empty main-duty combinations display `NR`.
+
+Additional strength is hidden by default. Selecting a department adds only that
+department's staff as a separate row, and the Excel export reflects the same
+selection. Excel keeps all names for one shift/date inside one multiline cell and
+uses merged title and section-master rows. The backing endpoints are
+`GET /leave/blocked-periods/{id}/staffing` and
+`GET /leave/blocked-periods/{id}/staffing.xlsx`; the workbook includes both date
+and weekday rows.
+
+### Pending leave after hierarchy changes
+
+Organization-based leave approval follows the employee's current Organization
+Master hierarchy for every stage that has not yet been acted upon.
+`refresh_unacted_organization_leave_workflows` runs before leave lists are
+returned and rebuilds the current and future pending stages from
+`organization_leave_approval_chain`.
+
+Completed stages remain immutable audit evidence: actor, timestamp, comment and
+delegation metadata are never rewritten. If the Reporting Officer, intermediary
+officer, HOD or configured approval-level count changes, the next inbox owner is
+the newly configured officer. Duplicate actors and already-completed levels are
+not reintroduced.
+
+Primary implementation anchors are `ensure_leave_dates_open`,
+`blocked_period_staffing`, `get_blocked_period_staffing`,
+`export_blocked_period_staffing`, and
+`refresh_unacted_organization_leave_workflows` in
+`backend/crew_legacy/api/leave_api.py`; the shared frontend is
+`frontend/src/components/crew/LeaveBlockedPeriods.jsx` hosted by
+`frontend/src/crewLegacy/LeaveManagement.jsx`.
+
+### Published holidays
+
+Both calendar endpoints read the current active Holiday Master for the requested
+dates. A newly added holiday appears without republishing or changing shift duty.
+The calendar refreshes on window focus, after a same-window holiday save, and once
+per minute while visible. Deleted/inactive holiday markers no longer survive from
+old daily snapshots.
+
+### Nomination history
+
+The history workspace opens on a compact training matrix. Use financial year,
+name/ID/group and status filters; search programme columns and sort employees.
+Status cells open the complete nomination details. Mixed states are identified
+explicitly. Progress shows approved days against the existing seven-day target.
+The full-matrix CSV remains available; the history table is a separate view on the
+same page. Summary totals cover matching employees across all programmes.
+
+### Crew reports
+
+Employee selectors support name/ID search, multiple selections and removable
+chips. Choose people and dates, then Load report. In Activity Explorer, search
+loaded records, filter status, switch between Table and Compare, or export the
+filtered records as CSV. Compare cards count activity records, not approved days.
+The consolidated matrix also supports selecting multiple employees and keeps
+employee identities visible when scrolling. Existing server-side report visibility
+rules remain in force.
+
+### Validation
+
+The 2 October dashboard integration passed 32 isolated backend tests covering
+operations, leave blocks/staffing/export and calendar workflows. Browser checks
+also verified grouped cancellation payloads, nomination editing and the shared
+Special Event roster popup. The public sample was verified without login or API
+requests. See [Dash Test verification](#dash-test-dashboard-and-sample-preview).
+
+Backend regression tests cover block boundaries, admin authorization, invalid
+ranges, batched submissions and holiday overlays on published duties. Component
+render checks use synthetic data. No real leave restrictions or nominations were
+created during verification. Browser visual QA requires an available browser.
+
+
+### Leave tracking and cancellation
+
+Every visible leave record has Track leave, including Other Employees. The
+tracking dialog shows its approval chain, current stage and cancellation/rejection
+information. It is available from the leave table, leave calendar and the main
+duty calendar's Track / manage leave workflow. Employees may cancel their own
+active leave; administrators and the configured reporting authorities (including
+active delegates) can cancel records in their authorised scope. The server makes
+the decision; read-only page settings do not suppress these personal workflow
+actions. Consumed replacement C-OFF credits still prevent cancellation.
+
+### Changing training nominations
+
+Click an existing nomination in the training calendar, or choose Manage training
+from the main duty calendar. Nomination history and its matrix also open the same
+controls. Edit nomination details provides name/location fields, a searchable employee selector and date fields. Dragging along the same employee row proposes a new start date and keeps
+the nomination's duration; a reason and Save changes are required before it is
+changed. Name, location and date edits apply to that nomination, not the whole Training Master entry.
+
+Admins, HR and authorised nomination managers can edit or remove active
+nominations. Employees can change their own pending requests. Approved changes
+restart approval and restore the previous duties. Old replacement cover, acting
+SIC assignments and linked training OFF requests are cleared. A new OFF request
+can be made after approval. Remove nomination records a cancellation and preserves
+history rather than deleting the audit record. Imported historical entries remain
+read-only. Overlapping leave, training or other recorded assignments reject edits.
+
+Duty and leave calendars refresh after a successful change, including other tabs
+in the same browser. Reopen a nomination if another officer changed it. An
+interrupted calendar update can be retried with Save to complete the stored change.
+
+Deploy the backend and rebuilt frontend together, then restart through
+start_server.bat and hard-refresh the browser (Ctrl+F5). Verification uses isolated
+fixtures; operational leave and training records are not modified by tests.
+
+
+## Crew Management internal storage
+
+All Crew collections and the employee directory use the internal database.
+The default server is `10.3.230.60:27017`, database `crew_management`.
+New Crew Notice attachments remain in `backend/uploads/crew_threads`.
+Existing GridFS attachments are read from the same internal database.
+
+### Configuration
+
+```dotenv
+MONGO_URI=mongodb://10.3.230.60:27017/
+MONGO_DB_NAME=rtg_db
+CREW_LOCAL_MONGO_URI=mongodb://10.3.230.60:27017/
+CREW_LOCAL_MONGO_DB_NAME=crew_management
+```
+
+Crew also accepts the existing `CREW_MONGO_URI`, `CREW_MONGO_DB_NAME`, and
+`CREW_DATABASE_NAME` fallbacks. Database URIs must use the standard scheme
+and private/loopback IP addresses, localhost, or an internal.erldc.in hostname.
+Discovery URIs and external hostnames are rejected before network activity.
+Obsolete cloud configuration is ignored; remove it from deployment environments.
+
+Restart each deployed backend worker after installing this change. No remote
+records are copied automatically: confirm required operational records and
+attachments are available internally before resuming production use.
+
+
+### Refresh a deployed instance
+
+Copy the updated checkout (including `start_server.ps1`) to the actual LAN server.
+Run `start_server.bat` from that folder. It prints the project path and local Git
+commit, validates database configuration, rebuilds the frontend using installed
+packages offline, stops recognized server process trees, clears backend bytecode,
+and starts one backend without auto-reload plus the frontend. It opens the page
+only after both respond. Logs are in `.runtime` in the project folder.
+The launcher never pulls Git changes or installs dependencies. Latest means the
+files currently in that folder; updating a development PC does not update a
+separate deployment. Use your approved deployment procedure to transfer changes.
+
+A Python environment with the backend requirements and installed frontend
+packages is required. An existing `.venv` is preferred; otherwise Python on PATH
+is used. An unrelated service on ports 8001/3001 causes an error rather than being
+terminated. If a service manager restarts an old deployment, stop or update that
+service first. Old copies on other ports or computers need separate retirement.
+
+Use `powershell -NoProfile -File .\start_server.ps1 -CheckOnly` to inspect which
+processes the launcher would replace, without changing anything.
+Run `powershell -NoProfile -File .\diagnose_database_connections.ps1` on the
+machine reported by the network team to identify processes using database port
+27017. This inspection makes no database connection. A snapshot can miss short
+attempts; repeat while the network team observes the traffic.
+
+Both database clients use direct connections to a single internal endpoint.
+Proxy URI options and multiple seed hosts are rejected. Replica member discovery
+is disabled, so a server cannot redirect the driver to additional hosts.
+Approved email and data feeds remain enabled; this is a database restriction,
+not a machine-wide Internet firewall. Windows/browser traffic must be attributed
+to its owning process separately.
+
+
+### One-time Python setup
+
+Run `setup_backend.bat` on each deployment machine to create `.venv` and install
+`backend/requirements.txt`, including python-dotenv. This setup command uses the
+configured package index; normal startup does not download packages. On an
+isolated LAN machine, supply a folder of approved compatible wheels instead:
+`setup_backend.bat D:\approved-wheels`. That mode uses `--no-index` and never
+contacts a package index. Create the virtual environment on its destination
+machine rather than copying `.venv` between computers.
+
+
+### Database-free dashboard design preview
+
+`/crew/dash-test-preview` uses generated browser-memory fixtures, makes no auth/Crew API requests and needs no backend or database. Sample changes are discarded on refresh/reload. Live dashboard routes continue to use the internal Crew database and existing authentication. See [Dash Test preview](#dash-test-dashboard-and-sample-preview).
+
+
+## URL Based Deployment
+
+The app is now prepared for URL/domain based access.
+
+### Recommended Setup
+
+Use one public URL for both frontend and backend:
+
+```text
+https://astro.example.in        -> frontend
+https://astro.example.in/api    -> backend FastAPI
+```
+
+This is the simplest setup because the frontend already calls `/api` by default, so browser calls stay on the same domain.
+
+### Backend
+
+Run FastAPI on an internal port:
+
+```powershell
+cd D:\RTG-project\backend
+$env:MONGO_URI="mongodb://10.3.230.60:27017/"
+$env:MONGO_DB_NAME="rtg_db"
+$env:CORS_ALLOW_ORIGINS="https://astro.example.in,http://localhost:3001"
+python -m uvicorn main:app --host 127.0.0.1 --port 8001
+```
+
+For a Windows service or scheduled startup, set the same environment variables in the service configuration.
+
+### Frontend
+
+For production with same-domain `/api`, no API URL is needed:
+
+```powershell
+cd D:\RTG-project\frontend
+npm run build
+```
+
+Serve `frontend/dist` from the public URL.
+
+For local development:
+
+```powershell
+cd D:\RTG-project\frontend
+$env:VITE_API_PROXY_TARGET="http://127.0.0.1:8001"
+npm run dev
+```
+
+### Nginx Reverse Proxy Example
+
+Replace `astro.example.in` with the real DNS name.
+
+```nginx
+server {
+    listen 80;
+    server_name astro.example.in;
+
+    root D:/RTG-project/frontend/dist;
+    index index.html;
+
+    location /api/ {
+        proxy_pass http://127.0.0.1:8001/api/;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 300s;
+    }
+
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+}
+```
+
+### DNS
+
+Create a DNS record:
+
+```text
+astro.example.in -> server IP
+```
+
+After DNS and reverse proxy are ready, users should open only:
+
+```text
+https://astro.example.in
+```
+
+No browser-facing IP or port should be required.
+
+### Notes
+
+- Internal source systems such as RTG, PSP, CRMS, MDP, MongoDB, or network shares may still use internal IPs if those systems do not have DNS names.
+- Browser-facing URLs are now configurable and should not be hardcoded in React source.
+- In production, prefer HTTPS and set `CORS_ALLOW_ORIGINS` to the exact portal URL.
+### Dash Test sample preview
+
+After building the updated frontend, `/crew/dash-test-preview` provides a public
+sample dashboard without login or database access. Live `/crew/dashboard` and
+`/crew/dash-test` still require authentication. The public preview uses generated
+fixtures and local simulated changes. See [preview instructions](#dash-test-dashboard-and-sample-preview).
+
+
+## WBES schedule fetch reference
+
+The WBES schedule API is configured in **PSP Settings** (`pipeline_config`, `config_type: PSP`).
+Fetchers must read these values at runtime and must not embed credentials:
+
+- `wbes_url`
+- `wbes_api_key`
+- `wbes_username`
+- `wbes_password`
+
+Endpoint:
+
+```text
+{wbes_url}?apikey={wbes_api_key}
+```
+
+Request body:
+
+```json
+{
+  "Date": "DD-MM-YYYY",
+  "SchdRevNo": -1,
+  "UserName": "<configured wbes_username>",
+  "UtilAcronymList": ["BIHAR_STATE"],
+  "UtilRegionIdList": [1]
+}
+```
+
+The response is read from `ResponseBody.GroupWiseDataList`. For each utility,
+the net schedule is taken from:
+
+```python
+summary = fsData_stateAcronym["NetScheduleSummary"]
+total_net_schedule = summary["TotalNetSchdAmount"]
+net_schedule_components = summary["NetSchdDataList"]
+```
+
+`TotalNetSchdAmount` is the 96-point 15-minute net schedule. `NetSchdDataList`
+contains the schedule components and may be used for category bifurcation via
+the schedule-type fields. The MIS Schedule Data page expands the 15-minute
+values to 5-minute or 1-minute display intervals by holding each published
+value until the next WBES interval.

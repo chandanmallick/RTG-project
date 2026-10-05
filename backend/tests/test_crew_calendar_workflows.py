@@ -184,16 +184,18 @@ class ReplacementValidationTests(unittest.TestCase):
     def test_unknown_leave_replacement_preserves_existing_assignment(self):
         leave_id = ObjectId()
         leaves, employees, daily, release = Mock(), Mock(), Mock(), Mock()
-        leaves.find_one.return_value = {
+        existing_leave = {
             "_id": leave_id, "employeeId": "absent", "date": "2026-09-20",
             "finalStatus": "Approved", "replacement": {"employeeId": "existing"},
         }
+        leaves.find_one.side_effect = lambda query: existing_leave if "_id" in query else None
         employees.find_one.return_value = None
         daily.find_one.return_value = None
         context = load_functions("crew_legacy/api/replacement.py", {"assign_replacement"}, {
             "leave_request_collection": leaves, "employee_collection": employees,
             "employee_daily_collection": daily, "release_replacement_assignment": release,
             "require_replacement_authority": lambda *args: None,
+            "ACTIVE_LEAVE_STATUSES": {"Applied", "Forwarded", "Forwarded by SIC", "Approved"},
         })
         with self.assertRaises(HTTPException) as error:
             context["assign_replacement"](str(leave_id), {"replacementEmployeeId": "missing"}, {"role": "admin"})

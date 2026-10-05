@@ -40,6 +40,7 @@ api.interceptors.request.use((config) => {
   // Leave approval is likewise controlled by the live SIC/DIC/reporting hierarchy.
     const isLeaveApproval = method === "PUT" && (
     requestUrl.includes("/leave/cancel/") ||
+    requestUrl.includes("/leave/withdraw/") ||
     requestUrl.includes("/leave/cancel-group") ||
     requestUrl.includes("/leave/sic-forward-bulk") ||
     requestUrl.includes("/leave/sic-reject-bulk") ||

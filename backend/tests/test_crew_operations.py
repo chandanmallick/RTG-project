@@ -38,6 +38,7 @@ class OperationsTests(unittest.TestCase):
                 "exchange_request_summary": lambda item, actor: item,
                 "has_replacement_authority": lambda user, leave: leave.get("authority", False),
                 "TRAINING_HR_POOL_ID": "HR_POOL",
+                "refresh_unacted_organization_leave_workflows": Mock(),
             })
 
     def actions(self, pages=None, role=None, counts=None, **kwargs):
@@ -47,8 +48,16 @@ class OperationsTests(unittest.TestCase):
     def summary(self):
         return self.context["operations_summary"](user={"employeeId": "actor", "role": "employee"})
 
-    def test_no_access_disables_all_actions_even_for_admin(self):
-        self.assertTrue(all(not item["enabled"] for item in self.actions({}, {"isAdmin": True}).values()))
+    def test_admin_special_event_access_does_not_grant_other_pages(self):
+        actions = self.actions({}, {"isAdmin": True})
+        self.assertTrue(actions["specialEventRoster"]["enabled"])
+        self.assertTrue(all(not item["enabled"] for key, item in actions.items() if key != "specialEventRoster"))
+
+    def test_summary_refreshes_hierarchy_before_counting_pending_leave(self):
+        self.context["refresh_unacted_organization_leave_workflows"].side_effect = lambda: setattr(self.leaves.find, "return_value", [{"organization": True, "sic": True}])
+        result = self.summary()
+        self.assertEqual(result["actions"]["leaveApproval"]["pending"], 1)
+        self.context["refresh_unacted_organization_leave_workflows"].assert_called_once()
 
     def test_view_does_not_grant_event_creation_or_requests(self):
         pages = {key: {"view": True, "write": False} for key in self.pages}
