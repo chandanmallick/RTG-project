@@ -648,6 +648,7 @@ async def get_schedule_data(
     generators: str = Query("", description="Mapped WBES name(s), comma separated"),
     kind: str = Query("all", description="all, generator or state"),
     frequency: int = Query(15, description="Output interval: 15, 5 or 1 minutes"),
+    refresh: bool = Query(False, description="Fetch the latest WBES revision"),
 ):
     """Load WBES schedules for a date range and resample the 15-minute source."""
     try:
@@ -672,10 +673,12 @@ async def get_schedule_data(
     acronyms = [item["id"] for item in selected]
     output_rows = []
     diagnostics = []
+    source_details = []
     current = start
     while current <= end:
-        source = fetch_wbes_schedule_raw(current.strftime("%d-%m-%Y"), acronyms, diagnostics=diagnostics)
+        source = fetch_wbes_schedule_raw(current.strftime("%d-%m-%Y"), acronyms, diagnostics=diagnostics, force_refresh=refresh)
         source_by_acronym = {normalize_wbes_identifier(item.get("Acronym")): item for item in source or []}
+        source_details.append({"date": current.isoformat(), "mode": "live" if refresh else "cache_or_live", "utilities": [{"acronym": item.get("Acronym"), "NetScheduleSummary": item.get("NetScheduleSummary")} for item in source or []]})
         # WBES returns 96 quarter-hour samples. Repeat each sample for the
         # requested finer interval; this preserves the published schedule
         # step until a finer source is available.
@@ -690,7 +693,7 @@ async def get_schedule_data(
                 payload = source_by_acronym.get(item["id"]) or {}
                 series = (payload.get("NetScheduleSummary") or {}).get("TotalNetSchdAmount") or []
                 dc_series, normative_dc_series = _declaration_dc_series(payload)
-                row[item["id"]] = float(series[source_slot] or 0) if source_slot < len(series) else None
+                row[item["id"]] = safe_float(series[source_slot]) if source_slot < len(series) else None
                 row[f"{item['id']}_dc"] = (
                     float(dc_series[source_slot] or 0)
                     if source_slot < len(dc_series)
@@ -712,6 +715,8 @@ async def get_schedule_data(
         "rows": output_rows,
         "diagnostics": diagnostics,
         "source": "WBES schedule API / existing frequency mapping",
+        "source_path": "ResponseBody.GroupWiseDataList[Acronym].NetScheduleSummary.TotalNetSchdAmount[block - 1]",
+        "source_details": source_details,
     }
 
 
@@ -1816,6 +1821,10 @@ def get_source_series(raw_doc: Optional[dict], source: str, field: str):
         return None
     sources = raw_doc.get("sources", {}) or {}
     values = (sources.get(source, {}) or {}).get(field)
+    if field == "schedule_components":
+        return values
+    if field == "schedule" and isinstance(values, list):
+        return [safe_float(value) for value in values]
     return normalize_series_for_resolution(values)
 
 def get_source_series_for_timestamp(db, dt_value: datetime, plant_id: str, wbes_name: str, source: str, field: str):
@@ -2228,7 +2237,14 @@ def fetch_wbes_schedule_raw(
     diagnostics = diagnostics if diagnostics is not None else []
     results = []
     missing_acronyms = []
-    acronyms = [normalize_wbes_identifier(acr) for acr in acronyms or [] if normalize_wbes_identifier(acr)]
+    supplied_names = {normalize_wbes_identifier(acr): str(acr).strip() for acr in acronyms or [] if normalize_wbes_identifier(acr)}
+    acronyms = list(supplied_names)
+    # Cache identifiers are case-insensitive; WBES request acronyms are not.
+    request_names = {}
+    for mapping in db.map_collection.find({}, {"wbes_name": 1, "wbes_acronym": 1}):
+        name = str(mapping.get("wbes_name") or mapping.get("wbes_acronym") or "").strip()
+        if name:
+            request_names.setdefault(normalize_wbes_identifier(name), name)
     
     for acr in acronyms:
         try:
@@ -2240,7 +2256,7 @@ def fetch_wbes_schedule_raw(
                 results.append({
                     "Acronym": acr,
                     "NetScheduleSummary": {
-                        "TotalNetSchdAmount": cached_schedule or [0.0]*96,
+                        "TotalNetSchdAmount": cached_schedule or [],
                         "NetSchdDataList": cached_components or [],
                     },
                     "DeclarationList": [{
@@ -2305,7 +2321,7 @@ def fetch_wbes_schedule_raw(
         "Date": date_str,
         "SchdRevNo": -1,
         "UserName": username,
-        "UtilAcronymList": missing_acronyms,
+        "UtilAcronymList": [request_names.get(acr, supplied_names[acr]) for acr in missing_acronyms],
         "UtilRegionIdList": [1]
     }
     auth = (username, password)
@@ -2330,7 +2346,9 @@ def fetch_wbes_schedule_raw(
                 # WBES publishes the canonical net schedule and its component
                 # breakdown together. Keep both so schedule updates and later
                 # category views use the same source payload.
-                totalNetSchdAmount = net_summary.get('TotalNetSchdAmount') or [0.0] * 96
+                totalNetSchdAmount = net_summary.get('TotalNetSchdAmount') or []
+                if not totalNetSchdAmount:
+                    diagnostics.append({"date": date_str, "status": "no_data", "generators": [acr], "message": "WBES TotalNetSchdAmount is missing or empty; schedule is unavailable, not zero."})
                 netScheduleDataList = net_summary.get('NetSchdDataList') or []
                 
                 DCList = [0.0] * 96
@@ -2349,7 +2367,7 @@ def fetch_wbes_schedule_raw(
                     iso_date,
                     wbes_name=acr,
                     set_fields={
-                        "sources.wbes.schedule": normalize_series(totalNetSchdAmount),
+                        "sources.wbes.schedule": [safe_float(value) for value in totalNetSchdAmount],
                         "sources.wbes.schedule_components": netScheduleDataList,
                         "sources.wbes.dc": normalize_series(DCList),
                         "sources.wbes.fetched_at": datetime.utcnow().isoformat(),
@@ -2382,7 +2400,7 @@ def fetch_rtg_schedule_raw(date_str: str, plant_id: str, force_refresh: bool = F
         cached_dc = get_source_series(cached, "rtg", "dc")
         if cached_schedule is not None or cached_dc is not None:
             return {
-                "schedule": cached_schedule or [0.0]*96,
+                "schedule": cached_schedule or [],
                 "dc": cached_dc or [0.0]*96
             }
         legacy_cached = None if force_refresh else db.db["rtg_schedule_raw"].find_one({"date": date_str, "plant_id": plant_id})
@@ -2434,7 +2452,7 @@ def fetch_rtg_schedule_raw(date_str: str, plant_id: str, force_refresh: bool = F
         status_code = res.status_code
         if status_code == 200:
             res_json = res.json() or {}
-            sch = res_json.get("schedule", [0.0]*96)
+            sch = res_json.get("schedule") or []
             dc_val = res_json.get("dc", [0.0]*96)
             
             merge_event_raw_data(
@@ -2442,7 +2460,7 @@ def fetch_rtg_schedule_raw(date_str: str, plant_id: str, force_refresh: bool = F
                 date_str,
                 plant_id=plant_id,
                 set_fields={
-                    "sources.rtg.schedule": normalize_series(sch),
+                    "sources.rtg.schedule": [safe_float(value) for value in sch],
                     "sources.rtg.dc": normalize_series(dc_val),
                     "sources.rtg.fetched_at": datetime.utcnow().isoformat(),
                 },

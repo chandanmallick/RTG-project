@@ -104,13 +104,11 @@ def run_isgs_schedule_check(force_rtg_refresh=False):
     plant_ids = sorted({str(row.get("rtg_plant_id") or row.get("plant_id") or "").strip() for row in mappings if row.get("rtg_plant_id") or row.get("plant_id")})
 
     def load_rtg_schedule(plant_id):
-        fresh = fetch_rtg_schedule_raw(date_iso, plant_id, force_refresh=force_rtg_refresh)
+        fresh = fetch_rtg_schedule_raw(date_iso, plant_id, force_refresh=True)
         if fresh:
             return plant_id, fresh
-        # A transient source failure should be identified, but a cached series
-        # remains preferable to the dashboard aggregate (which is not block-wise).
-        cached = fetch_rtg_schedule_raw(date_iso, plant_id, force_refresh=False)
-        return plant_id, cached
+        # Do not compare a cached revision against a fresh WBES revision.
+        return plant_id, {}
 
     with ThreadPoolExecutor(max_workers=min(12, max(1, len(plant_ids)))) as executor:
         rtg_schedule_by_id = dict(executor.map(load_rtg_schedule, plant_ids))
@@ -147,6 +145,8 @@ def run_isgs_schedule_check(force_rtg_refresh=False):
             "stage_name": mapping.get("STAGE_NAME") or mapping.get("stage_name") or "",
             "wbes_name": acronym,
             "wbes_schedule_mw": wbes_value,
+            "wbes_raw_schedule_mw": raw_wbes_value,
+            "source_details": {"block_index": block_index, "wbes_path": "ResponseBody.GroupWiseDataList[Acronym].NetScheduleSummary.TotalNetSchdAmount", "wbes_sign_multiplier": -1, "rtg_path": "schedule", "wbes_summary": (wbes_row or {}).get("NetScheduleSummary"), "wbes_series": schedule, "rtg_series": rtg_series},
             "rtg_schedule_mw": rtg_value,
             "rtg_schedule_updated_at": (rtg_row or {}).get("schedule_last_updated"),
             "difference_mw": difference,

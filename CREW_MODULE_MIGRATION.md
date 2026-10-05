@@ -514,6 +514,14 @@ fixtures and local simulated changes. See [preview instructions](#dash-test-dash
 ## WBES schedule fetch reference
 
 The WBES schedule API is configured in **PSP Settings** (`pipeline_config`, `config_type: PSP`).
+The CR Health card's **All blocks / source** button displays all 96 state blocks
+and the `NetScheduleSummary` response portion used to build them. ISGS comparison
+rows provide **Inspect source**, including raw series, zero-based block index and
+the generator sign conversion. Both sources are fetched fresh for reconciliation;
+failed requests are shown as unavailable rather than compared against older data.
+WBES request acronyms preserve the exact configured spelling: `Teesta_V` returns
+data whereas `TEESTA_V` can return a zero-filled response. Cache keys remain
+case-insensitive. Missing schedule fields are no longer manufactured as zeros.
 Fetchers must read these values at runtime and must not embed credentials:
 
 - `wbes_url`
