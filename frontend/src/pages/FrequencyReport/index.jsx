@@ -12,6 +12,8 @@ import { showModernPopup } from "../../components/ui/ModernPopup";
 
 // Sub-components
 import ReportHeader from "./components/ReportHeader";
+import FrequencyPreAnalysis from "./components/FrequencyPreAnalysis";
+import SavedEventReports from "./components/SavedEventReports";
 import ExecutiveSummary from "./components/ExecutiveSummary";
 import StateComplianceTable from "./components/StateComplianceTable";
 import GeneratorComplianceTable from "./components/GeneratorComplianceTable";
@@ -1291,9 +1293,14 @@ export default function FrequencyReport() {
     }
   }, [startTime, endTime]);
 
-  const runSSEReport = async (fileId, fileObject, overrideRows = rows) => {
-    const isHistoricalRun = fileId === "database" && !!selectedEventId;
-    const selectedEvent = availableEvents.find((item) => item.event_id === selectedEventId);
+  const runSSEReport = async (fileId, fileObject, overrideRows = rows, context = {}) => {
+    const reportStart = context.start_time ?? startTime;
+    const reportEnd = context.end_time ?? endTime;
+    const reportType = context.event_type ?? eventType;
+    const reportEventId = context.event_id ?? selectedEventId;
+    const generationComparison = context.include_generation_comparison ?? includeGenerationComparison;
+    const isHistoricalRun = fileId === "database" && !!reportEventId;
+    const selectedEvent = availableEvents.find((item) => item.event_id === reportEventId);
     setDataLoading(true);
     setShowLogsModal(true);
     setLogsModalStatus("running");
@@ -1301,16 +1308,16 @@ export default function FrequencyReport() {
     setLogsErrorDetails("");
     setSyncLogs([
       "🚀 [SYSTEM] Initializing EventSource (SSE) pipeline...",
-      "⏳ [SYSTEM] Selected Period: " + startTime + " to " + endTime,
+      "⏳ [SYSTEM] Selected Period: " + reportStart + " to " + reportEnd,
       "⏳ [SYSTEM] Dispatching job parameters: file_id = " + fileId
     ]);
 
     if (isHistoricalRun) {
       setSyncLogs([
         "[MONGO] Preparing saved historical event load...",
-        "[MONGO] Event: " + (selectedEvent?.name || selectedEventId),
-        "[MONGO] Saved period: " + startTime + " to " + endTime,
-        includeGenerationComparison
+        "[MONGO] Event: " + (selectedEvent?.name || reportEventId),
+        "[MONGO] Saved period: " + reportStart + " to " + reportEnd,
+        generationComparison
           ? "[SOURCE] Dated generation workbook comparison will be refreshed."
           : "[MONGO] Loading stored event series only."
       ]);
@@ -1320,12 +1327,12 @@ export default function FrequencyReport() {
     try {
       jobRes = await API.createFrequencyReportJob(
         fileId,
-        startTime,
-        endTime,
+        reportStart,
+        reportEnd,
         overrideRows,
-        fileId === "database" ? selectedEventId : "",
-        eventType,
-        isHistoricalRun && includeGenerationComparison,
+        fileId === "database" ? reportEventId : "",
+        reportType,
+        isHistoricalRun && generationComparison,
       );
     } catch (err) {
       console.error("SSE job creation failed:", err);
@@ -1335,6 +1342,7 @@ export default function FrequencyReport() {
       toast.dismiss();
       toast.error("Could not start report job.");
       setDataLoading(false);
+      context.onError?.(err);
       return;
     }
 
@@ -1346,6 +1354,7 @@ export default function FrequencyReport() {
       toast.dismiss();
       toast.error("Could not start report job.");
       setDataLoading(false);
+      context.onError?.(new Error(errorMsg));
       return;
     }
 
@@ -1376,7 +1385,7 @@ export default function FrequencyReport() {
               setStateObservation(result.report_notes.state_observation || result.report_notes.auto_state_observation || "");
               setGeneratorObservation(result.report_notes.generator_observation || result.report_notes.auto_generator_observation || "");
             }
-            loadCrmsMessages(startTime, endTime, normalizedRows);
+            loadCrmsMessages(reportStart, reportEnd, normalizedRows);
             if (result.event_type) {
               setEventType(result.event_type);
             }
@@ -1387,7 +1396,11 @@ export default function FrequencyReport() {
             if (!result.from_saved_event) {
               setScadaFile(fileObject);
             }
-            ensureEventNameDraft(fileObject);
+            if (context.onComplete) {
+              setEventNameDraft(`${reportType === "high" ? "High" : "Low"} Freq ${reportStart.slice(0, 10)} (${reportStart.slice(11)}-${reportEnd.slice(11)})`);
+            } else {
+              ensureEventNameDraft(fileObject);
+            }
             setShowLogsModal(false);
             setShowUploadDetailsModal(!result.from_saved_event || (result.missing_sources || []).length > 0);
             setSyncLogs((prev) => [
@@ -1415,6 +1428,7 @@ export default function FrequencyReport() {
                 : (result.generation_comparison_refreshed ? "Saved data and dated generation comparison loaded successfully." : "Data loaded successfully."),
             });
             setDataLoading(false);
+            context.onComplete?.(result);
           } else {
             eventSource.close();
             const errorMsg = result.error || "Unknown error";
@@ -1424,6 +1438,7 @@ export default function FrequencyReport() {
             toast.dismiss();
             toast.error("Compilation failed: " + errorMsg);
             setDataLoading(false);
+            context.onError?.(new Error(errorMsg));
           }
         } else if (data.success === false) {
           eventSource.close();
@@ -1434,9 +1449,15 @@ export default function FrequencyReport() {
           toast.dismiss();
           toast.error("Execution failed: " + errorMsg);
           setDataLoading(false);
+          context.onError?.(new Error(errorMsg));
         }
       } catch (err) {
         console.error("SSE parse error:", err);
+        if (context.onError) {
+          eventSource.close();
+          setDataLoading(false);
+          context.onError(err);
+        }
       }
     };
 
@@ -1448,7 +1469,56 @@ export default function FrequencyReport() {
       toast.dismiss();
       toast.error("SSE connection failed.");
       setDataLoading(false);
+      context.onError?.(new Error("SSE connection failed."));
     };
+  };
+
+  const activateSelectedPeriod = (event) => {
+    setStartTime(event.start_time);
+    setEndTime(event.end_time);
+    setEventType(event.event_type);
+    setScadaFile(event.file);
+    setUseDatabase(Boolean(event.stored_event_id));
+    setSelectedEventId(event.stored_event_id || "");
+    setSelectedDbDate("");
+    setEventNameDraft(`${event.event_type === "high" ? "High" : "Low"} Freq ${event.start_time.slice(0, 10)} (${event.start_time.slice(11)}-${event.end_time.slice(11)})`);
+    setTab("report");
+    setExpandedRowIds([]);
+    setSelectedExportStateIds([]);
+    setSelectedExportGeneratorIds([]);
+  };
+
+  const analyzeSelectedPeriod = async (event) => {
+    const analysisRows = reportRowsFromMapping(mapData);
+    if (!analysisRows.length) throw new Error("Plant mapping is still loading. Retry analysis when it is ready.");
+    activateSelectedPeriod(event);
+    setStateObservation("");
+    setGeneratorObservation("");
+    return new Promise((resolve, reject) => {
+      runSSEReport(event.stored_event_id ? "database" : event.file_id, event.file, analysisRows, {
+        event_id: event.stored_event_id || "", include_generation_comparison: false,
+        start_time: event.start_time, end_time: event.end_time, event_type: event.event_type,
+        onComplete: resolve, onError: reject,
+      }).catch(reject);
+    });
+  };
+
+  const viewSelectedPeriodResult = (event) => {
+    if (!event.result) return;
+    activateSelectedPeriod(event);
+    const restoredRows = (event.result.rows || []).map(normalizeReportRow);
+    setRows(restoredRows);
+    setUploadDetailRows(buildUploadDetails(restoredRows));
+    setWbesLoaded(false);
+    setRtgLoaded(false);
+    setScadaLoaded(true);
+    const notes = event.result.report_notes || {};
+    setIntroDesc(notes.executive_summary || "");
+    setStateDesc(notes.state_drawal_compliance || "");
+    setGenDesc(notes.generator_scheduling_compliance || "");
+    setStateObservation(notes.state_observation || notes.auto_state_observation || "");
+    setGeneratorObservation(notes.generator_observation || notes.auto_generator_observation || "");
+    loadCrmsMessages(event.start_time, event.end_time, restoredRows);
   };
 
   const handleFileSelect = async (file) => {
@@ -1659,7 +1729,12 @@ export default function FrequencyReport() {
     });
   });
 
-  const buildInteractiveChartsHtml = (selectedRows) => {
+  const buildInteractiveChartsHtml = (selectedRows, reportContext = {}) => {
+    const htmlTitle = reportContext.title ?? eventDurationName();
+    const htmlStart = reportContext.start_time ?? startTime;
+    const htmlEnd = reportContext.end_time ?? endTime;
+    const htmlFrequency = reportContext.frequencyRow === undefined ? systemFrequencyRow : reportContext.frequencyRow;
+    const escapeTitle = text => String(text).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
     const chartRows = selectedRows
       .filter((row) => row.series?.timestamps?.length > 0 && !row.is_frequency)
       .map((row) => ({
@@ -1683,31 +1758,31 @@ export default function FrequencyReport() {
       }));
 
     const payload = JSON.stringify({
-      title: eventDurationName(),
-      start_time: startTime,
-      end_time: endTime,
+      title: htmlTitle,
+      start_time: htmlStart,
+      end_time: htmlEnd,
       includeFrequency: exportIncludeFrequencyPlot,
       includeDeviation: exportIncludeDeviationPlot,
       includeStateScheduleActual: exportIncludeStateScheduleActualPlot,
       includeGeneratorScheduleActual: exportIncludeGeneratorScheduleActualPlot,
-      frequencyRow: systemFrequencyRow ? {
-        plant_id: systemFrequencyRow.plant_id,
+      frequencyRow: htmlFrequency ? {
+        plant_id: htmlFrequency.plant_id,
         plant_name: "System Frequency",
-        event_type: systemFrequencyRow.event_type || eventType,
+        event_type: htmlFrequency.event_type || eventType,
         series: {
-          timestamps: systemFrequencyRow.series?.timestamps || [],
-          frequency: systemFrequencyRow.series?.frequency || [],
+          timestamps: htmlFrequency.series?.timestamps || [],
+          frequency: htmlFrequency.series?.frequency || [],
         },
       } : null,
       rows: chartRows,
-    }).replace(/<\/script/gi, "<\\/script");
+    }).replace(/</g, "\\u003c");
 
     return `<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>${eventDurationName()} - Annexure Charts</title>
+  <title>${escapeTitle(htmlTitle)} - Annexure Charts</title>
   <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
   <style>
     body { margin: 0; font-family: Inter, Arial, sans-serif; color: #0f172a; background: #f4f8fb; }
@@ -1739,8 +1814,8 @@ export default function FrequencyReport() {
 </head>
 <body>
   <header>
-    <h1>Annexure: Frequency Event Plots</h1>
-    <div class="meta">${startTime} to ${endTime} | Hover chart lines and CRMS pins for details</div>
+    <h1>${reportContext.title ? escapeTitle(htmlTitle) : "Annexure: Frequency Event Plots"}</h1>
+    <div class="meta">${escapeTitle(htmlStart)} to ${escapeTitle(htmlEnd)} | Hover chart lines and CRMS pins for details</div>
   </header>
   <main id="charts"></main>
   <script>
@@ -3119,6 +3194,24 @@ export default function FrequencyReport() {
   return (
     <AppShell>
       <Toaster position="top-right" reverseOrder={false} />
+
+      <SavedEventReports availableEvents={availableEvents} busy={dataLoading || mapLoading} saveBlob={saveBlobToFile} onOpenEvent={async id => {
+        const event = availableEvents.find(item => item.event_id === id);
+        if (event) await analyzeSelectedPeriod({ ...event, stored_event_id: id, event_type: event.event_type || "low" });
+      }} onViewHtml={async (_, options) => {
+        const response = await API.exportSavedFrequencyReport(options);
+        const context = { ...response.context, frequencyRow: response.rows.find(row => row.is_frequency) || response.rows.find(row => row.series?.frequency?.length) || null };
+        let html = buildInteractiveChartsHtml(response.include_existing_sections ? response.rows : [], context);
+        if (!response.include_existing_sections) html = html.replace(/<script>[\s\S]*?<\/script>/, "");
+        html = html.replace("</body>", `${response.supplemental_html}</body>`);
+        const blob = new Blob([html], { type: "text/html;charset=utf-8" });
+        const url = URL.createObjectURL(blob);
+        const preview = window.open(url, "_blank");
+        if (preview) preview.opener = null;
+        else await saveBlobToFile(blob, `${String(context.title).replace(/[<>:"/\\|?*]/g, "_")}.html`);
+        setTimeout(() => URL.revokeObjectURL(url), 60000);
+      }} />
+      <FrequencyPreAnalysis storedEvents={availableEvents} busy={dataLoading || mapLoading} onAnalyze={analyzeSelectedPeriod} onViewResult={viewSelectedPeriodResult} />
 
       <ReportHeader
         startTime={startTime}

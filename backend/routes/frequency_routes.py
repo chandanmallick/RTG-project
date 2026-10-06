@@ -635,6 +635,20 @@ def _declaration_dc_series(payload: dict) -> tuple[list, list]:
     return onbar, normative
 
 
+@router.get("/curve-series")
+def get_curve_frequency_series(
+    start_date: str = Query(...),
+    end_date: str = Query(...),
+    user=Depends(get_authenticated_user),
+):
+    """Pre-upload frequency overview using PSP's existing Curve file access."""
+    from services.curve_frequency_service import load_curve_frequency_range
+    try:
+        return load_curve_frequency_range(start_date, end_date)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
 @router.get("/schedule-data/generators")
 async def get_schedule_data_generators():
     return {"success": True, "data": _schedule_data_generators()}
@@ -1024,7 +1038,7 @@ def parse_crms_message_datetime(value):
     if value in [None, ""]:
         return None
     text = str(value).strip()
-    for fmt in ("%d-%m-%Y %H:%M", "%d-%m-%Y %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%dT%H:%M"):
+    for fmt in ("%d-%m-%Y %H:%M", "%d-%m-%Y %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%dT%H:%M", "%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S"):
         try:
             return datetime.strptime(text, fmt)
         except Exception:
@@ -1367,6 +1381,8 @@ class FrequencyMessageRange(BaseModel):
 
 class FrequencyMessageTimelinePayload(BaseModel):
     ranges: List[FrequencyMessageRange]
+    event_id: Optional[str] = None
+    stored_only: bool = False
 
 
 CRMS_CONSTITUENT_DEFAULTS = {
@@ -1521,58 +1537,102 @@ async def build_frequency_message_timeline(payload: FrequencyMessageTimelinePayl
             raise HTTPException(400, "A single message range cannot exceed 31 days.")
         parsed_ranges.append((start_dt, end_dt))
 
+    db = MongoService()
+    event_doc = None
+    warnings = []
+    messages_complete = True
+    if payload.event_id:
+        from services.frequency_event_reporting import event_period, timeline_aliases, timeline_point_values
+        event_doc = db.db[EVENT_COLLECTION].find_one({"event_id": payload.event_id}, {"_id": 0})
+        if not event_doc:
+            raise HTTPException(404, "Saved event not found.")
+        try:
+            event_start, event_end = event_period(event_doc)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        parsed_ranges = [(max(start, event_start), min(end, event_end)) for start, end in parsed_ranges if end >= event_start and start <= event_end]
+        if not parsed_ranges:
+            raise HTTPException(400, "Message ranges do not intersect the saved event period.")
     messages_by_key = {}
     skipped = 0
+    if event_doc:
+        for point in event_doc.get("data_points") or []:
+            for message in point.get("crms_messages") or []:
+                stamp = parse_crms_message_datetime(message.get("timestamp") or message.get("message_date"))
+                if stamp and any(start <= stamp <= end for start, end in parsed_ranges):
+                    normalized = normalize_crms_message(message, stamp)
+                    if not normalized["issued_to"]:
+                        normalized["issued_to"] = [point.get("plant_name") or point.get("plant_id")]
+                    key = f"{normalized.get('message_no')}|{normalized.get('timestamp')}"
+                    if key in messages_by_key:
+                        normalized["issued_to"] = list(dict.fromkeys(messages_by_key[key]["issued_to"] + normalized["issued_to"]))
+                    messages_by_key[key] = normalized
+
     for start_dt, end_dt in parsed_ranges:
+        if event_doc and payload.stored_only:
+            messages_complete = False
+            warnings.append("Stored messages only; message counts are unavailable until CRMS coverage is verified.")
+            continue
         try:
             messages, range_skipped = await fetch_crms_frequency_messages(start_dt, end_dt)
         except Exception as exc:
-            raise HTTPException(502, f"CRMS message fetch failed: {exc}") from exc
+            if not event_doc:
+                raise HTTPException(502, f"CRMS message fetch failed: {exc}") from exc
+            messages_complete = False
+            warnings.append("CRMS is unavailable. Saved message rows are shown; complete message counts are unavailable.")
+            continue
         skipped += range_skipped
         for message in messages:
             key = f"{message.get('message_no')}|{message.get('timestamp')}"
             messages_by_key[key] = message
 
-    db = MongoService()
-    alias_map = _timeline_state_mappings(db)
+    alias_map = timeline_aliases(db, event_doc) if event_doc else _timeline_state_mappings(db)
     schedule_cache = {}
     rows = []
     for message in messages_by_key.values():
         message_dt = parse_crms_message_datetime(message.get("timestamp") or message.get("message_date"))
-        if not message_dt:
+        if not message_dt or not any(start <= message_dt <= end for start, end in parsed_ranges):
             continue
         for issued_to in message.get("issued_to") or []:
-            mapping = alias_map.get(normalize_crms_lookup(issued_to))
-            if not mapping:
+            match = alias_map.get(normalize_crms_lookup(issued_to))
+            if not match:
                 continue
-            state_name = mapping.get("display_name") or issued_to
-            frequency, deviation = _nearest_saved_event_values(db, message_dt, state_name)
-            data_source = "Saved frequency event"
-            raw_frequency, raw_deviation = _raw_timeline_values(db, message_dt, mapping)
-            if frequency is None:
-                frequency = raw_frequency
-            if deviation is None:
-                deviation = raw_deviation
-                if deviation is not None:
-                    data_source = "Frequency raw data"
-            if deviation is None:
-                deviation = _schedule_page_fallback(db, message_dt, mapping, schedule_cache)
-                if deviation is not None:
-                    data_source = "Schedule Data fallback"
-            rows.append({
-                "timestamp": message_dt.isoformat(timespec="minutes"),
-                "time": message_dt.strftime("%H:%M"),
-                "frequency_hz": round(frequency, 3) if frequency is not None else None,
-                "state": state_name,
-                "deviation_mw": round(deviation) if deviation is not None else None,
-                "message_type": crms_message_category(message),
-                "message_no": message.get("message_no") or "",
-                "issued_to": issued_to,
-                "data_source": data_source if frequency is not None or deviation is not None else "Unavailable",
-            })
+            for mapping in (match if isinstance(match, list) else [match]):
+                state_name = mapping.get("display_name") or issued_to
+                frequency, deviation = timeline_point_values(mapping, message_dt, event_doc) if event_doc else _nearest_saved_event_values(db, message_dt, state_name)
+                data_source = "Saved frequency event"
+                raw_frequency, raw_deviation = (None, None) if event_doc else _raw_timeline_values(db, message_dt, mapping)
+                if frequency is None:
+                    frequency = raw_frequency
+                if deviation is None:
+                    deviation = raw_deviation
+                    if deviation is not None:
+                        data_source = "Frequency raw data"
+                if deviation is None and not event_doc:
+                    deviation = _schedule_page_fallback(db, message_dt, mapping, schedule_cache)
+                    if deviation is not None:
+                        data_source = "Schedule Data fallback"
+                rows.append({
+                    "timestamp": message_dt.isoformat(timespec="seconds" if event_doc else "minutes"),
+                    "entity_id": mapping.get("entity_id"),
+                    "entity_group": mapping.get("group"),
+                    "message_details": message.get("remarks") or "",
+                    "time": message_dt.strftime("%H:%M"),
+                    "frequency_hz": round(frequency, 3) if frequency is not None else None,
+                    "state": state_name,
+                    "deviation_mw": (round(deviation, 3) if event_doc else round(deviation)) if deviation is not None else None,
+                    "message_type": crms_message_category(message),
+                    "message_no": message.get("message_no") or "",
+                    "issued_to": issued_to,
+                    "data_source": data_source if frequency is not None or deviation is not None else "Unavailable",
+                })
+    if event_doc:
+        rows = list({(row["timestamp"], row["message_no"], row.get("entity_id")): row for row in rows}.values())
     rows.sort(key=lambda row: (row["timestamp"], row["message_no"], row["state"]))
     return {
         "success": True,
+        "messages_complete": messages_complete,
+        "warnings": warnings,
         "ranges": [{"start_time": start.isoformat(timespec="minutes"), "end_time": end.isoformat(timespec="minutes")} for start, end in parsed_ranges],
         "message_count": len(messages_by_key),
         "row_count": len(rows),
@@ -2073,6 +2133,7 @@ def build_saved_event_response(
         return None, "Saved event has no merged data points. Please reprocess/upload once and save the event again."
 
     point_by_plant = {str(point.get("plant_id")): point for point in event_points}
+    point_by_stage = {(str(point.get("plant_id")), str(point.get("stage_id") or point.get("STAGE_ID") or "")): point for point in event_points}
     missing_sources = []
     rows = []
     event_type = normalize_event_type(event_doc.get("event_type"))
@@ -2085,7 +2146,8 @@ def build_saved_event_response(
         if entity.get("is_frequency"):
             continue
         pid = str(entity.get("plant_id"))
-        point = point_by_plant.get(pid)
+        stage = str(entity.get("stage_id") or entity.get("STAGE_ID") or "")
+        point = point_by_stage.get((pid, stage)) or point_by_plant.get(pid)
         if not point:
             missing_sources.append({
                 "plant_id": pid,
@@ -4553,79 +4615,82 @@ async def download_pdf(payload: dict):
         gen_rows = [r for r in rows if not r.get("is_state")]
         story = [
             NextPageTemplate("landscape"),
-            Paragraph("POWER SYSTEM DEVIATION ANALYSIS REPORT", title_style),
+            Paragraph(xml_escape(str(payload.get("report_title") or "POWER SYSTEM DEVIATION ANALYSIS REPORT")), title_style),
             Paragraph(f"Generated on {datetime.now().strftime('%d-%m-%Y %H:%M')}", text_style),
         ]
         if payload.get("start_time") or payload.get("end_time"):
             story.append(Paragraph(f"Report Date Range: {xml_escape(str(payload.get('start_time', '')))} to {xml_escape(str(payload.get('end_time', '')))}", text_style))
 
-        story.append(Paragraph("Executive Summary & General Notes", section_style))
-        if payload.get("intro_desc"):
-            story.append(Paragraph(xml_escape(str(payload.get("intro_desc"))), text_style))
+        if payload.get("include_existing_sections", True):
+            story.append(Paragraph("Executive Summary & General Notes", section_style))
+            if payload.get("intro_desc"):
+                story.append(Paragraph(xml_escape(str(payload.get("intro_desc"))), text_style))
 
-        if state_rows:
-            story.append(Paragraph("State Drawal Compliance Details", section_style))
-            if payload.get("state_desc"):
-                story.append(Paragraph(xml_escape(str(payload.get("state_desc"))), text_style))
-            state_data = [[pdf_cell(value, table_header_cell) for value in ["State Name", "Max UD (MW)" if event_type == "high" else "Max OD (MW)", "Time", "Freq", "% Dev>0", "% Dev<0"]]]
-            for r in state_rows:
-                state_data.append([pdf_cell(value) for value in [
-                    str(r.get("plant_name") or ""),
-                    safe_format_mw(get_stat(r, "max_ud") if event_type == "high" else get_stat(r, "max_od")),
-                    str((get_stat(r, "max_ud_time") if event_type == "high" else get_stat(r, "max_od_time")) or "-"),
-                    safe_format_hz(get_stat(r, "max_ud_freq") if event_type == "high" else get_stat(r, "max_od_freq")),
-                    safe_format_pct(get_stat(r, "over_drawal_pct")),
-                    safe_format_pct(get_stat(r, "under_drawal_pct")),
-                ]])
-            t = Table(state_data, colWidths=[150, 115, 155, 100, 105, 105], repeatRows=1)
-            t.setStyle(table_style)
-            story.append(t)
+            if state_rows:
+                story.append(Paragraph("State Drawal Compliance Details", section_style))
+                if payload.get("state_desc"):
+                    story.append(Paragraph(xml_escape(str(payload.get("state_desc"))), text_style))
+                state_data = [[pdf_cell(value, table_header_cell) for value in ["State Name", "Max UD (MW)" if event_type == "high" else "Max OD (MW)", "Time", "Freq", "% Dev>0", "% Dev<0"]]]
+                for r in state_rows:
+                    state_data.append([pdf_cell(value) for value in [
+                        str(r.get("plant_name") or ""),
+                        safe_format_mw(get_stat(r, "max_ud") if event_type == "high" else get_stat(r, "max_od")),
+                        str((get_stat(r, "max_ud_time") if event_type == "high" else get_stat(r, "max_od_time")) or "-"),
+                        safe_format_hz(get_stat(r, "max_ud_freq") if event_type == "high" else get_stat(r, "max_od_freq")),
+                        safe_format_pct(get_stat(r, "over_drawal_pct")),
+                        safe_format_pct(get_stat(r, "under_drawal_pct")),
+                    ]])
+                t = Table(state_data, colWidths=[150, 115, 155, 100, 105, 105], repeatRows=1)
+                t.setStyle(table_style)
+                story.append(t)
+                if include_annexure:
+                    story.append(Paragraph("Annexure - 1 attached", small_style))
+
+            if gen_rows:
+                story.append(Spacer(1, 8))
+                story.append(Paragraph("Generator Scheduling Compliance Details", section_style))
+                if payload.get("gen_desc"):
+                    story.append(Paragraph(xml_escape(str(payload.get("gen_desc"))), text_style))
+                gen_data = [[pdf_cell(value, table_header_cell) for value in ["Generator Name", "% Dev<0", "% Dev>0"]]]
+                for r in gen_rows:
+                    gen_data.append([pdf_cell(report_entity_label(r)), pdf_cell(safe_format_pct(get_stat(r, "under_inj_pct"))), pdf_cell(safe_format_pct(get_stat(r, "helping_grid_pct")))])
+                t = Table(gen_data, colWidths=[550, 115, 115], repeatRows=1)
+                t.setStyle(table_style)
+                story.append(t)
+                if include_annexure:
+                    story.append(Paragraph("Annexure - 2 attached", small_style))
+
             if include_annexure:
-                story.append(Paragraph("Annexure - 1 attached", small_style))
-
-        if gen_rows:
-            story.append(Spacer(1, 8))
-            story.append(Paragraph("Generator Scheduling Compliance Details", section_style))
-            if payload.get("gen_desc"):
-                story.append(Paragraph(xml_escape(str(payload.get("gen_desc"))), text_style))
-            gen_data = [[pdf_cell(value, table_header_cell) for value in ["Generator Name", "% Dev<0", "% Dev>0"]]]
-            for r in gen_rows:
-                gen_data.append([pdf_cell(report_entity_label(r)), pdf_cell(safe_format_pct(get_stat(r, "under_inj_pct"))), pdf_cell(safe_format_pct(get_stat(r, "helping_grid_pct")))])
-            t = Table(gen_data, colWidths=[550, 115, 115], repeatRows=1)
-            t.setStyle(table_style)
-            story.append(t)
-            if include_annexure:
-                story.append(Paragraph("Annexure - 2 attached", small_style))
-
-        if include_annexure:
-            annexure_rows = [r for r in rows if r.get("plot_image") or r.get("capacity_plot_image")]
-            if frequency_plot_b64 or annexure_rows:
-                story.append(PageBreak())
-                if frequency_plot_b64:
-                    story.append(Paragraph("Annexure: System Frequency", section_style))
-                    try:
-                        story.append(Image(io.BytesIO(base64.b64decode(frequency_plot_b64)), width=760, height=315))
-                    except Exception as img_err:
-                        print(f"Skipping invalid PDF frequency plot image: {img_err}")
-                    if annexure_rows:
-                        story.append(PageBreak())
-                for idx, r in enumerate(annexure_rows, 1):
-                    entity_type = "State" if r.get("is_state") else "Generator"
-                    annexure_no = "1" if r.get("is_state") else "2"
-                    story.append(Paragraph(f"Annexure {annexure_no}: {entity_type}: {xml_escape(report_entity_label(r))}", section_style))
-                    for image_key, height in [("plot_image", 285), ("capacity_plot_image", 145)]:
-                        plot_b64 = r.get(image_key)
-                        if not plot_b64:
-                            continue
+                annexure_rows = [r for r in rows if r.get("plot_image") or r.get("capacity_plot_image")]
+                if frequency_plot_b64 or annexure_rows:
+                    story.append(PageBreak())
+                    if frequency_plot_b64:
+                        story.append(Paragraph("Annexure: System Frequency", section_style))
                         try:
-                            story.append(Image(io.BytesIO(base64.b64decode(plot_b64)), width=760, height=height))
-                            story.append(Spacer(1, 3))
+                            story.append(Image(io.BytesIO(base64.b64decode(frequency_plot_b64)), width=760, height=315))
                         except Exception as img_err:
-                            print(f"Skipping invalid PDF plot image for {r.get('plant_name')}: {img_err}")
-                    append_pdf_annexure_writeup_crms(story, r, styles)
-                    if idx < len(annexure_rows):
-                        story.append(PageBreak())
+                            print(f"Skipping invalid PDF frequency plot image: {img_err}")
+                        if annexure_rows:
+                            story.append(PageBreak())
+                    for idx, r in enumerate(annexure_rows, 1):
+                        entity_type = "State" if r.get("is_state") else "Generator"
+                        annexure_no = "1" if r.get("is_state") else "2"
+                        story.append(Paragraph(f"Annexure {annexure_no}: {entity_type}: {xml_escape(report_entity_label(r))}", section_style))
+                        for image_key, height in [("plot_image", 285), ("capacity_plot_image", 145)]:
+                            plot_b64 = r.get(image_key)
+                            if not plot_b64:
+                                continue
+                            try:
+                                story.append(Image(io.BytesIO(base64.b64decode(plot_b64)), width=760, height=height))
+                                story.append(Spacer(1, 3))
+                            except Exception as img_err:
+                                print(f"Skipping invalid PDF plot image for {r.get('plant_name')}: {img_err}")
+                        append_pdf_annexure_writeup_crms(story, r, styles)
+                        if idx < len(annexure_rows):
+                            story.append(PageBreak())
 
+        from services.frequency_event_reporting import append_pdf_supplements
+        append_pdf_supplements(story, payload, styles, table_style, pdf_cell, table_header_cell)
         doc.build(story)
         buf.seek(0)
         return StreamingResponse(
@@ -4788,78 +4853,61 @@ async def download_docx(payload: dict):
         section.left_margin = docx.shared.Inches(0.45)
         section.right_margin = docx.shared.Inches(0.45)
 
-    title = doc.add_heading("Power System Deviation Analysis Report", level=0)
+    title = doc.add_heading(payload.get("report_title") or "Power System Deviation Analysis Report", level=0)
     title.style.font.color.rgb = docx.shared.RGBColor(2, 39, 38)
     doc.add_paragraph(f"Report Date Range: {payload.get('start_time', '')} to {payload.get('end_time', '')}")
     doc.add_paragraph(f"Generated at: {datetime.now().strftime('%d-%m-%Y %H:%M')}")
 
-    doc.add_heading("Executive Summary & General Notes", level=1)
-    if intro_desc:
-        doc.add_paragraph(intro_desc)
+    if payload.get("include_existing_sections", True):
+        doc.add_heading("Executive Summary & General Notes", level=1)
+        if intro_desc:
+            doc.add_paragraph(intro_desc)
 
-    doc.add_heading("State Drawal Compliance Details", level=1)
-    if state_desc:
-        doc.add_paragraph(state_desc)
-    if state_rows:
-        table = doc.add_table(rows=1, cols=6)
-        table.style = 'Light Shading Accent 1'
-        hdr_cells = table.rows[0].cells
-        hdr_cells[0].text = 'State Name'
-        hdr_cells[1].text = 'Max UD (MW)' if event_type == "high" else 'Max OD (MW)'
-        hdr_cells[2].text = 'Time'
-        hdr_cells[3].text = 'Freq'
-        hdr_cells[4].text = '% Dev>0'
-        hdr_cells[5].text = '% Dev<0'
-        for r in state_rows:
-            row_cells = table.add_row().cells
-            row_cells[0].text = report_entity_label(r)
-            row_cells[1].text = safe_format_mw(get_stat(r, 'max_ud') if event_type == "high" else get_stat(r, 'max_od'))
-            row_cells[2].text = str((get_stat(r, 'max_ud_time') if event_type == "high" else get_stat(r, 'max_od_time')) or "-")
-            row_cells[3].text = safe_format_hz(get_stat(r, 'max_ud_freq') if event_type == "high" else get_stat(r, 'max_od_freq'))
-            row_cells[4].text = safe_format_pct(get_stat(r, 'over_drawal_pct'))
-            row_cells[5].text = safe_format_pct(get_stat(r, 'under_drawal_pct'))
+        doc.add_heading("State Drawal Compliance Details", level=1)
+        if state_desc:
+            doc.add_paragraph(state_desc)
+        if state_rows:
+            table = doc.add_table(rows=1, cols=6)
+            table.style = 'Light Shading Accent 1'
+            hdr_cells = table.rows[0].cells
+            hdr_cells[0].text = 'State Name'
+            hdr_cells[1].text = 'Max UD (MW)' if event_type == "high" else 'Max OD (MW)'
+            hdr_cells[2].text = 'Time'
+            hdr_cells[3].text = 'Freq'
+            hdr_cells[4].text = '% Dev>0'
+            hdr_cells[5].text = '% Dev<0'
+            for r in state_rows:
+                row_cells = table.add_row().cells
+                row_cells[0].text = report_entity_label(r)
+                row_cells[1].text = safe_format_mw(get_stat(r, 'max_ud') if event_type == "high" else get_stat(r, 'max_od'))
+                row_cells[2].text = str((get_stat(r, 'max_ud_time') if event_type == "high" else get_stat(r, 'max_od_time')) or "-")
+                row_cells[3].text = safe_format_hz(get_stat(r, 'max_ud_freq') if event_type == "high" else get_stat(r, 'max_od_freq'))
+                row_cells[4].text = safe_format_pct(get_stat(r, 'over_drawal_pct'))
+                row_cells[5].text = safe_format_pct(get_stat(r, 'under_drawal_pct'))
+            if include_annexure:
+                doc.add_paragraph("Annexure - 1 attached")
+
+        doc.add_heading("Generator Scheduling Compliance Details", level=1)
+        if gen_desc:
+            doc.add_paragraph(gen_desc)
+        if gen_rows:
+            table = doc.add_table(rows=1, cols=3)
+            table.style = 'Light Shading Accent 1'
+            hdr_cells = table.rows[0].cells
+            hdr_cells[0].text = 'Generator Name'
+            hdr_cells[1].text = '% Dev<0'
+            hdr_cells[2].text = '% Dev>0'
+            for r in gen_rows:
+                row_cells = table.add_row().cells
+                row_cells[0].text = str(r.get("plant_name") or "")
+                row_cells[1].text = safe_format_pct(get_stat(r, 'under_inj_pct'))
+                row_cells[2].text = safe_format_pct(get_stat(r, 'helping_grid_pct'))
+            if include_annexure:
+                doc.add_paragraph("Annexure - 2 attached")
+
         if include_annexure:
-            doc.add_paragraph("Annexure - 1 attached")
-
-    doc.add_heading("Generator Scheduling Compliance Details", level=1)
-    if gen_desc:
-        doc.add_paragraph(gen_desc)
-    if gen_rows:
-        table = doc.add_table(rows=1, cols=3)
-        table.style = 'Light Shading Accent 1'
-        hdr_cells = table.rows[0].cells
-        hdr_cells[0].text = 'Generator Name'
-        hdr_cells[1].text = '% Dev<0'
-        hdr_cells[2].text = '% Dev>0'
-        for r in gen_rows:
-            row_cells = table.add_row().cells
-            row_cells[0].text = str(r.get("plant_name") or "")
-            row_cells[1].text = safe_format_pct(get_stat(r, 'under_inj_pct'))
-            row_cells[2].text = safe_format_pct(get_stat(r, 'helping_grid_pct'))
-        if include_annexure:
-            doc.add_paragraph("Annexure - 2 attached")
-
-    if include_annexure:
-        annexure_rows = [r for r in rows if r.get("plot_image") or r.get("capacity_plot_image")]
-        if frequency_plot_b64:
-            section = doc.add_section(WD_SECTION.NEW_PAGE)
-            section.orientation = WD_ORIENT.LANDSCAPE
-            section.page_width = docx.shared.Inches(11.69)
-            section.page_height = docx.shared.Inches(8.27)
-            section.top_margin = docx.shared.Inches(0.25)
-            section.bottom_margin = docx.shared.Inches(0.25)
-            section.left_margin = docx.shared.Inches(0.28)
-            section.right_margin = docx.shared.Inches(0.28)
-            section.header.is_linked_to_previous = False
-            section.header.paragraphs[0].text = "Annexure: System Frequency"
-            section.header.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
-            doc.add_heading("System Frequency", level=1)
-            try:
-                doc.add_picture(io.BytesIO(base64.b64decode(frequency_plot_b64)), width=docx.shared.Inches(9.2))
-            except Exception as img_err:
-                print(f"Skipping invalid DOCX frequency plot image: {img_err}")
-        if annexure_rows:
-            for r in annexure_rows:
+            annexure_rows = [r for r in rows if r.get("plot_image") or r.get("capacity_plot_image")]
+            if frequency_plot_b64:
                 section = doc.add_section(WD_SECTION.NEW_PAGE)
                 section.orientation = WD_ORIENT.LANDSCAPE
                 section.page_width = docx.shared.Inches(11.69)
@@ -4869,24 +4917,44 @@ async def download_docx(payload: dict):
                 section.left_margin = docx.shared.Inches(0.28)
                 section.right_margin = docx.shared.Inches(0.28)
                 section.header.is_linked_to_previous = False
-                entity_type = "State" if r.get("is_state") else "Generator"
-                annexure_no = "1" if r.get("is_state") else "2"
-                header_para = section.header.paragraphs[0]
-                header_para.text = f"Annexure {annexure_no}"
-                header_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                section.header.paragraphs[0].text = "Annexure: System Frequency"
+                section.header.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+                doc.add_heading("System Frequency", level=1)
+                try:
+                    doc.add_picture(io.BytesIO(base64.b64decode(frequency_plot_b64)), width=docx.shared.Inches(9.2))
+                except Exception as img_err:
+                    print(f"Skipping invalid DOCX frequency plot image: {img_err}")
+            if annexure_rows:
+                for r in annexure_rows:
+                    section = doc.add_section(WD_SECTION.NEW_PAGE)
+                    section.orientation = WD_ORIENT.LANDSCAPE
+                    section.page_width = docx.shared.Inches(11.69)
+                    section.page_height = docx.shared.Inches(8.27)
+                    section.top_margin = docx.shared.Inches(0.25)
+                    section.bottom_margin = docx.shared.Inches(0.25)
+                    section.left_margin = docx.shared.Inches(0.28)
+                    section.right_margin = docx.shared.Inches(0.28)
+                    section.header.is_linked_to_previous = False
+                    entity_type = "State" if r.get("is_state") else "Generator"
+                    annexure_no = "1" if r.get("is_state") else "2"
+                    header_para = section.header.paragraphs[0]
+                    header_para.text = f"Annexure {annexure_no}"
+                    header_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
-                doc.add_heading(f"{entity_type}: {report_entity_label(r)}", level=1)
-                for image_key in ["plot_image", "capacity_plot_image"]:
-                    plot_b64 = r.get(image_key)
-                    if not plot_b64:
-                        continue
-                    try:
-                        doc.add_picture(io.BytesIO(base64.b64decode(plot_b64)), width=docx.shared.Inches(9.0))
-                    except Exception as img_err:
-                        print(f"Skipping invalid DOCX plot image for {r.get('plant_name')}: {img_err}")
-                append_docx_annexure_writeup_crms(doc, r)
+                    doc.add_heading(f"{entity_type}: {report_entity_label(r)}", level=1)
+                    for image_key in ["plot_image", "capacity_plot_image"]:
+                        plot_b64 = r.get(image_key)
+                        if not plot_b64:
+                            continue
+                        try:
+                            doc.add_picture(io.BytesIO(base64.b64decode(plot_b64)), width=docx.shared.Inches(9.0))
+                        except Exception as img_err:
+                            print(f"Skipping invalid DOCX plot image for {r.get('plant_name')}: {img_err}")
+                    append_docx_annexure_writeup_crms(doc, r)
 
     apply_docx_font_size(doc, base_font)
+    from services.frequency_event_reporting import append_docx_supplements
+    append_docx_supplements(doc, payload)
     buf = io.BytesIO()
     doc.save(buf)
     buf.seek(0)
@@ -5638,6 +5706,87 @@ def stacked_frequency_event_comparison(payload: FrequencyEventStackPayload):
     if not output:
         raise HTTPException(404, "No saved event contains any selected state record.")
     return {"success": True, "state": requested_states[0], "states": requested_states, "events": output, "missing": missing}
+
+
+class FrequencySavedReportPayload(BaseModel):
+    event_ids: List[str]
+    format: str = "xlsx"
+    consolidated: bool = False
+    include_existing_sections: bool = True
+    include_chronology: bool = True
+    include_entity_performance: bool = True
+    performance_groups: List[str] = ["State", "ISGS", "IPP"]
+    refresh: bool = False
+
+
+async def _saved_report_events(payload):
+    from services.frequency_event_reporting import saved_event_analysis
+    ids = list(dict.fromkeys(value.strip() for value in payload.event_ids if value.strip()))
+    if not ids or len(ids) > 100:
+        raise HTTPException(400, "Select between 1 and 100 saved instances.")
+    db = MongoService()
+    output, documents = [], []
+    for event_id in ids:
+        try:
+            result, document = await saved_event_analysis(db, event_id, refresh=payload.refresh)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        output.append(result)
+        documents.append(document)
+    return db, output, documents
+
+
+@router.post("/events/report-analysis")
+async def analyse_saved_frequency_events(payload: FrequencySavedReportPayload, user=Depends(get_authenticated_user)):
+    _, events, _ = await _saved_report_events(payload)
+    return {"success": True, "events": events}
+
+
+@router.post("/events/report-export")
+async def export_saved_frequency_events(payload: FrequencySavedReportPayload, user=Depends(get_authenticated_user)):
+    from services.frequency_event_reporting import GROUPS, event_period, supplements_excel, supplements_html
+    if payload.format not in {"xlsx", "docx", "pdf", "html"}:
+        raise HTTPException(400, "Unsupported report format.")
+    if payload.consolidated and payload.format not in {"xlsx", "docx"}:
+        raise HTTPException(400, "Consolidated supplements support Excel and Word.")
+    if not payload.consolidated and len(set(payload.event_ids)) != 1:
+        raise HTTPException(400, "Each full event report must contain exactly one saved instance.")
+    if any(group not in GROUPS for group in payload.performance_groups):
+        raise HTTPException(400, "Performance groups must be State, ISGS or IPP.")
+    if payload.include_entity_performance and not payload.performance_groups:
+        raise HTTPException(400, "Select at least one performance group.")
+    if not (payload.include_chronology or payload.include_entity_performance or (payload.include_existing_sections and not payload.consolidated)):
+        raise HTTPException(400, "Select at least one report section.")
+    db, events, documents = await _saved_report_events(payload)
+    options = payload.model_dump() if hasattr(payload, "model_dump") else payload.dict()
+    options["include_existing_sections"] = payload.include_existing_sections and not payload.consolidated
+    options["supplemental_events"] = events
+    options["start_time"] = min(event["start_time"] for event in events)
+    options["end_time"] = max(event["end_time"] for event in events)
+    options["report_title"] = "Consolidated Frequency Event Analysis" if payload.consolidated else events[0]["event_name"]
+    options["include_annexure"] = False
+    options["rows"] = []
+    if options["include_existing_sections"] and payload.format != "xlsx":
+        start, end = event_period(documents[0])
+        result, error = build_saved_event_response(db, documents[0]["event_id"], [], start, end, include_generation_comparison=False)
+        if error:
+            raise HTTPException(400, error)
+        options["rows"] = result["rows"]
+        notes = documents[0].get("report_notes") or {}
+        options.update({"intro_desc": notes.get("executive_summary", ""), "state_desc": "\n\n".join(filter(None, [notes.get("state_drawal_compliance", ""), notes.get("state_observation", "")])), "gen_desc": "\n\n".join(filter(None, [notes.get("generator_scheduling_compliance", ""), notes.get("generator_observation", "")])), "event_type": documents[0].get("event_type", "low")})
+    if payload.format == "xlsx":
+        try:
+            buffer = supplements_excel(events, options)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        return StreamingResponse(buffer, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", headers={"Content-Disposition": 'attachment; filename="frequency_event_analysis.xlsx"'})
+    if payload.format == "html":
+        # Return series only for the explicitly requested existing interactive
+        # HTML template; overview tables never carry these large arrays.
+        return {"success": True, "context": {"title": events[0]["event_name"], "start_time": options["start_time"], "end_time": options["end_time"], "event_type": events[0]["event_type"]}, "rows": options["rows"], "supplemental_html": supplements_html(events, options), "include_existing_sections": options["include_existing_sections"]}
+    if payload.format == "pdf":
+        return await download_pdf(options)
+    return await download_docx(options)
 
 @router.post("/events")
 def save_frequency_event(payload: FrequencyEventPayload):

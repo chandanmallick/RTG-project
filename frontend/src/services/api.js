@@ -1062,6 +1062,12 @@ const API = {
     return res.data;
   },
 
+  getCurveFrequencySeries: async (startDate, endDate, signal) => (
+    await axios.get(`${BASE_URL}/frequency/curve-series`, {
+      params: { start_date: startDate, end_date: endDate }, signal,
+    })
+  ).data,
+
   exportMapping: async () => {
     const res = await axios.get(`${BASE_URL}/frequency/export-mapping`, {
       responseType: "blob"
@@ -1085,6 +1091,14 @@ const API = {
     const res = await axios.get(`${BASE_URL}/frequency/events`);
     return res.data;
   },
+
+  getSavedFrequencyAnalysis: async (eventIds, refresh = false) => (
+    await axios.post(`${BASE_URL}/frequency/events/report-analysis`, { event_ids: eventIds, refresh })
+  ).data,
+
+  exportSavedFrequencyReport: async (payload) => (
+    await axios.post(`${BASE_URL}/frequency/events/report-export`, payload, { responseType: payload.format === "html" ? "json" : "blob" })
+  ).data,
 
   getStackedFrequencyEvents: async (payload) => {
     const res = await axios.post(`${BASE_URL}/frequency/events/stacked-comparison`, payload, {

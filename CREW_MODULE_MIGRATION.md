@@ -9,6 +9,7 @@ This is the single software document for the repository. Update its relevant sec
 - [Crew workflow update](#crew-workflow-update)
 - [Crew Management internal storage](#crew-management-internal-storage)
 - [URL Based Deployment](#url-based-deployment)
+- [Frequency Analysis pre-upload overview](#frequency-analysis-pre-upload-overview)
 - [WBES schedule fetch reference](#wbes-schedule-fetch-reference)
 
 ## Integrated scope
@@ -520,6 +521,83 @@ sample dashboard without login or database access. Live `/crew/dashboard` and
 `/crew/dash-test` still require authentication. The public preview uses generated
 fixtures and local simulated changes. See [preview instructions](#dash-test-dashboard-and-sample-preview).
 
+
+## Frequency Analysis pre-upload overview
+
+Frequency Analysis (`/frequency-report`) starts with a date/date-range Curve
+frequency overview, initially loading today's Curve. Its authenticated
+`GET /api/frequency/curve-series` reads
+only sheet `30SEC`, frequency `D8:D2887`, and timestamps `C8:C2887` through
+PSP's existing file naming, configured share, reader and fallback. The opt-in
+`frequency_only=True` mode does not alter PSP demand/report checking reads.
+Each day contributes 2880 half-minute points from 00:00:00 through 23:59:30,
+expressed in IST. Empty time cells derive from that grid; inconsistent dates or
+times fail validation. Invalid frequency readings remain null gaps. A range may
+include up to 31 days; unavailable dates are reported without hiding the usable
+days. Events spanning an unavailable day are rejected.
+
+The overview shades LOW below 49.90 Hz, NORMAL from 49.90 through 50.05 Hz,
+and HIGH above 50.05 Hz. It supports zoom/pan, full-screen expansion, drag
+selection, two-point selection and editable 30-second start/end fields. Add any
+number of intervals, review their extrema/duration, edit/remove them or clear
+all. Date selections fetch once and subsequent chart/event actions use the
+loaded points; up to five date/range responses are cached in the page session.
+Refresh explicitly rereads the source.
+
+Finalize periods to attach a separate SCADA workbook to each event through the
+existing temporary-file API. Analyze each event through the existing report-job
+and SSE pipeline with that event's explicit period and file ID. Each completed
+result remains attached to its event for reopening in the current report
+workspace; existing report editing, saving and exports continue there. Event
+selections/files/results are held for the page session; use the existing Save
+Event flow for persistent reports. Editing an interval invalidates its previous
+file/result. Changing dates starts a new interval session. Existing upload,
+historical report and PSP Report Checking APIs retain their behavior.
+
+Saved frequency instances are selectable without re-upload through the existing
+`GET /api/frequency/events` discovery. Curve-selected periods covered by an
+instance use its structured start/end metadata and stored event ID; only periods
+without a matching instance expose a file upload. Display names are labels,
+never a substitute for timestamps.
+
+**Saved event reporting:** `POST /api/frequency/events/report-analysis` returns
+compact per-event chronology and 15-minute entity performance.
+`frequency_event_reporting.py` reuses the existing `/message-timeline` service
+with an optional event ID, restricts messages and frequency/deviation lookup to
+that saved instance, and resolves State/ISGS/IPP using the existing entity
+mapping. State-sector generators retain their existing classification and are
+excluded from these three groups with a notice. Separate plant stages retain
+separate row identities. Raw series are not returned by the analysis endpoint.
+Results cache for five minutes by event ID and update timestamp.
+
+Deviation remains Actual minus Schedule. State OD is positive and generator UI
+negative. Block averages use signed deviations, allowing opposite deviations to
+offset; maximum OD is positive, maximum UI remains negative. Percentage uses
+`compute_frequency_statistics` and its frequency-qualified sample denominator.
+Periods clip to event bounds and missing values stay unavailable. Entity message
+counts deduplicate chronology messages within the same block. When CRMS cannot
+verify coverage, saved messages remain visible with a warning and counts are
+unavailable rather than zero.
+
+`SavedEventReports` provides chronology and State/ISGS/IPP tabs, individual Excel
+exports and section checkboxes for existing report sections, chronology,
+performance and groups. `POST /api/frequency/events/report-export` appends the
+selected tables to the existing Word/PDF generators and supplies escaped HTML
+supplements for the existing interactive HTML template. Existing upload,
+chronology and download defaults remain compatible. The existing report
+workspace remains available for editing and its chart-annexure exports.
+
+Multiple saved events may export consolidated **new sections only** to Word or
+Excel. Word identifies each event and uses compact landscape tables. Excel has
+Chronology, State Performance, ISGS Performance and IPP Performance sheets when
+all sections/groups are selected; every sheet includes the event/instance,
+structured bounds and data-quality notes. Text beginning with `=` stays text.
+
+Verification includes focused backend calculation/chronology/export tests,
+frontend stored-period and Curve interval tests, an isolated production build,
+read-only live Mongo/CRMS checks for two saved events, and rendered Word/PDF
+layout checks using representative long message text. QA outputs and build files
+stay under `.runtime`; production deployment is a separate step.
 
 ## WBES schedule fetch reference
 

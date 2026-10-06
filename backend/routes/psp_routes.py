@@ -2224,7 +2224,7 @@ def normalize_time_block(time_text, block_minutes: int):
     block_start = min(block_start, 23 * 3600 + 59 * 60)
     return f"{block_start // 3600:02d}:{(block_start % 3600) // 60:02d}"
 
-def read_curve_file_series(date_str: str, states: list[str], config: dict):
+def read_curve_file_series(date_str: str, states: list[str], config: dict, frequency_only: bool = False):
     curve_dir = str(config.get("curve_file_dir") or "").strip()
     if not curve_dir:
         return {}, {"available": False, "message": "Curve file directory is not configured."}
@@ -2239,7 +2239,9 @@ def read_curve_file_series(date_str: str, states: list[str], config: dict):
     payload = {
         "file_path": file_path,
         "file_name": file_name,
-        "sheet_name": config.get("curve_sheet_name") or "30SEC",
+        "sheet_name": "30SEC" if frequency_only else (config.get("curve_sheet_name") or "30SEC"),
+        "date_str": date_str,
+        "frequency_only": frequency_only,
         "time_col": config.get("curve_time_column") or "C",
         "state_cols": expand_excel_columns(config.get("curve_state_columns") or "V:AA"),
         "er_col": config.get("curve_er_column") or "AE",
@@ -2348,6 +2350,13 @@ try:
     if sheet_name not in wb.sheet_names:
         print(json.dumps({"series": {}, "meta": {"available": False, "message": f"Sheet not found: {sheet_name}"}}))
         raise SystemExit(0)
+    if payload.get("frequency_only"):
+        from services.curve_frequency_service import extract_curve_frequency_rows
+        rows = wb.get_sheet_by_name(sheet_name).to_python(skip_empty_area=False)
+        points, stats = extract_curve_frequency_rows([(row[2] if len(row) > 2 else None, row[3] if len(row) > 3 else None) for row in rows[7:2887]], payload["date_str"])
+        wb.close()
+        print(json.dumps({"series": {"frequency": points}, "meta": {"available": True, "reader": "python-calamine", "file": payload["file_name"], **stats}}))
+        raise SystemExit(0)
     rows = wb.get_sheet_by_name(sheet_name).to_python()
     header_by_col = mapped_headers_from_rows(rows)
     series = {key: [] for key in header_by_col.values()}
@@ -2379,6 +2388,12 @@ try:
         print(json.dumps({"series": {}, "meta": {"available": False, "message": f"Sheet not found: {sheet_name}"}}))
         raise SystemExit(0)
     ws = wb[sheet_name]
+    if payload.get("frequency_only"):
+        from services.curve_frequency_service import extract_curve_frequency_rows
+        points, stats = extract_curve_frequency_rows(ws.iter_rows(min_row=8, max_row=2887, min_col=3, max_col=4, values_only=True), payload["date_str"])
+        wb.close()
+        print(json.dumps({"series": {"frequency": points}, "meta": {"available": True, "reader": "openpyxl", "file": payload["file_name"], **stats}}))
+        raise SystemExit(0)
     header_by_col = {}
     for col in columns:
         mapped = state_mapping.get(col) or state_mapping.get(str(col).upper())
