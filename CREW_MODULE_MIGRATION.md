@@ -198,7 +198,11 @@ The Event Calendar card exposes Special Event roster only when `specialEventRost
 
 Tracking and History show a summary submission/review timeline for training, sports, exchange and replacement, and the configured approval timeline for leave: green completed ticks, a purple current stage and muted upcoming stages. Rejected, cancelled and withdrawn requests stop the timeline without inventing completed approvals. **Track leave** opens a larger styled detail dialog with approval comments and audit information.
 
-**Manage dates** opens the existing date-wise cancellation controls directly from each authorised multi-day leave card. Dates start unselected; select only the dates to cancel or choose the whole application. Approved leave uses these cancellation controls, rather than changing dates after approval.
+**Manage dates** (or **Approved leave dates**) opens the existing date-wise cancellation controls directly from authorised leave cards, including single-day approved records. Dates start unselected. Tracking and History provide an **Application status** filter and an **Approved leave** shortcut. Approved leave in Tracking offers only **Cancel selected dates**, with no whole-application shortcut, select-all checkbox or edit/withdraw controls. Cancellation submits the explicit selected dates, preserving all other dates. History retains approved-date management and its existing cancellation controls.
+
+Cancelled (including legacy Canceled), rejected and withdrawn records do not count as active duplicate applications. The applicant can reapply for the same dates after cancellation by any authorised actor; existing history is retained. Active/pending/approved requests still block duplicates, and roster publication, department/event leave blocks, date scope, group and C-OFF checks still apply. Backend regressions exercise inactive versus active statuses without deleting history.
+
+History exposes **Change dates** and **Apply revised dates** for the applicant, opening the existing Leave Apply page with employee/date context and a notice. Changing an approved period means cancelling dates no longer required and submitting revised dates for fresh approval; previous approval is not transferred to new dates. Cancelled/withdrawn/rejected applications offer **Reapply leave** from both views. Public preview navigation stays local.
 
 **Edit leave period** is available to the applicant only while every date remains Applied and no approver or replacement decision has acted. Review the revised range (up to 93 dates), choose working-day leave types, station leave and C-OFF credits, then save. `PUT /api/crew/leave/period/{leave_id}` resolves the application on the server and reuses application validation for published roster, date scope, department/event leave blocks, duplicate requests, group limits and credit expiry/reservations. Retained dates keep their record IDs; removed dates are retained as withdrawn history under a revision group; new dates receive pending records. Period changes retain an audit of the old and new dates. Existing C-OFF reservations may be reused by their owning application; removed credits are released.
 
@@ -567,3 +571,7 @@ contains the schedule components and may be used for category bifurcation via
 the schedule-type fields. The MIS Schedule Data page expands the 15-minute
 values to 5-minute or 1-minute display intervals by holding each published
 value until the next WBES interval.
+
+### Administrator leave deletion
+
+Administrators can delete leave of any status, including cancelled leave, from Tracking, History and Leave Approval through the shared `LeaveTracking` / `LeaveDelete` controls. The confirmation lists individual dates, all selected initially. `DELETE /leave/master/{leave_id}` enforces administrator or existing Leave Master Permanent Delete permission, clears operational effects and retains the deletion audit. Successful dates refresh across workspaces even if a later date fails.

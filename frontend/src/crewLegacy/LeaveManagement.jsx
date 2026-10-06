@@ -125,7 +125,7 @@ export default function LeaveManagement({ embeddedApproval = false, embeddedAppl
   const [leaves, setLeaves] = useState([]);
   const [loading, setLoading] = useState(true);
   const [working, setWorking] = useState(false);
-  const [notice, setNotice] = useState(null);
+  const [notice, setNotice] = useState(() => new URLSearchParams(window.location.search).get("reviseLeaveId") ? { severity: "info", text: "Select revised dates and submit a new application for approval. Cancel any existing approved dates you no longer need before reusing those dates." } : null);
   const dragFill = useRef(null);
   const [selectedWorkflowIds, setSelectedWorkflowIds] = useState(() => initialLeaveId ? [initialLeaveId] : []);
   const [replacementChoices, setReplacementChoices] = useState({});

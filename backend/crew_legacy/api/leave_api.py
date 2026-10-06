@@ -880,7 +880,7 @@ def can_authority_act(user: dict, leave: dict) -> bool:
 
 def can_delete_leave_master(user: dict) -> bool:
     actor = clean_id(user.get("employeeId"))
-    if actor == "50041":
+    if is_admin(user):
         return True
     access = page_access_collection.find_one({"userId": actor}) or {}
     return bool(((access.get("pages") or {}).get("leave_master_delete") or {}).get("write"))
@@ -1529,7 +1529,8 @@ def apply_leave(data: dict, user=Depends(get_authenticated_user)):
         # =========================
         duplicate = leave_request_collection.find_one({
             "employeeId": employee_id,
-            "date": date_str
+            "date": date_str,
+            "finalStatus": {"$nin": ["Rejected", "Withdrawn", "Cancelled", "Canceled"]},
         })
 
         if duplicate:
@@ -1964,7 +1965,7 @@ def prepare_leave_applications(data, user, excluded_ids=None, reusable_credits=N
         duplicate = leave_request_collection.find_one({
             "employeeId": employee_id,
             "date": date_str,
-            "finalStatus": {"$nin": ["Rejected", "Withdrawn"]},
+            "finalStatus": {"$nin": ["Rejected", "Withdrawn", "Cancelled", "Canceled"]},
             "_id": {"$nin": excluded_ids},
         })
         if duplicate:
@@ -3545,7 +3546,10 @@ def delete_leave_master_record(leave_id: str, user=Depends(get_authenticated_use
     if not leave:
         raise HTTPException(404, "Leave not found")
 
-    clear_leave_operational_effects(leave)
+    # Closed records have already released their duty effects. Repeating cleanup
+    # could erase a newer application or release a subsequently reused credit.
+    if leave.get("finalStatus") not in {"Cancelled", "Canceled", "Rejected", "Withdrawn"}:
+        clear_leave_operational_effects(leave)
     archive_doc = {
         **leave,
         "sourceLeaveId": str(leave["_id"]),

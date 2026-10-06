@@ -215,3 +215,75 @@ class LeavePeriodTests(TestCase):
         blocked.assert_called_once()
         with self.assertRaises(HTTPException):
             context["prepare_leave_applications"](payload, self.actor, [self.original["_id"]], {str(credit_id): "another-application"})
+
+    def test_cancelled_leave_can_be_reapplied_without_erasing_history(self):
+        stored = {**self.original, "finalStatus": "Cancelled", "cancelledBy": "administrator"}
+        requests = Mock()
+        requests.find_one.side_effect = lambda query: None if stored["finalStatus"] in query["finalStatus"]["$nin"] else stored
+        context = load_functions("crew_legacy/api/leave_api.py", {"clean_id", "prepare_leave_applications"}, {
+            "datetime": datetime, "timedelta": timedelta,
+            "employee_collection": Mock(find_one=Mock(return_value={"userId": "employee"})),
+            "leave_request_collection": requests, "ensure_leave_dates_open": Mock(),
+            "is_admin": lambda user: True, "can_apply_for": lambda *args: True,
+            "ensure_leave_roster_is_published": Mock(), "is_group_leave_rule_enabled": lambda: False,
+            "daily_record": lambda *args: {"groupName": "Group 1", "assignedDuty": "Morning"},
+            "shift_group_for_date": lambda *args: True, "map_duty_type": lambda value: value,
+        })
+        payload = {"employeeId": "employee", "reason": "Reapplication", "applications": [{"date": stored["date"], "leaveType": "CL"}]}
+        for status in ["Cancelled", "Canceled", "Rejected", "Withdrawn"]:
+            stored["finalStatus"] = status
+            self.assertEqual(len(context["prepare_leave_applications"](payload, self.actor)[3]), 1)
+        for status in ["Applied", "Forwarded", "Approved", "Editing"]:
+            stored["finalStatus"] = status
+            with self.assertRaises(HTTPException) as error:
+                context["prepare_leave_applications"](payload, self.actor)
+            self.assertEqual(error.exception.status_code, 400)
+        requests.insert_one.assert_not_called()
+        requests.update_one.assert_not_called()
+        requests.delete_one.assert_not_called()
+
+
+class AdministratorLeaveDeleteTests(TestCase):
+    def context(self, status="Cancelled"):
+        leave = {"_id": ObjectId(), "employeeId": "employee", "date": "2026-11-10", "finalStatus": status}
+        leaves = Mock(find_one=Mock(return_value=leave))
+        archive = Mock()
+        access = Mock(find_one=Mock(return_value=None))
+        clear = Mock()
+        ctx = load_functions("crew_legacy/api/leave_api.py", {"clean_id", "is_admin", "can_delete_leave_master", "delete_leave_master_record"}, {
+            "datetime": datetime, "leave_request_collection": leaves,
+            "deleted_leave_collection": archive, "page_access_collection": access,
+            "clear_leave_operational_effects": clear,
+        })
+        return ctx, leave, leaves, archive, access, clear
+
+    def test_admin_can_delete_every_status_with_audit_and_cleanup(self):
+        for status in ["Cancelled", "Applied", "Approved", "Rejected", "Withdrawn", "Forwarded by SIC"]:
+            with self.subTest(status=status):
+                ctx, leave, leaves, archive, access, clear = self.context(status)
+                ctx["delete_leave_master_record"](str(leave["_id"]), {"role": "admin", "employeeId": "another-admin"})
+                access.find_one.assert_not_called()
+                if status in {"Cancelled", "Rejected", "Withdrawn"}:
+                    clear.assert_not_called()
+                else:
+                    clear.assert_called_once_with(leave)
+                audit = archive.insert_one.call_args.args[0]
+                self.assertEqual(audit["finalStatus"], status)
+                self.assertEqual(audit["deletedBy"], "another-admin")
+                self.assertEqual(audit["sourceLeaveId"], str(leave["_id"]))
+                leaves.delete_one.assert_called_once_with({"_id": leave["_id"]})
+
+    def test_employee_denied_before_read_or_mutation(self):
+        ctx, leave, leaves, archive, access, clear = self.context()
+        with self.assertRaises(HTTPException) as error:
+            ctx["delete_leave_master_record"](str(leave["_id"]), {"role": "employee", "employeeId": "employee"})
+        self.assertEqual(error.exception.status_code, 403)
+        leaves.find_one.assert_not_called()
+        leaves.delete_one.assert_not_called()
+        archive.insert_one.assert_not_called()
+        clear.assert_not_called()
+
+    def test_existing_explicit_delete_permission_is_preserved(self):
+        ctx, _, _, _, access, _ = self.context()
+        access.find_one.return_value = {"pages": {"leave_master_delete": {"write": True}}}
+        self.assertTrue(ctx["can_delete_leave_master"]({"employeeId": "permitted"}))
