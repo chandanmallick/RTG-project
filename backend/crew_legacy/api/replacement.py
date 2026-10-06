@@ -2656,6 +2656,8 @@ def assigned_replacements(user=Depends(get_authenticated_user)):
             "leaveType": leave.get("leaveType"),
             "date": leave.get("date"),
             "assignedDuty": leave_daily.get("assignedDuty") or leave.get("assignedDuty"),
+            "isSIC": bool(leave.get("isSIC") or leave_daily.get("isSIC") or str(leave.get("employeeId") or "") in group_shift_in_charge_ids(leave.get("date"), leave.get("groupName"))),
+            "actingSIC": leave.get("actingSIC"),
             "organization": group_organization_context(leave.get("groupName")),
             "replacement": {
                 "employeeId": replacement.get("employeeId"),
@@ -3727,6 +3729,9 @@ def assign_sic(
     if not sic_emp:
         raise HTTPException(404, "Employee not found")
 
+    if not any(str(candidate.get("employeeId")) == str(sic_id) for candidate in get_sic_candidates(leave_id, user)):
+        raise HTTPException(409, "Acting SIC must be SIC-eligible and working the same shift and group on this date")
+
     # =============================
     # 1ï¸âƒ£ REMOVE OLD SIC
     # =============================
@@ -3873,8 +3878,22 @@ def get_sic_candidates(leave_id: str, user=Depends(get_current_user)):
     }))
 
     result = []
+    past_roles = historical_shift_roles()
+    current_roles = active_shift_memberships()
+    leave_daily = employee_daily_collection.find_one({"employeeId": leave.get("employeeId"), "date": leave_date}) or {}
+    shift = normalized_duty(leave.get("assignedDuty") or leave_daily.get("assignedDuty"))
 
     for s in shift_people:
+        candidate_id = str(s.get("employeeId") or "")
+        duty = normalized_duty(s.get("assignedDuty"))
+        if duty not in SHIFT_DUTIES or (shift in SHIFT_DUTIES and duty != shift):
+            continue
+        master = employee_collection.find_one({"$or": [{"userId": candidate_id}, {"employeeId": candidate_id}]}) or {}
+        eligible = bool(master.get("isIC") or category_matches(normalized_categories(master.get("category")), "sic")
+                        or "sic" in past_roles.get(candidate_id, set())
+                        or "sic" in current_roles.get(candidate_id, {}).get("roles", set()))
+        if not eligible:
+            continue
         result.append({
             "employeeId": s.get("employeeId"),
             "name": s.get("name"),

@@ -351,7 +351,7 @@ export default function ReplacementManagement({ initialWorkflow } = {}) {
       const res = await api.get(`/replacement/sic-candidates/${leave.id}`);
       setSicCandidates(res.data || []);
 
-      setSelectedSIC("");
+      setSelectedSIC((res.data || []).some(candidate => candidate.employeeId === leave.actingSIC?.employeeId) ? leave.actingSIC.employeeId : "");
       setSicDialogOpen(true);
 
     } catch (err) {
@@ -861,6 +861,7 @@ export default function ReplacementManagement({ initialWorkflow } = {}) {
                       <TableCell align="right" sx={{ whiteSpace: "nowrap" }}>
                         {isCurrentReplacement ? (
                           <Box sx={{ display: "flex", justifyContent: "flex-end", gap: .75 }}>
+                            {current.isSIC && <Button size="small" color="warning" variant="contained" onClick={() => openSICDialog(current, "Assigned replacement board")}>{current.actingSIC?.employeeId ? "Change acting SIC" : "Assign acting SIC"}</Button>}
                             {current.canChange !== false && (
                               <Button size="small" variant="outlined" onClick={() => openCandidateDialog(current)}>
                                 Change assignment
@@ -1208,9 +1209,10 @@ export default function ReplacementManagement({ initialWorkflow } = {}) {
         <DialogContent sx={{ mt: 2 }}>
 
           <Typography sx={{ mb: 1 }}>
-            Replacement Assigned: {selectedCandidate?.name || "-"}
+            Replacement Assigned: {selectedLeave?.replacement?.name || selectedCandidate?.name || "Not assigned"}
           </Typography>
 
+          <Alert severity="info" sx={{ mb: 2 }}>SIC responsibility can be assigned separately from replacement duty. Choose an eligible employee working the same shift and group on {selectedLeave?.date ? dayjs(selectedLeave.date).format("DD MMM YYYY") : "the leave date"}.</Alert>
           <TextField
             select
             fullWidth
@@ -1222,7 +1224,7 @@ export default function ReplacementManagement({ initialWorkflow } = {}) {
           >
 
             {sicCandidates.length === 0 && (
-              <MenuItem disabled>No shift staff available</MenuItem>
+              <MenuItem disabled>No SIC-eligible staff available on this shift</MenuItem>
             )}
 
             {sicCandidates.map(s => (

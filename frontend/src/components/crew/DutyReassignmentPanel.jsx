@@ -164,6 +164,14 @@ export default function DutyReassignmentPanel({
     [employees],
   );
   const leavesForSourceDate = leaves.filter((item) => item.date === date);
+  const leavesForDestinationDate = leaves.filter((item) => item.date === destinationDate);
+
+  useEffect(() => {
+    if (mode === "cross_date" && leaveId && !leaves.some(item => item.id === leaveId && item.date === destinationDate)) {
+      setLeaveId("");
+      setVacancyReplacementId("");
+    }
+  }, [mode, leaveId, leaves, destinationDate]);
   const exchangeEmployees = useMemo(
     () => employees.filter((item) => item.employeeId !== firstId && !item.onLeave),
     [employees, firstId],
@@ -255,6 +263,7 @@ export default function DutyReassignmentPanel({
         }
       } else {
         if (!canManage || !firstId || !destinationDate) throw new Error("Select an employee and destination date.");
+        if (leaveId && selectedLeave?.date !== destinationDate) throw new Error("Select a leave vacancy on the destination duty date.");
         if (!destinationAssignment) throw new Error("The employee has no roster duty on the destination date.");
         const result = await api.put("/replacement/duty-switch/cross-date", {
           employeeId: firstId,
@@ -488,7 +497,7 @@ export default function DutyReassignmentPanel({
             <Grid item xs={12}>
               <Field
                 label="Link to a leave vacancy (optional)"
-                helper="If selected, this employee will also be recorded as the replacement for that person’s leave."
+                helper={`Only leave vacancies on ${destinationDate ? dayjs(destinationDate).format("DD MMM YYYY") : "the selected destination date"} are shown. Linking records this employee as the leave replacement.`}
               >
                 <FormControl fullWidth size="small">
                   <Select
@@ -496,17 +505,16 @@ export default function DutyReassignmentPanel({
                     displayEmpty
                     onChange={(event) => {
                       const nextLeaveId = event.target.value;
-                      const leave = leaves.find((item) => item.id === nextLeaveId);
+                      const leave = leavesForDestinationDate.find((item) => item.id === nextLeaveId);
                       setLeaveId(nextLeaveId);
                       setVacancyReplacementId("");
                       if (leave?.date) {
-                        setDestinationDate(leave.date);
                         setDestinationDuty(leave.assignedDuty || destinationDuty);
                       }
                     }}
                   >
                     <MenuItem value="">Do not link this move to a leave</MenuItem>
-                    {leaves.map((leave) => (
+                    {leavesForDestinationDate.map((leave) => (
                       <MenuItem key={leave.id} value={leave.id}>
                         {dayjs(leave.date).format("DD MMM YYYY")} · {leave.name} ({leave.employeeId}) · {leave.assignedDuty || "Duty"} · {leave.groupName || "No group"}
                       </MenuItem>

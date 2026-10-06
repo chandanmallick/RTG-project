@@ -244,3 +244,33 @@ class ReplacementValidationTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ActingSICCandidateTests(unittest.TestCase):
+    def test_only_eligible_same_shift_staff_are_offered(self):
+        leave_id = ObjectId()
+        leave = {"_id": leave_id, "employeeId": "absent-sic", "date": "2026-10-10", "groupName": "A", "assignedDuty": "Morning"}
+        people = [
+            {"employeeId": "engineer", "assignedDuty": "Morning"},
+            {"employeeId": "qualified", "assignedDuty": "Morning"},
+            {"employeeId": "other-shift", "assignedDuty": "Night"},
+            {"employeeId": "off", "assignedDuty": "Off"},
+            {"employeeId": "experienced", "assignedDuty": "Morning"},
+        ]
+        master = Mock()
+        master.find_one.side_effect = lambda query: {"isIC": query["$or"][0]["userId"] in {"qualified", "other-shift", "off"}}
+        daily = Mock(find=Mock(return_value=people), find_one=Mock(return_value={"assignedDuty": "Morning"}))
+        ctx = load_functions("crew_legacy/api/replacement.py", {"get_sic_candidates"}, {
+            "get_current_user": lambda: None, "check_replacement_access": Mock(), "require_replacement_authority": Mock(),
+            "leave_request_collection": Mock(find_one=Mock(return_value=leave)), "employee_daily_collection": daily,
+            "employee_collection": master, "ACTIVE_LEAVE_STATUSES": ["Applied", "Approved"],
+            "historical_shift_roles": lambda: {"experienced": {"sic"}}, "active_shift_memberships": lambda: {},
+            "normalized_duty": lambda value: str(value or "").upper(), "SHIFT_DUTIES": {"MORNING", "EVENING", "NIGHT"},
+            "normalized_categories": lambda value: value, "category_matches": lambda *args: False,
+        })
+        candidates = ctx["get_sic_candidates"](str(leave_id), {"role": "admin"})
+        self.assertEqual([item["employeeId"] for item in candidates], ["qualified", "experienced"])
+        query = daily.find.call_args.args[0]
+        self.assertEqual(query["groupName"], "A")
+        self.assertEqual(query["date"], "2026-10-10")
+        self.assertEqual(query["leaveStatus"]["$nin"], ["Applied", "Approved"])

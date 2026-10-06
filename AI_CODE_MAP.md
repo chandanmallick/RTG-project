@@ -110,3 +110,7 @@ feature. Preserve the concise format so this remains cheap to include in AI cont
 ### Administrator leave deletion
 
 Administrators can delete leave of any status, including cancelled leave, from Tracking, History and Leave Approval through the shared `LeaveTracking` / `LeaveDelete` controls. The confirmation lists individual dates, all selected initially. `DELETE /leave/master/{leave_id}` enforces administrator or existing Leave Master Permanent Delete permission, clears operational effects and retains the deletion audit. Successful dates refresh across workspaces even if a later date fails.
+
+Move/Reallocate leave-vacancy linking in `DutyReassignmentPanel.jsx` is restricted to the selected destination duty date. Choosing a vacancy preserves that date; changing the date clears the previous link. Submission rejects stale mismatched links.
+
+Acting SIC can be assigned separately from replacement coverage on the Replacement assigned-duty board, using the existing calendar-compatible SIC dialog and `/replacement/assign-sic/{leave_id}` endpoint. Assigned records include original-SIC and acting-SIC metadata. The candidate endpoint and save validation require SIC eligibility (category/isIC or current/historical SIC roster role), the same group/date and working shift, and no active leave.
