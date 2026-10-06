@@ -1208,11 +1208,7 @@ export default function ReplacementManagement({ initialWorkflow } = {}) {
 
         <DialogContent sx={{ mt: 2 }}>
 
-          <Typography sx={{ mb: 1 }}>
-            Replacement Assigned: {selectedLeave?.replacement?.name || selectedCandidate?.name || "Not assigned"}
-          </Typography>
-
-          <Alert severity="info" sx={{ mb: 2 }}>SIC responsibility can be assigned separately from replacement duty. Choose an eligible employee working the same shift and group on {selectedLeave?.date ? dayjs(selectedLeave.date).format("DD MMM YYYY") : "the leave date"}.</Alert>
+          <Alert severity="info" sx={{ mb: 2 }}>Choose a colleague working the same shift and group on {selectedLeave?.date ? dayjs(selectedLeave.date).format("DD MMM YYYY") : "the leave date"}. You can assign acting SIC with or without replacement duty; the replacement employee can be a different person.</Alert>
           <TextField
             select
             fullWidth
@@ -1224,12 +1220,12 @@ export default function ReplacementManagement({ initialWorkflow } = {}) {
           >
 
             {sicCandidates.length === 0 && (
-              <MenuItem disabled>No SIC-eligible staff available on this shift</MenuItem>
+              <MenuItem disabled>No available staff rostered on this shift</MenuItem>
             )}
 
             {sicCandidates.map(s => (
               <MenuItem key={s.employeeId} value={s.employeeId}>
-                {s.name} ({s.designation})
+                {s.name || s.employeeId} ({s.employeeId}) {s.designation ? ` ? ${s.designation}` : ""}
               </MenuItem>
             ))}
 

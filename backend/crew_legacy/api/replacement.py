@@ -3730,7 +3730,7 @@ def assign_sic(
         raise HTTPException(404, "Employee not found")
 
     if not any(str(candidate.get("employeeId")) == str(sic_id) for candidate in get_sic_candidates(leave_id, user)):
-        raise HTTPException(409, "Acting SIC must be SIC-eligible and working the same shift and group on this date")
+        raise HTTPException(409, "Acting SIC must be working the same shift and group on this date and not on leave")
 
     # =============================
     # 1ï¸âƒ£ REMOVE OLD SIC
@@ -3878,21 +3878,23 @@ def get_sic_candidates(leave_id: str, user=Depends(get_current_user)):
     }))
 
     result = []
-    past_roles = historical_shift_roles()
-    current_roles = active_shift_memberships()
     leave_daily = employee_daily_collection.find_one({"employeeId": leave.get("employeeId"), "date": leave_date}) or {}
-    shift = normalized_duty(leave.get("assignedDuty") or leave_daily.get("assignedDuty"))
+    # Acting SIC is a designation by the authority, independent of replacement
+    # eligibility or a previously configured SIC role. Compare shift families.
+    def shift_family(value):
+        value = normalized_duty(value)
+        if value in {"M", "M1", "M2", "MORNING"}:
+            return "M"
+        if value in {"E", "E1", "E2", "EVENING"}:
+            return "E"
+        if value in {"N", "N1", "N2", "NIGHT"}:
+            return "N"
+        return ""
 
+    shift = shift_family(leave.get("assignedDuty") or leave_daily.get("assignedDuty"))
     for s in shift_people:
-        candidate_id = str(s.get("employeeId") or "")
-        duty = normalized_duty(s.get("assignedDuty"))
-        if duty not in SHIFT_DUTIES or (shift in SHIFT_DUTIES and duty != shift):
-            continue
-        master = employee_collection.find_one({"$or": [{"userId": candidate_id}, {"employeeId": candidate_id}]}) or {}
-        eligible = bool(master.get("isIC") or category_matches(normalized_categories(master.get("category")), "sic")
-                        or "sic" in past_roles.get(candidate_id, set())
-                        or "sic" in current_roles.get(candidate_id, {}).get("roles", set()))
-        if not eligible:
+        duty = shift_family(s.get("assignedDuty"))
+        if not duty or (shift and duty != shift):
             continue
         result.append({
             "employeeId": s.get("employeeId"),

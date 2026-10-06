@@ -247,11 +247,11 @@ if __name__ == "__main__":
 
 
 class ActingSICCandidateTests(unittest.TestCase):
-    def test_only_eligible_same_shift_staff_are_offered(self):
+    def test_same_shift_staff_can_be_designated_without_replacement_or_existing_sic_role(self):
         leave_id = ObjectId()
         leave = {"_id": leave_id, "employeeId": "absent-sic", "date": "2026-10-10", "groupName": "A", "assignedDuty": "Morning"}
         people = [
-            {"employeeId": "engineer", "assignedDuty": "Morning"},
+            {"employeeId": "engineer", "assignedDuty": "M1"},
             {"employeeId": "qualified", "assignedDuty": "Morning"},
             {"employeeId": "other-shift", "assignedDuty": "Night"},
             {"employeeId": "off", "assignedDuty": "Off"},
@@ -269,7 +269,7 @@ class ActingSICCandidateTests(unittest.TestCase):
             "normalized_categories": lambda value: value, "category_matches": lambda *args: False,
         })
         candidates = ctx["get_sic_candidates"](str(leave_id), {"role": "admin"})
-        self.assertEqual([item["employeeId"] for item in candidates], ["qualified", "experienced"])
+        self.assertEqual([item["employeeId"] for item in candidates], ["engineer", "qualified", "experienced"])
         query = daily.find.call_args.args[0]
         self.assertEqual(query["groupName"], "A")
         self.assertEqual(query["date"], "2026-10-10")
