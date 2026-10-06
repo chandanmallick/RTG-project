@@ -12,6 +12,15 @@ from services.curve_frequency_service import extract_curve_frequency_rows, load_
 
 
 class CurveFrequencyTests(unittest.TestCase):
+    def test_frequency_below_45_is_a_gap_and_45_is_valid(self):
+        rows = self.samples()
+        rows[0] = (rows[0][0],44.999)
+        rows[1] = (rows[1][0],45)
+        points,stats = extract_curve_frequency_rows(rows,'2026-10-05')
+        self.assertIsNone(points[0]['frequency'])
+        self.assertEqual(points[1]['frequency'],45)
+        self.assertEqual(stats['missing_readings'],1)
+
     def samples(self):
         day = datetime(2026, 10, 5)
         return [(day + timedelta(seconds=index * 30), 50.0) for index in range(2880)]

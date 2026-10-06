@@ -1068,6 +1068,10 @@ const API = {
     })
   ).data,
 
+  checkFrequencyPeriods: async (periods, signal) => (
+    await axios.post(`${BASE_URL}/frequency/analysis/check-periods`, { periods }, { signal })
+  ).data,
+
   exportMapping: async () => {
     const res = await axios.get(`${BASE_URL}/frequency/export-mapping`, {
       responseType: "blob"
@@ -1091,6 +1095,18 @@ const API = {
     const res = await axios.get(`${BASE_URL}/frequency/events`);
     return res.data;
   },
+
+  uploadFrequencyAnalysis: async (file) => {
+    const form = new FormData(); form.append("file", file);
+    return (await axios.post(`${BASE_URL}/frequency/analysis/upload`, form)).data;
+  },
+  createFrequencyAnalysisSession: async (fileId) => (await axios.post(`${BASE_URL}/frequency/analysis/from-temp`, { file_id: fileId })).data,
+  runFrequencyAnalysis: async (payload) => (await axios.post(`${BASE_URL}/frequency/analysis/run`, payload)).data,
+  consolidateFrequencyAnalysis: async (sources) => (await axios.post(`${BASE_URL}/frequency/analysis/consolidate`, { sources })).data,
+  getFrequencyAnalysisTable: async (payload) => (await axios.post(`${BASE_URL}/frequency/analysis/table`, payload)).data,
+  getFrequencyAnalysisChart: async (payload) => (await axios.post(`${BASE_URL}/frequency/analysis/chart`, payload)).data,
+  exportFrequencyAnalysis: async (payload) => (await axios.post(`${BASE_URL}/frequency/analysis/export`, payload, { responseType: payload.format === "html" ? "json" : "blob" })).data,
+  releaseFrequencyAnalysis: async (token) => (await axios.delete(`${BASE_URL}/frequency/analysis/session/${encodeURIComponent(token)}`)).data,
 
   getSavedFrequencyAnalysis: async (eventIds, refresh = false) => (
     await axios.post(`${BASE_URL}/frequency/events/report-analysis`, { event_ids: eventIds, refresh })

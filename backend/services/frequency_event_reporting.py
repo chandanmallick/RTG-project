@@ -36,6 +36,81 @@ def number(value):
         return None
 
 
+def checked_event_period(event):
+    """Structured bounds first; narrowly support old frequency instance names."""
+    import re
+    try:
+        start, end = event_period(event)
+        return start, end, "structured"
+    except ValueError:
+        if event.get("start_time") or event.get("end_time"):
+            raise
+    match = re.fullmatch(r"(?:Low|High) Freq (\d{2}-[A-Za-z]{3}-\d{2}) \((\d{2}:\d{2})-(\d{2}:\d{2})\)", event.get("name") or "")
+    if not match:
+        raise ValueError("Saved event has no usable period metadata.")
+    day, first, last = match.groups()
+    start = datetime.strptime(f"{day} {first}", "%d-%b-%y %H:%M")
+    end = datetime.strptime(f"{day} {last}", "%d-%b-%y %H:%M")
+    if end < start:
+        end += timedelta(days=1)
+    return start, end, "legacy_name"
+
+
+def check_frequency_periods(db, periods):
+    """One metadata-only DB read for all selections; never fetch saved series."""
+    from routes.frequency_routes import EVENT_COLLECTION
+    if not 1 <= len(periods) <= 1000:
+        raise ValueError("Select between 1 and 1000 periods per check.")
+    requested = []
+    for period in periods:
+        start, end = event_period(period)
+        if end <= start:
+            raise ValueError("Period end must be after its start.")
+        requested.append((period, start, end))
+    documents = db.db[EVENT_COLLECTION].find(
+        {"event_id": {"$exists": True}, "data_points": {"$elemMatch": {"series.timestamps.0": {"$exists": True}}}},
+        {"_id": 0, "event_id": 1, "name": 1, "start_time": 1, "end_time": 1, "dates": 1},
+    )
+    available = []
+    for event in documents:
+        try:
+            start, end, source = checked_event_period(event)
+        except ValueError:
+            continue
+        if end > start:
+            available.append((event, start, end, source))
+    output = []
+    for period, start, end in requested:
+        matches = []
+        for event, first, last, source in available:
+            left, right = max(start, first), min(end, last)
+            if left < right:
+                matches.append({"event_id": event["event_id"], "name": event.get("name"), "start_time": first.isoformat(), "end_time": last.isoformat(),
+                    "coverage_start": left.isoformat(), "coverage_end": right.isoformat(), "metadata_source": source})
+        matches.sort(key=lambda item: (datetime.fromisoformat(item["end_time"]) - datetime.fromisoformat(item["start_time"])).total_seconds())
+        coverage = []
+        for left, right in sorted((datetime.fromisoformat(item["coverage_start"]), datetime.fromisoformat(item["coverage_end"])) for item in matches):
+            if coverage and left <= coverage[-1][1]:
+                coverage[-1] = (coverage[-1][0], max(coverage[-1][1], right))
+            else:
+                coverage.append((left, right))
+        missing, cursor = [], start
+        for left, right in coverage:
+            if cursor < left:
+                missing.append((cursor, left))
+            cursor = right
+        if cursor < end:
+            missing.append((cursor, end))
+        covering = next((item for item in matches if datetime.fromisoformat(item["start_time"]) <= start and datetime.fromisoformat(item["end_time"]) >= end), None)
+        encode = lambda ranges: [{"start_time": a.isoformat(), "end_time": b.isoformat()} for a, b in ranges]
+        output.append({"id": period.get("id"), "start_time": start.isoformat(), "end_time": end.isoformat(),
+            "status": "existing" if not missing else "partial" if coverage else "new", "matches": matches,
+            "event_id": covering["event_id"] if covering else None, "event_name": covering["name"] if covering else None,
+            "coverage": encode(coverage), "missing": encode(missing), "coverage_seconds": sum((b-a).total_seconds() for a,b in coverage),
+            "completion_supported": False})
+    return {"success": True, "periods": output}
+
+
 def point_group(point, mapping):
     kind = str(point.get("type") or "").upper()
     if kind == "STATE" or point.get("is_state") or mapping.get("is_state"):
@@ -72,10 +147,10 @@ def event_entities(db, event):
     return entities
 
 
-def timeline_aliases(db, event):
+def timeline_aliases(db, event, entities=None):
     from routes.frequency_routes import _timeline_state_mappings, crms_text_list, normalize_crms_lookup
     aliases = defaultdict(list)
-    entities = event_entities(db, event)
+    entities = entities if entities is not None else event_entities(db, event)
     state_aliases = _timeline_state_mappings(db)
     for entity in entities:
         point, mapping = entity["point"], entity["mapping"]
@@ -180,7 +255,14 @@ async def saved_event_analysis(db, event_id, refresh=False):
     timeline = await build_frequency_message_timeline(FrequencyMessageTimelinePayload(ranges=[FrequencyMessageRange(start_time=start.isoformat(), end_time=end.isoformat())], event_id=event_id))
     entities = event_entities(db, event)
     performance, lowest = build_performance(event, entities, timeline["rows"], timeline.get("messages_complete", True))
+    from services.frequency_threshold_analysis import dataset_from_event, calculate
+    try:
+        threshold_analysis=calculate(dataset_from_event(db,event),[(start.isoformat(),end.isoformat())],timeline["rows"],timeline.get("messages_complete",True))
+    except ValueError as exc:
+        threshold_analysis=None
+        timeline.setdefault("warnings",[]).append(f"Threshold analysis unavailable: {exc}")
     result = {
+        "threshold_analysis": threshold_analysis,
         "event_id": event_id, "event_name": event.get("name") or event_id,
         "start_time": start.isoformat(timespec="seconds"), "end_time": end.isoformat(timespec="seconds"), "event_type": event.get("event_type") or "low",
         "lowest_frequency": lowest, "chronology": timeline["rows"], "performance": performance,
@@ -200,15 +282,60 @@ CHRONOLOGY_COLUMNS = [("timestamp", "Time (IST)"), ("frequency_hz", "Frequency (
 PERFORMANCE_COLUMNS = [("entity", "Entity"), ("period", "Period (IST)"), ("average_od_ui_mw", "15-Min Average OD/UI (MW)"), ("od_ui_time_pct", "% Time OD/UI"), ("maximum_od_ui_mw", "Maximum OD/UI (MW)"), ("lowest_frequency", "Lowest Frequency (Hz)"), ("message_count", "No. of Messages")]
 
 
+def threshold_columns(wide=False):
+    if not wide:
+        return [("entity", "Entity"), ("period", "Period (IST)"), ("threshold", "Frequency Below (Hz)"),
+                ("frequency_minutes", "Freq Minutes"), ("adverse_minutes", "OD/UI Minutes"), ("adverse_pct", "OD/UI %"),
+                ("average_od_ui_mw", "15-Min Avg OD/UI (MW)"), ("maximum_od_ui_mw", "Max OD/UI (MW)"),
+                ("lowest_frequency", "Lowest Hz"), ("message_count", "Threshold Messages")]
+    columns=[("entity", "Entity"), ("period", "Period (IST)")]
+    for level in ("49.90", "49.70", "49.50"):
+        columns.extend((f"{level}_{key}", f"<{level} {label}") for key,label in [("frequency_minutes","Freq Minutes"),("adverse_minutes","OD/UI Minutes"),("adverse_pct","OD/UI %"),("average_od_ui_mw","Avg OD/UI (MW)"),("maximum_od_ui_mw","Max OD/UI (MW)")])
+    return columns+[("lowest_frequency","Lowest Hz"),("message_count","Messages")]
+
+
+def threshold_rows(rows,wide=False):
+    output=[]
+    for row in rows:
+        base={"entity":row["entity"],"period":row["period_start"].replace("T"," ")+" - "+row["period_end"].replace("T"," "),"lowest_frequency":row.get("lowest_frequency"),"message_count":row.get("message_count")}
+        if wide:
+            output.append({**base,**{f"{level}_{key}":value for level,values in row["thresholds"].items() for key,value in values.items()}})
+        else:
+            output.extend({**base,"threshold":level,**values} for level,values in row["thresholds"].items())
+    return output
+
+
+SUMMARY_COLUMNS=[("threshold","Frequency Below (Hz)"),("frequency_minutes","Frequency Minutes"),("occurrences","Occurrences"),("longest_minutes","Longest Occurrence (min)"),("lowest_frequency","Lowest Hz")]
+
+
+def summary_rows(event):
+    analysis=event.get("threshold_analysis") or {}
+    return [{"threshold":level,**values} for level,values in analysis.get("summary",{}).get("thresholds",{}).items()]
+
+
+def table_weights(columns,title):
+    if len(columns)==7:
+        return [1.25,.7,1.6,.8,1.4,1.2,3.75] if title=="Chronology of Messages" else [1.8,2.6,1.4,1,1.3,1.3,1.3]
+    return [2 if key=="entity" else 2.5 if key=="period" else 1 for key,_ in columns]
+
+
 def report_tables(event, payload):
-    tables = []
-    if payload.get("include_chronology", False):
-        tables.append(("Chronology of Messages", CHRONOLOGY_COLUMNS, event.get("chronology") or []))
-    if payload.get("include_entity_performance", False):
-        for group in payload.get("performance_groups", GROUPS):
-            if group in GROUPS:
-                rows = [{**row, "period": row["period_start"].replace("T", " ") + " - " + row["period_end"].replace("T", " ")} for row in event.get("performance", {}).get(group, [])]
-                tables.append((f"{group} Performance", PERFORMANCE_COLUMNS, rows))
+    tables=[]
+    analysis=event.get("threshold_analysis") if payload.get("include_threshold_performance",False) else None
+    if payload.get("include_analysis_summary") and analysis:
+        tables.append(("Overall Frequency Statistics",SUMMARY_COLUMNS,summary_rows(event)))
+    if payload.get("include_chronology",False):
+        tables.append(("Chronology of Messages",CHRONOLOGY_COLUMNS,event.get("chronology") or []))
+    if payload.get("include_entity_performance",False):
+        for group in payload.get("performance_groups",GROUPS):
+            if group not in GROUPS:continue
+            if analysis:
+                if payload.get("include_analysis_summary"):
+                    tables.append((f"{group} Overall Performance",threshold_columns(),threshold_rows(analysis["overall_performance"].get(group,[]))))
+                tables.append((f"{group} Performance",threshold_columns(),threshold_rows(analysis["performance"].get(group,[]))))
+            else:
+                rows=[{**row,"period":row["period_start"].replace("T"," ")+" - "+row["period_end"].replace("T"," ")} for row in event.get("performance",{}).get(group,[])]
+                tables.append((f"{group} Performance",PERFORMANCE_COLUMNS,rows))
     return tables
 
 
@@ -238,6 +365,11 @@ def append_docx_supplements(doc, payload):
             doc.add_page_break()
         doc.add_heading(event["event_name"], level=1)
         doc.add_paragraph(f"Event Date: {event['start_time'][:10]} | Start Time: {event['start_time'].replace('T', ' ')} | End Time: {event['end_time'].replace('T', ' ')} | Lowest Frequency: {cell_text(event.get('lowest_frequency'))} Hz")
+        if payload.get("include_analysis_summary") and event.get("threshold_analysis"):
+            stats=event["threshold_analysis"]["summary"]
+            doc.add_paragraph(f"Selected: {stats['selected_minutes']} min | Covered frequency: {stats['covered_frequency_minutes']} min | Average frequency: {cell_text(stats['average_frequency'])} Hz | Minimum at: {stats['minimum_timestamp']} | Low-frequency occurrences: {stats['low_frequency_events']} | Sampling interval(s): {stats.get('sampling_intervals_seconds', [stats['sampling_seconds']])} sec")
+        if event.get("selection_note"):
+            doc.add_paragraph(event["selection_note"])
         for warning in event.get("warnings", []):
             doc.add_paragraph(warning)
         if payload.get("include_entity_performance"):
@@ -250,7 +382,7 @@ def append_docx_supplements(doc, payload):
             table = doc.add_table(rows=1, cols=len(columns))
             table.style = "Light Shading Accent 1"
             table.autofit = False
-            widths = [1.25, .7, 1.6, .8, 1.4, 1.2, 3.75] if title == "Chronology of Messages" else [1.8, 2.6, 1.4, 1, 1.3, 1.3, 1.3]
+            widths = table_weights(columns, title)
             # Fit to the same usable landscape frame as the existing annexures.
             scale = 10.79 / sum(widths)
             for column, width in zip(table.columns, widths):
@@ -264,6 +396,7 @@ def append_docx_supplements(doc, payload):
                 for cell, (key, _) in zip(cells, columns):
                     cell.text = cell_text(row.get(key))
             for row in table.rows:
+                row._tr.get_or_add_trPr().append(OxmlElement("w:cantSplit"))
                 for cell, width in zip(row.cells, widths):
                     cell.width = docx.shared.Inches(width * scale)
                     for paragraph in cell.paragraphs:
@@ -293,7 +426,7 @@ def append_pdf_supplements(story, payload, styles, table_style, pdf_cell, header
                 continue
             values = [[pdf_cell(label, header_style) for _, label in columns]]
             values += [[pdf_cell(cell_text(row.get(key))) for key, _ in columns] for row in rows]
-            weights = [1.25, .7, 1.6, .8, 1.4, 1.2, 3.75] if title == "Chronology of Messages" else [1.8, 2.6, 1.4, 1, 1.3, 1.3, 1.3]
+            weights = table_weights(columns, title)
             table = Table(values, colWidths=[weight / sum(weights) * 790 for weight in weights], repeatRows=1, splitInRow=1)
             table.setStyle(table_style)
             story.append(table)
@@ -306,6 +439,11 @@ def supplements_html(events, payload):
     output = ['<section class="frequency-supplements" style="padding:24px;font-family:Arial,sans-serif;color:#102a43"><style>.frequency-supplements table{border-collapse:collapse;width:100%;font-size:12px;margin-bottom:24px}.frequency-supplements th,.frequency-supplements td{border:1px solid #CBD5E1;padding:7px;text-align:left;vertical-align:top;overflow-wrap:anywhere}.frequency-supplements th{background:#EAF2FF}.frequency-supplements h2{color:#03624C}.frequency-supplements .table-scroll{overflow-x:auto}</style>']
     for event in events:
         output.append(f"<h2>{escape(event['event_name'])}</h2><p>{escape(event['start_time'])} to {escape(event['end_time'])} IST | Lowest Frequency: {escape(cell_text(event.get('lowest_frequency')))} Hz</p>")
+        if payload.get("include_analysis_summary") and event.get("threshold_analysis"):
+            stats=event["threshold_analysis"]["summary"]
+            output.append("<p>"+escape(f"Selected: {stats['selected_minutes']} min | Covered frequency: {stats['covered_frequency_minutes']} min | Average frequency: {cell_text(stats['average_frequency'])} Hz | Minimum at: {stats['minimum_timestamp']} | Low-frequency occurrences: {stats['low_frequency_events']} | Sampling interval(s): {stats.get('sampling_intervals_seconds', [stats['sampling_seconds']])} sec")+"</p>")
+        if event.get("selection_note"):
+            output.append("<p>"+escape(event["selection_note"])+"</p>")
         output.extend(f"<p>{escape(warning)}</p>" for warning in event.get("warnings", []))
         if payload.get("include_entity_performance"):
             output.append(f"<p>{escape(event['calculation_note'])}</p>")
@@ -327,28 +465,50 @@ def supplements_excel(events, payload):
     workbook = Workbook()
     workbook.remove(workbook.active)
     specs = []
+    threshold_mode=payload.get("include_threshold_performance",False) and any(event.get("threshold_analysis") for event in events)
+    if payload.get("include_analysis_summary") and threshold_mode:
+        specs.append(("Analysis Summary",[("metric","Metric"),("value","Value")],"metadata"))
+        specs.append(("Overall Statistics",SUMMARY_COLUMNS,"summary"))
+        if payload.get("include_entity_performance"):
+            specs.extend((f"{group} Overall",threshold_columns(True),f"overall:{group}") for group in payload.get("performance_groups",GROUPS))
     if payload.get("include_chronology"):
         specs.append(("Chronology", CHRONOLOGY_COLUMNS, "chronology"))
     if payload.get("include_entity_performance"):
-        specs.extend((f"{group} Performance", PERFORMANCE_COLUMNS, group) for group in payload.get("performance_groups", GROUPS))
+        specs.extend((f"{group} Performance", threshold_columns(True) if threshold_mode else PERFORMANCE_COLUMNS, group) for group in payload.get("performance_groups", GROUPS))
     for name, columns, group in specs:
         sheet = workbook.create_sheet(name)
         headers = ["Event / Instance", "Event Start (IST)", "Event End (IST)"] + [label for _, label in columns] + ["Data Quality Notes"]
+        grouped=threshold_mode and group not in {"summary","metadata","chronology"}
+        header_row=2 if grouped else 1
+        if grouped:
+            sheet.append(["Event / Entity"]+[None]*4+["Freq <49.90"]+[None]*4+["Freq <49.70"]+[None]*4+["Freq <49.50"]+[None]*4+["Other"]+[None]*2)
+            for left,right in [(1,5),(6,10),(11,15),(16,20),(21,23)]:sheet.merge_cells(start_row=1,start_column=left,end_row=1,end_column=right)
         sheet.append(headers)
         for event in events:
-            rows = event["chronology"] if group == "chronology" else event["performance"].get(group, [])
+            if group=="metadata":
+                stats=event["threshold_analysis"]["summary"]
+                rows=[{"metric":key.replace("_"," ").title(),"value":str(value) if isinstance(value,list) else value} for key,value in stats.items() if key!="thresholds"]
+                rows.append({"metric":"Calculation", "value":event["calculation_note"]})
+                if event.get("selection_note"):rows.append({"metric":"Selected Slots (IST)","value":event["selection_note"]})
+            elif group=="summary":rows=summary_rows(event)
+            elif group=="chronology":rows=event["chronology"]
+            elif threshold_mode:
+                analysis=event.get("threshold_analysis") or {}
+                source=analysis.get("overall_performance" if group.startswith("overall:") else "performance",{})
+                rows=threshold_rows(source.get(group.split(":")[-1],[]),True)
+            else:rows=event["performance"].get(group,[])
             for row in rows:
                 record = {**row}
-                if group != "chronology":
+                if not threshold_mode and group != "chronology":
                     record["period"] = row["period_start"].replace("T", " ") + " - " + row["period_end"].replace("T", " ")
                 sheet.append([event["event_name"], event["start_time"], event["end_time"]] + [record.get(key) for key, _ in columns] + ["; ".join(event.get("warnings", []))])
             # Retain an event's identity even when its selected section is empty.
             if not rows:
                 sheet.append([event["event_name"], event["start_time"], event["end_time"], "No records available"] + [None] * (len(columns) - 1) + ["; ".join(event.get("warnings", []))])
-        for cell in sheet[1]:
+        for cell in list(sheet[header_row])+(list(sheet[1]) if grouped else []):
             cell.font = Font(bold=True, color="FFFFFF")
             cell.fill = PatternFill("solid", fgColor="03624C")
-        for row in sheet.iter_rows(min_row=2):
+        for row in sheet.iter_rows(min_row=header_row+1):
             for cell in row:
                 if isinstance(cell.value, str):
                     # Message text/labels must stay text, including leading '='.
@@ -358,10 +518,10 @@ def supplements_excel(events, payload):
                 cell.alignment = Alignment(vertical="top", wrap_text=True)
         for index, label in enumerate(headers, 1):
             sheet.column_dimensions[get_column_letter(index)].width = 54 if label in {"Message / Details", "Period (IST)"} else 34 if label in {"Event / Instance", "State / Entity", "Entity"} else 24
-        sheet.freeze_panes = "D2"
-        sheet.auto_filter.ref = sheet.dimensions
+        sheet.freeze_panes = "F3" if grouped else "D2"
+        sheet.auto_filter.ref = f"A{header_row}:{get_column_letter(len(headers))}{sheet.max_row}"
         sheet.sheet_view.showGridLines = False
-        sheet.print_title_rows = "1:1"
+        sheet.print_title_rows = f"1:{header_row}"
         sheet.page_setup.orientation = "landscape"
         sheet.page_setup.fitToWidth = 1
         sheet.page_setup.fitToHeight = 0

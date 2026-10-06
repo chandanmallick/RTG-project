@@ -40,6 +40,15 @@ test("missing readings are gaps, not zero minima", () => {
   assert.equal(event.missing_readings, 1);
 });
 
+test("readings below 45 Hz do not create invalid event extrema", () => {
+  const invalid = points.map((point, index) => index === 1 ? { ...point, frequency: 44.999 } : point);
+  const event = summarizeInterval(invalid, points[0].timestamp, points[3].timestamp);
+  assert.equal(event.min_frequency, LOW_HZ);
+  assert.equal(event.missing_readings, 1);
+  assert.throws(() => summarizeInterval(points.map(point => ({ ...point, frequency: 0 })), points[0].timestamp, points[3].timestamp));
+  assert.equal(summarizeInterval([{ ...points[0], frequency: 45 }, points[1]], points[0].timestamp, points[1].timestamp).min_frequency,45);
+});
+
 test("invalid intervals, unsampled endpoints and unavailable days are rejected", () => {
   assert.throws(() => summarizeInterval(points, points[1].timestamp, points[0].timestamp));
   assert.throws(() => summarizeInterval(points, "2026-10-05T18:32:10", points[3].timestamp));

@@ -2,20 +2,23 @@ import { useState } from "react";
 import { Alert, Autocomplete, Button, Checkbox, Dialog, DialogContent, DialogTitle, FormControlLabel, IconButton, MenuItem, Paper, Stack, Tab, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Tabs, TextField, Typography } from "@mui/material";
 import { Download, X } from "lucide-react";
 import API from "../../../services/api";
+import ThresholdPerformanceTable from "./ThresholdPerformanceTable";
 
 const GROUPS = ["State", "ISGS", "IPP"];
 const value = number => number == null ? "—" : typeof number === "number" ? Number(number.toFixed(3)).toLocaleString("en-IN") : number;
 const stamp = text => String(text || "").replace("T", " ");
 
-export default function SavedEventReports({ availableEvents, busy, onOpenEvent, onViewHtml, saveBlob }) {
+export default function SavedEventReports({ availableEvents, busy, onOpenEvent, onViewHtml, saveBlob, onConsolidateAnalysis }) {
   const [selectedIds, setSelectedIds] = useState([]);
   const [analyses, setAnalyses] = useState([]);
   const [activeId, setActiveId] = useState("");
   const [group, setGroup] = useState("State");
+  const [performanceDetail, setPerformanceDetail] = useState(false);
+  const [performancePage, setPerformancePage] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [consolidatedOpen, setConsolidatedOpen] = useState(false);
-  const [sections, setSections] = useState({ include_existing_sections: true, include_chronology: true, include_entity_performance: true, performance_groups: GROUPS });
+  const [sections, setSections] = useState({ include_threshold_performance: true, include_existing_sections: true, include_chronology: true, include_entity_performance: true, performance_groups: GROUPS });
   const selected = availableEvents.filter(event => selectedIds.includes(event.event_id));
   const active = analyses.find(event => event.event_id === activeId);
   const locked = busy || loading;
@@ -83,9 +86,9 @@ export default function SavedEventReports({ availableEvents, busy, onOpenEvent, 
         <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mt: 2, mb: 1 }}><Typography sx={{ fontWeight: 850 }}>Chronology of Messages</Typography><Button size="small" startIcon={<Download size={15} />} disabled={locked} onClick={() => generate("xlsx", false, { include_existing_sections: false, include_chronology: true, include_entity_performance: false })}>Export Excel</Button></Stack>
         <TableContainer sx={{ maxHeight: 300 }}><Table size="small" stickyHeader><TableHead><TableRow>{chronologyHeaders.map(label => <TableCell key={label} sx={{ fontWeight: 850, bgcolor: "#F1F7F5" }}>{label}</TableCell>)}</TableRow></TableHead><TableBody>{active.chronology.map((row, index) => <TableRow key={`${row.entity_id}-${row.message_no}-${row.timestamp}-${index}`}><TableCell sx={{ whiteSpace: "nowrap" }}>{stamp(row.timestamp)}</TableCell><TableCell>{value(row.frequency_hz)}</TableCell><TableCell>{row.state}</TableCell><TableCell>{value(row.deviation_mw)}</TableCell><TableCell>{row.message_type}</TableCell><TableCell>{row.message_no}</TableCell><TableCell sx={{ minWidth: 200 }}>{row.message_details}</TableCell></TableRow>)}{!active.chronology.length && <TableRow><TableCell colSpan={7}>No message rows available for this period.</TableCell></TableRow>}</TableBody></Table></TableContainer>
         <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mt: 2 }}><Typography sx={{ fontWeight: 850 }}>Entity Performance</Typography><Button size="small" startIcon={<Download size={15} />} disabled={locked} onClick={() => generate("xlsx", false, { include_existing_sections: false, include_chronology: false, include_entity_performance: true, performance_groups: [group] })}>Export Excel</Button></Stack>
-        <Tabs value={group} onChange={(_, next) => setGroup(next)}>{GROUPS.map(item => <Tab key={item} value={item} label={item} />)}</Tabs>
+        <Tabs value={group} onChange={(_, next) => { setGroup(next); setPerformancePage(0); }}>{GROUPS.map(item => <Tab key={item} value={item} label={item} />)}</Tabs>
         <Typography sx={{ color: "#64748B", fontSize: 11, my: 1 }}>{active.calculation_note}</Typography>
-        <TableContainer sx={{ maxHeight: 400 }}><Table size="small" stickyHeader><TableHead><TableRow>{performanceHeaders.map(label => <TableCell key={label} sx={{ fontWeight: 850, bgcolor: "#F1F7F5" }}>{label}</TableCell>)}</TableRow></TableHead><TableBody>{active.performance[group].map((row, index) => <TableRow key={`${row.entity_id}-${row.period_start}-${index}`}><TableCell>{row.entity}</TableCell><TableCell sx={{ minWidth: 160 }}>{stamp(row.period_start)} – {stamp(row.period_end)}</TableCell>{[row.average_od_ui_mw, row.od_ui_time_pct, row.maximum_od_ui_mw, row.lowest_frequency, row.message_count].map((number, column) => <TableCell key={column}>{value(number)}</TableCell>)}</TableRow>)}{!active.performance[group].length && <TableRow><TableCell colSpan={7}>No {group} records available.</TableCell></TableRow>}</TableBody></Table></TableContainer>
+        {active.threshold_analysis ? <><FormControlLabel control={<Checkbox size="small" checked={performanceDetail} onChange={event => { setPerformanceDetail(event.target.checked); setPerformancePage(0); }} />} label="15-minute blocks" /><ThresholdPerformanceTable rows={performanceDetail ? active.threshold_analysis.performance[group].slice(performancePage * 50, (performancePage + 1) * 50) : active.threshold_analysis.overall_performance[group]} />{performanceDetail && <Stack direction="row" spacing={1}><Button disabled={!performancePage} onClick={() => setPerformancePage(current => current - 1)}>Previous</Button><Typography sx={{ fontSize: 12, alignSelf: "center" }}>Page {performancePage + 1}</Typography><Button disabled={(performancePage + 1) * 50 >= active.threshold_analysis.performance[group].length} onClick={() => setPerformancePage(current => current + 1)}>Next</Button></Stack>}</> : <TableContainer sx={{ maxHeight: 400 }}><Table size="small" stickyHeader><TableHead><TableRow>{performanceHeaders.map(label => <TableCell key={label} sx={{ fontWeight: 850, bgcolor: "#F1F7F5" }}>{label}</TableCell>)}</TableRow></TableHead><TableBody>{active.performance[group].map((row, index) => <TableRow key={`${row.entity_id}-${row.period_start}-${index}`}><TableCell>{row.entity}</TableCell><TableCell sx={{ minWidth: 160 }}>{stamp(row.period_start)} – {stamp(row.period_end)}</TableCell>{[row.average_od_ui_mw, row.od_ui_time_pct, row.maximum_od_ui_mw, row.lowest_frequency, row.message_count].map((number, column) => <TableCell key={column}>{value(number)}</TableCell>)}</TableRow>)}{!active.performance[group].length && <TableRow><TableCell colSpan={7}>No {group} records available.</TableCell></TableRow>}</TableBody></Table></TableContainer>}
       </>}
     </>}
     <Dialog open={consolidatedOpen} onClose={() => !loading && setConsolidatedOpen(false)} maxWidth="sm" fullWidth><DialogTitle>Consolidated Frequency Event Analysis<IconButton onClick={() => setConsolidatedOpen(false)} disabled={loading} sx={{ float: "right" }}><X /></IconButton></DialogTitle><DialogContent>
@@ -94,7 +97,7 @@ export default function SavedEventReports({ availableEvents, busy, onOpenEvent, 
       <Stack>{[["include_chronology", "Chronology of Messages"], ["include_entity_performance", "Entity Performance"]].map(([key, label]) => <FormControlLabel key={key} control={<Checkbox checked={sections[key]} disabled={locked} onChange={event => setSections(current => ({ ...current, [key]: event.target.checked }))} />} label={label} />)}</Stack>
       <Stack direction="row">{GROUPS.map(item => <FormControlLabel key={item} control={<Checkbox checked={sections.performance_groups.includes(item)} disabled={locked || !sections.include_entity_performance} onChange={() => toggleGroup(item)} />} label={item} />)}</Stack>
       {error && <Alert severity="error">{error}</Alert>}
-      <Stack direction="row" spacing={1} sx={{ mt: 1 }}><Button variant="contained" disabled={locked} onClick={() => generate("xlsx", true)}>Download Excel</Button><Button variant="outlined" disabled={locked} onClick={() => generate("docx", true)}>Download Word</Button></Stack>
+      <Stack direction="row" spacing={1} sx={{ mt: 1 }}><Button disabled={locked} onClick={async () => { setLoading(true); setError(""); try { await onConsolidateAnalysis(selected.map(event => ({ event_id: event.event_id }))); setConsolidatedOpen(false); } catch (err) { setError(err?.response?.data?.detail || err.message); } finally { setLoading(false); } }}>Consolidated Analysis / HTML</Button><Button variant="contained" disabled={locked} onClick={() => generate("xlsx", true)}>Download Excel</Button><Button variant="outlined" disabled={locked} onClick={() => generate("docx", true)}>Download Word</Button></Stack>
     </DialogContent></Dialog>
   </Paper>;
 }

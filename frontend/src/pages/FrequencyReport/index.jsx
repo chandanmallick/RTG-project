@@ -14,6 +14,9 @@ import { showModernPopup } from "../../components/ui/ModernPopup";
 import ReportHeader from "./components/ReportHeader";
 import FrequencyPreAnalysis from "./components/FrequencyPreAnalysis";
 import SavedEventReports from "./components/SavedEventReports";
+import LongPeriodAnalysis from "./components/LongPeriodAnalysis";
+import FrequencyAnalysisResults from "./components/FrequencyAnalysisResults";
+import { Tabs, Tab, Dialog, DialogTitle, DialogContent, IconButton } from "@mui/material";
 import ExecutiveSummary from "./components/ExecutiveSummary";
 import StateComplianceTable from "./components/StateComplianceTable";
 import GeneratorComplianceTable from "./components/GeneratorComplianceTable";
@@ -459,6 +462,9 @@ const FrequencyOnlyChart = React.forwardRef(function FrequencyOnlyChart({ row, s
 
 export default function FrequencyReport() {
   const [tab, setTab] = useState("report");
+  const [analysisMode, setAnalysisMode] = useState("event");
+  const [consolidatedAnalysis, setConsolidatedAnalysis] = useState(null);
+  useEffect(() => { window.dispatchEvent(new Event("resize")); }, [analysisMode]);
   const [eventType, setEventType] = useState("low");
   const [startTime, setStartTime] = useState(today() + "T00:00");
   const [endTime, setEndTime] = useState(today() + "T23:59");
@@ -2896,10 +2902,12 @@ export default function FrequencyReport() {
 
   const buildStackedEventsHtml = useCallback((response) => {
     const safeJson = JSON.stringify({
+      analysis: !!response.analysis,
+      title: response.title || "",
       state: response.state,
       states: response.states || [response.state],
       events: response.events || [],
-    }).replace(/<\/script/gi, "<\\/script");
+    }).replace(/</g, "\\u003c");
     return `<!doctype html>
 <html lang="en">
 <head>
@@ -2920,12 +2928,12 @@ export default function FrequencyReport() {
   </style>
 </head>
 <body>
-  <header><h1 id="heading"></h1><p>Saved frequency events shown chronologically as separate interactive charts.</p></header>
+  <header><h1 id="heading"></h1><p>${response.analysis ? "Consolidated selected periods ? nested thresholds ? envelope display; statistics use original readings" : "Saved frequency events shown chronologically as separate interactive charts."}</p>${response.analysis ? '<select id="state-filter" aria-label="Select State"></select>' : ""}</header>
   <main id="root"></main>
   <script>
     const report=${safeJson};
     const root=document.getElementById('root');
-    document.getElementById('heading').textContent=(report.states||[report.state]).join(', ')+' | stacked frequency event comparison';
+    document.getElementById('heading').textContent=report.analysis?(report.title||'Consolidated Frequency Analysis'):(report.states||[report.state]).join(', ')+' | stacked frequency event comparison';
     const numberSeries=(values)=>Array.isArray(values)?values.map(v=>v===null||v===''||!Number.isFinite(Number(v))?null:Number(v)):[];
     const esc=(v)=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
     const parseTimestamp=(value)=>{const parsed=new Date(String(value||'').replace(' ','T'));return Number.isNaN(parsed.getTime())?null:parsed};
@@ -2955,6 +2963,8 @@ export default function FrequencyReport() {
       if(event.remarks)html+='<div><span style="color:#64748b">Details:</span> '+esc(event.remarks)+'</div>';
       return html+'</div>';
     };
+    const stateFilter=document.getElementById('state-filter');
+    if(stateFilter){(report.states||[]).forEach(state=>{const option=document.createElement('option');option.textContent=state;option.value=state;stateFilter.appendChild(option)});stateFilter.addEventListener('change',()=>{root.querySelectorAll('.card').forEach(card=>{card.hidden=card.dataset.state!==stateFilter.value});window.dispatchEvent(new Event('resize'))})}
     report.events.forEach((event,index)=>{
       const eventState=event.state||report.state;
       const series=event.series||{};
@@ -3016,9 +3026,11 @@ export default function FrequencyReport() {
       const regulatoryList=transmissionEvents.length?'<ul>'+transmissionEvents.map(item=>'<li><strong>'+esc(item.line_name||'Transmission line')+'</strong> - '+esc(item.timestamp||item.outage_date_time||'-')+(Array.isArray(item.owners)&&item.owners.length?' | '+esc(item.owners.join(', ')):'')+'</li>').join('')+'</ul>':'<small>No physical-regulation record for this state and event period.</small>';
       const resultsHtml='<div class="event-results"><div class="result-tile"><b>Maximum OD</b><strong>'+(maxOd===null?'-':Number(maxOd).toFixed(0)+' MW')+'</strong><small>'+(maxOdIndex<0?'-':esc(times[maxOdIndex]||''))+'</small></div><div class="result-tile"><b>OD at lowest frequency</b><strong>'+(odAtLowestFrequency===null?'-':Number(odAtLowestFrequency).toFixed(0)+' MW')+'</strong><small>'+(lowestFrequencyIndex<0?'-':Number(frequency[lowestFrequencyIndex]).toFixed(3)+' Hz | '+esc(times[lowestFrequencyIndex]||''))+'</small></div><div class="result-tile"><b>Different messages</b><strong>'+differentMessageCount+'</strong><small>'+crmsMessages.length+' mapped message record(s)</small>'+messageBreakupHtml+'</div><div class="result-tile"><b>Physical regulations</b><strong>'+transmissionEvents.length+'</strong><small>Transmission-line action(s)</small></div><div class="result-tile regulatory-details"><b>Physical regulatory details</b>'+regulatoryList+'</div></div>';
       const card=document.createElement('details'); card.className='card'; card.open=true;
-      card.innerHTML='<summary><span>Annexure '+(index+1)+': '+esc(eventState)+'</span><em>Annexure - Deviation / Frequency</em></summary><div class="card-body"><div class="event-identity"><div class="event-state">'+esc(eventState)+'</div><div class="event-period"><strong>'+esc(event.event_name||event.event_id)+'</strong><span>'+esc(event.start_time||'')+' to '+esc(event.end_time||'')+'</span></div></div><h2 class="chart-title">Frequency (Hz) vs Deviation (MW)</h2><div class="chart frequency-chart"></div>'+resultsHtml+(hasGeneration?'<div class="comparison-heading">'+esc(eventState)+' Deviation vs State Generation</div><div class="axis-controls"><strong>Generation axis:</strong><span class="axis-buttons"></span><span>Deviation always remains on Secondary.</span></div><div class="chart generation-chart"></div>':'')+'</div>';
+      card.innerHTML='<summary><span>Annexure '+(index+1)+': '+esc(eventState)+'</span><em>Annexure - Deviation / Frequency</em></summary><div class="card-body"><div class="event-identity"><div class="event-state">'+esc(eventState)+'</div><div class="event-period"><strong>'+esc(event.event_name||event.event_id)+'</strong><span>'+esc(event.start_time||'')+' to '+esc(event.end_time||'')+'</span></div></div><h2 class="chart-title">Frequency (Hz) vs Deviation (MW)</h2><div class="chart frequency-chart"></div>'+(report.analysis?'':resultsHtml)+(hasGeneration?'<div class="comparison-heading">'+esc(eventState)+' Deviation vs State Generation</div><div class="axis-controls"><strong>Generation axis:</strong><span class="axis-buttons"></span><span>Deviation always remains on Secondary.</span></div><div class="chart generation-chart"></div>':'')+'</div>';
+      if(report.analysis){card.dataset.state=eventState;card.hidden=stateFilter&&stateFilter.value!==eventState;}
       root.appendChild(card);
       const chart=echarts.init(card.querySelector('.frequency-chart'));
+      if(report.analysis){const expand=document.createElement('button');expand.textContent='Expand';expand.style.cssText='float:right;margin:6px';expand.addEventListener('click',()=>card.requestFullscreen?.());card.querySelector('.card-body').prepend(expand);document.addEventListener('fullscreenchange',()=>{card.querySelector('.frequency-chart').style.height=document.fullscreenElement===card?'calc(100vh - 180px)':'560px';chart.resize()});}
       chart.setOption({
         animation:false,
         color:['#059669','#0284c7','#7c3aed'],
@@ -3036,7 +3048,8 @@ export default function FrequencyReport() {
           {name:negativeShadeLabel,type:'line',data:negativeShade,yAxisIndex:0,symbol:'none',lineStyle:{width:0},itemStyle:{color:'rgba(6,182,212,.27)'},areaStyle:{color:'rgba(6,182,212,.27)',origin:0},emphasis:{disabled:true},z:1},
           {name:eventState+' Deviation',type:'line',data:deviation,yAxisIndex:0,symbol:'none',lineStyle:{width:2.8,color:'#059669'},itemStyle:{color:'#059669'}},
           ...(hasPurulia?[{name:'Purulia PSP Net (G + P)',type:'line',data:purulia,yAxisIndex:0,symbol:'none',connectNulls:false,lineStyle:{width:2.8,color:'#0284c7'},itemStyle:{color:'#0284c7'}}]:[]),
-          {name:'Frequency',type:'line',data:frequency,yAxisIndex:1,symbol:'none',lineStyle:{width:2.4,color:'#7c3aed'},itemStyle:{color:'#7c3aed'},markLine:{silent:true,symbol:'none',data:[{yAxis:threshold}],lineStyle:{color:'#dc2626',type:'dashed'},label:{formatter:threshold+' Hz'}}},
+          {name:'Frequency',type:'line',data:frequency,yAxisIndex:1,symbol:'none',lineStyle:{width:2.4,color:'#7c3aed'},itemStyle:{color:'#7c3aed'},markLine:{silent:true,symbol:'none',data:report.analysis?[{yAxis:49.9},{yAxis:49.7},{yAxis:49.5}]:[{yAxis:threshold}],lineStyle:{color:'#dc2626',type:'dashed'},label:{formatter:report.analysis?params=>params.value+' Hz':threshold+' Hz'}}},
+          ...(report.analysis?[49.7,49.5].map((level,i)=>({name:'OD at f <'+level,type:'line',data:deviation.map((v,at)=>frequency[at]==null||v==null?null:frequency[at]<level?Math.max(v,0):0),yAxisIndex:0,symbol:'none',lineStyle:{width:0},areaStyle:{color:i?'#DC2626':'#EA580C',opacity:.3},z:i+2})):[]),
           ...crmsSeries,
           ...transmissionSeries
         ]
@@ -3095,6 +3108,21 @@ export default function FrequencyReport() {
 </body>
 </html>`;
   }, []);
+
+  const viewConsolidatedHtml = async response => {
+    let html = buildStackedEventsHtml(response.stacked_response);
+    html = html.replace("</body>", `${response.supplemental_html}</body>`);
+    const blob = new Blob([html], { type: "text/html;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const preview = window.open(url, "_blank");
+    if (preview) preview.opener = null;
+    else await saveBlobToFile(blob, "Consolidated_Frequency_Analysis.html");
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+  };
+  const consolidateSelectedEvents = async sources => {
+    const response = await API.consolidateFrequencyAnalysis(sources);
+    setConsolidatedAnalysis(response);
+  };
 
   const handleStackedEventsExport = useCallback(async () => {
     if (!stackedExportEventIds.length) {
@@ -3195,7 +3223,11 @@ export default function FrequencyReport() {
     <AppShell>
       <Toaster position="top-right" reverseOrder={false} />
 
-      <SavedEventReports availableEvents={availableEvents} busy={dataLoading || mapLoading} saveBlob={saveBlobToFile} onOpenEvent={async id => {
+      <Tabs value={analysisMode} onChange={(_, mode) => setAnalysisMode(mode)} sx={{ mb: 2 }}><Tab value="event" label="Event / Curve Analysis" disabled={dataLoading} /><Tab value="long" label="Long-Period Analysis" disabled={dataLoading} /></Tabs>
+      <div style={{ display: analysisMode === "long" ? "block" : "none" }}><LongPeriodAnalysis saveBlob={saveBlobToFile} onHtmlReport={viewConsolidatedHtml} /></div>
+      <Dialog fullScreen open={Boolean(consolidatedAnalysis)} onClose={() => setConsolidatedAnalysis(null)}><DialogTitle>Consolidated Event Analysis<IconButton sx={{ float: "right" }} onClick={() => setConsolidatedAnalysis(null)}>?</IconButton></DialogTitle><DialogContent><FrequencyAnalysisResults result={consolidatedAnalysis} saveBlob={saveBlobToFile} onHtmlReport={viewConsolidatedHtml} /></DialogContent></Dialog>
+      <div style={{ display: analysisMode === "event" ? "block" : "none" }}>
+      <SavedEventReports onConsolidateAnalysis={consolidateSelectedEvents} availableEvents={availableEvents} busy={dataLoading || mapLoading} saveBlob={saveBlobToFile} onOpenEvent={async id => {
         const event = availableEvents.find(item => item.event_id === id);
         if (event) await analyzeSelectedPeriod({ ...event, stored_event_id: id, event_type: event.event_type || "low" });
       }} onViewHtml={async (_, options) => {
@@ -3211,7 +3243,7 @@ export default function FrequencyReport() {
         else await saveBlobToFile(blob, `${String(context.title).replace(/[<>:"/\\|?*]/g, "_")}.html`);
         setTimeout(() => URL.revokeObjectURL(url), 60000);
       }} />
-      <FrequencyPreAnalysis storedEvents={availableEvents} busy={dataLoading || mapLoading} onAnalyze={analyzeSelectedPeriod} onViewResult={viewSelectedPeriodResult} />
+      <FrequencyPreAnalysis onConsolidate={consolidateSelectedEvents} storedEvents={availableEvents} busy={dataLoading || mapLoading} onAnalyze={analyzeSelectedPeriod} onViewResult={viewSelectedPeriodResult} />
 
       <ReportHeader
         startTime={startTime}
@@ -4855,6 +4887,7 @@ export default function FrequencyReport() {
           </div>
         </div>
       )}
+      </div>
     </AppShell>
   );
 }

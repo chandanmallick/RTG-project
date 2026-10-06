@@ -1,6 +1,8 @@
 // Curve timestamps and report event periods are expressed in IST.
 export const LOW_HZ = 49.90;
 export const HIGH_HZ = 50.05;
+export const createSelectionId = () => `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+export const validCurveFrequency = value => Number.isFinite(value) && value >= 45;
 export const istMillis = (timestamp) => Date.parse(`${timestamp.slice(0, 19)}+05:30`);
 
 export function nearestPoint(points, millis) {
@@ -26,7 +28,7 @@ export function summarizeInterval(points, startTime, endTime) {
   });
   if (!samples.length || istMillis(samples[0].timestamp) !== start || istMillis(samples.at(-1).timestamp) !== end) throw new Error("Use timestamps on the loaded 30-second timeline.");
   if (samples.some((point, index) => index > 0 && istMillis(point.timestamp) - istMillis(samples[index - 1].timestamp) !== 30000)) throw new Error("This interval crosses a day with unavailable Curve data. Select separate intervals.");
-  const valid = samples.filter(point => point.frequency !== null && Number.isFinite(point.frequency));
+  const valid = samples.filter(point => validCurveFrequency(point.frequency));
   if (!valid.length) throw new Error("This interval contains no valid frequency readings.");
   const minimum = valid.reduce((value, point) => Math.min(value, point.frequency), Infinity);
   const maximum = valid.reduce((value, point) => Math.max(value, point.frequency), -Infinity);

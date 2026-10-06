@@ -50,7 +50,7 @@ def extract_curve_frequency_rows(rows, date_str):
             frequency = float(frequency_value) if not isinstance(frequency_value, bool) else None
         except (TypeError, ValueError):
             frequency = None
-        if frequency is None or not math.isfinite(frequency) or frequency <= 0:
+        if frequency is None or not math.isfinite(frequency) or frequency < 45:
             frequency = None
             missing += 1
         points.append({"timestamp": stamp.isoformat(timespec="seconds"), "frequency": frequency})

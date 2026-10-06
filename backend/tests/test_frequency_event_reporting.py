@@ -17,6 +17,40 @@ def entity(kind='State', deviations=None):
     return {'entity_id':kind,'display_name':kind,'group':kind,'point':point(kind,deviations),'mapping':{}}
 
 class SavedEventTests(unittest.TestCase):
+    def test_batch_period_check_coverage_gaps_and_metadata_only_read(self):
+        from unittest.mock import Mock
+        events = [
+            {**EVENT, 'event_id':'first', 'start_time':'2026-10-05T17:00:00', 'end_time':'2026-10-05T17:10:00'},
+            {**EVENT, 'event_id':'second', 'start_time':'2026-10-05T11:40:00Z', 'end_time':'2026-10-05T11:50:00Z'},
+            {**EVENT, 'event_id':'smallest', 'start_time':'2026-10-05T17:02:00', 'end_time':'2026-10-05T17:05:00'},
+        ]
+        collection = SimpleNamespace(find=Mock(return_value=events))
+        db = SimpleNamespace(db={routes.EVENT_COLLECTION:collection})
+        periods = [{'id':str(index), 'start_time':f'2026-10-05T{start}:00', 'end_time':f'2026-10-05T{end}:00'} for index,(start,end) in enumerate([('17:02','17:05'),('17:00','17:20'),('17:15','17:25'),('17:20','17:30')])]
+        result = reporting.check_frequency_periods(db,periods)['periods']
+        self.assertEqual([row['status'] for row in result],['existing','existing','partial','new'])
+        self.assertEqual(result[0]['event_id'],'smallest')
+        self.assertIsNone(result[1]['event_id'])
+        self.assertEqual(result[1]['coverage_seconds'],1200)
+        self.assertEqual(result[2]['missing'],[{'start_time':'2026-10-05T17:20:00','end_time':'2026-10-05T17:25:00'}])
+        collection.find.assert_called_once()
+        self.assertNotIn('data_points',collection.find.call_args.args[1])
+        with self.assertRaises(ValueError):reporting.check_frequency_periods(db,[{**periods[0],'end_time':periods[0]['start_time']}])
+
+    def test_period_check_legacy_fallback_never_overrides_structured_bounds(self):
+        from unittest.mock import Mock
+        events = [
+            {'event_id':'legacy','name':'Low Freq 05-Oct-26 (23:55-00:05)'},
+            {**EVENT,'event_id':'structured','name':'Low Freq 05-Oct-26 (23:55-00:05)'},
+            {'event_id':'bad','name':'Low Freq 05-Oct-26 (23:55-00:05)','start_time':'bad','end_time':'bad'},
+        ]
+        collection = SimpleNamespace(find=Mock(return_value=events))
+        db = SimpleNamespace(db={routes.EVENT_COLLECTION:collection})
+        row = reporting.check_frequency_periods(db,[{'id':'night','start_time':'2026-10-05T23:57:00','end_time':'2026-10-06T00:03:00'}])['periods'][0]
+        self.assertEqual(row['status'],'existing')
+        self.assertEqual(row['event_id'],'legacy')
+        self.assertEqual([match['metadata_source'] for match in row['matches']],['legacy_name'])
+
     def test_signed_average_threshold_denominator_and_partial_block(self):
         messages = [{'entity_id':'State','timestamp':'2026-10-05T17:02:30','message_no':'M1'}]*2
         messages += [{'entity_id':'State','timestamp':EVENT['end_time'],'message_no':'M2'}]

@@ -536,9 +536,14 @@ times fail validation. Invalid frequency readings remain null gaps. A range may
 include up to 31 days; unavailable dates are reported without hiding the usable
 days. Events spanning an unavailable day are rejected.
 
-The overview shades LOW below 49.90 Hz, NORMAL from 49.90 through 50.05 Hz,
-and HIGH above 50.05 Hz. It supports zoom/pan, full-screen expansion, drag
-selection, two-point selection and editable 30-second start/end fields. Add any
+The overview colors LOW below 49.90 Hz, NORMAL from 49.90 through 50.05 Hz,
+and HIGH above 50.05 Hz; frequency area fill ends at the 50.00 Hz baseline.
+Reference lines remain at 49.50, 49.70, 49.90, 50.00 and 50.05 Hz. Readings below
+45 Hz are invalid null gaps and excluded from interval statistics. Explicit
+Zoom/Pan and Select Period modes use ECharts ZRender mouse-down/move/up on the
+plot grid, converting X-axis pixels to timestamps. A translucent drag preview
+becomes a saved period on release, including in the expanded chart. Editable
+30-second start/end fields remain available. Add any
 number of intervals, review their extrema/duration, edit/remove them or clear
 all. Date selections fetch once and subsequent chart/event actions use the
 loaded points; up to five date/range responses are cached in the page session.
@@ -556,9 +561,21 @@ historical report and PSP Report Checking APIs retain their behavior.
 
 Saved frequency instances are selectable without re-upload through the existing
 `GET /api/frequency/events` discovery. Curve-selected periods covered by an
-instance use its structured start/end metadata and stored event ID; only periods
-without a matching instance expose a file upload. Display names are labels,
-never a substitute for timestamps.
+instance use its structured start/end metadata and stored event ID. After a
+completed drag or manual add/edit, authenticated
+`POST /api/frequency/analysis/check-periods` batches only selected IDs/start/end
+times. One metadata-only `frequency_events` read checks instances with saved
+timestamp series; no workbook or raw curve arrays are sent/read for this check.
+It returns existing/partial/new status, matched instances, union coverage and
+missing ranges. Structured timestamps are authoritative; the existing name
+format is parsed only for legacy instances lacking both structured bounds.
+Existing periods process DB data without upload; combined adjacent coverage
+reuses the consolidated API. Partial periods can process available DB ranges
+and show their gaps. Gap-only merging is not supported by the existing upload
+flow, so completion explicitly requires a full-period workbook. New periods
+reuse the existing upload flow. Process Selected Events reuses these same
+processing actions. Frontend IDs use a timestamp/random string without UUID
+dependencies or secure-context-only APIs.
 
 **Saved event reporting:** `POST /api/frequency/events/report-analysis` returns
 compact per-event chronology and 15-minute entity performance.
@@ -598,6 +615,102 @@ frontend stored-period and Curve interval tests, an isolated production build,
 read-only live Mongo/CRMS checks for two saved events, and rendered Word/PDF
 layout checks using representative long message text. QA outputs and build files
 stay under `.runtime`; production deployment is a separate step.
+
+### Consolidated and long-period frequency analysis
+
+Frequency Analysis now separates **Event / Curve Analysis** and **Long-Period
+Analysis**, retaining event controls/results when switching modes. Curve-selected
+intervals offer a Consolidated Report and individual Threshold Analysis; sources
+may be saved instances or temporarily parsed event uploads. Existing event-wise
+report/SSE editing and Word/PDF exports continue unchanged.
+
+Long-period mode accepts one `.xlsx`/`.xlsm` base workbook using the existing
+`parse_scada_file` schema: `Sheet1` or the first sheet, a detected date/time key
+row with the preceding display-header row, and frequency identified by its header
+or existing key. The read-only option is opt-in; legacy parser defaults remain.
+`match_scada_columns` resolves actual/schedule columns using maintained entity
+mapping, including separate stages. Long-period calculations use uploaded
+columns only; absent schedule/actual values remain unavailable. No RTG/WBES
+measurement fallback, generation-share fetch or Mongo source-series write runs
+in the temporary analysis path. State-sector generators retain their existing
+classification rather than being relabelled as State drawal.
+
+Authenticated `/api/frequency/analysis` endpoints:
+
+- `POST /upload`: parse one workbook and return owner-scoped session metadata,
+  actual file bytes/reading count, array footprint, bounds and sampling interval.
+- `POST /from-temp`: reuse an existing event temporary-file ID for consolidated
+  analysis; the legacy upload/report flow retains that file's behavior.
+- `POST /run`: select dates and dynamic daily slots against the parsed session.
+  Same-day slots support `24:00` as the next midnight; split other overnight
+  slots. Overlapping/adjacent slots merge and are counted once.
+- `POST /consolidate`: combine selected saved/temporary event sources. Overlapping
+  timestamps count once with first-selected-source precedence, reported in a
+  notice. Sources retain their own sampling intervals.
+- `POST /table`, `/chart`: page computed detail/chronology and return a selected
+  State's aggregated frequency/OD envelope without re-upload or reparse.
+- `POST /export`: reuse the existing Word generator, Excel supplement utility and
+  stacked interactive HTML template for HTML, Excel and Word.
+- `DELETE /session/{token}`: release temporary state when replacing an upload.
+
+Sessions expire after one hour of inactivity and disappear on backend restart.
+Cleanup occurs on session access/admission. Uploads cap at 128 MB; expanded
+workbooks, parsed arrays and estimated cached results are resource-guarded by a
+512 MB process-session budget. Detail tables are paged; overview JSON carries
+only summary/overall rows, identifiers and warnings. CPU-heavy work and Excel
+reading run outside the request event loop. Successful CRMS retrieval is reused
+for covered ranges within a session; one range fetch supplies chronology and
+all entity/block/threshold message counts. Outages leave coverage and counts
+unavailable, with no false zero-count claim.
+
+`frequency_threshold_analysis.py` supplies strict, **nested** `<49.90`, `<49.70`
+and `<49.50` calculations for saved, Curve-selected and long-period analyses.
+Deviation remains Actual minus Schedule: adverse State OD is positive and
+adverse ISGS/IPP UI is negative. Each observation covers `[timestamp,
+min(next timestamp, timestamp + inferred source interval))`, clipped to selected
+`[start,end)` windows and split at quarter-hour boundaries. The modal positive
+timestamp spacing establishes source interval; mixed consolidated sources retain
+per-reading support. Missing timestamps and invalid frequencies add no duration.
+Durations therefore use elapsed seconds, not arbitrary row counts.
+
+Per-threshold frequency minutes form the adverse-percentage denominator.
+Observed adverse minutes count known adverse deviations; unknown deviation
+minutes are tracked separately and make the percentage unavailable. Signed
+15-minute averages are duration-weighted within each threshold, allowing
+opposite deviations to offset. Max OD remains positive and max UI negative.
+A zero threshold denominator displays unavailable percentage/average/extrema.
+Message counts deduplicate entity/time/message-number matches; threshold-specific
+counts use unrounded frequency and stay unavailable if frequency coverage at a
+message is unknown. The table's Other/Messages column gives total period counts.
+
+Summary statistics include selected/covered duration, minimum and its source
+sample timestamp, duration-weighted average, and each threshold's duration,
+occurrence count, longest continuous occurrence and minimum. Gaps, invalid
+frequency and disjoint slots break occurrences. Overall entity rows and
+15-minute detail use the same engine. Grouped State/ISGS/IPP headers scroll
+horizontally with sticky entity labels. State charts reuse ECharts and the
+stacked HTML style, with nested OD shading, threshold lines, tooltips, zoom/pan,
+State selection and expansion. Envelope points preserve frequency extrema/OD
+maxima and mark coverage breaks; every statistic uses original readings.
+
+Excel includes Analysis Summary, Overall Statistics, overall entity sheets,
+Chronology and grouped State/ISGS/IPP Performance sheets as selected, with event
+identity and quality notes. Word uses compact per-threshold landscape tables and
+records selection patterns/calculation rules. HTML reuses the existing stacked
+export with State selection and fullscreen controls plus backend-generated tables.
+
+Permanent MongoDB persistence is unnecessary and remains disabled. Actual row,
+file-byte and array-size metadata is available before any future storage proposal;
+such a proposal must separately estimate daily/monthly/yearly BSON size and index
+overhead and receive confirmation. This implementation proposes no permanent
+storage.
+
+Verification covers nested strict boundaries, 30-/60-second sampling, timezone
+alignment, gaps, overlapping slots, quarter-hour splits, unknown coverage,
+message deduplication, session ownership/expiry, parse-once and fetch-once reuse,
+large bounded chart envelopes, legacy report regressions, live saved-event
+consolidation and generated Excel/Word/HTML checks. Build and QA artifacts remain
+under `.runtime`; deployment remains separate.
 
 ## WBES schedule fetch reference
 

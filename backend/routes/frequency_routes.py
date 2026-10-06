@@ -1521,6 +1521,10 @@ def _schedule_page_fallback(db, message_dt: datetime, mapping: dict, cache: dict
 
 @router.post("/message-timeline")
 async def build_frequency_message_timeline(payload: FrequencyMessageTimelinePayload):
+    return await _build_frequency_message_timeline(payload)
+
+
+async def _build_frequency_message_timeline(payload, *, event_context=None, aliases_override=None, value_lookup=None, messages_override=None, db=None, data_source_label="Saved frequency event"):
     """Create a chronological, constituent-wise CRMS message timeline."""
     if not 1 <= len(payload.ranges) <= 20:
         raise HTTPException(400, "Select between 1 and 20 date-time ranges.")
@@ -1533,15 +1537,15 @@ async def build_frequency_message_timeline(payload: FrequencyMessageTimelinePayl
             raise HTTPException(400, "Every range must contain valid ISO date-time values.") from exc
         if end_dt < start_dt:
             raise HTTPException(400, "A range end time cannot be before its start time.")
-        if end_dt - start_dt > timedelta(days=31):
+        if end_dt - start_dt > timedelta(days=366 if event_context is not None else 31):
             raise HTTPException(400, "A single message range cannot exceed 31 days.")
         parsed_ranges.append((start_dt, end_dt))
 
-    db = MongoService()
-    event_doc = None
+    db = db or MongoService()
+    event_doc = event_context
     warnings = []
     messages_complete = True
-    if payload.event_id:
+    if payload.event_id and event_doc is None:
         from services.frequency_event_reporting import event_period, timeline_aliases, timeline_point_values
         event_doc = db.db[EVENT_COLLECTION].find_one({"event_id": payload.event_id}, {"_id": 0})
         if not event_doc:
@@ -1574,7 +1578,7 @@ async def build_frequency_message_timeline(payload: FrequencyMessageTimelinePayl
             warnings.append("Stored messages only; message counts are unavailable until CRMS coverage is verified.")
             continue
         try:
-            messages, range_skipped = await fetch_crms_frequency_messages(start_dt, end_dt)
+            messages, range_skipped = messages_override if messages_override is not None else await fetch_crms_frequency_messages(start_dt, end_dt)
         except Exception as exc:
             if not event_doc:
                 raise HTTPException(502, f"CRMS message fetch failed: {exc}") from exc
@@ -1586,7 +1590,7 @@ async def build_frequency_message_timeline(payload: FrequencyMessageTimelinePayl
             key = f"{message.get('message_no')}|{message.get('timestamp')}"
             messages_by_key[key] = message
 
-    alias_map = timeline_aliases(db, event_doc) if event_doc else _timeline_state_mappings(db)
+    alias_map = aliases_override if aliases_override is not None else (timeline_aliases(db, event_doc) if event_doc else _timeline_state_mappings(db))
     schedule_cache = {}
     rows = []
     for message in messages_by_key.values():
@@ -1599,8 +1603,8 @@ async def build_frequency_message_timeline(payload: FrequencyMessageTimelinePayl
                 continue
             for mapping in (match if isinstance(match, list) else [match]):
                 state_name = mapping.get("display_name") or issued_to
-                frequency, deviation = timeline_point_values(mapping, message_dt, event_doc) if event_doc else _nearest_saved_event_values(db, message_dt, state_name)
-                data_source = "Saved frequency event"
+                frequency, deviation = value_lookup(mapping, message_dt) if value_lookup is not None else (timeline_point_values(mapping, message_dt, event_doc) if event_doc else _nearest_saved_event_values(db, message_dt, state_name))
+                data_source = data_source_label
                 raw_frequency, raw_deviation = (None, None) if event_doc else _raw_timeline_values(db, message_dt, mapping)
                 if frequency is None:
                     frequency = raw_frequency
@@ -1619,6 +1623,7 @@ async def build_frequency_message_timeline(payload: FrequencyMessageTimelinePayl
                     "message_details": message.get("remarks") or "",
                     "time": message_dt.strftime("%H:%M"),
                     "frequency_hz": round(frequency, 3) if frequency is not None else None,
+                    "frequency_raw_hz": frequency if event_doc else None,
                     "state": state_name,
                     "deviation_mw": (round(deviation, 3) if event_doc else round(deviation)) if deviation is not None else None,
                     "message_type": crms_message_category(message),
@@ -2827,12 +2832,13 @@ def clean_mapping_value(key, value):
         return int(value)
     return value
 
-def parse_scada_file(contents: bytes):
-    wb = openpyxl.load_workbook(io.BytesIO(contents), data_only=True)
+def parse_scada_file(contents: bytes, read_only: bool = False):
+    wb = openpyxl.load_workbook(io.BytesIO(contents), data_only=True, read_only=read_only)
     sheet_name = "Sheet1" if "Sheet1" in wb.sheetnames else wb.sheetnames[0]
     ws = wb[sheet_name]
     
     rows = list(ws.iter_rows(values_only=True))
+    wb.close()
     if len(rows) < 3:
         raise ValueError("SCADA file must have at least 3 rows (header, keys, and values)")
     
@@ -5717,6 +5723,7 @@ class FrequencySavedReportPayload(BaseModel):
     include_entity_performance: bool = True
     performance_groups: List[str] = ["State", "ISGS", "IPP"]
     refresh: bool = False
+    include_threshold_performance: bool = False
 
 
 async def _saved_report_events(payload):
@@ -5915,3 +5922,8 @@ def resync_source(payload: ResyncSourcePayload):
         }
     except Exception as e:
         return {"success": False, "error": str(e)}
+
+
+# Temporary long-period/consolidated APIs share this feature prefix.
+from routes.frequency_analysis_routes import router as frequency_analysis_router
+router.include_router(frequency_analysis_router)
