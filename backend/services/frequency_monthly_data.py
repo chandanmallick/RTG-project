@@ -169,8 +169,11 @@ def monthly_model(session, result, payload):
     chronology, warnings = sessions.report_chronology(session, result)
     chronology = [r for r in chronology if r.get('timestamp') and start <= seconds(r['timestamp']) < end]
     chronology = [{**r,'frequency_hz':None} if r.get('frequency_hz') is not None and r['frequency_hz']<45 else r for r in chronology]
+    from services.frequency_report_formatting import is_regional_aggregate
+    chronology = [r for r in chronology if not is_regional_aggregate({'entity': r.get('state') or r.get('entity')})]
     chronology.sort(key=lambda r:(r.get('timestamp') or '', r.get('state') or r.get('entity') or '', str(r.get('message_no') or '')))
-    available_entities = [e for e in dataset['entities'] if e['group'] in payload.performance_groups]
+    from services.frequency_report_formatting import is_regional_aggregate
+    available_entities = [e for e in dataset['entities'] if e['group'] in payload.performance_groups and not is_regional_aggregate(e)]
     entities = list(available_entities) if payload.include_entity_performance else []
     if payload.include_entity_performance and 'State' in payload.performance_groups:
         for name in ('Bihar','DVC','Jharkhand','Odisha','West Bengal','Sikkim'):
@@ -179,7 +182,7 @@ def monthly_model(session, result, payload):
                                  'deviation':np.full(len(frequency),np.nan),'point':{},'unavailable':True})
     summary = frequency_statistics(dataset, full_ranges)
     daily_frequency = [{**d, 'summary': frequency_statistics(dataset,d['ranges'])} for d in days]
-    slots = sorted({1,2,*[w['event'] for w in events]})
+    slots = sorted({w['event'] for w in events})
     slot_rows = {}; daily_rows = []; event_rows = []
     complete = result['messages_complete'] and bool(events)
     for slot in slots:
@@ -190,6 +193,7 @@ def monthly_model(session, result, payload):
         daily_rows.extend(performance_rows(dataset,ranges,entities,chronology,complete,day['date']))
         for slot in slots:
             ranges = [r for w in events if w['date']==day['date'] and w['event']==slot for r in w['ranges']]
+            if not ranges: continue
             event_rows.extend(performance_rows(dataset,ranges,entities,chronology,complete,day['date'],slot))
     messages, message_warnings = message_summary(entities if payload.include_entity_performance else available_entities,chronology,complete)
     defence = defence_records(dataset,start,end)

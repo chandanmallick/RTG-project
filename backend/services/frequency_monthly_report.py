@@ -7,7 +7,7 @@ import numpy as np
 from fastapi.responses import StreamingResponse
 from services import frequency_analysis_sessions as sessions
 from services.frequency_compact_reports import number, report_tables
-from services.frequency_report_formatting import format_report_value
+from services.frequency_report_formatting import format_report_value, monthly_display
 from services.frequency_threshold_analysis import calculate, iso, merge_ranges, seconds, segments
 
 TEMPLATE = Path(__file__).resolve().parent.parent / 'report_templates' / 'frequency_monthly.docx'
@@ -232,7 +232,7 @@ def build_blocks(session,result,payload):
 def performance_columns(high):
     cols=[('period','Date / Event / IST'),('entity','Entity'),('minimum','Frequency Hz / At IST')]
     for level in (['50.05'] if high else ['49.50','49.70','49.90']):
-        cols.extend([(level+'_adverse',level+' Hz\nFrequency min / Adverse min (%)'),(level+'_average',level+' Hz\nAvg MW'),(level+'_maximum',level+' Hz\nMax MW'),(level+'_messages',level+' Hz\nMessages')])
+        cols.extend([(level+'_adverse',('<' if not high else '>')+str(float(level))+' Hz\nOD/UI duration min (%)'),(level+'_average',level+' Hz\nAvg MW'),(level+'_maximum',level+' Hz\nMax MW'),(level+'_messages',level+' Hz\nMessages')])
     return cols
 
 
@@ -242,10 +242,10 @@ def performance_records(rows,high):
     for row in rows:
         intervals=list(dict.fromkeys(a[11:16]+'–'+b[11:16] for a,b in row['selected_ranges']))
         frequency_value = value(row.get('highest_frequency') if high else row['lowest_frequency'],3)
-        r={'period':row['date']+(f" / Slot {row['event']}" if row['event'] else ' / Monthly')+'\n'+'; '.join(intervals),'entity':row['entity'],'minimum':f"{frequency_value}\n"+value(row.get('minimum_timestamp') if not high else None)}
+        r={'period':monthly_display(row['date'])+(f" / Slot {row['event']}" if row['event'] else ' / Monthly')+'\n'+'; '.join(intervals),'entity':row['entity'],'minimum':f"{frequency_value}\n"+value(row.get('minimum_timestamp') if not high else None)}
         if row.get('lowest_frequency') is None:r['minimum']='—'
         for level,v in row['thresholds'].items():
-            r.update({level+'_adverse':f"{value(v['frequency_minutes'])} / {value(v['adverse_minutes'])} ({value(v['adverse_pct'])}%)",level+'_average':format_report_value(v['average_od_ui_mw'],'average_od_ui_mw') or '—',level+'_maximum':format_report_value(v['maximum_od_ui_mw'],'maximum_od_ui_mw') or '—',level+'_messages':value(v['message_count'],0)})
+            r.update({level+'_adverse':f"{value(v['adverse_minutes'],0)} ({value(v['adverse_pct'])}%)",level+'_average':format_report_value(v['average_od_ui_mw'],'average_od_ui_mw') or '—',level+'_maximum':format_report_value(v['maximum_od_ui_mw'],'maximum_od_ui_mw') or '—',level+'_messages':value(v['message_count'],0)})
             if v['frequency_minutes'] is None:r[level+'_adverse']='—'
         output.append(r)
     return output
@@ -316,8 +316,8 @@ def render_word(blocks):
             if grouped:
                 for at in range(3):table.cell(0,at).merge(table.cell(1,at)).text=cols[at][1]
                 for at in range(3,len(cols),4):
-                    table.cell(0,at).merge(table.cell(0,at+3)).text=('>' if cols[at][0].startswith('50.') else '<')+cols[at][0].split('_')[0]+' Hz'
-                    for offset,label in enumerate(['Freq min / OD/UI min (%)','Avg MW','Max MW','Messages']):table.cell(1,at+offset).text=label
+                    table.cell(0,at).merge(table.cell(0,at+3)).text=('>' if cols[at][0].startswith('50.') else '<')+str(float(cols[at][0].split('_')[0]))+' Hz'
+                    for offset,label in enumerate(['OD/UI min (%)','Avg MW','Max MW','Messages']):table.cell(1,at+offset).text=label
             else:
                 for c,(_,label) in zip(table.rows[0].cells,cols):c.text=label
             for header_row in list(table.rows)[:2 if grouped else 1]:
@@ -325,7 +325,7 @@ def render_word(blocks):
             for row in rows:
                 for c,(key,_) in zip(table.add_row().cells,cols):
                     cell_value = format_report_value(row.get(key), key)
-                    c.text=number(cell_value) if cell_value is not None else '—'
+                    c.text=monthly_display(number(cell_value)) if cell_value is not None else '—'
             for i,row in enumerate(table.rows):
                 for cell_index,cell in enumerate(row.cells):
                     is_header=i<(2 if grouped else 1)
@@ -402,9 +402,9 @@ def render_pdf(blocks):
                 first=[para(label,header) if at<3 else '' for at,(_,label) in enumerate(cols)]
                 second=['']*3
                 for at in range(3,len(cols),4):
-                    first[at]=para(('>' if cols[at][0].startswith('50.') else '<')+cols[at][0].split('_')[0]+' Hz',header)
+                    first[at]=para(('>' if cols[at][0].startswith('50.') else '<')+str(float(cols[at][0].split('_')[0]))+' Hz',header)
                     spans.append(('SPAN',(at,0),(at+3,0)))
-                    second.extend(para(label,subheader) for label in ['Freq min / OD/UI min (%)','Avg MW','Max MW','Messages'])
+                    second.extend(para(label,subheader) for label in ['OD/UI min (%)','Avg MW','Max MW','Messages'])
                 spans.extend(('SPAN',(at,0),(at,1)) for at in range(3));data=[first,second]
             else:data=[[para(label,header) for _,label in cols]]
             data.extend([[para(number(format_report_value(row.get(key), key)) if row.get(key) is not None else '—',cell) for key,_ in cols] for row in rows])

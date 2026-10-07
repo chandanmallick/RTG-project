@@ -32,13 +32,13 @@ class MonthlyReportTests(unittest.TestCase):
         payload=ResultPayload(session_token=result['session_token'],result_token=result['result_token'],layout='monthly-template',include_chronology=False,report_text={'executive_summary':'Reviewed by operator <safe>','adms_ufr_remarks':'UFR remarks entered by operator'})
         session,stored=sessions.get_result(payload.session_token,payload.result_token,USER)
         blocks=build_blocks(session,stored,payload)
-        self.assertTrue(any('44640' in str(b) for b in blocks if b[0]=='table'))
+        self.assertFalse(any('Automatic validation' in str(b) for b in blocks if b[0]!='image'))
         self.assertTrue(any(b[0]=='image' and 'Slot 2' in b[1][0] for b in blocks))
         annexure=next(i for i,b in enumerate(blocks) if b==('heading','Annexure 1  Daily Frequency Plots'))
         self.assertFalse(any(b[0]=='table' and b[1][0].startswith('Daily') for b in blocks[:annexure]))
         self.assertEqual(sum(b[0]=='image' and 'Daily frequency curve' in b[1][0] for b in blocks),31)
         self.assertTrue(any(b[0]=='table' and b[1][0].startswith('Annexure 2.1') for b in blocks[annexure:]))
-        self.assertTrue(any(b[0]=='table' and b[1][0].startswith('Annexure 2.2') for b in blocks[annexure:]))
+        self.assertTrue(any(b[0]=='table' and b[1][0].startswith('Annexure 2.1.2') for b in blocks[annexure:]))
         async def contents(response):
             return b''.join([chunk async for chunk in response.body_iterator])
         with patch('services.frequency_monthly_report.build_blocks',return_value=blocks):
@@ -47,7 +47,7 @@ class MonthlyReportTests(unittest.TestCase):
                 if fmt=='docx':
                     document=Document(io.BytesIO(data));text='\n'.join(p.text for p in document.paragraphs)
                     self.assertIn('Reviewed by operator <safe>',text)
-                    self.assertIn('UFR remarks entered by operator',text)
+                    self.assertNotIn('UFR',text)
                     self.assertIn('Annexure 1',text);self.assertNotIn('6,791',text)
                     self.assertTrue(any(s.page_width>s.page_height for s in document.sections))
                     self.assertEqual(len(performance_columns(False)),15)
@@ -89,7 +89,7 @@ class MonthlyReportTests(unittest.TestCase):
         self.assertEqual(len(empty['days']),29)
         self.assertEqual(empty['summary']['covered_minutes'],0)
         self.assertIsNone(empty['summary']['minimum'])
-        self.assertIsNone(empty['slot_rows'][1][0]['thresholds']['49.90']['adverse_minutes'])
+        self.assertEqual(empty['slot_rows'],{})
 
     def test_invalid_reading_and_message_reconciliation(self):
         dataset=fixture();dataset['frequency']=dataset['frequency'].copy();dataset['frequency'][0]=40
@@ -131,3 +131,32 @@ class MonthlyReportTests(unittest.TestCase):
         self.assertEqual(adms_statistics(records),{'due':2,'operated':1,'effectiveness':50})
         self.assertIsNone(adms_statistics([{'condition_met':True}])['operated'])
         self.assertIsNone(adms_statistics([])['effectiveness'])
+
+
+class MonthlyObservationTests(unittest.TestCase):
+    def test_display_formats_do_not_modify_numeric_data(self):
+        from services.frequency_report_formatting import monthly_display
+        self.assertEqual(monthly_display('2026-09 | 2026-09-16T17:00:30 | 6681.00 min'), 'Sep-2026 | 16-Sep-26 17:00 | 6681 min')
+        self.assertEqual(monthly_display(6681.25), 6681.25)
+        row={'date':'2026-09','event':1,'selected_ranges':[], 'entity':'Bihar', 'lowest_frequency':49.876, 'minimum_timestamp':'2026-09-16T17:00:00',
+             'thresholds':{'49.90':{'frequency_minutes':120,'adverse_minutes':30,'adverse_pct':25,'average_od_ui_mw':5.49,'maximum_od_ui_mw':12.51,'message_count':0}}}
+        record=performance_records([row],False)[0]
+        self.assertEqual(record['49.90_adverse'],'30 (25.00%)')
+        self.assertEqual(row['thresholds']['49.90']['frequency_minutes'],120)
+        self.assertIn('Sep-2026',record['period'])
+
+    def test_only_selected_slots_and_no_regional_aggregate(self):
+        original=fixture()
+        import numpy as np
+        original['entities'].append({**original['entities'][0], 'entity_id':'regional', 'display_name':'ER'})
+        frequency=original['frequency'].copy()
+        token=sessions._put(USER,original,{'filename':'Slots test','crms_enabled':False})['session_token']
+        for count in (1,3):
+            ranges=[(f'2026-10-03T17:0{i}:00', f'2026-10-03T17:0{i}:30') for i in range(count)]
+            result=sessions.analyse(token,USER,ranges,db=DB)
+            payload=ResultPayload(session_token=token,result_token=result['result_token'],reporting_month='2026-10')
+            session,stored=sessions.get_result(token,result['result_token'],USER)
+            model=monthly_model(session,stored,payload)
+            self.assertEqual(len(model['slot_rows']),count)
+            self.assertFalse(any(e['display_name']=='ER' for e in model['entities']))
+            np.testing.assert_array_equal(original['frequency'],frequency)
