@@ -271,12 +271,15 @@ def export_result(payload,user):
         for chart_event in events:
             series=chart_event['series']
             if not series['timestamps']:continue
-            image=generate_plot_base64({'series_timestamps':[stamp.replace('T',' ') for stamp in series['timestamps']],
-                'series_deviation':[float('nan') if value is None else value for value in series['deviation']],
-                'series_frequency':[float('nan') if value is None else value for value in series['frequency']],
-                'analysis_chart':True,'is_state':True,'plant_name':chart_event['state'],'crms_messages':chart_event['crms_messages'],'transmission_line_events':chart_event['transmission_line_events']},
-                datetime.fromisoformat(chart_event['start_time']),datetime.fromisoformat(chart_event['end_time']))
-            options['event_charts'].append({'title':chart_event['state']+' | '+chart_event['event_name'],'image':image})
+            try:
+                image=generate_plot_base64({'series_timestamps':[stamp.replace('T',' ') for stamp in series['timestamps']],
+                    'series_deviation':[float('nan') if value is None else value for value in series['deviation']],
+                    'series_frequency':[float('nan') if value is None else value for value in series['frequency']],
+                    'analysis_chart':True,'is_state':True,'plant_name':chart_event['state'],'crms_messages':chart_event['crms_messages'],'transmission_line_events':chart_event['transmission_line_events']},
+                    datetime.fromisoformat(chart_event['start_time']),datetime.fromisoformat(chart_event['end_time']))
+                options['event_charts'].append({'title':chart_event['state']+' | '+chart_event['event_name'],'image':image})
+            except Exception as chart_err:
+                print(f"Skipping chart image for {chart_event.get('state')}: {chart_err}")
         return asyncio.run(download_pdf(options))
     return {'success':True,'supplemental_html':supplements_html([event],options),'stacked_response':{'analysis':True,'title':event['event_name'],'state':states[0]['display_name'] if states else 'Frequency Analysis','states':[e['display_name'] for e in states],'events':events}}
 
