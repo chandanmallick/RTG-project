@@ -183,7 +183,13 @@ def performance_table(model,group,slot,daily=False):
     if group=='Generators':
         cols[1]=('entity','Generator (Agency)')
         entities={e['entity_id']:e for e in model['entities']}
-        rows=[{**r,'entity':r['entity']+'\nAgency: '+value(next((entities[r['entity_id']].get('point',{}).get(k) for k in ('agency_name','owner_name','company_name') if entities[r['entity_id']].get('point',{}).get(k)),None))} for r in rows]
+        updated_rows=[]
+        for r in rows:
+            entity_obj=entities.get(r.get('entity_id'),{})
+            point=entity_obj.get('point') or {}
+            agency=value(next((point.get(k) for k in ('agency_name','owner_name','company_name') if point.get(k)),None))
+            updated_rows.append({**r,'entity':r['entity']+('\nAgency: '+agency if agency!='—' else '')})
+        rows=updated_rows
     return table(f"{'Daily' if daily else 'Monthly'} {group} performance | Slot {slot} | {model['month']} | min, %, MW, Hz",cols,performance_records(rows,False),True)
 
 

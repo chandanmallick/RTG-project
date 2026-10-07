@@ -167,14 +167,14 @@ def monthly_model(session, result, payload):
         ranges = [(iso(max(start,seconds(a))),iso(min(end,seconds(b)))) for a,b in event['ranges'] if seconds(a)<end and seconds(b)>start]
         if ranges: events.append({**event, 'ranges': ranges})
     chronology, warnings = sessions.report_chronology(session, result)
-    chronology = [r for r in chronology if start <= seconds(r['timestamp']) < end]
+    chronology = [r for r in chronology if r.get('timestamp') and start <= seconds(r['timestamp']) < end]
     chronology = [{**r,'frequency_hz':None} if r.get('frequency_hz') is not None and r['frequency_hz']<45 else r for r in chronology]
-    chronology.sort(key=lambda r:(r['timestamp'],r.get('state',''),r.get('message_no','')))
+    chronology.sort(key=lambda r:(r.get('timestamp') or '', r.get('state') or r.get('entity') or '', str(r.get('message_no') or '')))
     available_entities = [e for e in dataset['entities'] if e['group'] in payload.performance_groups]
     entities = list(available_entities) if payload.include_entity_performance else []
     if payload.include_entity_performance and 'State' in payload.performance_groups:
         for name in ('Bihar','DVC','Jharkhand','Odisha','West Bengal','Sikkim'):
-            if not any(e['group']=='State' and e['display_name'].casefold()==name.casefold() for e in entities):
+            if not any(e.get('group')=='State' and (e.get('display_name') or '').casefold()==name.casefold() for e in entities):
                 entities.append({'entity_id':'unavailable:'+name,'display_name':name,'group':'State',
                                  'deviation':np.full(len(frequency),np.nan),'point':{},'unavailable':True})
     summary = frequency_statistics(dataset, full_ranges)

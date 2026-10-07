@@ -116,9 +116,20 @@ def data(model):
     return model.model_dump() if hasattr(model,'model_dump') else model.dict()
 
 
+def _window_bounds(w):
+    if isinstance(w, (list, tuple)): return w[0], w[1]
+    if isinstance(w, dict): return w.get('start_time') or w.get('start'), w.get('end_time') or w.get('end')
+    return getattr(w, 'start_time', getattr(w, 'start', '')), getattr(w, 'end_time', getattr(w, 'end', ''))
+
+
 async def checked(function,*args,**kwargs):
     try:return await run_in_threadpool(function,*args,**kwargs)
+    except HTTPException:raise
     except (ValueError,KeyError,TypeError,zipfile.BadZipFile,InvalidFileException) as exc:raise HTTPException(400,str(exc)) from exc
+    except Exception as exc:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(500,f"Frequency analysis operation failed: {exc}") from exc
 
 
 @router.post('/upload')
@@ -188,14 +199,15 @@ def export_result(payload,user):
     if payload.format not in {'xlsx','docx','html','pdf'}:raise ValueError('Choose HTML, PDF, Excel or Word.')
     if any(group not in sessions.GROUPS for group in payload.performance_groups):raise ValueError('Invalid performance group.')
     if payload.include_entity_performance and not payload.performance_groups:raise ValueError('Select at least one performance group.')
+    event_windows = result.get('event_windows', result['ranges'])
     event={'event_name':session['metadata'].get('filename') or 'Consolidated Frequency Analysis','start_time':result['summary']['analysis_start'],'end_time':result['summary']['analysis_end'],
-        'lowest_frequency':result['summary']['minimum_frequency'],'threshold_analysis':result,'chronology':result['chronology'],'performance':{},'warnings':result['warnings'],'calculation_note':result['calculation_note'],'selection_note':f"Selected windows: {len(result.get('event_windows',result['ranges']))}. Slot patterns (IST): "+', '.join(dict.fromkeys(r['start_time'][11:]+' - '+r['end_time'][11:]+(' (next date)' if r['start_time'][:10]!=r['end_time'][:10] else '') for r in result.get('event_windows',result['ranges'])))}
+        'lowest_frequency':result['summary']['minimum_frequency'],'threshold_analysis':result,'chronology':result['chronology'],'performance':{},'warnings':result['warnings'],'calculation_note':result['calculation_note'],'selection_note':f"Selected windows: {len(event_windows)}. Slot patterns (IST): "+', '.join(dict.fromkeys(str(_window_bounds(r)[0])[11:]+' - '+str(_window_bounds(r)[1])[11:]+(' (next date)' if str(_window_bounds(r)[0])[:10]!=str(_window_bounds(r)[1])[:10] else '') for r in event_windows))}
     options={**data(payload),'supplemental_events':[event],'include_existing_sections':False,'include_threshold_performance':True,'include_analysis_summary':True,
         'compact_html':True,'report_title':'Consolidated Frequency Analysis','start_time':event['start_time'],'end_time':event['end_time'],'rows':[]}
     chronology,physical_warnings=sessions.report_chronology(session,result) if payload.include_chronology else (result['chronology'],[])
     chronology_columns=[('event','Event'),*CHRONOLOGY_COLUMNS]
     event['chronology_columns']=chronology_columns
-    event['chronology']=[{**row,'event':', '.join(str(index) for index,window in enumerate(result.get('event_windows',result['ranges']),1) if window['start_time']<=row['timestamp']<window['end_time']),
+    event['chronology']=[{**row,'event':', '.join(str(index) for index,window in enumerate(event_windows,1) if _window_bounds(window)[0]<=row['timestamp']<_window_bounds(window)[1]),
         'timestamp':row['timestamp'].replace('T',' '),'message_type':' / '.join(row.get('message_categories') or [row['message_type']])} for row in chronology]
     event['warnings']=[*event['warnings'],*physical_warnings]
     categories=message_category_rows(chronology,result['messages_complete'])
@@ -242,8 +254,8 @@ def export_result(payload,user):
     states=[e for e in session['dataset']['entities'] if e['group']=='State']
     events=[]
     for entity in states:
-      for index,window in enumerate(result.get('event_windows',result['ranges']),1):
-        start,end=window['start_time'],window['end_time']
+      for index,window in enumerate(event_windows,1):
+        start,end=_window_bounds(window)
         chart=sessions.chart_points(session['dataset'],[(start,end)],entity['entity_id'],limit=1200)
         points=chart['points']
         messages=[row for row in chronology if row['entity_id']==entity['entity_id'] and start<=row['timestamp']<end]

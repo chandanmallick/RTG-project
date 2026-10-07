@@ -232,7 +232,9 @@ def report_chronology(session,result):
     Keep physical actions separate from messages used by threshold statistics.
     """
     from routes.frequency_routes import get_crms_frequency_transmission_lines,normalize_crms_lookup
-    start,end=result['ranges'][0]['start_time'],result['ranges'][-1]['end_time']
+    first_r, last_r = result['ranges'][0], result['ranges'][-1]
+    start = first_r[0] if isinstance(first_r, (list, tuple)) else first_r.get('start_time') or first_r.get('start')
+    end = last_r[1] if isinstance(last_r, (list, tuple)) else last_r.get('end_time') or last_r.get('end')
     with session['lock']:
         cache=session.get('physical_report')
         if not cache or cache['start']>start or cache['end']<end:
@@ -243,7 +245,7 @@ def report_chronology(session,result):
         response=cache['response']
     warnings=[] if response.get('success') else ['Physical-regulation records are unavailable from CRMS; their coverage is unconfirmed.']
     physical=[];seen=set();dataset=session['dataset'];times=dataset['times']
-    selected=merge_ranges([(r['start_time'],r['end_time']) for r in result['ranges']])
+    selected=merge_ranges([(r[0], r[1]) if isinstance(r, (list, tuple)) else (r.get('start_time') or r.get('start'), r.get('end_time') or r.get('end')) for r in result['ranges']])
     for action in [*(dataset.get('physical_actions') or []),*(response.get('events') or [])]:
         try:moment=seconds(action.get('timestamp') or action.get('outage_date_time'))
         except (ValueError,TypeError):continue
@@ -252,7 +254,8 @@ def report_chronology(session,result):
         matched={entity['entity_id']:entity for name in names for entity in session.get('report_aliases',{}).get(normalize_crms_lookup(name),[]) if entity['group']=='State'}
         if action.get('recipient_identity'):
             for entity in dataset['entities']:
-                point=entity['point'];identity=f"{point.get('plant_id')}:{point.get('stage_id') or point.get('STAGE_ID') or ''}"
+                point=entity.get('point') or {}
+                identity=f"{point.get('plant_id')}:{point.get('stage_id') or point.get('STAGE_ID') or ''}"
                 if entity['group']=='State' and identity==action['recipient_identity']:matched[entity['entity_id']]=entity
         for entity in matched.values():
             key=(entity['entity_id'],iso(moment),action.get('line_name'))
@@ -265,12 +268,12 @@ def report_chronology(session,result):
                 'frequency_hz':float(freq) if np.isfinite(freq) else None,'deviation_mw':float(dev) if np.isfinite(dev) else None,
                 'message_type':'Physical Regulation','message_no':'','message_details':str(action.get('line_name') or '')+' | '+str(action.get('reason') or ''),
                 'record_kind':'physical','action':action})
-    return sorted([*result['chronology'],*physical],key=lambda r:(r['timestamp'],r['state'],r.get('message_no',''))),warnings
+    return sorted([*result['chronology'],*physical],key=lambda r:(r.get('timestamp') or '', r.get('state') or r.get('entity') or '', str(r.get('message_no') or ''))),warnings
 
 
 def result_chart(token,result_token,user,entity_id):
     session,result=get_result(token,result_token,user)
-    return chart_points(session['dataset'],[(r['start_time'],r['end_time']) for r in result['ranges']],entity_id)
+    return chart_points(session['dataset'],[(r[0], r[1]) if isinstance(r, (list, tuple)) else (r.get('start_time') or r.get('start'), r.get('end_time') or r.get('end')) for r in result['ranges']],entity_id)
 
 
 def period_windows(result,view='event'):
@@ -282,7 +285,9 @@ def period_windows(result,view='event'):
     if view not in {'day','event'}:raise ValueError('Choose day, event or monthly statistics.')
     days={}
     for window in result.get('event_windows',result['ranges']):
-        start,end=seconds(window['start_time']),seconds(window['end_time'])
+        w_start = window[0] if isinstance(window, (list, tuple)) else window.get('start_time') or window.get('start')
+        w_end = window[1] if isinstance(window, (list, tuple)) else window.get('end_time') or window.get('end')
+        start,end=seconds(w_start),seconds(w_end)
         while start<end:
             day=iso(start)[:10];edge=min(end,(np.floor(start/86400)+1)*86400)
             days.setdefault(day,[]).append((start,edge));start=edge
