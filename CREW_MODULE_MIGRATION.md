@@ -660,6 +660,23 @@ edited before export. Wide performance tables use landscape pages with repeated
 headers. Owner-scoped cached arrays and the existing chronology/calculation
 services supply results without rereading Curve or uploaded workbooks. Existing
 legacy export behavior is retained for callers that do not select this layout.
+Monthly Low exports accept `reporting_month` (`YYYY-MM`). The pure
+`frequency_monthly_data` model clips prepared sources to that calendar month,
+keeps Slot 1/2 (and additional selections) independent, and validates day/minute
+coverage, strict threshold hierarchy, covered-time percentages and category
+counts. `frequency_monthly_components` supplies individual tables and plots.
+The main report contains monthly summaries, duration/severity plots, monthly
+State/generator slot tables, separate maximum-OD and OD-duration heatmaps,
+message summaries and ADMS/UFR sections. Daily frequency tables/curves occur
+only in Annexure 1; daily State slot tables in Annexures 2.1/2.2; State OD/message
+plots in Annexure 2.3; chronological slot/day messages and physical regulation
+in Annexure 4. Missing days, unmapped required states and unavailable fields
+remain visible as em dashes. Calendar coverage is distinct from percentages
+of valid frequency minutes. ADMS/UFR tables accept explicit structured source
+operations only; outages and operator prose are never inferred as operations.
+Existing sources currently do not supply structured ADMS/UFR operations, so
+those tables show unavailable data and the operator remarks remain editable.
+No sample numbers from the retained Word reference enter calculations.
 `frequency_compact_reports` reuses cached calculations and existing Excel/PDF/
 Word engines, returning table-only HTML without ECharts, source arrays or graphs.
 It includes overall/event frequency statistics (minutes plus percentages),

@@ -83,6 +83,9 @@ def series(dataset,ranges,entity=None):
 
 
 def build_blocks(session,result,payload):
+    if result.get('event_type', 'low') == 'low':
+        from services.frequency_monthly_components import build_low_blocks
+        return build_low_blocks(session, result, payload)
     high=result.get('event_type')=='high';label='HIGH' if high else 'LOW';dataset=session['dataset']
     tables,warnings=report_tables(session,result,payload)
     events=sessions.period_windows(result,'event')
@@ -226,18 +229,31 @@ def performance_columns(high):
 
 
 def performance_records(rows,high):
+    from services.frequency_monthly_components import value
     output=[]
     for row in rows:
         intervals=list(dict.fromkeys(a[11:16]+'–'+b[11:16] for a,b in row['selected_ranges']))
-        r={'period':row['date']+(f" / Event {row['event']}" if row['event'] else ' / Monthly')+'\n'+'; '.join(intervals),'entity':row['entity'],'minimum':f"{number(row.get('highest_frequency') if high else row['lowest_frequency'])}\n"+(row.get('minimum_timestamp','') if not high else '')}
+        r={'period':row['date']+(f" / Slot {row['event']}" if row['event'] else ' / Monthly')+'\n'+'; '.join(intervals),'entity':row['entity'],'minimum':f"{value(row.get('highest_frequency') if high else row['lowest_frequency'],3)}\n"+value(row.get('minimum_timestamp') if not high else None)}
+        if row.get('lowest_frequency') is None:r['minimum']='—'
         for level,v in row['thresholds'].items():
-            r.update({level+'_adverse':f"{number(v['frequency_minutes'])} / {number(v['adverse_minutes'])} ({number(v['adverse_pct'])}%)",level+'_average':number(v['average_od_ui_mw']),level+'_maximum':number(v['maximum_od_ui_mw']),level+'_messages':number(v['message_count'])})
+            r.update({level+'_adverse':f"{value(v['frequency_minutes'])} / {value(v['adverse_minutes'])} ({value(v['adverse_pct'])}%)",level+'_average':value(v['average_od_ui_mw']),level+'_maximum':value(v['maximum_od_ui_mw']),level+'_messages':value(v['message_count'],0)})
+            if v['frequency_minutes'] is None:r[level+'_adverse']='—'
         output.append(r)
     return output
 
 
 def grouped_header(cols):
     return len(cols)>3 and cols[0][0]=='period' and cols[3][0].endswith('_adverse')
+
+
+def block_landscape(blocks, position, current):
+    kind,value=blocks[position]
+    if kind=='table':return value[3]
+    if kind=='text':return current
+    if kind=='heading':
+        following=next((b for b in blocks[position+1:] if b[0]!='text'),None)
+        return bool(following and following[0]=='table' and following[1][3])
+    return False
 
 
 def render_word(blocks):
@@ -257,6 +273,8 @@ def render_word(blocks):
         style=doc.styles[name];style.font.name='Calibri';style.font.color.rgb=RGBColor(0,0,0)
     doc.styles['Normal'].font.size=Pt(10);doc.styles['Normal'].paragraph_format.space_after=Pt(6)
     doc.styles['Title'].font.size=Pt(21);doc.styles['Heading 1'].font.size=Pt(14)
+    doc.styles['Title'].font.color.rgb=RGBColor.from_string('203B63');doc.styles['Title'].font.bold=True
+    doc.styles['Heading 1'].font.color.rgb=RGBColor.from_string('005474')
     footer=doc.sections[0].footer.paragraphs[0]
     footer.text='Frequency Operation Report | IST | Page '
     page_field=OxmlElement('w:fldSimple');page_field.set(qn('w:instr'),'PAGE');footer._p.append(page_field)
@@ -290,31 +308,39 @@ def render_word(blocks):
                 for at in range(3):table.cell(0,at).merge(table.cell(1,at)).text=cols[at][1]
                 for at in range(3,len(cols),4):
                     table.cell(0,at).merge(table.cell(0,at+3)).text=('>' if cols[at][0].startswith('50.') else '<')+cols[at][0].split('_')[0]+' Hz'
-                    for offset,label in enumerate(['Frequency min / Adverse min (%)','Average MW','Maximum MW','Violation messages']):table.cell(1,at+offset).text=label
+                    for offset,label in enumerate(['Freq min / OD/UI min (%)','Avg MW','Max MW','Messages']):table.cell(1,at+offset).text=label
             else:
                 for c,(_,label) in zip(table.rows[0].cells,cols):c.text=label
             for header_row in list(table.rows)[:2 if grouped else 1]:
                 repeat=OxmlElement('w:tblHeader');header_row._tr.get_or_add_trPr().append(repeat)
             for row in rows:
-                for c,(key,_) in zip(table.add_row().cells,cols):c.text=number(row.get(key))
+                for c,(key,_) in zip(table.add_row().cells,cols):c.text=number(row.get(key)) if row.get(key) is not None else '—'
             for i,row in enumerate(table.rows):
-                for cell in row.cells:
+                for cell_index,cell in enumerate(row.cells):
                     is_header=i<(2 if grouped else 1)
-                    shade=OxmlElement('w:shd');shade.set(qn('w:fill'),'203B63' if is_header else ('EFF3F7' if i%2==0 else 'FFFFFF'));cell._tc.get_or_add_tcPr().append(shade)
+                    subheader=grouped and i==1 and cell_index>=3
+                    shade=OxmlElement('w:shd');shade.set(qn('w:fill'),'DBEAF4' if subheader else '203B63' if is_header else ('EFF3F7' if i%2==0 else 'FFFFFF'));cell._tc.get_or_add_tcPr().append(shade)
                     for p in cell.paragraphs:
                         p.paragraph_format.space_after=Pt(3)
-                        for run in p.runs:run.font.size=Pt(7 if len(cols)>10 else 9);run.font.bold=is_header;run.font.color.rgb=RGBColor.from_string('FFFFFF' if is_header else '000000')
+                        if title.startswith('Monthly ') and 'performance | Slot' in title and len(rows)<=10:
+                            p.paragraph_format.keep_with_next=i<len(table.rows)-1
+                        for run in p.runs:run.font.size=Pt(7 if len(cols)>10 else 9);run.font.bold=is_header;run.font.color.rgb=RGBColor.from_string('203B63' if subheader else 'FFFFFF' if is_header else '000000')
         else:
             next_block=blocks[position+1] if position+1<len(blocks) else None
-            orientation(bool(kind=='heading' and next_block and next_block[0]=='table' and next_block[1][3]))
+            was_landscape=landscape
+            orientation(block_landscape(blocks,position,landscape))
             if kind=='title':doc.add_paragraph(value,'Title')
-            elif kind=='heading':doc.add_heading(value,1)
+            elif kind=='heading':
+                p=doc.add_heading(value,1)
+                if value.startswith('Annexure') and was_landscape==landscape:p.paragraph_format.page_break_before=True
             elif kind=='text':
                 p=doc.add_paragraph(value)
                 if next_block and next_block[0]=='image':p.paragraph_format.keep_with_next=True
             elif kind=='image':
                 title,data=value;p=doc.add_paragraph(title);p.paragraph_format.keep_with_next=True
-                doc.add_picture(BytesIO(data),width=Inches(6.75))
+                from PIL import Image as PILImage
+                with PILImage.open(BytesIO(data)) as picture:ratio=picture.height/picture.width
+                doc.add_picture(BytesIO(data),width=Inches(min(6.75,8.4/ratio)))
     doc.core_properties.title=blocks[0][1];doc.core_properties.author=''
     output=BytesIO();doc.save(output);output.seek(0);return output
 
@@ -326,11 +352,13 @@ def render_pdf(blocks):
     from reportlab.lib.pagesizes import A4,landscape
     output=BytesIO();styles=getSampleStyleSheet();styles['Title'].fontSize=21;styles['Title'].textColor=colors.black
     styles['BodyText'].fontSize=10;styles['BodyText'].leading=14
-    styles['Heading1'].fontSize=14;styles['Heading1'].textColor=colors.black
+    styles['Title'].textColor=colors.HexColor('#203B63')
+    styles['Heading1'].fontSize=14;styles['Heading1'].textColor=colors.HexColor('#005474')
     styles['Heading1'].keepWithNext=styles['Heading2'].keepWithNext=True
     from reportlab.lib.styles import ParagraphStyle
     cell=ParagraphStyle('cell',fontName='Helvetica',fontSize=7,leading=9)
     header=ParagraphStyle('header',parent=cell,textColor=colors.white,fontName='Helvetica-Bold')
+    subheader=ParagraphStyle('subheader',parent=header,textColor=colors.HexColor('#203B63'))
     def para(text,style):return Paragraph(escape(str(text)).replace('\n','<br/>'),style)
     def footer(canvas,doc):
         canvas.setFont('Helvetica',8);canvas.setFillColor(colors.HexColor('#64748b'));canvas.drawString(40,25,'Frequency Operation Report | IST');canvas.drawRightString(canvas._pagesize[0]-40,25,str(doc.page))
@@ -338,17 +366,23 @@ def render_pdf(blocks):
     for name,size in [('portrait',A4),('landscape',landscape(A4))]:doc.addPageTemplates(PageTemplate(id=name,frames=[Frame(40,42,size[0]-80,size[1]-82,id=name)],pagesize=size,onPage=footer))
     story=[];wide=False
     for position,(kind,value) in enumerate(blocks):
-        desired=value[3] if kind=='table' else False
-        if kind=='heading' and position+1<len(blocks) and blocks[position+1][0]=='table':desired=blocks[position+1][1][3]
+        desired=block_landscape(blocks,position,wide)
         if desired!=wide:story.extend([NextPageTemplate('landscape' if desired else 'portrait'),PageBreak()]);wide=desired
         width=(landscape(A4) if wide else A4)[0]-80
         if kind in ('title','heading','text'):
+            if kind=='heading' and value.startswith('Annexure') and story and not isinstance(story[-1],PageBreak):story.append(PageBreak())
             paragraph=para(value,styles[{'title':'Title','heading':'Heading1','text':'BodyText'}[kind]])
             spacing=Spacer(1,8)
             if kind in ('title','heading') or position+1<len(blocks) and blocks[position+1][0]=='image':paragraph.keepWithNext=spacing.keepWithNext=True
             story.extend([paragraph,spacing])
         elif kind=='image':
-            title,data=value;story.extend([KeepTogether([para(title,styles['Heading2']),Image(BytesIO(data),width=width,height=width*3.1/9.6)]),Spacer(1,10)])
+            from PIL import Image as PILImage
+            title,data=value
+            with PILImage.open(BytesIO(data)) as picture:ratio=picture.height/picture.width
+            image_width=min(width,620/ratio)
+            prefix=[]
+            if position and blocks[position-1][0]=='heading':prefix=story[-2:];del story[-2:]
+            story.extend([KeepTogether([*prefix,para(title,styles['Heading2']),Image(BytesIO(data),width=image_width,height=image_width*ratio)]),Spacer(1,10)])
         elif kind=='table':
             title,cols,rows,_=value;story.append(para(title,styles['Heading2']))
             if not rows:story.append(para('No records available for this section.',styles['BodyText']));continue
@@ -359,14 +393,15 @@ def render_pdf(blocks):
                 for at in range(3,len(cols),4):
                     first[at]=para(('>' if cols[at][0].startswith('50.') else '<')+cols[at][0].split('_')[0]+' Hz',header)
                     spans.append(('SPAN',(at,0),(at+3,0)))
-                    second.extend(para(label,header) for label in ['Frequency min / Adverse min (%)','Average MW','Maximum MW','Violation messages'])
+                    second.extend(para(label,subheader) for label in ['Freq min / OD/UI min (%)','Avg MW','Max MW','Messages'])
                 spans.extend(('SPAN',(at,0),(at,1)) for at in range(3));data=[first,second]
             else:data=[[para(label,header) for _,label in cols]]
-            data.extend([[para(number(row.get(key)),cell) for key,_ in cols] for row in rows])
+            data.extend([[para(number(row.get(key)) if row.get(key) is not None else '—',cell) for key,_ in cols] for row in rows])
             weights=[2 if key in ('entity','period','message_details','value','timestamp','minimum') else 1 for key,_ in cols]
             count=2 if grouped else 1
+            header_background=[('BACKGROUND',(3,1),(-1,1),colors.HexColor('#DBEAF4'))] if grouped else []
             t=LongTable(data,colWidths=[width*w/sum(weights) for w in weights],repeatRows=count,splitByRow=1,splitInRow=1)
-            t.setStyle(TableStyle([*spans,('BACKGROUND',(0,0),(-1,count-1),colors.HexColor('#203B63')),('ROWBACKGROUNDS',(0,count),(-1,-1),[colors.white,colors.HexColor('#eff3f7')]),('GRID',(0,0),(-1,-1),.35,colors.HexColor('#d9d9d9')),('VALIGN',(0,0),(-1,-1),'MIDDLE'),('LEFTPADDING',(0,0),(-1,-1),5),('RIGHTPADDING',(0,0),(-1,-1),5),('TOPPADDING',(0,0),(-1,-1),5),('BOTTOMPADDING',(0,0),(-1,-1),5)]));story.extend([t,Spacer(1,12)])
+            t.setStyle(TableStyle([*spans,('BACKGROUND',(0,0),(-1,count-1),colors.HexColor('#203B63')),*header_background,('ROWBACKGROUNDS',(0,count),(-1,-1),[colors.white,colors.HexColor('#eff3f7')]),('GRID',(0,0),(-1,-1),.35,colors.HexColor('#d9d9d9')),('VALIGN',(0,0),(-1,-1),'MIDDLE'),('LEFTPADDING',(0,0),(-1,-1),5),('RIGHTPADDING',(0,0),(-1,-1),5),('TOPPADDING',(0,0),(-1,-1),5),('BOTTOMPADDING',(0,0),(-1,-1),5)]));story.extend([t,Spacer(1,12)])
     doc.build(story);output.seek(0);return output
 
 

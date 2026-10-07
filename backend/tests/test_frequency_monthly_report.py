@@ -6,6 +6,7 @@ from docx import Document
 from test_frequency_threshold_analysis import fixture, USER, DB
 from services import frequency_analysis_sessions as sessions
 from services.frequency_monthly_report import build_blocks, performance_columns
+from services.frequency_monthly_data import monthly_model, frequency_statistics, message_summary, frequency_heatmap
 from routes.frequency_analysis_routes import ResultPayload, export_result
 
 
@@ -21,8 +22,13 @@ class MonthlyReportTests(unittest.TestCase):
         payload=ResultPayload(session_token=result['session_token'],result_token=result['result_token'],layout='monthly-template',include_chronology=False,report_text={'executive_summary':'Reviewed by operator <safe>','adms_ufr_remarks':'UFR remarks entered by operator'})
         session,stored=sessions.get_result(payload.session_token,payload.result_token,USER)
         blocks=build_blocks(session,stored,payload)
-        self.assertTrue(any('1440' in str(b) for b in blocks if b[0]=='text'))
-        self.assertTrue(any(b[0]=='image' and 'Event 2' in b[1][0] for b in blocks))
+        self.assertTrue(any('44640' in str(b) for b in blocks if b[0]=='table'))
+        self.assertTrue(any(b[0]=='image' and 'Slot 2' in b[1][0] for b in blocks))
+        annexure=next(i for i,b in enumerate(blocks) if b==('heading','Annexure 1  Daily Frequency Plots'))
+        self.assertFalse(any(b[0]=='table' and b[1][0].startswith('Daily') for b in blocks[:annexure]))
+        self.assertEqual(sum(b[0]=='image' and 'Daily frequency curve' in b[1][0] for b in blocks),31)
+        self.assertTrue(any(b[0]=='table' and b[1][0].startswith('Annexure 2.1') for b in blocks[annexure:]))
+        self.assertTrue(any(b[0]=='table' and b[1][0].startswith('Annexure 2.2') for b in blocks[annexure:]))
         async def contents(response):
             return b''.join([chunk async for chunk in response.body_iterator])
         with patch('services.frequency_monthly_report.build_blocks',return_value=blocks):
@@ -47,3 +53,59 @@ class MonthlyReportTests(unittest.TestCase):
         payload.format='pdf'
         with self.assertRaises(Exception) as caught:export_result(payload,{'employeeId':'other'})
         self.assertEqual(caught.exception.status_code,404)
+
+    def test_month_selection_missing_days_and_independent_slots(self):
+        result=self.result();payload=ResultPayload(session_token=result['session_token'],result_token=result['result_token'],reporting_month='2026-10')
+        session,stored=sessions.get_result(payload.session_token,payload.result_token,USER)
+        model=monthly_model(session,stored,payload)
+        self.assertEqual(len(model['days']),31)
+        self.assertEqual(model['summary']['covered_days'],1)
+        self.assertNotEqual(model['slot_rows'][1][0]['thresholds'],model['slot_rows'][2][0]['thresholds'])
+        self.assertEqual(model['slot_rows'][1][0]['selected_ranges'],[('2026-10-03T17:00:00','2026-10-03T17:01:00')])
+        self.assertEqual(model['slot_rows'][2][0]['selected_ranges'],[('2026-10-03T17:02:00','2026-10-03T17:03:00')])
+        payload.reporting_month='2028-02';empty=monthly_model(session,stored,payload)
+        self.assertEqual(len(empty['days']),29)
+        self.assertEqual(empty['summary']['covered_minutes'],0)
+        self.assertIsNone(empty['summary']['minimum'])
+        self.assertIsNone(empty['slot_rows'][1][0]['thresholds']['49.90']['adverse_minutes'])
+
+    def test_invalid_reading_and_message_reconciliation(self):
+        dataset=fixture();dataset['frequency']=dataset['frequency'].copy();dataset['frequency'][0]=40
+        stats=frequency_statistics(dataset,[('2026-10-03T17:00:00','2026-10-03T17:03:00')])
+        self.assertGreaterEqual(stats['minimum'],45)
+        self.assertAlmostEqual(stats['normal_percent']+stats['above_percent']+stats['thresholds']['49.90']['percent'],100)
+        entity=dataset['entities'][0]
+        message={'entity_id':entity['entity_id'],'timestamp':'2026-10-03T17:00:00','message_no':'1','message_categories':['Alert','Warning']}
+        rows,_=message_summary([entity],[message,message],True)
+        self.assertEqual(rows[0]['total'],2)
+        self.assertEqual(rows[0]['Alert'],1)
+        self.assertEqual(rows[0]['Warning'],1)
+
+    def test_heatmap_uses_daily_weighted_duration_not_maximum_event_percent(self):
+        import numpy as np
+        dataset=fixture();dataset['entities'][0]['deviation']=np.array([10,0,10,10,10],dtype=float)
+        token=sessions._put(USER,dataset,{'filename':'weights','crms_enabled':False})['session_token']
+        result=sessions.analyse(token,USER,[('2026-10-03T17:00:00','2026-10-03T17:01:00'),('2026-10-03T17:02:00','2026-10-03T17:03:00')],db=DB)
+        payload=ResultPayload(session_token=token,result_token=result['result_token'])
+        session,stored=sessions.get_result(token,result['result_token'],USER)
+        model=monthly_model(session,stored,payload)
+        self.assertAlmostEqual(model['state_heatmaps']['duration'][0][2],100*1/1.5,places=5)
+        self.assertIsNone(model['state_heatmaps']['duration'][0][0])
+        self.assertIsNone(model['state_heatmaps']['maximum'][1][2])
+
+    def test_midnight_does_not_add_an_excursion(self):
+        from services.frequency_threshold_analysis import timeline
+        times,frequency,cadence=timeline(['2026-10-01T23:59:30','2026-10-02T00:00:00'],[49.8,49.8])
+        dataset={'times':times,'frequency':frequency,'cadence':cadence}
+        days=[{'date':'2026-10-01','ranges':[('2026-10-01T00:00:00','2026-10-02T00:00:00')]},
+              {'date':'2026-10-02','ranges':[('2026-10-02T00:00:00','2026-10-03T00:00:00')]}]
+        heat=frequency_heatmap(dataset,days)
+        self.assertEqual(sum(heat['occurrences']),1)
+        self.assertEqual(heat['occurrences'][23],1)
+
+    def test_adms_operations_are_not_inferred_from_record_count(self):
+        from services.frequency_monthly_data import adms_statistics
+        records=[{'condition_met':True,'actually_operated':True},{'condition_met':True,'actually_operated':False}]
+        self.assertEqual(adms_statistics(records),{'due':2,'operated':1,'effectiveness':50})
+        self.assertIsNone(adms_statistics([{'condition_met':True}])['operated'])
+        self.assertIsNone(adms_statistics([])['effectiveness'])

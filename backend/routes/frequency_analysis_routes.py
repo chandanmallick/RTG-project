@@ -108,6 +108,7 @@ class ResultPayload(BaseModel):
     entity_offset:int=0
     entity_limit:int=10
     layout:str='legacy'
+    reporting_month:Optional[str]=Field(default=None,pattern=r'^\d{4}-(0[1-9]|1[0-2])$')
     report_text:ReportText=Field(default_factory=ReportText)
 
 

@@ -25,6 +25,8 @@ export default function FrequencyAnalysisResults({ result, saveBlob, onHtmlRepor
   const [sections, setSections] = useState({ include_chronology: true, include_entity_performance: true, performance_groups: GROUPS });
   const [reportText, setReportText] = useState({ executive_summary: "", general_notes: "", state_observations: "", generator_observations: "", chronology_notes: "", adms_ufr_remarks: "" });
   const [editReportText, setEditReportText] = useState(false);
+  const [reportingMonth, setReportingMonth] = useState(result?.summary?.analysis_start?.slice(0, 7) || "");
+  useEffect(() => { setReportingMonth(result?.summary?.analysis_start?.slice(0, 7) || ""); }, [result?.result_token]);
   const chartCache = useRef(new Map());
   const tableCache = useRef(new Map());
   const session = result?.session_token, token = result?.result_token;
@@ -63,10 +65,10 @@ export default function FrequencyAnalysisResults({ result, saveBlob, onHtmlRepor
   const generate = async (format, downloadHtml = false) => {
     setExporting(true); setError("");
     try {
-      const response = await API.exportFrequencyAnalysis({ session_token: session, result_token: token, format, layout: ["pdf", "docx"].includes(format) ? "monthly-template" : "compact", report_text: reportText, ...sections });
+      const response = await API.exportFrequencyAnalysis({ session_token: session, result_token: token, format, layout: ["pdf", "docx"].includes(format) ? "monthly-template" : "compact", reporting_month: !high && ["pdf", "docx"].includes(format) ? reportingMonth || null : null, report_text: reportText, ...sections });
       if (format === "html" && downloadHtml) await saveBlob(new Blob([response.html_document],{type:"text/html;charset=utf-8"}),`Frequency_Analysis_${result.event_type || "low"}.html`);
       else if (format === "html") await onHtmlReport(response);
-      else await saveBlob(response, ["pdf", "docx"].includes(format) ? `Frequency_Operation_Report_${summary.analysis_start?.slice(0, 10)}_${summary.analysis_end?.slice(0, 10)}.${format}` : `Consolidated_Frequency_Analysis.${format}`);
+      else await saveBlob(response, ["pdf", "docx"].includes(format) ? `Frequency_Operation_Report_${!high && reportingMonth ? reportingMonth : summary.analysis_start?.slice(0, 10)}.${format}` : `Consolidated_Frequency_Analysis.${format}`);
     } catch (err) {
       let detail = err?.response?.data?.detail || err.message;
       if (err?.response?.data instanceof Blob) { try { detail = JSON.parse(await err.response.data.text()).detail || detail; } catch {} }
@@ -83,6 +85,7 @@ export default function FrequencyAnalysisResults({ result, saveBlob, onHtmlRepor
     <Typography sx={{ fontSize: 11, color: "#64748B", my: 1 }}>{result.calculation_note}</Typography>
     <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>{[["include_chronology", "Chronology"], ["include_entity_performance", "Entity Performance"]].map(([key, label]) => <FormControlLabel key={key} control={<Checkbox size="small" checked={sections[key]} disabled={exporting} onChange={event => setSections(current => ({ ...current, [key]: event.target.checked }))} />} label={label} />)}{GROUPS.map(item => <FormControlLabel key={item} control={<Checkbox size="small" checked={sections.performance_groups.includes(item)} disabled={exporting || !sections.include_entity_performance} onChange={() => setSections(current => ({ ...current, performance_groups: current.performance_groups.includes(item) ? current.performance_groups.filter(group => group !== item) : [...current.performance_groups, item] }))} />} label={item} />)}</Stack>
     <Button size="small" disabled={exporting} onClick={() => setEditReportText(value => !value)}>{editReportText ? "Hide report text" : "Edit Word / PDF report text"}</Button>
+    {!high && <TextField type="month" size="small" label="Word / PDF reporting month" value={reportingMonth} disabled={exporting} onChange={event => setReportingMonth(event.target.value)} InputLabelProps={{ shrink: true }} helperText="Uses prepared data for this calendar month. Missing days are listed in coverage checks." sx={{ my: 1, minWidth: 280 }} />}
     {editReportText && <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "1fr 1fr" }, gap: 2, my: 2 }}>{[["executive_summary", "Executive summary"], ["general_notes", "General notes"], ["state_observations", "State performance observations"], ["generator_observations", "ISGS / IPP observations"], ["chronology_notes", "Actions and chronology notes"], ["adms_ufr_remarks", "ADMS / UFR remarks"]].map(([key, label]) => <TextField key={key} label={label} multiline minRows={3} value={reportText[key]} disabled={exporting} inputProps={{ maxLength: 6000 }} helperText="Included in Word and PDF. Leave blank to omit optional commentary." onChange={event => setReportText(current => ({ ...current, [key]: event.target.value }))} />)}</Box>}
     <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap sx={{ mb: 2 }}>{["html", "pdf", "xlsx", "docx"].map(format => <Button key={format} size="small" variant="outlined" disabled={exporting} onClick={() => generate(format)}>{format === "html" ? "HTML Report" : format === "pdf" ? "Download PDF" : format === "xlsx" ? "Download Excel" : "Download Word"}</Button>)}<Button size="small" variant="outlined" disabled={exporting} onClick={()=>generate("html",true)}>Download HTML</Button>{exporting && <CircularProgress size={20} />}</Stack>
     <Stack direction="row" justifyContent="space-between" alignItems="center"><Tabs value={group} onChange={(_, value) => { setGroup(value); setPage(0); }}>{[...GROUPS, "Chronology", "Message Categories"].map(item => <Tab key={item} value={item} label={item} />)}</Tabs>{GROUPS.includes(group) && <FormControlLabel control={<Checkbox checked={detail} onChange={event => { setDetail(event.target.checked); setPage(0); }} size="small" />} label="15-minute detail" />}</Stack>
