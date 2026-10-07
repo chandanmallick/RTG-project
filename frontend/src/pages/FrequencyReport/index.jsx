@@ -16,7 +16,7 @@ import FrequencyPreAnalysis from "./components/FrequencyPreAnalysis";
 import SavedEventReports from "./components/SavedEventReports";
 import LongPeriodAnalysis from "./components/LongPeriodAnalysis";
 import FrequencyAnalysisResults from "./components/FrequencyAnalysisResults";
-import { Tabs, Tab, Dialog, DialogTitle, DialogContent, IconButton } from "@mui/material";
+import { Tabs, Tab, Dialog, DialogTitle, DialogContent, IconButton, Typography } from "@mui/material";
 import ExecutiveSummary from "./components/ExecutiveSummary";
 import StateComplianceTable from "./components/StateComplianceTable";
 import GeneratorComplianceTable from "./components/GeneratorComplianceTable";
