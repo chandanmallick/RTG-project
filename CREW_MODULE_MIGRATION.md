@@ -633,7 +633,33 @@ mean is below 49.90 Hz. Selected low-frequency minutes as a share of 1,440 minut
 in API summaries; this does not estimate unobserved hours. UFR records are
 not inferred. HTML/PDF/Excel/Word add
 daily and event frequency/entity statistics through the existing report engines.
-The consolidated/long-period UI requests `layout=compact` for all exports.
+Automatic preparation now sits inside `FrequencyPreAnalysis` after cursor/manual
+period selection, reusing `LongPeriodAnalysis` in preparation-only mode. Curve
+dates drive WBES/RTG/MIS/CRMS fetching; one blanket upload or fetched session can
+serve multiple selected events, with optional per-event upload overrides. The
+standalone automatic preparation panel has been removed; long-period daily-slot
+analysis remains separate. `POST /api/frequency/analysis/save-periods` validates
+owner-scoped sessions and saves clipped datasets through the shared existing
+event writer into `frequency_events`, preserving second-level bounds, null
+readings, messages and physical actions. It returns per-period save errors and
+refreshes the saved-report list. Existing records are reused; retry IDs remain
+stable. A one-hour bounded Curve-series cache bridges overview and source fetch;
+explicit Refresh Curve bypasses it. Tests use isolated in-memory DB collections.
+
+The consolidated/long-period UI requests `layout=compact` for HTML/Excel and
+`layout=monthly-template` for Word/PDF. `frequency_monthly_report` uses the
+retained `backend/report_templates/frequency_monthly.docx` reference and a common
+report model for both formats: operator-editable summary/notes/ADMS/UFR remarks,
+full-calendar frequency coverage and cumulative duration curves, daily/event
+plots, frequency and adverse-deviation heat maps, horizontal deviation bars,
+grouped three-threshold tables, monthly and daily-window State/ISGS/IPP
+performance, recipient/category messages and event chronology with physical
+regulation. Full-day and selected-event denominators are separately labelled;
+missing coverage remains unavailable. Text fields are bounded plain text and
+edited before export. Wide performance tables use landscape pages with repeated
+headers. Owner-scoped cached arrays and the existing chronology/calculation
+services supply results without rereading Curve or uploaded workbooks. Existing
+legacy export behavior is retained for callers that do not select this layout.
 `frequency_compact_reports` reuses cached calculations and existing Excel/PDF/
 Word engines, returning table-only HTML without ECharts, source arrays or graphs.
 It includes overall/event frequency statistics (minutes plus percentages),

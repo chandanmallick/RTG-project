@@ -62,10 +62,35 @@ class FetchSourcesPayload(BaseModel):
     session_token:Optional[str]=None
 
 
+class PreparedPeriod(Period):
+    event_type:str='low'
+    session_token:Optional[str]=None
+    event_id:Optional[str]=None
+
+
+class SavePeriodsPayload(BaseModel):
+    periods:List[PreparedPeriod]
+
+
+@router.post('/save-periods')
+async def save_periods(payload:SavePeriodsPayload,user=Depends(get_authenticated_user)):
+    from services.frequency_event_preparation import save_periods as persist
+    return await checked(persist,[data(p) for p in payload.periods],user)
+
+
 @router.post('/fetch-sources')
 async def fetch_sources(payload:FetchSourcesPayload,user=Depends(get_authenticated_user)):
     from services.frequency_auto_sources import fetch_sources
     return await checked(fetch_sources,payload,user)
+
+
+class ReportText(BaseModel):
+    executive_summary:str=Field(default='',max_length=6000)
+    general_notes:str=Field(default='',max_length=6000)
+    state_observations:str=Field(default='',max_length=6000)
+    generator_observations:str=Field(default='',max_length=6000)
+    chronology_notes:str=Field(default='',max_length=6000)
+    adms_ufr_remarks:str=Field(default='',max_length=6000)
 
 
 class ResultPayload(BaseModel):
@@ -83,6 +108,7 @@ class ResultPayload(BaseModel):
     entity_offset:int=0
     entity_limit:int=10
     layout:str='legacy'
+    report_text:ReportText=Field(default_factory=ReportText)
 
 
 def data(model):
@@ -146,6 +172,10 @@ async def chart(payload:ResultPayload,user=Depends(get_authenticated_user)):
 
 
 def export_result(payload,user):
+    if payload.layout=='monthly-template':
+        if payload.format not in {'docx','pdf'}:raise ValueError('Monthly template supports Word and PDF.')
+        from services.frequency_monthly_report import export_monthly
+        return export_monthly(payload,user)
     if payload.layout=='compact' or payload.format=='html' and payload.layout!='legacy':
         from services.frequency_compact_reports import export_compact
         return export_compact(payload,user)

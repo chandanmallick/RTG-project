@@ -463,7 +463,6 @@ const FrequencyOnlyChart = React.forwardRef(function FrequencyOnlyChart({ row, s
 export default function FrequencyReport() {
   const [tab, setTab] = useState("report");
   const [analysisMode, setAnalysisMode] = useState("automatic");
-  const [automaticSource,setAutomaticSource]=useState(null);
   const [consolidatedAnalysis, setConsolidatedAnalysis] = useState(null);
   useEffect(() => { window.dispatchEvent(new Event("resize")); }, [analysisMode]);
   const [eventType, setEventType] = useState("low");
@@ -3234,7 +3233,7 @@ export default function FrequencyReport() {
       <div style={{ display: analysisMode === "long" ? "block" : "none" }}><LongPeriodAnalysis saveBlob={saveBlobToFile} onHtmlReport={viewConsolidatedHtml} /></div>
       <Dialog fullScreen open={Boolean(consolidatedAnalysis)} onClose={() => setConsolidatedAnalysis(null)}><DialogTitle>Consolidated Event Analysis<IconButton sx={{ float: "right" }} onClick={() => setConsolidatedAnalysis(null)}>?</IconButton></DialogTitle><DialogContent><FrequencyAnalysisResults result={consolidatedAnalysis} saveBlob={saveBlobToFile} onHtmlReport={viewConsolidatedHtml} /></DialogContent></Dialog>
       <div style={{ display: analysisMode === "automatic" ? "block" : "none" }}>
-      <LongPeriodAnalysis automatic onSourceReady={setAutomaticSource} saveBlob={saveBlobToFile} onHtmlReport={viewConsolidatedHtml} />
+      <FrequencyPreAnalysis onEventsSaved={loadAvailableDates} onConsolidate={consolidateSelectedEvents} storedEvents={availableEvents} busy={dataLoading || mapLoading} onAnalyze={analyzeSelectedPeriod} onViewResult={viewSelectedPeriodResult} />
       <SavedEventReports onConsolidateAnalysis={consolidateSelectedEvents} availableEvents={availableEvents} busy={dataLoading || mapLoading} saveBlob={saveBlobToFile} onOpenEvent={async id => {
         const event = availableEvents.find(item => item.event_id === id);
         if (event) await analyzeSelectedPeriod({ ...event, stored_event_id: id, event_type: event.event_type || "low" });
@@ -3251,7 +3250,6 @@ export default function FrequencyReport() {
         else await saveBlobToFile(blob, `${String(context.title).replace(/[<>:"/\\|?*]/g, "_")}.html`);
         setTimeout(() => URL.revokeObjectURL(url), 60000);
       }} />
-      <FrequencyPreAnalysis automaticSource={automaticSource} onConsolidate={consolidateSelectedEvents} storedEvents={availableEvents} busy={dataLoading || mapLoading} onAnalyze={analyzeSelectedPeriod} onViewResult={viewSelectedPeriodResult} />
 
       </div>
       <div style={{ display: analysisMode === "event" ? "block" : "none" }}>

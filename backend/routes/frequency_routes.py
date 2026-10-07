@@ -639,12 +639,13 @@ def _declaration_dc_series(payload: dict) -> tuple[list, list]:
 def get_curve_frequency_series(
     start_date: str = Query(...),
     end_date: str = Query(...),
+    refresh: bool = Query(False),
     user=Depends(get_authenticated_user),
 ):
     """Pre-upload frequency overview using PSP's existing Curve file access."""
     from services.curve_frequency_service import load_curve_frequency_range
     try:
-        return load_curve_frequency_range(start_date, end_date)
+        return load_curve_frequency_range(start_date, end_date, refresh=refresh)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
 
@@ -1773,10 +1774,11 @@ RAW_DATA_COLLECTION = "frequency_event_raw_data"
 EVENT_COLLECTION = "frequency_events"
 
 
-def frequency_event_name(event_type: str, start_dt: datetime, end_dt: datetime) -> str:
+def frequency_event_name(event_type: str, start_dt: datetime, end_dt: datetime, with_seconds: bool = False) -> str:
     """Return the single canonical display name used by every frequency event."""
     prefix = "High Freq" if normalize_event_type(event_type) == "high" else "Low Freq"
-    return f"{prefix} {start_dt.strftime('%d-%b-%y')} ({start_dt.strftime('%H:%M')}-{end_dt.strftime('%H:%M')})"
+    clock_format = '%H:%M:%S' if with_seconds else '%H:%M'
+    return f"{prefix} {start_dt.strftime('%d-%b-%y')} ({start_dt.strftime(clock_format)}-{end_dt.strftime(clock_format)})"
 
 def normalize_series(values, length=96):
     result = []
@@ -5804,25 +5806,29 @@ async def export_saved_frequency_events(payload: FrequencySavedReportPayload, us
 
 @router.post("/events")
 def save_frequency_event(payload: FrequencyEventPayload):
+    return persist_frequency_event(payload)
+
+
+def persist_frequency_event(payload: FrequencyEventPayload, db=None, precise=False):
     try:
         start_dt = datetime.fromisoformat(payload.start_time.replace("Z", ""))
         end_dt = datetime.fromisoformat(payload.end_time.replace("Z", ""))
         if end_dt < start_dt:
             return {"success": False, "error": "Event end time cannot be before start time."}
 
-        db = MongoService()
+        db = db or MongoService()
         date_span = get_unique_date_strings(start_dt, end_dt)
         event_id = str(uuid.uuid4())
         event_type = normalize_event_type(payload.event_type)
-        name = frequency_event_name(event_type, start_dt, end_dt)
+        name = frequency_event_name(event_type, start_dt, end_dt, with_seconds=precise and bool(start_dt.second or end_dt.second))
         doc = {
             "event_id": event_id,
             "name": name,
             "event_type": event_type,
-            "start_time": start_dt.isoformat(timespec="minutes"),
-            "end_time": end_dt.isoformat(timespec="minutes"),
+            "start_time": start_dt.isoformat(timespec="seconds" if precise else "minutes"),
+            "end_time": end_dt.isoformat(timespec="seconds" if precise else "minutes"),
             "dates": date_span,
-            "duration_minutes": int((end_dt - start_dt).total_seconds() // 60) + 1,
+            "duration_minutes": (end_dt - start_dt).total_seconds() / 60 if precise else int((end_dt - start_dt).total_seconds() // 60) + 1,
             "notes": payload.notes or "",
             "report_notes": payload.report_notes or {},
             "details": payload.details or [],
@@ -5830,6 +5836,11 @@ def save_frequency_event(payload: FrequencyEventPayload):
             "single_event_record": True,
             "updated_at": datetime.utcnow().isoformat(),
         }
+        update_fields = dict(doc)
+        insert_fields = {"created_at": datetime.utcnow().isoformat()}
+        if precise:
+            update_fields.pop("event_id", None)
+            insert_fields["event_id"] = event_id
         db.db[EVENT_COLLECTION].update_one(
             {
                 "name": name,
@@ -5837,8 +5848,8 @@ def save_frequency_event(payload: FrequencyEventPayload):
                 "end_time": doc["end_time"],
             },
             {
-                "$set": doc,
-                "$setOnInsert": {"created_at": datetime.utcnow().isoformat()},
+                "$set": update_fields,
+                "$setOnInsert": insert_fields,
             },
             upsert=True,
         )

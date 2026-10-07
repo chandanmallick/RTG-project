@@ -39,7 +39,10 @@ def fetch_sources(payload,user,db=None):
         metadata={'filename':'Automatic Frequency Event Analysis','row_count':len(times),'sampling_seconds':cadence,'file_bytes':0,
             'start_time':iso(times[0]),'end_time':iso(times[-1]+cadence),'mode':'automatic'}
         warnings.extend(item['message'] for item in curve.get('diagnostics',[]))
-    times=dataset['times'];days=[iso(day*86400)[:10] for day in np.unique(np.floor(times/86400))];entities=dataset['entities']
+    from_date=datetime.fromisoformat(payload.start_date).date().isoformat();to_date=datetime.fromisoformat(payload.end_date).date().isoformat()
+    if to_date<from_date:raise ValueError('Choose a valid fetch date range.')
+    times=dataset['times'];days=[iso(day*86400)[:10] for day in np.unique(np.floor(times/86400)) if from_date<=iso(day*86400)[:10]<=to_date];entities=dataset['entities']
+    if not days:raise ValueError('The prepared workbook does not cover the Curve dates. Upload a matching blanket workbook.')
     if len(days)>31:raise ValueError('Fetch at most 31 days per automatic source session.')
     for entity in entities:
         for key in ('actual','schedule'):
@@ -93,7 +96,8 @@ def fetch_sources(payload,user,db=None):
     if 'crms' in sources:
         session=sessions.get_session(response['session_token'],user)
         try:
-            messages,skipped=asyncio.run(fetch_crms_frequency_messages(datetime.fromisoformat(metadata['start_time']),datetime.fromisoformat(metadata['end_time'])))
-            session['messages']={'start':times[0],'end':seconds(metadata['end_time']),'messages':messages,'skipped':skipped}
+            start=max(times[0],seconds(from_date+'T00:00:00'));end=min(seconds(metadata['end_time']),seconds(to_date+'T00:00:00')+86400)
+            messages,skipped=asyncio.run(fetch_crms_frequency_messages(datetime.fromisoformat(iso(start)),datetime.fromisoformat(iso(end))))
+            session['messages']={'start':start,'end':end,'messages':messages,'skipped':skipped}
         except Exception:dataset['warnings'].append('CRMS is unavailable; retry its fetch before processing.')
     return response

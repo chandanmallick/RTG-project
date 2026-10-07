@@ -1062,9 +1062,9 @@ const API = {
     return res.data;
   },
 
-  getCurveFrequencySeries: async (startDate, endDate, signal) => (
+  getCurveFrequencySeries: async (startDate, endDate, signal, refresh = false) => (
     await axios.get(`${BASE_URL}/frequency/curve-series`, {
-      params: { start_date: startDate, end_date: endDate }, signal,
+      params: { start_date: startDate, end_date: endDate, refresh }, signal,
     })
   ).data,
 
@@ -1104,6 +1104,7 @@ const API = {
   runFrequencyAnalysis: async (payload) => (await axios.post(`${BASE_URL}/frequency/analysis/run`, payload)).data,
   consolidateFrequencyAnalysis: async (sources, event_type = "low") => (await axios.post(`${BASE_URL}/frequency/analysis/consolidate`, { sources, event_type })).data,
   fetchFrequencySources: async (payload) => (await axios.post(`${BASE_URL}/frequency/analysis/fetch-sources`, payload)).data,
+  savePreparedFrequencyEvents: async (payload) => (await axios.post(`${BASE_URL}/frequency/analysis/save-periods`, payload)).data,
   getFrequencyAnalysisTable: async (payload) => (await axios.post(`${BASE_URL}/frequency/analysis/table`, payload)).data,
   getFrequencyAnalysisChart: async (payload) => (await axios.post(`${BASE_URL}/frequency/analysis/chart`, payload)).data,
   exportFrequencyAnalysis: async (payload) => (await axios.post(`${BASE_URL}/frequency/analysis/export`, payload, { responseType: payload.format === "html" ? "json" : "blob" })).data,

@@ -1,5 +1,9 @@
 """Frequency-only extraction through the existing PSP Curve reader."""
 import math
+from collections import OrderedDict
+from threading import RLock
+from time import monotonic
+import json
 from datetime import date, datetime, time, timedelta
 
 from openpyxl.utils.datetime import from_excel
@@ -59,7 +63,11 @@ def extract_curve_frequency_rows(rows, date_str):
     return points, {"missing_readings": missing, "derived_timestamps": derived}
 
 
-def load_curve_frequency_range(start_date, end_date):
+_series_cache=OrderedDict()
+_series_lock=RLock()
+
+
+def load_curve_frequency_range(start_date, end_date, refresh=False):
     # Lazy import avoids a router/service import cycle. File naming, location,
     # timeout, workbook readers and fallback are owned by the PSP integration.
     from routes.psp_routes import get_psp_config_with_curve_defaults, read_curve_file_series
@@ -73,6 +81,10 @@ def load_curve_frequency_range(start_date, end_date):
     if (end - start).days >= 31:
         raise ValueError("Select up to 31 days per overview.")
     config = get_psp_config_with_curve_defaults()
+    key=(start_date,end_date,json.dumps(config,sort_keys=True,default=str))
+    with _series_lock:
+        cached=_series_cache.get(key)
+        if cached and not refresh and monotonic()-cached[0]<3600:return cached[1]
     points, sources, diagnostics = [], [], []
     current = start
     while current <= end:
@@ -84,9 +96,15 @@ def load_curve_frequency_range(start_date, end_date):
         else:
             diagnostics.append({"date": day, "message": meta.get("message") or "Curve frequency is unavailable."})
         current += timedelta(days=1)
-    return {
+    response = {
         "success": bool(points), "start_date": start_date, "end_date": end_date,
         "timezone": "Asia/Kolkata", "sample_seconds": 30,
         "sheet": "30SEC", "frequency_range": "D8:D2887", "timestamp_range": "C8:C2887",
         "points": points, "sources": sources, "diagnostics": diagnostics,
     }
+    if points:
+        with _series_lock:
+            _series_cache[key]=(monotonic(),response)
+            _series_cache.move_to_end(key)
+            while len(_series_cache)>2:_series_cache.popitem(last=False)
+    return response

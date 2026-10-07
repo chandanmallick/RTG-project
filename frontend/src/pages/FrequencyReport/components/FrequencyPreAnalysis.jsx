@@ -5,6 +5,7 @@ import { Expand, MousePointer2, Plus, Trash2, X } from "lucide-react";
 import CalendarInput from "../../../components/ui/CalendarInput";
 import GradientButton from "../../../components/ui/GradientButton";
 import API from "../../../services/api";
+import LongPeriodAnalysis from "./LongPeriodAnalysis";
 import { HIGH_HZ, LOW_HZ, createSelectionId, validCurveFrequency, istMillis, nearestPoint, summarizeInterval } from "./frequencyIntervals";
 
 const istToday = () => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
@@ -12,7 +13,9 @@ const displayTime = (stamp) => stamp.replace("T", " ");
 const axisTime = (millis) => new Date(millis).toLocaleString("en-GB", { timeZone: "Asia/Kolkata", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
 const duration = (seconds) => `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
 
-export default function FrequencyPreAnalysis({ busy, onAnalyze, onViewResult, onConsolidate, automaticSource }) {
+export default function FrequencyPreAnalysis({ busy, onAnalyze, onViewResult, onConsolidate, onEventsSaved }) {
+  const [automaticSource, setAutomaticSource] = useState(null);
+  const [preparing, setPreparing] = useState(false);
   const [frequencyKind,setFrequencyKind]=useState('low');
   const [startDate, setStartDate] = useState(istToday);
   const [endDate, setEndDate] = useState(istToday);
@@ -33,7 +36,7 @@ export default function FrequencyPreAnalysis({ busy, onAnalyze, onViewResult, on
   const drag = useRef(null);
   const interaction = useRef(null);
   const points = data?.points || [];
-  const locked = busy || runningId !== null;
+  const locked = busy || preparing || runningId !== null;
   const visibleEvents=events.filter(event=>event.event_type===frequencyKind);
 
   const load = useCallback(async (from, to, refresh = false) => {
@@ -43,6 +46,7 @@ export default function FrequencyPreAnalysis({ busy, onAnalyze, onViewResult, on
     setLoading(true);
     setError("");
     setData(null);
+    setAutomaticSource(null);
     setEvents([]);
     setFinalized(false);
     setCandidate({ start_time: "", end_time: "" });
@@ -51,7 +55,7 @@ export default function FrequencyPreAnalysis({ busy, onAnalyze, onViewResult, on
     try {
       if (!from || !to || to < from) throw new Error("Select a valid date range.");
       const key = `${from}:${to}`;
-      const response = (!refresh && cache.current.get(key)) || await API.getCurveFrequencySeries(from, to, controller.signal);
+      const response = (!refresh && cache.current.get(key)) || await API.getCurveFrequencySeries(from, to, controller.signal, refresh);
       if (controller.signal.aborted) return;
       if (!response.success) throw new Error(response.diagnostics?.map(item => `${item.date}: ${item.message}`).join("; ") || "Curve frequency is unavailable.");
       if (cache.current.size >= 5) cache.current.delete(cache.current.keys().next().value);
@@ -215,6 +219,16 @@ export default function FrequencyPreAnalysis({ busy, onAnalyze, onViewResult, on
   };
 
   const updateEvent = (id, changes) => setEvents(current => current.map(event => event.id === id ? { ...event, ...changes } : event));
+  const saveEvents = async selected => {
+    setRunningId('saving'); setError('');
+    try {
+      const response = await API.savePreparedFrequencyEvents({ periods: selected.map(event => ({ id:event.id, start_time:event.start_time, end_time:event.end_time, event_type:event.event_type, session_token:event.stored_event_id ? null : event.analysis_token || automaticSource?.session_token || null, event_id:event.stored_event_id || null })) });
+      response.periods.forEach(saved => updateEvent(saved.id, saved.error ? {error:saved.error,status:'Save failed'} : {stored_event_id:saved.event_id,stored_event_name:saved.name,db_status:'existing',status:'Saved',error:''}));
+      if(response.periods.some(period=>period.error))setError('Some events could not be saved. Review their errors and retry. Successfully saved events are retained.');
+      await onEventsSaved?.();
+    } catch(err){setError(err?.response?.data?.detail || err.message);}
+    finally{setRunningId(null);}
+  };
 
   const upload = async (event, file) => {
     if (!file) return;
@@ -309,18 +323,21 @@ export default function FrequencyPreAnalysis({ busy, onAnalyze, onViewResult, on
         <TableContainer><Table size="small"><TableHead><TableRow>{["Event", "Start (IST)", "End (IST)", "Duration", "Min Hz", "DB Status", "Action"].map(label => <TableCell key={label} sx={{ bgcolor: "#F1F7F5", fontWeight: 850, whiteSpace: "nowrap" }}>{label}</TableCell>)}</TableRow></TableHead><TableBody>
           {visibleEvents.map((event, index) => <TableRow key={event.id}><TableCell>Event {index + 1}{event.missing_readings > 0 && <Typography sx={{ fontSize: 10, color: "#B45309" }}>{event.missing_readings} invalid/missing samples</Typography>}</TableCell><TableCell sx={{ whiteSpace: "nowrap" }}>{displayTime(event.start_time)}</TableCell><TableCell sx={{ whiteSpace: "nowrap" }}>{displayTime(event.end_time)}</TableCell><TableCell sx={{ whiteSpace: "nowrap" }}>{duration(event.duration_seconds)}</TableCell><TableCell>{event.min_frequency.toFixed(3)}</TableCell><TableCell><Typography sx={{ fontSize: 12, color: event.db_status === "existing" ? "success.main" : "text.secondary" }}>{statusLabel(event)}</Typography>{event.db_match?.matches.map(match => <Typography key={match.event_id} sx={{ fontSize: 10 }}>{match.name || match.event_id}: {displayTime(match.coverage_start)} – {displayTime(match.coverage_end)}</Typography>)}</TableCell><TableCell><Button size="small" disabled={locked || !verified(event)} onClick={() => process(event)}>{processLabel(event)}</Button><Button size="small" disabled={finalized || locked} onClick={() => { setEditingId(event.id); setCandidate({ start_time: event.start_time, end_time: event.end_time }); }}>Edit</Button><IconButton size="small" aria-label={`Remove Event ${index + 1}`} disabled={finalized || locked} onClick={() => { setEvents(current => current.filter(item => item.id !== event.id)); if (editingId === event.id) { setEditingId(null); setCandidate({ start_time: "", end_time: "" }); } }}><Trash2 size={15} /></IconButton></TableCell></TableRow>)}
         </TableBody></Table></TableContainer>
+        <LongPeriodAnalysis key={`${data.start_date}:${data.end_date}`} automatic preparationOnly preparationDates={{start:data.start_date,end:data.end_date}} onSourceReady={setAutomaticSource} onBusyChange={setPreparing} disabled={busy || runningId !== null} />
+        <Stack direction="row" spacing={1} sx={{my:1}}><Button variant="contained" disabled={locked || !visibleEvents.length || visibleEvents.some(event => !verified(event) || (!event.stored_event_id && !event.analysis_token && !automaticSource?.session_token))} onClick={() => saveEvents(visibleEvents)}>Save selected events to database</Button><Typography sx={{fontSize:12,color:'#64748B'}}>Each period is saved separately for later verification and report downloads.</Typography></Stack>
       </>}
       {finalized && <Box sx={{ mt: 2, borderTop: "1px solid #DCE9E5", pt: 1.5 }}>
         <Typography sx={{ fontWeight: 850, color: "#0F2F4F", mb: 1 }}>Event files & analysis</Typography>
-        <Typography sx={{ color: "#64748B", fontSize: 12, mb: 1 }}>Attach one SCADA workbook to each event. Analyze events in turn; each result stays mapped to its event for reopening in the report workspace.</Typography>
+        <Typography sx={{ color: "#64748B", fontSize: 12, mb: 1 }}>Use the shared blanket workbook or fetched sources above, or attach a separate event workbook. Save the selected events to reopen reports later.</Typography>
         {visibleEvents.map((event, index) => <Stack key={event.id} direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ md: "center" }} sx={{ py: 1, borderBottom: "1px solid #EDF2F7" }}>
           <Typography sx={{ minWidth: 200, fontSize: 12, fontWeight: 800 }}>Event {index + 1} · {event.start_time.slice(11)}–{event.end_time.slice(11)}</Typography>
           <TextField select size="small" label="Analysis type" value={event.event_type} onChange={e => updateEvent(event.id, { event_type: e.target.value, result: null, status: event.file_id ? "Ready" : "Selected" })} slotProps={{ select: { native: true } }} disabled={locked} sx={{ minWidth: 135 }}><option value="low">Low frequency</option><option value="high">High frequency</option></TextField>
           {verified(event) && event.db_status !== "existing" && <Button component="label" size="small" variant="outlined" disabled={locked}>{event.file ? "Replace file" : "Upload file"}<input hidden type="file" accept=".xlsx,.xlsm" disabled={locked} onChange={e => { const file = e.target.files?.[0]; e.target.value = ""; upload(event, file); }} /></Button>}
-          <Typography sx={{ flex: 1, fontSize: 12, overflowWrap: "anywhere" }}>{event.stored_event_name || event.file?.name || "No file attached"}</Typography>
+          <Typography sx={{ flex: 1, fontSize: 12, overflowWrap: "anywhere" }}>{event.stored_event_name || event.file?.name || automaticSource?.filename || "No data prepared"}</Typography>
           <Chip size="small" label={event.status} color={event.status === "Complete" ? "success" : "default"} />
           <Button size="small" variant="contained" disabled={locked || !verified(event) || (!event.file_id && !automaticSource?.session_token && event.db_status !== "existing")} onClick={() => process(event)}>{automaticSource?.session_token && event.db_status !== 'existing' ? 'Process fetched / blanket data' : processLabel(event)}</Button>
           <Button size="small" variant="outlined" disabled={locked || !verified(event) || (event.db_status !== "existing" && !event.analysis_token && !automaticSource?.session_token)} onClick={() => consolidated([event])}>Threshold Analysis</Button>
+          {event.stored_event_id && <Button size="small" disabled={locked} onClick={() => analyze(event)}>View saved report</Button>}
           {event.db_status === "partial" && <Box sx={{ maxWidth: 320 }}><Typography sx={{ fontSize: 11 }}>Missing: {event.db_match.missing.map(range => `${displayTime(range.start_time)} – ${displayTime(range.end_time)}`).join("; ")}. Gap-only completion is unavailable in the current upload flow; use a workbook covering this period.</Typography><Button size="small" disabled={locked} onClick={() => consolidated([{ ...event, analysis_token: null }])}>Process Available Data</Button></Box>}
           {event.result && <Button size="small" disabled={locked} onClick={() => onViewResult(event)}>View result</Button>}
           {event.analysis_error && <Typography color="warning.main" sx={{ fontSize: 11 }}>Consolidation unavailable: {event.analysis_error}</Typography>}
