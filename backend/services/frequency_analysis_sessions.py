@@ -96,7 +96,8 @@ def upload_session(contents,name,user,db=None):
     entities=event_entities(db,{'data_points':points})
     for entity,deviation in zip(entities,deviations):entity['deviation']=deviation
     if not any(entity['group'] in GROUPS for entity in entities):raise ValueError('No State/ISGS/IPP actual columns match the existing plant mapping.')
-    if any(entity['group'] is None for entity in entities):warnings.append('State-sector generator rows retain their existing classification and are outside State drawal / ISGS / IPP.')
+    excluded=[entity['display_name'] for entity in entities if entity['group'] not in GROUPS]
+    if excluded:warnings.append('State-sector or unclassified generators excluded from State drawal / ISGS / IPP: '+', '.join(excluded))
     dataset={'times':times,'frequency':freq,'cadence':cadence,'entities':entities,'warnings':warnings}
     metadata={'success':True,'filename':Path(name).name,'row_count':len(frame),'file_bytes':len(contents),'parsed_array_bytes':memory(dataset),'sampling_seconds':cadence,
         'start_time':iso(times[0]),'end_time':iso(times[-1]+cadence),'entity_counts':{group:sum(entity['group']==group for entity in entities) for group in GROUPS},'warnings':warnings}
@@ -112,7 +113,7 @@ def session_from_temp(file_id,user):
     return upload_session(path.read_bytes(),path.name,user)
 
 
-def daily_ranges(start_date,end_date,slots):
+def daily_ranges(start_date,end_date,slots,preserve_events=False):
     first,last=date.fromisoformat(start_date),date.fromisoformat(end_date)
     if last<first or (last-first).days>=366:raise ValueError('Select a date range of at most 366 days.')
     if not slots:raise ValueError('Add at least one daily time slot.')
@@ -124,7 +125,7 @@ def daily_ranges(start_date,end_date,slots):
             if start>=end and not midnight:raise ValueError('Daily slot end must follow its start. Split an overnight slot at midnight.')
             result.append((datetime.combine(day,start).isoformat(),datetime.combine(day+timedelta(days=1) if midnight else day,end).isoformat()))
     if len(result)>10000:raise ValueError('Select at most 10,000 daily periods per session.')
-    return [(iso(a),iso(b)) for a,b in merge_ranges(result)]
+    return result if preserve_events else [(iso(a),iso(b)) for a,b in merge_ranges(result)]
 
 
 def _messages_and_timeline(session,ranges,db):
@@ -143,6 +144,7 @@ def _messages_and_timeline(session,ranges,db):
             messages,skipped=[],0;complete=False;warnings=['CRMS is unavailable; chronology coverage and message counts are unavailable.']
     event={'start_time':iso(start),'end_time':iso(end),'data_points':[]}
     aliases=timeline_aliases(db,event,entities=dataset['entities'])
+    session['report_aliases']=aliases
     times=dataset['times']
     def values(entity,stamp):
         moment=seconds(stamp);at=np.searchsorted(times,moment,side='right')-1
@@ -163,7 +165,8 @@ def analyse(token,user,ranges,db=None):
     from services.db_handler import MongoService
     session=get_session(token,user)
     selected=[(iso(a),iso(b)) for a,b in merge_ranges(ranges)]
-    key=json.dumps(selected)
+    windows=sorted(set((iso(seconds(a)),iso(seconds(b))) for a,b in ranges))
+    key=json.dumps([selected,windows])
     with session['lock']:
         if key in session['results']:
             result=session['results'][key]
@@ -176,7 +179,8 @@ def analyse(token,user,ranges,db=None):
             chronology=_messages_and_timeline(session,selected,db)
             result=calculate(session['dataset'],selected,chronology['rows'],chronology['messages_complete'])
             result.update({'chronology':chronology['rows'],'messages_complete':chronology['messages_complete'],
-                'warnings':session['dataset']['warnings']+chronology['warnings'],'ranges':[{'start_time':a,'end_time':b} for a,b in selected],'result_token':secrets.token_urlsafe(24)})
+                'warnings':session['dataset']['warnings']+chronology['warnings'],'ranges':[{'start_time':a,'end_time':b} for a,b in selected],
+                'event_windows':[{'start_time':a,'end_time':b} for a,b in windows],'result_token':secrets.token_urlsafe(24)})
             if result['summary']['uncovered_minutes']>0:result['warnings'].append(f"{result['summary']['uncovered_minutes']:.3f} selected minutes have no valid uploaded frequency coverage.")
             if any(row['thresholds'][level]['unknown_deviation_minutes']>0 for rows in result['overall_performance'].values() for row in rows for level in row['thresholds']):result['warnings'].append('Some entities lack actual/schedule coverage under a threshold. Their adverse percentages remain unavailable.')
             session['results'][key]=result
@@ -193,7 +197,7 @@ def analyse(token,user,ranges,db=None):
 
 def compact(token,session,result):
     return {'success':True,'session_token':token,'result_token':result['result_token'],'summary':result['summary'],'overall_performance':result['overall_performance'],
-        'chronology_count':len(result['chronology']),'messages_complete':result['messages_complete'],'warnings':result['warnings'],'ranges':result['ranges'],
+        'chronology_count':len(result['chronology']),'messages_complete':result['messages_complete'],'warnings':result['warnings'],'ranges':result['ranges'],'event_windows':result['event_windows'],
         'calculation_note':result['calculation_note'],'states':[{'entity_id':e['entity_id'],'entity':e['display_name']} for e in session['dataset']['entities'] if e['group']=='State'],
         'source':session['metadata']}
 
@@ -207,17 +211,126 @@ def get_result(token,result_token,user):
 
 
 def result_page(token,result_token,user,group='State',offset=0,limit=50):
-    _,result=get_result(token,result_token,user)
+    session,result=get_result(token,result_token,user)
     if group=='Chronology':rows=result['chronology']
+    elif group=='Message Categories':
+        from services.frequency_event_reporting import message_category_rows
+        rows=message_category_rows(result['chronology'],result['messages_complete'])
     elif group in GROUPS:rows=result['performance'][group]
     else:raise ValueError('Select State, ISGS, IPP or Chronology.')
     if offset<0 or not 1<=limit<=200:raise ValueError('Use a non-negative offset and a page size of 1 to 200.')
     return {'success':True,'rows':rows[offset:offset+limit],'total':len(rows),'offset':offset,'limit':limit}
 
 
+def report_chronology(session,result):
+    """Reuse the CRMS physical-regulation reader once per source date range.
+
+    Keep physical actions separate from messages used by threshold statistics.
+    """
+    from routes.frequency_routes import get_crms_frequency_transmission_lines,normalize_crms_lookup
+    start,end=result['ranges'][0]['start_time'],result['ranges'][-1]['end_time']
+    with session['lock']:
+        cache=session.get('physical_report')
+        if not cache or cache['start']>start or cache['end']<end:
+            try:response=asyncio.run(get_crms_frequency_transmission_lines(start,end))
+            except Exception:response={'success':False,'events':[]}
+            cache={'start':start,'end':end,'response':response}
+            session['physical_report']=cache
+        response=cache['response']
+    warnings=[] if response.get('success') else ['Physical-regulation records are unavailable from CRMS; their coverage is unconfirmed.']
+    physical=[];seen=set();dataset=session['dataset'];times=dataset['times']
+    selected=merge_ranges([(r['start_time'],r['end_time']) for r in result['ranges']])
+    for action in [*(dataset.get('physical_actions') or []),*(response.get('events') or [])]:
+        try:moment=seconds(action.get('timestamp') or action.get('outage_date_time'))
+        except (ValueError,TypeError):continue
+        if not any(a<=moment<b for a,b in selected):continue
+        names=[*(action.get('owners') or []),action.get('owner'),action.get('agency_name')]
+        matched={entity['entity_id']:entity for name in names for entity in session.get('report_aliases',{}).get(normalize_crms_lookup(name),[]) if entity['group']=='State'}
+        if action.get('recipient_identity'):
+            for entity in dataset['entities']:
+                point=entity['point'];identity=f"{point.get('plant_id')}:{point.get('stage_id') or point.get('STAGE_ID') or ''}"
+                if entity['group']=='State' and identity==action['recipient_identity']:matched[entity['entity_id']]=entity
+        for entity in matched.values():
+            key=(entity['entity_id'],iso(moment),action.get('line_name'))
+            if key in seen:continue
+            seen.add(key);at=np.searchsorted(times,moment,side='right')-1
+            support=dataset['support_seconds'][at] if dataset.get('support_seconds') is not None and at>=0 else dataset['cadence']
+            valid=0<=at<len(times) and moment-times[at]<support
+            freq=dataset['frequency'][at] if valid else np.nan;dev=entity['deviation'][at] if valid else np.nan
+            physical.append({'timestamp':iso(moment),'entity_id':entity['entity_id'],'entity_group':'State','state':entity['display_name'],
+                'frequency_hz':float(freq) if np.isfinite(freq) else None,'deviation_mw':float(dev) if np.isfinite(dev) else None,
+                'message_type':'Physical Regulation','message_no':'','message_details':str(action.get('line_name') or '')+' | '+str(action.get('reason') or ''),
+                'record_kind':'physical','action':action})
+    return sorted([*result['chronology'],*physical],key=lambda r:(r['timestamp'],r['state'],r.get('message_no',''))),warnings
+
+
 def result_chart(token,result_token,user,entity_id):
     session,result=get_result(token,result_token,user)
     return chart_points(session['dataset'],[(r['start_time'],r['end_time']) for r in result['ranges']],entity_id)
+
+
+def period_windows(result,view='event'):
+    """Keep individual selections for comparison; merge only day totals."""
+    if view not in {'day','event'}:raise ValueError('Choose day or event statistics.')
+    days={}
+    for window in result.get('event_windows',result['ranges']):
+        start,end=seconds(window['start_time']),seconds(window['end_time'])
+        while start<end:
+            day=iso(start)[:10];edge=min(end,(np.floor(start/86400)+1)*86400)
+            days.setdefault(day,[]).append((start,edge));start=edge
+    output=[]
+    for day,windows in sorted(days.items()):
+        windows=sorted(set(windows))
+        if view=='day':
+            output.append({'id':day,'date':day,'event':None,'ranges':[(iso(a),iso(b)) for a,b in merge_ranges([(iso(a),iso(b)) for a,b in windows])]})
+        else:
+            output.extend({'id':f'{day}:{number}','date':day,'event':number,'ranges':[(iso(a),iso(b))]} for number,(a,b) in enumerate(windows,1))
+    return output
+
+
+def period_statistics(session,result,windows,entities):
+    """Recalculate from cached original arrays; never reread files or CRMS."""
+    rows=[];summaries=[]
+    dataset={**session['dataset'],'entities':entities}
+    for window in windows:
+        try:
+            stats=calculate(dataset,window['ranges'],result['chronology'],result['messages_complete'],include_blocks=False)
+        except ValueError as exc:
+            if 'No valid frequency' not in str(exc) and 'No uploaded readings' not in str(exc):raise
+            summaries.append({**window,'summary':None});continue
+        summary=stats['summary']
+        from services.frequency_threshold_analysis import segments
+        index,left,right=segments(dataset,merge_ranges(window['ranges']));frequency=dataset['frequency'][index]
+        codes=np.floor(left/900).astype(np.int64);_,codes=np.unique(codes,return_inverse=True)
+        valid=np.isfinite(frequency);weights=right-left
+        covered=np.bincount(codes,weights=weights*valid)
+        totals=np.bincount(codes,weights=np.where(valid,frequency,0)*weights)
+        means=np.divide(totals,covered,out=np.full(len(covered),np.nan),where=covered>0)
+        for level,values in summary['thresholds'].items():
+            values['selected_time_pct']=round(values['frequency_minutes']/summary['selected_minutes']*100,6)
+            values['day_time_pct']=round(values['frequency_minutes']/1440*100,6)
+            values['block_mean_below_pct']=round(float(np.sum(means<float(level))/np.sum(covered>0)*100),6)
+        summaries.append({**window,'summary':summary})
+        for group in GROUPS:
+            rows.extend({**row,'group':group,'date':window['date'],'event':window['event'],'period_id':window['id'],
+                'minimum_timestamp':summary['minimum_timestamp'],'selected_minutes':summary['selected_minutes'],'selected_ranges':window['ranges']} for row in stats['overall_performance'][group])
+    return rows,summaries
+
+
+def result_period_table(token,result_token,user,group='State',view='event',offset=0,limit=7,entity_offset=0,entity_limit=10):
+    session,result=get_result(token,result_token,user)
+    if group not in GROUPS or offset<0 or not 1<=limit<=7 or entity_offset<0 or not 1<=entity_limit<=20:
+        raise ValueError('Choose a valid group, up to 7 days and 20 entities per page.')
+    windows=period_windows(result,view)
+    days=sorted({window['date'] for window in windows});selected_days=days[offset:offset+limit]
+    windows=[window for window in windows if window['date'] in selected_days]
+    entities=[entity for entity in session['dataset']['entities'] if entity['group']==group]
+    selected_entities=entities[entity_offset:entity_offset+entity_limit]
+    rows,summaries=period_statistics(session,result,windows,selected_entities)
+    return {'success':True,'rows':rows,'periods':summaries,'days':selected_days,'total_days':len(days),'total_entities':len(entities),
+        'entities':[{'entity_id':entity['entity_id'],'entity':entity['display_name']} for entity in selected_entities],
+        'offset':offset,'limit':limit,'entity_offset':entity_offset,'entity_limit':entity_limit,'view':view,
+        'note':'Day totals count overlapping selections once; separate event statistics can overlap. Percent of selected time uses selected minutes, not an assumed full-day dataset. UFR is unavailable in these sources.'}
 
 
 def consolidate_sources(sources,user,db=None):
@@ -241,7 +354,13 @@ def consolidate_sources(sources,user,db=None):
         if seconds(start)<seconds(bounds[0]) or seconds(end)>seconds(bounds[1]):raise ValueError('Selected event period is outside its source coverage.')
         mask=(dataset['times']>=seconds(start))&(dataset['times']<seconds(end))
         if not mask.any():raise ValueError('A selected event contains no readings.')
+        physical_actions=[]
+        for action in dataset.get('physical_actions') or []:
+            try:moment=seconds(action.get('timestamp') or action.get('outage_date_time'))
+            except (ValueError,TypeError):continue
+            if seconds(start)<=moment<seconds(end):physical_actions.append(action)
         datasets.append({**dataset,'times':dataset['times'][mask],'frequency':dataset['frequency'][mask],
+            'physical_actions':physical_actions,
             'entities':[{**entity,'deviation':entity['deviation'][mask]} for entity in dataset['entities']]})
         ranges.append((start,end));names.append(name)
     times=np.unique(np.concatenate([d['times'] for d in datasets]));freq=np.full(len(times),np.nan);assigned=np.zeros(len(times),bool);support=np.zeros(len(times))
@@ -256,6 +375,7 @@ def consolidate_sources(sources,user,db=None):
             by_entity[identity]['deviation'][locations[new]]=entity['deviation'][new]
     source_warnings=list(dict.fromkeys(warning for source in datasets for warning in source.get('warnings',[])))
     dataset={'times':times,'frequency':freq,'cadence':min(d['cadence'] for d in datasets),'support_seconds':support,'entities':list(by_entity.values()),'warnings':source_warnings}
+    dataset['physical_actions']=[action for source in datasets for action in source.get('physical_actions') or []]
     if overlap:dataset['warnings'].append('Overlapping event timestamps are counted once; the first selected source takes precedence.')
     metadata={'success':True,'filename':'Consolidated Event Analysis','events':names,'row_count':len(times),'parsed_array_bytes':memory(dataset),'sampling_seconds':dataset['cadence'],'start_time':min(a for a,b in ranges),'end_time':max(b for a,b in ranges)}
     token=_put(user,dataset,metadata)['session_token']

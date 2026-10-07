@@ -101,12 +101,17 @@ def occurrence_stats(frequency, starts, ends, level):
     active = np.isfinite(frequency) & (frequency < level)
     indexes = np.flatnonzero(active)
     if not len(indexes):
-        return {'frequency_minutes': 0.0, 'occurrences': 0, 'longest_minutes': 0.0, 'lowest_frequency': None}
+        return {'frequency_minutes': 0.0, 'occurrences': 0, 'longest_minutes': 0.0, 'lowest_frequency': None, 'longest_start': None, 'longest_end': None}
     breaks = np.r_[True, (np.diff(indexes) != 1) | (np.abs(starts[indexes[1:]] - ends[indexes[:-1]]) > 1e-6)]
     durations = ends[indexes] - starts[indexes]
     runs = np.add.reduceat(durations, np.flatnonzero(breaks))
+    run_starts = np.flatnonzero(breaks)
+    longest = int(np.argmax(runs))
+    first = run_starts[longest]
+    last = (run_starts[longest+1] if longest+1 < len(run_starts) else len(indexes))-1
     return {'frequency_minutes': finite(durations.sum() / 60), 'occurrences': int(breaks.sum()),
-            'longest_minutes': finite(runs.max() / 60), 'lowest_frequency': finite(frequency[indexes].min())}
+            'longest_minutes': finite(runs.max() / 60), 'lowest_frequency': finite(frequency[indexes].min()),
+            'longest_start': iso(starts[indexes[first]]), 'longest_end': iso(ends[indexes[last]])}
 
 
 def metrics(freq, deviation, weights, codes, size, is_state):
@@ -132,7 +137,7 @@ def metrics(freq, deviation, weights, codes, size, is_state):
     return result
 
 
-def calculate(dataset, selections, chronology, messages_complete=True):
+def calculate(dataset, selections, chronology, messages_complete=True, include_blocks=True):
     ranges = merge_ranges(selections)
     index, starts, ends = segments(dataset, ranges)
     index = index.astype(int)
@@ -163,10 +168,10 @@ def calculate(dataset, selections, chronology, messages_complete=True):
         if group not in GROUPS:
             continue
         deviation = entity['deviation'][index]
-        block_metrics = metrics(freq,deviation,weights,codes,len(blocks),group=='State')
+        block_metrics = metrics(freq,deviation,weights,codes,len(blocks),group=='State') if include_blocks else {}
         total_metrics = metrics(freq,deviation,weights,np.zeros(len(index),dtype=int),1,group=='State')
         lowest=np.full(len(blocks),np.inf);np.minimum.at(lowest,codes[valid],freq[valid])
-        message_counts={};threshold_counts={level:{} for level in block_metrics};unknown_message_blocks=set();entity_messages=message_map.get(entity['entity_id'],{})
+        message_counts={};threshold_counts={level:{} for level in total_metrics};unknown_message_blocks=set();entity_messages=message_map.get(entity['entity_id'],{})
         for (stamp,_),message_frequency in entity_messages.items():
             block=int(seconds(stamp)//900)
             message_counts[block]=message_counts.get(block,0)+1
@@ -179,8 +184,9 @@ def calculate(dataset, selections, chronology, messages_complete=True):
             return {'entity_id':entity['entity_id'],'entity':entity['display_name'], 'period_start':iso(period_start),'period_end':iso(period_end),
                 'thresholds':{level:{**{key:finite(array[at]) for key,array in entry.items()},'message_count': (None if not messages_complete or (bool(unknown_message_blocks) if values is total_metrics else int(blocks[at]) in unknown_message_blocks) else sum(threshold_counts[level].values()) if values is total_metrics else threshold_counts[level].get(int(blocks[at]),0))} for level,entry in values.items()},
                 'lowest_frequency':finite(low),'message_count':count if messages_complete else None}
-        for at,block in enumerate(blocks):
-            performance[group].append(row(block_starts[at],block_ends[at],block_metrics,at,lowest[at],message_counts.get(int(block),0)))
+        if include_blocks:
+            for at,block in enumerate(blocks):
+                performance[group].append(row(block_starts[at],block_ends[at],block_metrics,at,lowest[at],message_counts.get(int(block),0)))
         overall[group].append(row(ranges[0][0],ranges[-1][1],total_metrics,0,freq[valid].min(),len(entity_messages)))
     return {'summary':summary,'performance':performance,'overall_performance':overall,'calculation_note':NOTE}
 
@@ -232,7 +238,11 @@ def dataset_from_event(db, event):
     order=np.argsort(pd.to_datetime(stamps,format='mixed').astype('int64'),kind='stable')
     times,freq,cadence=timeline(np.asarray(stamps)[order],np.asarray(series.get('frequency') or [None]*len(stamps),dtype=object)[order])
     index=pd.Index(times)
+    physical_actions=[]
     for entity in entities:
+        if entity['group']=='State':
+            identity=f"{entity['point'].get('plant_id')}:{entity['point'].get('stage_id') or entity['point'].get('STAGE_ID') or ''}"
+            physical_actions.extend({**action,'recipient_identity':identity} for action in entity['point'].get('transmission_line_events') or [])
         source=entity['point'].get('series') or {}
         source_times=timestamp_array(source.get('timestamps') or [])
         locations=index.get_indexer(source_times)
@@ -247,4 +257,6 @@ def dataset_from_event(db, event):
         aligned[locations[valid]]=dev[valid]
         entity['deviation']=aligned
         entity['point']={key:value for key,value in entity['point'].items() if key not in {'series','summary','crms_messages','transmission_line_events'}}
-    return {'times':times,'frequency':freq,'cadence':cadence,'entities':entities,'warnings':[]}
+    excluded=[entity['display_name'] for entity in entities if entity['group'] not in GROUPS]
+    warnings=['State-sector or unclassified generators excluded from State drawal / ISGS / IPP: '+', '.join(excluded)] if excluded else []
+    return {'times':times,'frequency':freq,'cadence':cadence,'entities':entities,'warnings':warnings,'physical_actions':physical_actions}

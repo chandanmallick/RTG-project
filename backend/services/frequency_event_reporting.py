@@ -112,23 +112,37 @@ def check_frequency_periods(db, periods):
 
 
 def point_group(point, mapping):
-    kind = str(point.get("type") or "").upper()
-    if kind == "STATE" or point.get("is_state") or mapping.get("is_state"):
+    kind = str(point.get("type") or "").strip().upper()
+    truth = lambda value: value is True or str(value).lower() in {"true", "1"}
+    if truth(mapping.get("is_state",point.get("is_state"))) or str(point.get('plant_id') or '').startswith('STATE_'):
         return "State"
-    if kind in {"ISGS", "IPP"}:
-        return kind
-    mapped = str(mapping.get("type") or "").upper()
+    # Maintained utility metadata distinguishes state generators from drawal
+    # and corrects old saved "Generator"/IPP labels. No plant-name guessing.
+    utility = str(mapping.get('utility_type') or point.get('utility_type') or '').strip().upper().replace(' ', '_')
+    if utility == 'ISGS':return 'ISGS'
+    if utility == 'STATE_IPP':return None
+    if utility in {'IPP','REGIONAL_IPP'}:return 'IPP'
+    if utility in {'STATE','STATE_GENERATOR','STATE_SECTOR'}:return None
+    mapped = str(mapping.get("type") or "").strip().upper()
     if mapped in {"ISGS", "IPP"}:
         return mapped
     # Match the existing generator table's fallback, retaining State Generator
     # classification rather than relabelling those units as state drawal.
     if mapped in {"STATE", "STATE_IPP"}:
         return None
-    return "IPP"
+    if kind in {'ISGS','IPP'}:return kind
+    if kind == 'STATE' and mapping.get('is_state') is not False and point.get('is_state') is not False:return 'State'
+    return None
 
 
 def event_entities(db, event):
     mappings = list(db.map_collection.find({}, {"_id": 0}))
+    unit_types = defaultdict(set)
+    if hasattr(db, 'unit_collection'):
+        for unit in db.unit_collection.find({}, {'_id':0,'plant_id':1,'rtg_plant_id':1,'STAGE_ID':1,'utility_type':1}):
+            if unit.get('utility_type'):
+                for plant in {str(unit.get('plant_id') or ''),str(unit.get('rtg_plant_id') or '')} - {''}:
+                    unit_types[(plant,str(unit.get('STAGE_ID') or ''))].add(unit['utility_type'])
     by_id = defaultdict(list)
     for mapping in mappings:
         by_id[str(mapping.get("plant_id") or "")].append(mapping)
@@ -139,10 +153,16 @@ def event_entities(db, event):
         choices = by_id.get(str(point.get("plant_id") or ""), [])
         stage = str(point.get("stage_id") or point.get("STAGE_ID") or "")
         mapping = next((item for item in choices if str(item.get("STAGE_ID") or "") == stage), choices[0] if choices else {})
+        if not mapping.get('utility_type'):
+            types = unit_types.get((str(point.get('plant_id') or ''),str(mapping.get('STAGE_ID') or stage)),set())
+            if not types:
+                types = set().union(*(values for (plant,_),values in unit_types.items() if plant == str(point.get('plant_id') or '')))
+            if len(types)==1:mapping={**mapping,'utility_type':next(iter(types))}
         group = point_group(point, mapping)
         name = str(point.get("plant_name") or mapping.get("plant_name") or point.get("plant_id") or "Unnamed entity")
-        if point.get("stage_name"):
-            name += " / " + str(point["stage_name"])
+        stage_name=point.get('stage_name') or mapping.get('STAGE_NAME')
+        if stage_name and group != 'State':
+            name += " / " + str(stage_name)
         entities.append({"entity_id": f"{point.get('plant_id', '')}:{stage}:{index}", "display_name": name, "group": group, "point": point, "mapping": mapping})
     return entities
 
@@ -153,10 +173,13 @@ def timeline_aliases(db, event, entities=None):
     entities = entities if entities is not None else event_entities(db, event)
     state_aliases = _timeline_state_mappings(db)
     for entity in entities:
+        if entity['group'] not in GROUPS:
+            continue
         point, mapping = entity["point"], entity["mapping"]
-        names = [entity["display_name"], point.get("plant_name"), mapping.get("plant_name"), point.get("plant_id"), point.get("state"), point.get("state_name"), mapping.get("mis_name"), mapping.get("wbes_name")]
+        names = [entity["display_name"], point.get("plant_name"), mapping.get("plant_name"), point.get("plant_id"), mapping.get("mis_name"), mapping.get("wbes_name")]
         names += crms_text_list(mapping.get("crms_utility_name")) + crms_text_list(point.get("crms_utility_name"))
         if entity["group"] == "State":
+            names += [point.get('state'),point.get('state_name')]
             for alias, state in state_aliases.items():
                 if normalize_crms_lookup(state.get("display_name")) == normalize_crms_lookup(entity["display_name"]) or str(state.get("plant_id")) == str(point.get("plant_id")):
                     names.append(alias)
@@ -314,6 +337,10 @@ def summary_rows(event):
 
 
 def table_weights(columns,title):
+    if any(key=='message_details' for key,_ in columns):
+        widths={'event':.6,'timestamp':1.25,'frequency_hz':.7,'state':1.6,'deviation_mw':.8,'message_type':1.4,'message_no':1.2,'message_details':3.75}
+        if any(key=='event' for key,_ in columns):widths.update(timestamp=1.5,frequency_hz=.9)
+        return [widths.get(key,1) for key,_ in columns]
     if len(columns)==7:
         return [1.25,.7,1.6,.8,1.4,1.2,3.75] if title=="Chronology of Messages" else [1.8,2.6,1.4,1,1.3,1.3,1.3]
     return [2 if key=="entity" else 2.5 if key=="period" else 1 for key,_ in columns]
@@ -325,7 +352,7 @@ def report_tables(event, payload):
     if payload.get("include_analysis_summary") and analysis:
         tables.append(("Overall Frequency Statistics",SUMMARY_COLUMNS,summary_rows(event)))
     if payload.get("include_chronology",False):
-        tables.append(("Chronology of Messages",CHRONOLOGY_COLUMNS,event.get("chronology") or []))
+        tables.append(("Chronology of Messages",event.get('chronology_columns',CHRONOLOGY_COLUMNS),event.get("chronology") or []))
     if payload.get("include_entity_performance",False):
         for group in payload.get("performance_groups",GROUPS):
             if group not in GROUPS:continue
@@ -336,7 +363,26 @@ def report_tables(event, payload):
             else:
                 rows=[{**row,"period":row["period_start"].replace("T"," ")+" - "+row["period_end"].replace("T"," ")} for row in event.get("performance",{}).get(group,[])]
                 tables.append((f"{group} Performance",PERFORMANCE_COLUMNS,rows))
+    tables.extend(event.get('period_reports') or [])
     return tables
+
+
+MESSAGE_CATEGORY_COLUMNS=[('group','Recipient group'),('entity','Recipient'),('category','Category'),('message_count','Messages')]
+
+
+def message_category_rows(chronology,complete=True):
+    """Count distinct messages per recipient/category; physical actions separately."""
+    counts={}
+    for row in chronology:
+        group=row.get('entity_group')
+        if group not in GROUPS:continue
+        categories=['Physical Regulation'] if row.get('record_kind')=='physical' else row.get('message_categories') or [row.get('message_type') or 'Unspecified']
+        if isinstance(categories,str):categories=[categories]
+        for category in set(categories):
+            key=(group,row.get('state') or '',category)
+            counts.setdefault(key,set()).add((row['timestamp'],row.get('message_no') or '',row.get('message_details') or ''))
+    return [{'group':group,'entity':entity,'category':category,'message_count':len(values) if complete or category=='Physical Regulation' else None}
+        for (group,entity,category),values in sorted(counts.items())]
 
 
 def cell_text(value):
@@ -406,7 +452,9 @@ def append_docx_supplements(doc, payload):
 
 
 def append_pdf_supplements(story, payload, styles, table_style, pdf_cell, header_style):
-    from reportlab.platypus import Paragraph, Table, PageBreak
+    from reportlab.platypus import Paragraph, Table, PageBreak, Image
+    import base64
+    import io
     from xml.sax.saxutils import escape
     for index, event in enumerate(payload.get("supplemental_events") or []):
         if not report_tables(event, payload):
@@ -430,6 +478,9 @@ def append_pdf_supplements(story, payload, styles, table_style, pdf_cell, header
             table = Table(values, colWidths=[weight / sum(weights) * 790 for weight in weights], repeatRows=1, splitInRow=1)
             table.setStyle(table_style)
             story.append(table)
+    for chart in payload.get('event_charts') or []:
+        story.extend([PageBreak(),Paragraph(escape(chart['title']),styles['Heading2']),
+            Image(io.BytesIO(base64.b64decode(chart['image'])),width=760,height=348)])
 
 
 def supplements_html(events, payload):
@@ -437,6 +488,7 @@ def supplements_html(events, payload):
     if not any(report_tables(event, payload) for event in events):
         return ""
     output = ['<section class="frequency-supplements" style="padding:24px;font-family:Arial,sans-serif;color:#102a43"><style>.frequency-supplements table{border-collapse:collapse;width:100%;font-size:12px;margin-bottom:24px}.frequency-supplements th,.frequency-supplements td{border:1px solid #CBD5E1;padding:7px;text-align:left;vertical-align:top;overflow-wrap:anywhere}.frequency-supplements th{background:#EAF2FF}.frequency-supplements h2{color:#03624C}.frequency-supplements .table-scroll{overflow-x:auto}</style>']
+    if payload.get('compact_html'):output.append('<style>.frequency-supplements .table-scroll{max-height:320px;overflow:auto}.frequency-supplements th{position:sticky;top:0}.frequency-supplements details{border-bottom:1px solid #CBD5E1}</style>')
     for event in events:
         output.append(f"<h2>{escape(event['event_name'])}</h2><p>{escape(event['start_time'])} to {escape(event['end_time'])} IST | Lowest Frequency: {escape(cell_text(event.get('lowest_frequency')))} Hz</p>")
         if payload.get("include_analysis_summary") and event.get("threshold_analysis"):
@@ -448,12 +500,23 @@ def supplements_html(events, payload):
         if payload.get("include_entity_performance"):
             output.append(f"<p>{escape(event['calculation_note'])}</p>")
         for title, columns, rows in report_tables(event, payload):
+            compact=payload.get('compact_html',False)
+            if compact:output.append(f'<details><summary style="cursor:pointer;font-weight:bold;padding:9px">{escape(title)} ({len(rows)} rows)</summary>')
             output.append(f"<h3>{escape(title)}</h3><div class='table-scroll'><table><thead><tr>" + "".join(f"<th>{escape(label)}</th>" for _, label in columns) + "</tr></thead><tbody>")
             for row in rows:
                 output.append("<tr>" + "".join(f"<td>{escape(cell_text(row.get(key)))}</td>" for key, _ in columns) + "</tr>")
             if not rows:
                 output.append(f"<tr><td colspan='{len(columns)}'>No records available for this event period.</td></tr>")
             output.append("</tbody></table></div>")
+            if compact:output.append('</details>')
+        if payload.get('compact_html'):
+            for state,reports in (event.get('state_reports') or {}).items():
+                output.append(f'<section data-state="{escape(state,quote=True)}" hidden><h3>{escape(state)} — Event statistics and message chronology</h3>')
+                for title,columns,rows in reports:
+                    output.append(f'<details><summary style="cursor:pointer;padding:9px;font-weight:bold">{escape(title)} ({len(rows)} rows)</summary><div class="table-scroll" style="max-height:320px;overflow:auto"><table><thead><tr>'+''.join(f'<th>{escape(label)}</th>' for _,label in columns)+'</tr></thead><tbody>')
+                    for row in rows:output.append('<tr>'+''.join(f'<td>{escape(cell_text(row.get(key)))}</td>' for key,_ in columns)+'</tr>')
+                    output.append('</tbody></table></div></details>')
+                output.append('</section>')
     return "".join(output) + "</section>"
 
 
@@ -472,20 +535,25 @@ def supplements_excel(events, payload):
         if payload.get("include_entity_performance"):
             specs.extend((f"{group} Overall",threshold_columns(True),f"overall:{group}") for group in payload.get("performance_groups",GROUPS))
     if payload.get("include_chronology"):
-        specs.append(("Chronology", CHRONOLOGY_COLUMNS, "chronology"))
+        specs.append(("Chronology", events[0].get('chronology_columns',CHRONOLOGY_COLUMNS), "chronology"))
     if payload.get("include_entity_performance"):
         specs.extend((f"{group} Performance", threshold_columns(True) if threshold_mode else PERFORMANCE_COLUMNS, group) for group in payload.get("performance_groups", GROUPS))
+    for index,(title,columns,_) in enumerate(events[0].get('period_reports') or []):
+        specs.append((title[:31],columns,f'period:{index}'))
     for name, columns, group in specs:
         sheet = workbook.create_sheet(name)
         headers = ["Event / Instance", "Event Start (IST)", "Event End (IST)"] + [label for _, label in columns] + ["Data Quality Notes"]
-        grouped=threshold_mode and group not in {"summary","metadata","chronology"}
+        grouped=threshold_mode and group not in {"summary","metadata","chronology"} and not group.startswith('period:')
         header_row=2 if grouped else 1
         if grouped:
             sheet.append(["Event / Entity"]+[None]*4+["Freq <49.90"]+[None]*4+["Freq <49.70"]+[None]*4+["Freq <49.50"]+[None]*4+["Other"]+[None]*2)
             for left,right in [(1,5),(6,10),(11,15),(16,20),(21,23)]:sheet.merge_cells(start_row=1,start_column=left,end_row=1,end_column=right)
         sheet.append(headers)
         for event in events:
-            if group=="metadata":
+            if group.startswith('period:'):
+                reports=event.get('period_reports') or []
+                rows=reports[int(group.split(':')[1])][2] if int(group.split(':')[1])<len(reports) else []
+            elif group=="metadata":
                 stats=event["threshold_analysis"]["summary"]
                 rows=[{"metric":key.replace("_"," ").title(),"value":str(value) if isinstance(value,list) else value} for key,value in stats.items() if key!="thresholds"]
                 rows.append({"metric":"Calculation", "value":event["calculation_note"]})
@@ -525,6 +593,30 @@ def supplements_excel(events, payload):
         sheet.page_setup.orientation = "landscape"
         sheet.page_setup.fitToWidth = 1
         sheet.page_setup.fitToHeight = 0
+    for event in events:
+        for state,reports in (event.get('state_reports') or {}).items():
+            import re
+            base=re.sub(r'[\\/*?:\[\]]','_',state).strip("'")[:31] or 'State'
+            name=base;counter=1
+            while name.lower() in {value.lower() for value in workbook.sheetnames}:
+                counter+=1;name=base[:27]+f' ({counter})'
+            sheet=workbook.create_sheet(name,0)
+            sheet.append([state,event['start_time'],event['end_time']])
+            sheet.append(['; '.join(event.get('warnings',[]))])
+            for title,columns,rows in reports:
+                sheet.append([]);sheet.append([title]);sheet.append([label for _,label in columns])
+                for cell in sheet[sheet.max_row]:
+                    cell.font=Font(bold=True,color='FFFFFF');cell.fill=PatternFill('solid',fgColor='03624C')
+                for row in rows:sheet.append([row.get(key) for key,_ in columns])
+                if not rows:sheet.append(['No records available'])
+            for row in sheet:
+                for cell in row:
+                    if isinstance(cell.value,str):cell.data_type='s'
+                    if isinstance(cell.value,float):cell.number_format='0.000'
+                    cell.alignment=Alignment(vertical='top',wrap_text=True)
+            for index in range(1,sheet.max_column+1):sheet.column_dimensions[get_column_letter(index)].width=50 if index in {1,8} else 25
+            sheet.freeze_panes='B6';sheet.sheet_view.showGridLines=False
+            sheet.page_setup.orientation='landscape';sheet.page_setup.fitToWidth=1;sheet.page_setup.fitToHeight=0
     if not workbook.sheetnames:
         raise ValueError("Select chronology or entity performance for Excel export.")
     buffer = io.BytesIO()

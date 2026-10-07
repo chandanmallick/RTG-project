@@ -37,6 +37,99 @@ def workbook():
 class ThresholdAnalysisTests(unittest.TestCase):
     def setUp(self):sessions._sessions.clear()
 
+    @patch.object(frequency_routes,'get_crms_frequency_transmission_lines',new_callable=AsyncMock)
+    def test_report_event_graphs_state_sheets_categories_and_physical_ownership(self,physical_reader):
+        messages=[{'timestamp':'2026-10-03 17:00:30','issued_to':['BSPTCL','UNIT'],'message_no':'M1','remarks':'=Escaped text','category':['Alert','Emergency']}]
+        physical_reader.return_value={'success':True,'events':[
+            {'timestamp':'2026-10-03 17:00:30','line_name':'Line A','owners':['BSPTCL'],'reason':'H/T ON PHYSICAL REGULATION'},
+            {'timestamp':'2026-10-03 17:00:30','line_name':'Line A','owners':['BSPTCL'],'reason':'H/T ON PHYSICAL REGULATION'},
+            {'timestamp':'2026-10-03 17:01:30','line_name':'Unmapped','owners':['Unknown'],'reason':'H/T ON PHYSICAL REGULATION'}]}
+        metadata=sessions._put(USER,fixture(),{'filename':'Event report'})
+        with patch.object(frequency_routes,'fetch_crms_frequency_messages',new=AsyncMock(return_value=(messages,0))):
+            result=sessions.analyse(metadata['session_token'],USER,[('2026-10-03T17:00:00','2026-10-03T17:01:00'),('2026-10-03T17:02:00','2026-10-03T17:03:00')],db=DB)
+        payload=ResultPayload(session_token=result['session_token'],result_token=result['result_token'],format='html')
+        report=export_result(payload,USER)
+        charts=report['stacked_response']['events']
+        self.assertEqual(len(charts),2)
+        self.assertEqual([len(event['crms_messages']) for event in charts],[1,0])
+        self.assertEqual([len(event['transmission_line_events']) for event in charts],[1,0])
+        self.assertTrue(all(chart['start_time']<=stamp<=chart['end_time'] for chart in charts for stamp in chart['series']['timestamps']))
+        self.assertIn('<details>',report['supplemental_html'])
+        self.assertIn('Physical Regulation',report['supplemental_html'])
+        self.assertIn('Category-wise Messages',report['supplemental_html'])
+        self.assertIn('data-state="Bihar"',report['supplemental_html'])
+        categories=sessions.result_page(payload.session_token,payload.result_token,USER,'Message Categories')['rows']
+        self.assertEqual({row['group'] for row in categories},{'State','ISGS'})
+        self.assertEqual({row['category'] for row in categories},{'Alert','Emergency'})
+        self.assertTrue(all(row['message_count']==1 for row in categories))
+        payload.format='xlsx'
+        response=export_result(payload,USER)
+        async def workbook_bytes():
+            chunks=[]
+            async for chunk in response.body_iterator:chunks.append(chunk)
+            return b''.join(chunks)
+        import asyncio
+        workbook=load_workbook(io.BytesIO(asyncio.run(workbook_bytes())))
+        self.assertEqual(workbook['Chronology']['D1'].value,'Event')
+        message_cells=[cell for row in workbook['Bihar'] for cell in row if cell.value=='=Escaped text']
+        self.assertEqual(len(message_cells),1)
+        self.assertEqual(message_cells[0].data_type,'s')
+        self.assertTrue(any(cell.value=='Physical Regulation' for row in workbook['Bihar'] for cell in row))
+        physical_reader.assert_awaited_once()
+
+    def test_stored_physical_actions_remain_available_when_crms_fails(self):
+        dataset=fixture()
+        dataset['physical_actions']=[{'timestamp':'2026-10-03 17:00:30','line_name':'Stored Line','recipient_identity':'state:','owners':[],'reason':'H/T ON PHYSICAL REGULATION'}]
+        session={'dataset':dataset,'lock':sessions.RLock(),'physical_report':{'start':'2026-10-03T17:00:00','end':'2026-10-03T17:03:00','response':{'success':False,'events':[]}}}
+        result={'ranges':[{'start_time':'2026-10-03T17:00:00','end_time':'2026-10-03T17:03:00'}],'chronology':[]}
+        chronology,warnings=sessions.report_chronology(session,result)
+        self.assertEqual(len(chronology),1)
+        self.assertEqual(chronology[0]['state'],'Bihar')
+        self.assertEqual(chronology[0]['record_kind'],'physical')
+        self.assertTrue(warnings)
+
+    def test_daily_event_statistics_preserve_adjacent_events_and_union_totals(self):
+        data=fixture()
+        result={'ranges':[{'start_time':'2026-10-03T17:00:00','end_time':'2026-10-03T17:03:00'}],
+            'event_windows':[{'start_time':'2026-10-03T17:00:00','end_time':'2026-10-03T17:01:00'},
+                             {'start_time':'2026-10-03T17:01:00','end_time':'2026-10-03T17:03:00'}],
+            'chronology':[],'messages_complete':True}
+        windows=sessions.period_windows(result,'event')
+        self.assertEqual([window['event'] for window in windows],[1,2])
+        rows,summaries=sessions.period_statistics({'dataset':data},result,windows,data['entities'])
+        self.assertEqual(len(rows),4)
+        self.assertEqual(rows[0]['thresholds']['49.90']['adverse_minutes'],.5)
+        self.assertEqual(summaries[0]['summary']['thresholds']['49.90']['selected_time_pct'],100)
+        daily,summary=sessions.period_statistics({'dataset':data},result,sessions.period_windows(result,'day'),data['entities'])
+        self.assertEqual(summary[0]['summary']['selected_minutes'],3)
+        self.assertEqual(summary[0]['summary']['thresholds']['49.90']['frequency_minutes'],2)
+        self.assertEqual(len(daily),2)
+        self.assertEqual(summary[0]['summary']['thresholds']['49.90']['longest_start'],'2026-10-03T17:00:00')
+        self.assertEqual(summary[0]['summary']['thresholds']['49.90']['longest_end'],'2026-10-03T17:01:30')
+        self.assertEqual(len(sessions.daily_ranges('2026-10-03','2026-10-03',[{'start':'17:00','end':'18:00'},{'start':'18:00','end':'19:00'}],preserve_events=True)),2)
+
+    def test_period_windows_split_midnight_and_merge_daily_overlap(self):
+        result={'ranges':[{'start_time':'2026-10-03T23:55:00','end_time':'2026-10-04T00:05:00'}],
+            'event_windows':[{'start_time':'2026-10-03T23:55:00','end_time':'2026-10-04T00:05:00'},
+                             {'start_time':'2026-10-04T00:00:00','end_time':'2026-10-04T00:10:00'}]}
+        windows=sessions.period_windows(result,'day')
+        self.assertEqual([window['date'] for window in windows],['2026-10-03','2026-10-04'])
+        self.assertEqual(windows[1]['ranges'],[('2026-10-04T00:00:00','2026-10-04T00:10:00')])
+        self.assertEqual(len(sessions.period_windows(result,'event')),3)
+
+    def test_period_page_uses_cached_data_and_no_second_message_fetch(self):
+        metadata=sessions._put(USER,fixture(),{'filename':'Daily comparison'})
+        with patch.object(frequency_routes,'fetch_crms_frequency_messages',new=AsyncMock(return_value=([],0))) as fetch:
+            result=sessions.analyse(metadata['session_token'],USER,[('2026-10-03T17:00:00','2026-10-03T17:01:00'),('2026-10-03T17:01:00','2026-10-03T17:03:00')],db=DB)
+            page=sessions.result_period_table(result['session_token'],result['result_token'],USER,'State','event')
+            daily=sessions.result_period_table(result['session_token'],result['result_token'],USER,'State','day')
+            self.assertEqual(fetch.call_count,1)
+        self.assertEqual(len(page['periods']),2)
+        self.assertEqual(len(page['rows']),2)
+        self.assertEqual(daily['periods'][0]['summary']['selected_minutes'],3)
+        self.assertNotIn('series',page)
+        with self.assertRaises(HTTPException):sessions.result_period_table(result['session_token'],result['result_token'],{'employeeId':'other'})
+
     def test_nested_duration_gaps_and_missing_deviation(self):
         result=calculate(fixture(),[('2026-10-03T17:00:00','2026-10-03T17:03:00')],[])
         summary=result['summary']
@@ -101,7 +194,8 @@ class ThresholdAnalysisTests(unittest.TestCase):
         with patch.object(sessions.time,'monotonic',return_value=sessions._sessions[token]['accessed']+sessions.TTL+1):
             with self.assertRaises(HTTPException):sessions.get_session(token,USER)
 
-    def test_nested_export_workbook_and_existing_word_engine(self):
+    @patch.object(frequency_routes,'get_crms_frequency_transmission_lines',new_callable=AsyncMock,return_value={'success':True,'events':[]})
+    def test_nested_export_workbook_and_existing_word_engine(self,physical_reader):
         metadata=sessions._put(USER,fixture(),{'filename':'Long Period'})
         with patch.object(frequency_routes,'fetch_crms_frequency_messages',new=AsyncMock(return_value=([],0))):
             result=sessions.analyse(metadata['session_token'],USER,[('2026-10-03T17:00:00','2026-10-03T17:03:00')],db=DB)
@@ -116,6 +210,11 @@ class ThresholdAnalysisTests(unittest.TestCase):
         self.assertIn('Overall Statistics',wb.sheetnames)
         self.assertIn('State Overall',wb.sheetnames)
         self.assertIn('State Performance',wb.sheetnames)
+        self.assertIn('Day Frequency Statistics',wb.sheetnames)
+        self.assertIn('Event Frequency Statistics',wb.sheetnames)
+        self.assertIn('State Event Statistics',wb.sheetnames)
+        self.assertIn('Bihar',wb.sheetnames)
+        self.assertIn('Category-wise Messages',wb.sheetnames)
         self.assertEqual(wb['State Performance'].freeze_panes,'F3')
         self.assertEqual(wb['State Performance']['F1'].value,'Freq <49.90')
         self.assertEqual(wb['State Performance']['K1'].value,'Freq <49.70')
@@ -125,6 +224,7 @@ class ThresholdAnalysisTests(unittest.TestCase):
         from docx import Document
         document=Document(io.BytesIO(asyncio.run(body())))
         self.assertTrue(any(len(table.columns)==10 for table in document.tables))
+        physical_reader.assert_awaited_once()
 
     def test_envelope_keeps_minimum_and_od_peak(self):
         data=fixture()

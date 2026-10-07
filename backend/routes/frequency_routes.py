@@ -1627,6 +1627,7 @@ async def _build_frequency_message_timeline(payload, *, event_context=None, alia
                     "state": state_name,
                     "deviation_mw": (round(deviation, 3) if event_doc else round(deviation)) if deviation is not None else None,
                     "message_type": crms_message_category(message),
+                    "message_categories": crms_text_list(message.get("category")) or [crms_message_category(message)],
                     "message_no": message.get("message_no") or "",
                     "issued_to": issued_to,
                     "data_source": data_source if frequency is not None or deviation is not None else "Unavailable",
@@ -3315,7 +3316,8 @@ def generate_plot_base64(row_data: dict, start_time: datetime, end_time: datetim
     has_dev = deviations is not None and len(deviations) > 0
     if has_dev:
         devs = np.array(deviations)
-        max_abs_dev = max(1.0, float(np.max(np.abs(devs))))
+        finite_devs=devs[np.isfinite(devs)]
+        max_abs_dev = max(1.0, float(np.max(np.abs(finite_devs)))) if len(finite_devs) else 10.0
     else:
         devs = np.zeros(len(times))
         max_abs_dev = 10.0
@@ -3343,6 +3345,10 @@ def generate_plot_base64(row_data: dict, start_time: datetime, end_time: datetim
     ax2.tick_params(axis='y', labelcolor='#475569', labelsize=8)
     
     ax2.set_ylim(49.4, 50.6)
+    if row_data.get('analysis_chart'):
+        valid_freqs=freqs[np.isfinite(freqs)]
+        if len(valid_freqs):ax2.set_ylim(min(49.4,float(np.min(valid_freqs))-.03),max(50.08,float(np.max(valid_freqs))+.03))
+        for level in (49.50,49.70,49.90,50.05):ax2.axhline(level,color='#dc2626',linestyle=':',linewidth=.8,alpha=.65)
     
     ax1.axhline(0, color='gray', linestyle='-', linewidth=0.8)
     ax2.axhline(50.0, color='purple', linestyle=':', linewidth=0.8, alpha=0.5)
@@ -3400,8 +3406,9 @@ def generate_plot_base64(row_data: dict, start_time: datetime, end_time: datetim
         )
         
     props = dict(boxstyle='round', facecolor='white', edgecolor='lightgray', alpha=0.9)
-    ax1.text(0.02, 0.98, ann_text, transform=ax1.transAxes, fontsize=8,
-             verticalalignment='top', bbox=props, family='monospace')
+    if not row_data.get('analysis_chart'):
+        ax1.text(0.02, 0.98, ann_text, transform=ax1.transAxes, fontsize=8,
+                 verticalalignment='top', bbox=props, family='monospace')
              
     buf = io.BytesIO()
     plt.savefig(buf, format='png', bbox_inches='tight', dpi=120)

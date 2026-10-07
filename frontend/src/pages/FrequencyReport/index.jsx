@@ -2964,7 +2964,9 @@ export default function FrequencyReport() {
       return html+'</div>';
     };
     const stateFilter=document.getElementById('state-filter');
-    if(stateFilter){(report.states||[]).forEach(state=>{const option=document.createElement('option');option.textContent=state;option.value=state;stateFilter.appendChild(option)});stateFilter.addEventListener('change',()=>{root.querySelectorAll('.card').forEach(card=>{card.hidden=card.dataset.state!==stateFilter.value});window.dispatchEvent(new Event('resize'))})}
+    const applyReportFilters=()=>{document.querySelectorAll('[data-state]').forEach(card=>{card.hidden=card.dataset.state!==stateFilter.value||Boolean(card.dataset.event&&eventFilter.value&&card.dataset.event!==eventFilter.value);card.renderChart?.()});window.dispatchEvent(new Event('resize'))};
+    let eventFilter;
+    if(stateFilter){(report.states||[]).forEach(state=>{const option=document.createElement('option');option.textContent=state;option.value=state;stateFilter.appendChild(option)});eventFilter=document.createElement('select');eventFilter.setAttribute('aria-label','Select event');eventFilter.style.marginLeft='8px';eventFilter.innerHTML='<option value="">All events</option>';const seen=new Set();report.events.forEach(event=>{const id=String(event.event_index||event.event_id);if(seen.has(id))return;seen.add(id);const option=document.createElement('option');option.value=id;option.textContent=event.event_name;eventFilter.appendChild(option)});stateFilter.after(eventFilter);stateFilter.addEventListener('change',applyReportFilters);eventFilter.addEventListener('change',applyReportFilters);document.addEventListener('DOMContentLoaded',applyReportFilters)}
     report.events.forEach((event,index)=>{
       const eventState=event.state||report.state;
       const series=event.series||{};
@@ -3027,9 +3029,10 @@ export default function FrequencyReport() {
       const resultsHtml='<div class="event-results"><div class="result-tile"><b>Maximum OD</b><strong>'+(maxOd===null?'-':Number(maxOd).toFixed(0)+' MW')+'</strong><small>'+(maxOdIndex<0?'-':esc(times[maxOdIndex]||''))+'</small></div><div class="result-tile"><b>OD at lowest frequency</b><strong>'+(odAtLowestFrequency===null?'-':Number(odAtLowestFrequency).toFixed(0)+' MW')+'</strong><small>'+(lowestFrequencyIndex<0?'-':Number(frequency[lowestFrequencyIndex]).toFixed(3)+' Hz | '+esc(times[lowestFrequencyIndex]||''))+'</small></div><div class="result-tile"><b>Different messages</b><strong>'+differentMessageCount+'</strong><small>'+crmsMessages.length+' mapped message record(s)</small>'+messageBreakupHtml+'</div><div class="result-tile"><b>Physical regulations</b><strong>'+transmissionEvents.length+'</strong><small>Transmission-line action(s)</small></div><div class="result-tile regulatory-details"><b>Physical regulatory details</b>'+regulatoryList+'</div></div>';
       const card=document.createElement('details'); card.className='card'; card.open=true;
       card.innerHTML='<summary><span>Annexure '+(index+1)+': '+esc(eventState)+'</span><em>Annexure - Deviation / Frequency</em></summary><div class="card-body"><div class="event-identity"><div class="event-state">'+esc(eventState)+'</div><div class="event-period"><strong>'+esc(event.event_name||event.event_id)+'</strong><span>'+esc(event.start_time||'')+' to '+esc(event.end_time||'')+'</span></div></div><h2 class="chart-title">Frequency (Hz) vs Deviation (MW)</h2><div class="chart frequency-chart"></div>'+(report.analysis?'':resultsHtml)+(hasGeneration?'<div class="comparison-heading">'+esc(eventState)+' Deviation vs State Generation</div><div class="axis-controls"><strong>Generation axis:</strong><span class="axis-buttons"></span><span>Deviation always remains on Secondary.</span></div><div class="chart generation-chart"></div>':'')+'</div>';
-      if(report.analysis){card.dataset.state=eventState;card.hidden=stateFilter&&stateFilter.value!==eventState;}
+      if(report.analysis){card.dataset.state=eventState;card.dataset.event=String(event.event_index||event.event_id);card.hidden=stateFilter&&stateFilter.value!==eventState;}
       root.appendChild(card);
-      const chart=echarts.init(card.querySelector('.frequency-chart'));
+      let chart;
+      const renderChart=()=>{if(chart||card.hidden)return;chart=echarts.init(card.querySelector('.frequency-chart'));
       if(report.analysis){const expand=document.createElement('button');expand.textContent='Expand';expand.style.cssText='float:right;margin:6px';expand.addEventListener('click',()=>card.requestFullscreen?.());card.querySelector('.card-body').prepend(expand);document.addEventListener('fullscreenchange',()=>{card.querySelector('.frequency-chart').style.height=document.fullscreenElement===card?'calc(100vh - 180px)':'560px';chart.resize()});}
       chart.setOption({
         animation:false,
@@ -3054,7 +3057,8 @@ export default function FrequencyReport() {
           ...transmissionSeries
         ]
       });
-      window.addEventListener('resize',()=>chart.resize());
+      };card.renderChart=renderChart;renderChart();
+      window.addEventListener('resize',()=>chart?.resize());
       if(hasGeneration){
         const comparisonChart=echarts.init(card.querySelector('.generation-chart'));
         comparisonChart.setOption({

@@ -17,6 +17,28 @@ def entity(kind='State', deviations=None):
     return {'entity_id':kind,'display_name':kind,'group':kind,'point':point(kind,deviations),'mapping':{}}
 
 class SavedEventTests(unittest.TestCase):
+    def test_state_recipient_alias_does_not_match_generator_geographic_state(self):
+        state=entity();state['display_name']='Bihar'
+        generator=entity('ISGS');generator['point']['state']='Bihar'
+        excluded=entity('IPP');excluded['group']=None
+        db=SimpleNamespace(map_collection=SimpleNamespace(find=lambda *args:[]))
+        aliases=reporting.timeline_aliases(db,EVENT,[state,generator,excluded])
+        self.assertEqual([item['group'] for item in aliases[routes.normalize_crms_lookup('Bihar')]],['State'])
+        self.assertNotIn(routes.normalize_crms_lookup('IPP'),aliases)
+
+    def test_utility_type_overrides_stale_saved_and_mapping_categories(self):
+        self.assertEqual(reporting.point_group({'type':'IPP'},{'type':'IPP','utility_type':'ISGS','is_state':False}),'ISGS')
+        self.assertEqual(reporting.point_group({'type':'ISGS'},{'type':'ISGS','utility_type':'State','is_state':False}),None)
+        self.assertEqual(reporting.point_group({'type':'Generator'},{'type':'ISGS','utility_type':'Regional_IPP'}),'IPP')
+        self.assertIsNone(reporting.point_group({'type':'Generator'},{'utility_type':'State_IPP'}))
+        self.assertIsNone(reporting.point_group({'type':'Generator'},{}))
+        self.assertEqual(reporting.point_group({'type':'State','plant_id':'STATE_BIHAR'},{'type':'State'}),'State')
+
+    def test_missing_mapping_utility_type_uses_unit_metadata(self):
+        db=SimpleNamespace(map_collection=SimpleNamespace(find=lambda *args:[{'plant_id':'plant','STAGE_ID':1,'type':'IPP'}]),
+            unit_collection=SimpleNamespace(find=lambda *args:[{'plant_id':'plant','STAGE_ID':1,'utility_type':'ISGS'}]))
+        entities=reporting.event_entities(db,{'data_points':[{'plant_id':'plant','stage_id':'1','plant_name':'Station','type':'IPP'}]})
+        self.assertEqual(entities[0]['group'],'ISGS')
     def test_batch_period_check_coverage_gaps_and_metadata_only_read(self):
         from unittest.mock import Mock
         events = [

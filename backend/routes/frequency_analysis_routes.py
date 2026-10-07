@@ -64,6 +64,9 @@ class ResultPayload(BaseModel):
     include_chronology:bool=True
     include_entity_performance:bool=True
     performance_groups:List[str]=Field(default_factory=lambda:['State','ISGS','IPP'])
+    period_view:str=''
+    entity_offset:int=0
+    entity_limit:int=10
 
 
 def data(model):
@@ -103,7 +106,7 @@ async def release(token:str,user=Depends(get_authenticated_user)):
 @router.post('/run')
 async def run(payload:RunPayload,user=Depends(get_authenticated_user)):
     def analyse():
-        ranges=sessions.daily_ranges(payload.start_date,payload.end_date,[data(slot) for slot in payload.slots])
+        ranges=sessions.daily_ranges(payload.start_date,payload.end_date,[data(slot) for slot in payload.slots],preserve_events=True)
         return sessions.analyse(payload.session_token,user,ranges)
     return await checked(analyse)
 
@@ -115,6 +118,9 @@ async def consolidate(payload:ConsolidatePayload,user=Depends(get_authenticated_
 
 @router.post('/table')
 async def table(payload:ResultPayload,user=Depends(get_authenticated_user)):
+    if payload.period_view:
+        return await checked(sessions.result_period_table,payload.session_token,payload.result_token,user,payload.group,payload.period_view,
+            payload.offset,payload.limit,payload.entity_offset,payload.entity_limit)
     return await checked(sessions.result_page,payload.session_token,payload.result_token,user,payload.group,payload.offset,payload.limit)
 
 
@@ -124,30 +130,89 @@ async def chart(payload:ResultPayload,user=Depends(get_authenticated_user)):
 
 
 def export_result(payload,user):
-    from services.frequency_event_reporting import supplements_excel,supplements_html
+    from services.frequency_event_reporting import supplements_excel,supplements_html,threshold_columns,threshold_rows,message_category_rows,MESSAGE_CATEGORY_COLUMNS,CHRONOLOGY_COLUMNS
     session,result=sessions.get_result(payload.session_token,payload.result_token,user)
-    if payload.format not in {'xlsx','docx','html'}:raise ValueError('Choose HTML, Excel or Word.')
+    if payload.format not in {'xlsx','docx','html','pdf'}:raise ValueError('Choose HTML, PDF, Excel or Word.')
     if any(group not in sessions.GROUPS for group in payload.performance_groups):raise ValueError('Invalid performance group.')
     if payload.include_entity_performance and not payload.performance_groups:raise ValueError('Select at least one performance group.')
     event={'event_name':session['metadata'].get('filename') or 'Consolidated Frequency Analysis','start_time':result['summary']['analysis_start'],'end_time':result['summary']['analysis_end'],
-        'lowest_frequency':result['summary']['minimum_frequency'],'threshold_analysis':result,'chronology':result['chronology'],'performance':{},'warnings':result['warnings'],'calculation_note':result['calculation_note'],'selection_note':f"Selected windows: {len(result['ranges'])}. Slot patterns (IST): "+', '.join(dict.fromkeys(r['start_time'][11:]+' - '+r['end_time'][11:]+(' (next date)' if r['start_time'][:10]!=r['end_time'][:10] else '') for r in result['ranges']))}
+        'lowest_frequency':result['summary']['minimum_frequency'],'threshold_analysis':result,'chronology':result['chronology'],'performance':{},'warnings':result['warnings'],'calculation_note':result['calculation_note'],'selection_note':f"Selected windows: {len(result.get('event_windows',result['ranges']))}. Slot patterns (IST): "+', '.join(dict.fromkeys(r['start_time'][11:]+' - '+r['end_time'][11:]+(' (next date)' if r['start_time'][:10]!=r['end_time'][:10] else '') for r in result.get('event_windows',result['ranges'])))}
     options={**data(payload),'supplemental_events':[event],'include_existing_sections':False,'include_threshold_performance':True,'include_analysis_summary':True,
-        'report_title':'Consolidated Frequency Analysis','start_time':event['start_time'],'end_time':event['end_time'],'rows':[]}
+        'compact_html':True,'report_title':'Consolidated Frequency Analysis','start_time':event['start_time'],'end_time':event['end_time'],'rows':[]}
+    chronology,physical_warnings=sessions.report_chronology(session,result) if payload.include_chronology else (result['chronology'],[])
+    chronology_columns=[('event','Event'),*CHRONOLOGY_COLUMNS]
+    event['chronology_columns']=chronology_columns
+    event['chronology']=[{**row,'event':', '.join(str(index) for index,window in enumerate(result.get('event_windows',result['ranges']),1) if window['start_time']<=row['timestamp']<window['end_time']),
+        'timestamp':row['timestamp'].replace('T',' '),'message_type':' / '.join(row.get('message_categories') or [row['message_type']])} for row in chronology]
+    event['warnings']=[*event['warnings'],*physical_warnings]
+    categories=message_category_rows(chronology,result['messages_complete'])
+    # Reuse the same cached-series calculations as the daily/event UI. Exports
+    # retain all selected periods rather than just the visible page.
+    entities=[entity for entity in session['dataset']['entities'] if payload.include_entity_performance and entity['group'] in payload.performance_groups]
+    period_reports=[]
+    state_reports={entity['display_name']:[] for entity in session['dataset']['entities'] if entity['group']=='State'}
+    summary_columns=[('date','Date'),('event','Event'),('minimum_frequency','Minimum Hz'),('minimum_timestamp','At (IST)'),('covered_frequency_minutes','Covered min'),
+        ('pct49.90','<49.90 (% selected)'),('pct49.70','<49.70 (% selected)'),('pct49.50','<49.50 (% selected)'),('longest','Longest <49.90 (IST)'),('block_pct','15-min mean <49.90 (%)')]
+    for view in ('day','event'):
+        rows,summaries=sessions.period_statistics(session,result,sessions.period_windows(result,view),entities)
+        frequency_rows=[]
+        for period in summaries:
+            summary=period['summary']
+            record={'date':period['date'],'event':period['event']}
+            if summary:
+                record.update({key:summary[key] for key in ('minimum_frequency','minimum_timestamp','covered_frequency_minutes')})
+                record.update({f'pct{level}':values['selected_time_pct'] for level,values in summary['thresholds'].items()})
+                low=summary['thresholds']['49.90']
+                record.update(longest=(f"{low['longest_start']} - {low['longest_end']} ({low['longest_minutes']} min)" if low['longest_start'] else None),block_pct=low['block_mean_below_pct'])
+            frequency_rows.append(record)
+        period_reports.append((f'{view.title()} Frequency Statistics',summary_columns,frequency_rows))
+        for state in state_reports:
+            state_rows=[row for row in rows if row['group']=='State' and row['entity']==state]
+            if payload.include_entity_performance and 'State' in payload.performance_groups:
+                state_reports[state].append((f'{view.title()} Statistics',threshold_columns(),threshold_rows([{**row,'entity':row['entity']+f" | {row['date']}"+(f" Event {row['event']}" if row['event'] else '')} for row in state_rows])))
+        for group in payload.performance_groups if payload.include_entity_performance else []:
+            group_rows=[{**row,'entity':row['entity']+f" | {row['date']}"+(f" Event {row['event']}" if row['event'] else '')} for row in rows if row['group']==group]
+            period_reports.append((f'{group} {view.title()} Statistics',threshold_columns(),threshold_rows(group_rows)))
+    if payload.include_chronology:
+        period_reports.append(('Category-wise Messages',MESSAGE_CATEGORY_COLUMNS,categories))
+        for state in state_reports:
+            state_reports[state].extend([('Category-wise Messages',MESSAGE_CATEGORY_COLUMNS,[row for row in categories if row['group']=='State' and row['entity']==state]),
+                ('Chronology including Physical Regulation',chronology_columns,[row for row in event['chronology'] if row['entity_group']=='State' and row['state']==state])])
+    event['period_reports']=period_reports
+    event['state_reports']=state_reports
     if payload.format=='xlsx':
         return StreamingResponse(supplements_excel([event],options),media_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',headers={'Content-Disposition':'attachment; filename="consolidated_frequency_analysis.xlsx"'})
     if payload.format=='docx':
         from routes.frequency_routes import download_docx
         import asyncio
         return asyncio.run(download_docx(options))
-    ranges=[(row['start_time'],row['end_time']) for row in result['ranges']]
     states=[e for e in session['dataset']['entities'] if e['group']=='State']
     events=[]
     for entity in states:
-        chart=sessions.chart_points(session['dataset'],ranges,entity['entity_id'],limit=max(500,6000//max(1,len(states))))
+      for index,window in enumerate(result.get('event_windows',result['ranges']),1):
+        start,end=window['start_time'],window['end_time']
+        chart=sessions.chart_points(session['dataset'],[(start,end)],entity['entity_id'],limit=1200)
         points=chart['points']
-        events.append({'event_id':entity['entity_id'],'event_name':event['event_name'],'event_type':'low','state':entity['display_name'],'start_time':event['start_time'],'end_time':event['end_time'],
-            'series':{'timestamps':[point['timestamp'] for point in points],'frequency':[point['frequency'] for point in points],'deviation':[point['od_mw'] for point in points]},
-            'crms_messages':[{'timestamp':row['timestamp'],'message_no':row['message_no'],'remarks':row['message_details'],'category':[row['message_type']]} for row in result['chronology'] if row['entity_id']==entity['entity_id']]})
+        messages=[row for row in chronology if row['entity_id']==entity['entity_id'] and start<=row['timestamp']<end]
+        events.append({'event_id':entity['entity_id']+f':{index}','event_index':index,'event_name':f'Event {index} | {start[:10]} | {start[11:]} - {end[11:]}','event_type':'low','state':entity['display_name'],'start_time':start,'end_time':end,
+            'series':{'timestamps':[point['timestamp'] for point in points],'frequency':[point['frequency'] for point in points],'deviation':[point['deviation_mw'] for point in points]},
+            'transmission_line_events':[row['action'] for row in messages if row.get('record_kind')=='physical'],
+            'crms_messages':[{'timestamp':row['timestamp'],'message_no':row['message_no'],'remarks':row['message_details'],'category':row.get('message_categories') or [row['message_type']]} for row in messages if row.get('record_kind')!='physical']})
+    if payload.format=='pdf':
+        from routes.frequency_routes import download_pdf,generate_plot_base64
+        from datetime import datetime
+        import asyncio
+        options['event_charts']=[]
+        for chart_event in events:
+            series=chart_event['series']
+            if not series['timestamps']:continue
+            image=generate_plot_base64({'series_timestamps':[stamp.replace('T',' ') for stamp in series['timestamps']],
+                'series_deviation':[float('nan') if value is None else value for value in series['deviation']],
+                'series_frequency':[float('nan') if value is None else value for value in series['frequency']],
+                'analysis_chart':True,'is_state':True,'plant_name':chart_event['state'],'crms_messages':chart_event['crms_messages'],'transmission_line_events':chart_event['transmission_line_events']},
+                datetime.fromisoformat(chart_event['start_time']),datetime.fromisoformat(chart_event['end_time']))
+            options['event_charts'].append({'title':chart_event['state']+' | '+chart_event['event_name'],'image':image})
+        return asyncio.run(download_pdf(options))
     return {'success':True,'supplemental_html':supplements_html([event],options),'stacked_response':{'analysis':True,'title':event['event_name'],'state':states[0]['display_name'] if states else 'Frequency Analysis','states':[e['display_name'] for e in states],'events':events}}
 
 

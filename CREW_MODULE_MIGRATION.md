@@ -618,6 +618,39 @@ stay under `.runtime`; production deployment is a separate step.
 
 ### Consolidated and long-period frequency analysis
 
+Daily/event statistics reuse the cached session arrays and original selected
+windows. `FrequencyPeriodStatistics` adds daily events side by side, day-wise
+totals and event-wise rows for State/ISGS/IPP, with dates down the rows and
+combined or separate tables per entity/stage. `/analysis/table` accepts
+`period_view=day|event`, paging by up to seven days and twenty entities. The UI
+defaults to ten entities and caches twelve responses; changing layout/threshold
+does not read the workbook or query CRMS. Individual adjacent event selections
+are retained while daily totals merge overlap once; overnight events split at
+IST midnight. Missing days/readings remain unavailable. Daily frequency tables
+show minimum/time, threshold percentages of selected minutes, longest spell
+and percentage of observed 15-minute blocks whose duration-weighted frequency
+mean is below 49.90 Hz. Selected low-frequency minutes as a share of 1,440 minutes are also available
+in API summaries; this does not estimate unobserved hours. UFR records are
+not inferred. HTML/PDF/Excel/Word add
+daily and event frequency/entity statistics through the existing report engines.
+HTML/PDF show each selected event as a separate State graph. HTML has State
+and event dropdowns and collapsed, scrollable chronology. Excel places State
+sheets first, with daily/event statistics, category-wise messages and chronology
+including physical-regulation actions. The existing CRMS transmission reader
+and maintained recipient/owner aliases are reused and cached per session range;
+stored physical actions are retained when CRMS is unavailable, and unconfirmed
+physical-regulation coverage is flagged. Chronology identifies its selected event. Message category tables
+cover State/ISGS/IPP, count all categories, and keep actions separate from CRMS
+messages used by threshold statistics. PDF reuses the existing chart/PDF engines.
+
+Classification now prefers maintained mapping `utility_type`, then unit
+metadata matched by plant/stage when that field is missing. ISGS stays ISGS;
+Regional_IPP enters IPP; State_IPP and State utility generators are excluded from
+State drawal/ISGS/IPP, while explicit state drawal records stay State. Current
+mapping categories override stale saved categories. Unknown generators no
+longer default to IPP, and excluded rows are reported. No mapping or saved event
+documents are rewritten by this correction.
+
 Frequency Analysis now separates **Event / Curve Analysis** and **Long-Period
 Analysis**, retaining event controls/results when switching modes. Curve-selected
 intervals offer a Consolidated Report and individual Threshold Analysis; sources
