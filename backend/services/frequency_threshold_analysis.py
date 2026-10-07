@@ -97,8 +97,8 @@ def segments(dataset, ranges):
     return tuple(np.concatenate(items)[order] for items in (split_index, split_left, split_right))
 
 
-def occurrence_stats(frequency, starts, ends, level):
-    active = np.isfinite(frequency) & (frequency < level)
+def occurrence_stats(frequency, starts, ends, level, high=False):
+    active = np.isfinite(frequency) & ((frequency > level) if high else (frequency < level))
     indexes = np.flatnonzero(active)
     if not len(indexes):
         return {'frequency_minutes': 0.0, 'occurrences': 0, 'longest_minutes': 0.0, 'lowest_frequency': None, 'longest_start': None, 'longest_end': None}
@@ -114,20 +114,20 @@ def occurrence_stats(frequency, starts, ends, level):
             'longest_start': iso(starts[indexes[first]]), 'longest_end': iso(ends[indexes[last]])}
 
 
-def metrics(freq, deviation, weights, codes, size, is_state):
+def metrics(freq, deviation, weights, codes, size, is_state, high=False):
     result = {}
-    for level in LEVELS:
-        condition = np.isfinite(freq) & (freq < level)
+    for level in ((50.05,) if high else LEVELS):
+        condition = np.isfinite(freq) & ((freq > level) if high else (freq < level))
         valid = condition & np.isfinite(deviation)
-        adverse = valid & ((deviation > 0) if is_state else (deviation < 0))
+        adverse = valid & ((deviation > 0) if is_state != high else (deviation < 0))
         denominator = np.bincount(codes, weights=weights * condition, minlength=size)
         covered = np.bincount(codes, weights=weights * valid, minlength=size)
         adverse_time = np.bincount(codes, weights=weights * adverse, minlength=size)
         totals = np.bincount(codes, weights=np.where(valid, deviation, 0) * weights, minlength=size)
         avg = np.divide(totals, covered, out=np.full(size, np.nan), where=covered > 0)
         pct = np.divide(adverse_time * 100, denominator, out=np.full(size, np.nan), where=(denominator > 0) & (np.abs(denominator-covered) < 1e-6))
-        maximum = np.full(size, -np.inf if is_state else np.inf)
-        if is_state:
+        maximum = np.full(size, -np.inf if is_state != high else np.inf)
+        if is_state != high:
             np.maximum.at(maximum, codes[valid], np.maximum(deviation[valid], 0))
         else:
             np.minimum.at(maximum, codes[valid], np.minimum(deviation[valid], 0))
@@ -137,7 +137,9 @@ def metrics(freq, deviation, weights, codes, size, is_state):
     return result
 
 
-def calculate(dataset, selections, chronology, messages_complete=True, include_blocks=True):
+def calculate(dataset, selections, chronology, messages_complete=True, include_blocks=True, event_type='low'):
+    if event_type not in {'low','high'}:raise ValueError('Choose Low or High frequency.')
+    high=event_type=='high'
     ranges = merge_ranges(selections)
     index, starts, ends = segments(dataset, ranges)
     index = index.astype(int)
@@ -151,8 +153,10 @@ def calculate(dataset, selections, chronology, messages_complete=True, include_b
         'selected_minutes': finite(sum(b-a for a,b in ranges)/60), 'covered_frequency_minutes': finite(weights[valid].sum()/60),
         'minimum_frequency': finite(freq[minimum_index]), 'minimum_timestamp': iso(dataset['times'][index[minimum_index]]),
         'average_frequency': finite(np.average(freq[valid], weights=weights[valid])),
-        'sampling_seconds': dataset['cadence'], 'sampling_intervals_seconds': sorted(float(value) for value in np.unique(dataset.get('support_seconds',np.array([dataset['cadence']])))), 'thresholds': {f'{level:.2f}':occurrence_stats(freq,starts,ends,level) for level in LEVELS}}
-    summary['low_frequency_events'] = summary['thresholds']['49.90']['occurrences']
+        'sampling_seconds': dataset['cadence'], 'sampling_intervals_seconds': sorted(float(value) for value in np.unique(dataset.get('support_seconds',np.array([dataset['cadence']])))), 'thresholds': {f'{level:.2f}':occurrence_stats(freq,starts,ends,level,high) for level in ((50.05,) if high else LEVELS)}}
+    summary['low_frequency_events'] = summary['thresholds'].get('49.90',{}).get('occurrences',0)
+    summary['high_frequency_events'] = summary['thresholds'].get('50.05',{}).get('occurrences',0)
+    summary['maximum_frequency']=finite(freq[valid].max())
     summary['uncovered_minutes'] = finite(max(0,summary['selected_minutes']-summary['covered_frequency_minutes']))
     blocks, codes = np.unique(np.floor(starts/900).astype(np.int64), return_inverse=True)
     block_starts=np.full(len(blocks),np.inf);block_ends=np.full(len(blocks),-np.inf)
@@ -168,9 +172,10 @@ def calculate(dataset, selections, chronology, messages_complete=True, include_b
         if group not in GROUPS:
             continue
         deviation = entity['deviation'][index]
-        block_metrics = metrics(freq,deviation,weights,codes,len(blocks),group=='State') if include_blocks else {}
-        total_metrics = metrics(freq,deviation,weights,np.zeros(len(index),dtype=int),1,group=='State')
+        block_metrics = metrics(freq,deviation,weights,codes,len(blocks),group=='State',high) if include_blocks else {}
+        total_metrics = metrics(freq,deviation,weights,np.zeros(len(index),dtype=int),1,group=='State',high)
         lowest=np.full(len(blocks),np.inf);np.minimum.at(lowest,codes[valid],freq[valid])
+        highest=np.full(len(blocks),-np.inf);np.maximum.at(highest,codes[valid],freq[valid])
         message_counts={};threshold_counts={level:{} for level in total_metrics};unknown_message_blocks=set();entity_messages=message_map.get(entity['entity_id'],{})
         for (stamp,_),message_frequency in entity_messages.items():
             block=int(seconds(stamp)//900)
@@ -179,16 +184,17 @@ def calculate(dataset, selections, chronology, messages_complete=True, include_b
                 unknown_message_blocks.add(block)
             else:
                 for level in threshold_counts:
-                    if message_frequency<float(level):threshold_counts[level][block]=threshold_counts[level].get(block,0)+1
+                    if (message_frequency>float(level) if high else message_frequency<float(level)):threshold_counts[level][block]=threshold_counts[level].get(block,0)+1
         def row(period_start,period_end, values, at, low, count):
             return {'entity_id':entity['entity_id'],'entity':entity['display_name'], 'period_start':iso(period_start),'period_end':iso(period_end),
                 'thresholds':{level:{**{key:finite(array[at]) for key,array in entry.items()},'message_count': (None if not messages_complete or (bool(unknown_message_blocks) if values is total_metrics else int(blocks[at]) in unknown_message_blocks) else sum(threshold_counts[level].values()) if values is total_metrics else threshold_counts[level].get(int(blocks[at]),0))} for level,entry in values.items()},
-                'lowest_frequency':finite(low),'message_count':count if messages_complete else None}
+                'lowest_frequency':finite(low),'highest_frequency':finite(freq[valid].max() if values is total_metrics else highest[at]),'message_count':count if messages_complete else None}
         if include_blocks:
             for at,block in enumerate(blocks):
                 performance[group].append(row(block_starts[at],block_ends[at],block_metrics,at,lowest[at],message_counts.get(int(block),0)))
         overall[group].append(row(ranges[0][0],ranges[-1][1],total_metrics,0,freq[valid].min(),len(entity_messages)))
-    return {'summary':summary,'performance':performance,'overall_performance':overall,'calculation_note':NOTE}
+    note=NOTE if not high else NOTE.replace('Thresholds are nested and strict.','High frequency is strictly >50.05 Hz.').replace('State OD is positive, generator UI negative.','Adverse State under-drawal is negative; adverse generator over-injection is positive.')
+    return {'summary':summary,'performance':performance,'overall_performance':overall,'calculation_note':note,'event_type':event_type}
 
 
 def chart_points(dataset, selections, entity_id, limit=2400):

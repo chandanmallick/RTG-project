@@ -22,6 +22,7 @@ class RunPayload(BaseModel):
     start_date:str
     end_date:str
     slots:List[Slot]
+    event_type:str='low'
 
 
 class Period(BaseModel):
@@ -51,6 +52,20 @@ class Source(BaseModel):
 
 class ConsolidatePayload(BaseModel):
     sources:List[Source]
+    event_type:str='low'
+
+
+class FetchSourcesPayload(BaseModel):
+    start_date:str
+    end_date:str
+    sources:List[str]
+    session_token:Optional[str]=None
+
+
+@router.post('/fetch-sources')
+async def fetch_sources(payload:FetchSourcesPayload,user=Depends(get_authenticated_user)):
+    from services.frequency_auto_sources import fetch_sources
+    return await checked(fetch_sources,payload,user)
 
 
 class ResultPayload(BaseModel):
@@ -67,6 +82,7 @@ class ResultPayload(BaseModel):
     period_view:str=''
     entity_offset:int=0
     entity_limit:int=10
+    layout:str='legacy'
 
 
 def data(model):
@@ -107,13 +123,13 @@ async def release(token:str,user=Depends(get_authenticated_user)):
 async def run(payload:RunPayload,user=Depends(get_authenticated_user)):
     def analyse():
         ranges=sessions.daily_ranges(payload.start_date,payload.end_date,[data(slot) for slot in payload.slots],preserve_events=True)
-        return sessions.analyse(payload.session_token,user,ranges)
+        return sessions.analyse(payload.session_token,user,ranges,event_type=payload.event_type)
     return await checked(analyse)
 
 
 @router.post('/consolidate')
 async def consolidate(payload:ConsolidatePayload,user=Depends(get_authenticated_user)):
-    return await checked(sessions.consolidate_sources,[data(source) for source in payload.sources],user)
+    return await checked(sessions.consolidate_sources,[data(source) for source in payload.sources],user,event_type=payload.event_type)
 
 
 @router.post('/table')
@@ -130,8 +146,14 @@ async def chart(payload:ResultPayload,user=Depends(get_authenticated_user)):
 
 
 def export_result(payload,user):
+    if payload.layout=='compact' or payload.format=='html' and payload.layout!='legacy':
+        from services.frequency_compact_reports import export_compact
+        return export_compact(payload,user)
     from services.frequency_event_reporting import supplements_excel,supplements_html,threshold_columns,threshold_rows,message_category_rows,MESSAGE_CATEGORY_COLUMNS,CHRONOLOGY_COLUMNS
     session,result=sessions.get_result(payload.session_token,payload.result_token,user)
+    if result.get('event_type')=='high':
+        from services.frequency_compact_reports import export_compact
+        return export_compact(payload,user)
     if payload.format not in {'xlsx','docx','html','pdf'}:raise ValueError('Choose HTML, PDF, Excel or Word.')
     if any(group not in sessions.GROUPS for group in payload.performance_groups):raise ValueError('Invalid performance group.')
     if payload.include_entity_performance and not payload.performance_groups:raise ValueError('Select at least one performance group.')

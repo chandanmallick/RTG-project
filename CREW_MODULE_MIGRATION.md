@@ -633,15 +633,30 @@ mean is below 49.90 Hz. Selected low-frequency minutes as a share of 1,440 minut
 in API summaries; this does not estimate unobserved hours. UFR records are
 not inferred. HTML/PDF/Excel/Word add
 daily and event frequency/entity statistics through the existing report engines.
-HTML/PDF show each selected event as a separate State graph. HTML has State
-and event dropdowns and collapsed, scrollable chronology. Excel places State
-sheets first, with daily/event statistics, category-wise messages and chronology
-including physical-regulation actions. The existing CRMS transmission reader
-and maintained recipient/owner aliases are reused and cached per session range;
-stored physical actions are retained when CRMS is unavailable, and unconfirmed
-physical-regulation coverage is flagged. Chronology identifies its selected event. Message category tables
-cover State/ISGS/IPP, count all categories, and keep actions separate from CRMS
-messages used by threshold statistics. PDF reuses the existing chart/PDF engines.
+The consolidated/long-period UI requests `layout=compact` for all exports.
+`frequency_compact_reports` reuses cached calculations and existing Excel/PDF/
+Word engines, returning table-only HTML without ECharts, source arrays or graphs.
+It includes overall/event frequency statistics (minutes plus percentages),
+State/ISGS/IPP event, monthly and overall performance, daily event chronology
+including physical regulation and category-wise messages. All three Low
+thresholds share one entity/event row. HTML paginates the selected table and
+supports daily chronology filtering, event comparisons side by side, table CSV
+(downloadable in Excel) and Download HTML. State workbook sheets are retained.
+Missing source readings/counts remain unavailable; source failures are flagged.
+
+Low and High are separate calculation/session/export categories. Low retains
+strict <49.90/<49.70/<49.50 thresholds; High uses strict >50.05 Hz and opposite
+adverse signs (State under-drawal, generator over-injection). Manual preparation
+is Frequency Analysis; Curve selection, blanket upload and automatic preparation
+are Frequency Event Analysis. `POST /analysis/fetch-sources` reuses existing
+Curve/WBES/RTG/MIS/CRMS readers and maintained mappings. Operators select sources:
+WBES for State/ISGS/IPP schedules, RTG for State-sector/State_IPP schedules, MIS
+for actuals and CRMS for messages/actions. Explicit schedule fetches refresh
+WBES/RTG; missing replacement readings preserve the uploaded/fetched baseline
+and produce source-status warnings. Source arrays remain in owner-scoped
+expiring sessions; Curve is reused when refreshing a prepared source. State-sector
+sources can be fetched but remain excluded from State drawal/ISGS/IPP performance.
+
 
 Classification now prefers maintained mapping `utility_type`, then unit
 metadata matched by plant/stage when that field is missing. ISGS stays ISGS;
@@ -651,8 +666,9 @@ mapping categories override stale saved categories. Unknown generators no
 longer default to IPP, and excluded rows are reported. No mapping or saved event
 documents are rewritten by this correction.
 
-Frequency Analysis now separates **Event / Curve Analysis** and **Long-Period
-Analysis**, retaining event controls/results when switching modes. Curve-selected
+Frequency reporting separates **Frequency Analysis (manual)**, **Frequency Event
+Analysis (automatic / Curve / blanket upload)** and **Long-Period Analysis**,
+retaining controls/results when switching modes. Curve-selected
 intervals offer a Consolidated Report and individual Threshold Analysis; sources
 may be saved instances or temporarily parsed event uploads. Existing event-wise
 report/SSE editing and Word/PDF exports continue unchanged.

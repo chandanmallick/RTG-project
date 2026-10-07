@@ -9,6 +9,7 @@ const value = number => number == null ? "—" : typeof number === "number" ? Nu
 const stamp = text => String(text || "").replace("T", " ");
 
 export default function SavedEventReports({ availableEvents, busy, onOpenEvent, onViewHtml, saveBlob, onConsolidateAnalysis }) {
+  const [eventType,setEventType]=useState('low');
   const [selectedIds, setSelectedIds] = useState([]);
   const [analyses, setAnalyses] = useState([]);
   const [activeId, setActiveId] = useState("");
@@ -27,6 +28,7 @@ export default function SavedEventReports({ availableEvents, busy, onOpenEvent, 
     setLoading(true);
     setError("");
     try {
+      if(eventType==='high'){await onConsolidateAnalysis(selected.map(event=>({event_id:event.event_id})),eventType);return;}
       const response = await API.getSavedFrequencyAnalysis(selectedIds);
       if (!response.success) throw new Error(response.error || "Saved event analysis is unavailable.");
       setAnalyses(response.events);
@@ -39,6 +41,12 @@ export default function SavedEventReports({ availableEvents, busy, onOpenEvent, 
     setLoading(true);
     setError("");
     try {
+      if(eventType==='high'){
+        const result=await onConsolidateAnalysis(selected.map(event=>({event_id:event.event_id})),eventType);
+        if(format==='html')return;
+        const response=await API.exportFrequencyAnalysis({session_token:result.session_token,result_token:result.result_token,format,layout:'compact',include_chronology:sections.include_chronology,include_entity_performance:sections.include_entity_performance,performance_groups:sections.performance_groups});
+        await saveBlob(response,`High_Frequency_Analysis.${format}`);return;
+      }
       const options = { ...sections, ...overrides, event_ids: consolidated ? selectedIds : [activeId], consolidated, format };
       if (consolidated) options.include_existing_sections = false;
       if (format === "html") {
@@ -65,7 +73,8 @@ export default function SavedEventReports({ availableEvents, busy, onOpenEvent, 
     <Typography sx={{ fontSize: 19, fontWeight: 900, color: "#0F2F4F" }}>Saved frequency event reports</Typography>
     <Typography sx={{ color: "#64748B", fontSize: 12, mb: 1.5 }}>Select stored instances directly. Each event keeps its own report; consolidated reports contain chronology and entity performance only.</Typography>
     <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ md: "center" }}>
-      <Autocomplete multiple options={availableEvents} value={selected} getOptionLabel={event => event.name || event.event_id} isOptionEqualToValue={(a, b) => a.event_id === b.event_id} onChange={(_, items) => { setSelectedIds(items.map(event => event.event_id)); setAnalyses([]); setActiveId(""); setError(""); }} disabled={locked} sx={{ flex: 1 }} renderInput={params => <TextField {...params} label="Stored event / instance" size="small" />} />
+      <TextField select size="small" label="Frequency category" value={eventType} disabled={locked} onChange={event=>{setEventType(event.target.value);setSelectedIds([]);setAnalyses([]);setActiveId('');}}><MenuItem value="low">Low frequency</MenuItem><MenuItem value="high">High frequency</MenuItem></TextField>
+      <Autocomplete multiple options={availableEvents.filter(event=>(event.event_type || (/^high/i.test(event.name || "") ? "high" : "low"))===eventType)} value={selected} getOptionLabel={event => event.name || event.event_id} isOptionEqualToValue={(a, b) => a.event_id === b.event_id} onChange={(_, items) => { setSelectedIds(items.map(event => event.event_id)); setAnalyses([]); setActiveId(""); setError(""); }} disabled={locked} sx={{ flex: 1 }} renderInput={params => <TextField {...params} label="Stored event / instance" size="small" />} />
       <Button variant="contained" disabled={locked || !selectedIds.length} onClick={load}>{loading ? "Preparing…" : "Load saved analysis"}</Button>
       <Button variant="outlined" disabled={locked || selectedIds.length < 2} onClick={() => setConsolidatedOpen(true)}>Consolidated Report</Button>
     </Stack>
@@ -97,7 +106,7 @@ export default function SavedEventReports({ availableEvents, busy, onOpenEvent, 
       <Stack>{[["include_chronology", "Chronology of Messages"], ["include_entity_performance", "Entity Performance"]].map(([key, label]) => <FormControlLabel key={key} control={<Checkbox checked={sections[key]} disabled={locked} onChange={event => setSections(current => ({ ...current, [key]: event.target.checked }))} />} label={label} />)}</Stack>
       <Stack direction="row">{GROUPS.map(item => <FormControlLabel key={item} control={<Checkbox checked={sections.performance_groups.includes(item)} disabled={locked || !sections.include_entity_performance} onChange={() => toggleGroup(item)} />} label={item} />)}</Stack>
       {error && <Alert severity="error">{error}</Alert>}
-      <Stack direction="row" spacing={1} sx={{ mt: 1 }}><Button disabled={locked} onClick={async () => { setLoading(true); setError(""); try { await onConsolidateAnalysis(selected.map(event => ({ event_id: event.event_id }))); setConsolidatedOpen(false); } catch (err) { setError(err?.response?.data?.detail || err.message); } finally { setLoading(false); } }}>Consolidated Analysis / HTML</Button><Button variant="contained" disabled={locked} onClick={() => generate("xlsx", true)}>Download Excel</Button><Button variant="outlined" disabled={locked} onClick={() => generate("docx", true)}>Download Word</Button></Stack>
+      <Stack direction="row" spacing={1} sx={{ mt: 1 }}><Button disabled={locked} onClick={async () => { setLoading(true); setError(""); try { await onConsolidateAnalysis(selected.map(event => ({ event_id: event.event_id })),eventType); setConsolidatedOpen(false); } catch (err) { setError(err?.response?.data?.detail || err.message); } finally { setLoading(false); } }}>Consolidated Analysis / HTML</Button><Button variant="contained" disabled={locked} onClick={() => generate("xlsx", true)}>Download Excel</Button><Button variant="outlined" disabled={locked} onClick={() => generate("docx", true)}>Download Word</Button></Stack>
     </DialogContent></Dialog>
   </Paper>;
 }

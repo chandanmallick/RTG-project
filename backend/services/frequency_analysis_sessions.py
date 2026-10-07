@@ -30,7 +30,7 @@ def owner(user):
 
 
 def memory(dataset):
-    return dataset['times'].nbytes+dataset['frequency'].nbytes+sum(entity['deviation'].nbytes for entity in dataset['entities'])+(dataset.get('support_seconds').nbytes if dataset.get('support_seconds') is not None else 0)
+    return dataset['times'].nbytes+dataset['frequency'].nbytes+sum(entity[key].nbytes for entity in dataset['entities'] for key in ('deviation','actual','schedule') if key in entity)+(dataset.get('support_seconds').nbytes if dataset.get('support_seconds') is not None else 0)
 
 
 def _purge():
@@ -80,7 +80,7 @@ def upload_session(contents,name,user,db=None):
     times,freq,cadence=timeline(frame[dt_col].tolist(),frame[freq_col].tolist())
     db=db or MongoService()
     mappings=list(db.map_collection.find({}, {'_id':0}))
-    points=[];deviations=[];warnings=[]
+    points=[];deviations=[];source_values=[];warnings=[]
     for mapping in mappings:
         if mapping.get('is_frequency') or str(mapping.get('plant_id'))=='SYSTEM_FREQUENCY':continue
         columns=match_scada_columns([mapping],headers,keys).get(mapping.get('plant_id'),{})
@@ -89,12 +89,14 @@ def upload_session(contents,name,user,db=None):
         def numeric(col):
             return pd.to_numeric(frame[col],errors='coerce').to_numpy(dtype=float) if col is not None else np.full(len(frame),np.nan)
         if schedule_col==actual_col:schedule_col=None
-        deviation=numeric(actual_col)-numeric(schedule_col)
+        actual,schedule=numeric(actual_col),numeric(schedule_col)
+        deviation=actual-schedule
+        source_values.append((actual,schedule))
         if schedule_col is None:warnings.append(f"{mapping.get('plant_name') or mapping.get('plant_id')}: no separate schedule column; OD/UI remains unavailable.")
         points.append({**mapping,'stage_id':mapping.get('STAGE_ID') or '', 'stage_name':mapping.get('STAGE_NAME') or '', 'type':'State' if mapping.get('is_state') else (mapping.get('type') if str(mapping.get('type')).upper() in {'ISGS','IPP'} else 'Generator'),'plant_name':mapping.get('plant_name') or mapping.get('STAGE_NAME') or str(mapping.get('plant_id'))})
         deviations.append(deviation)
     entities=event_entities(db,{'data_points':points})
-    for entity,deviation in zip(entities,deviations):entity['deviation']=deviation
+    for entity,deviation,(actual,schedule) in zip(entities,deviations,source_values):entity.update(deviation=deviation,actual=actual,schedule=schedule)
     if not any(entity['group'] in GROUPS for entity in entities):raise ValueError('No State/ISGS/IPP actual columns match the existing plant mapping.')
     excluded=[entity['display_name'] for entity in entities if entity['group'] not in GROUPS]
     if excluded:warnings.append('State-sector or unclassified generators excluded from State drawal / ISGS / IPP: '+', '.join(excluded))
@@ -132,6 +134,8 @@ def _messages_and_timeline(session,ranges,db):
     from routes.frequency_routes import fetch_crms_frequency_messages, _build_frequency_message_timeline, FrequencyMessageTimelinePayload, FrequencyMessageRange
     from services.frequency_event_reporting import timeline_aliases
     dataset=session['dataset'];start,end=seconds(ranges[0][0]),seconds(ranges[-1][1])
+    if not session['metadata'].get('crms_enabled',True):
+        return {'rows':[],'messages_complete':False,'warnings':['CRMS was not selected; message coverage is unavailable.']}
     cached=session['messages']
     complete=True;warnings=[]
     if cached and cached['start']<=start and cached['end']>=end:
@@ -161,12 +165,12 @@ def _messages_and_timeline(session,ranges,db):
     return response
 
 
-def analyse(token,user,ranges,db=None):
+def analyse(token,user,ranges,db=None,event_type='low'):
     from services.db_handler import MongoService
     session=get_session(token,user)
     selected=[(iso(a),iso(b)) for a,b in merge_ranges(ranges)]
     windows=sorted(set((iso(seconds(a)),iso(seconds(b))) for a,b in ranges))
-    key=json.dumps([selected,windows])
+    key=json.dumps([selected,windows,event_type])
     with session['lock']:
         if key in session['results']:
             result=session['results'][key]
@@ -177,7 +181,7 @@ def analyse(token,user,ranges,db=None):
             estimate=len(np.unique(np.floor(starts/900)))*sum(e['group'] in GROUPS for e in session['dataset']['entities'])*2300
             if estimate+session['bytes']>MAX_MEMORY:raise HTTPException(413,'This selection exceeds the temporary analysis memory limit. Reduce the range or selected daily slots.')
             chronology=_messages_and_timeline(session,selected,db)
-            result=calculate(session['dataset'],selected,chronology['rows'],chronology['messages_complete'])
+            result=calculate(session['dataset'],selected,chronology['rows'],chronology['messages_complete'],event_type=event_type)
             result.update({'chronology':chronology['rows'],'messages_complete':chronology['messages_complete'],
                 'warnings':session['dataset']['warnings']+chronology['warnings'],'ranges':[{'start_time':a,'end_time':b} for a,b in selected],
                 'event_windows':[{'start_time':a,'end_time':b} for a,b in windows],'result_token':secrets.token_urlsafe(24)})
@@ -196,7 +200,7 @@ def analyse(token,user,ranges,db=None):
 
 
 def compact(token,session,result):
-    return {'success':True,'session_token':token,'result_token':result['result_token'],'summary':result['summary'],'overall_performance':result['overall_performance'],
+    return {'success':True,'session_token':token,'result_token':result['result_token'],'event_type':result.get('event_type','low'),'summary':result['summary'],'overall_performance':result['overall_performance'],
         'chronology_count':len(result['chronology']),'messages_complete':result['messages_complete'],'warnings':result['warnings'],'ranges':result['ranges'],'event_windows':result['event_windows'],
         'calculation_note':result['calculation_note'],'states':[{'entity_id':e['entity_id'],'entity':e['display_name']} for e in session['dataset']['entities'] if e['group']=='State'],
         'source':session['metadata']}
@@ -232,7 +236,7 @@ def report_chronology(session,result):
     with session['lock']:
         cache=session.get('physical_report')
         if not cache or cache['start']>start or cache['end']<end:
-            try:response=asyncio.run(get_crms_frequency_transmission_lines(start,end))
+            try:response=asyncio.run(get_crms_frequency_transmission_lines(start,end)) if session['metadata'].get('crms_enabled',True) else {'success':False,'events':[]}
             except Exception:response={'success':False,'events':[]}
             cache={'start':start,'end':end,'response':response}
             session['physical_report']=cache
@@ -271,7 +275,11 @@ def result_chart(token,result_token,user,entity_id):
 
 def period_windows(result,view='event'):
     """Keep individual selections for comparison; merge only day totals."""
-    if view not in {'day','event'}:raise ValueError('Choose day or event statistics.')
+    if view=='monthly':
+        months={}
+        for window in period_windows(result,'day'):months.setdefault(window['date'][:7],[]).extend(window['ranges'])
+        return [{'id':month,'date':month,'event':None,'ranges':[(iso(a),iso(b)) for a,b in merge_ranges(ranges)]} for month,ranges in sorted(months.items())]
+    if view not in {'day','event'}:raise ValueError('Choose day, event or monthly statistics.')
     days={}
     for window in result.get('event_windows',result['ranges']):
         start,end=seconds(window['start_time']),seconds(window['end_time'])
@@ -294,7 +302,7 @@ def period_statistics(session,result,windows,entities):
     dataset={**session['dataset'],'entities':entities}
     for window in windows:
         try:
-            stats=calculate(dataset,window['ranges'],result['chronology'],result['messages_complete'],include_blocks=False)
+            stats=calculate(dataset,window['ranges'],result['chronology'],result['messages_complete'],include_blocks=False,event_type=result.get('event_type','low'))
         except ValueError as exc:
             if 'No valid frequency' not in str(exc) and 'No uploaded readings' not in str(exc):raise
             summaries.append({**window,'summary':None});continue
@@ -309,7 +317,7 @@ def period_statistics(session,result,windows,entities):
         for level,values in summary['thresholds'].items():
             values['selected_time_pct']=round(values['frequency_minutes']/summary['selected_minutes']*100,6)
             values['day_time_pct']=round(values['frequency_minutes']/1440*100,6)
-            values['block_mean_below_pct']=round(float(np.sum(means<float(level))/np.sum(covered>0)*100),6)
+            values['block_mean_below_pct']=round(float(np.sum(means>float(level) if result.get('event_type')=='high' else means<float(level))/np.sum(covered>0)*100),6)
         summaries.append({**window,'summary':summary})
         for group in GROUPS:
             rows.extend({**row,'group':group,'date':window['date'],'event':window['event'],'period_id':window['id'],
@@ -333,17 +341,19 @@ def result_period_table(token,result_token,user,group='State',view='event',offse
         'note':'Day totals count overlapping selections once; separate event statistics can overlap. Percent of selected time uses selected minutes, not an assumed full-day dataset. UFR is unavailable in these sources.'}
 
 
-def consolidate_sources(sources,user,db=None):
+def consolidate_sources(sources,user,db=None,event_type='low'):
     from services.db_handler import MongoService
     from routes.frequency_routes import EVENT_COLLECTION
     from services.frequency_event_reporting import checked_event_period
-    db=db or MongoService();datasets=[];ranges=[];names=[]
+    db=db or MongoService();datasets=[];ranges=[];names=[];message_caches=[];crms_flags=[]
     if not 1<=len(sources)<=100:raise ValueError('Select between 1 and 100 event sources.')
     for source in sources:
         if source.get('session_token'):
             session=get_session(source['session_token'],user);dataset=session['dataset'];name=source.get('name') or session['metadata'].get('filename')
+            message_caches.append(session.get('messages'));crms_flags.append(session['metadata'].get('crms_enabled',True))
             bounds=(iso(dataset['times'][0]),iso(dataset['times'][-1]+dataset['cadence']))
         elif source.get('event_id'):
+            message_caches.append(None);crms_flags.append(True)
             event=db.db[EVENT_COLLECTION].find_one({'event_id':source['event_id']},{'_id':0})
             if not event:raise ValueError('A selected saved event is unavailable.')
             first,last,metadata_source=checked_event_period(event)
@@ -378,5 +388,9 @@ def consolidate_sources(sources,user,db=None):
     dataset['physical_actions']=[action for source in datasets for action in source.get('physical_actions') or []]
     if overlap:dataset['warnings'].append('Overlapping event timestamps are counted once; the first selected source takes precedence.')
     metadata={'success':True,'filename':'Consolidated Event Analysis','events':names,'row_count':len(times),'parsed_array_bytes':memory(dataset),'sampling_seconds':dataset['cadence'],'start_time':min(a for a,b in ranges),'end_time':max(b for a,b in ranges)}
+    metadata['crms_enabled']=any(crms_flags)
     token=_put(user,dataset,metadata)['session_token']
-    return analyse(token,user,ranges,db=db)
+    if all(cache and cache['start']<=seconds(start) and cache['end']>=seconds(end) for cache,(start,end) in zip(message_caches,ranges)):
+        get_session(token,user)['messages']={'start':min(seconds(a) for a,b in ranges),'end':max(seconds(b) for a,b in ranges),
+            'messages':[message for cache in message_caches for message in cache['messages']],'skipped':sum(cache.get('skipped',0) for cache in message_caches)}
+    return analyse(token,user,ranges,db=db,event_type=event_type)

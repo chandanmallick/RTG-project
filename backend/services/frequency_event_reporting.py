@@ -567,7 +567,7 @@ def supplements_excel(events, payload):
             else:rows=event["performance"].get(group,[])
             for row in rows:
                 record = {**row}
-                if not threshold_mode and group != "chronology":
+                if not threshold_mode and group in GROUPS:
                     record["period"] = row["period_start"].replace("T", " ") + " - " + row["period_end"].replace("T", " ")
                 sheet.append([event["event_name"], event["start_time"], event["end_time"]] + [record.get(key) for key, _ in columns] + ["; ".join(event.get("warnings", []))])
             # Retain an event's identity even when its selected section is empty.

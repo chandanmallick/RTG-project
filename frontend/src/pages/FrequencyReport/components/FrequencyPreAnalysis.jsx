@@ -12,7 +12,8 @@ const displayTime = (stamp) => stamp.replace("T", " ");
 const axisTime = (millis) => new Date(millis).toLocaleString("en-GB", { timeZone: "Asia/Kolkata", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
 const duration = (seconds) => `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
 
-export default function FrequencyPreAnalysis({ busy, onAnalyze, onViewResult, onConsolidate }) {
+export default function FrequencyPreAnalysis({ busy, onAnalyze, onViewResult, onConsolidate, automaticSource }) {
+  const [frequencyKind,setFrequencyKind]=useState('low');
   const [startDate, setStartDate] = useState(istToday);
   const [endDate, setEndDate] = useState(istToday);
   const [data, setData] = useState(null);
@@ -33,6 +34,7 @@ export default function FrequencyPreAnalysis({ busy, onAnalyze, onViewResult, on
   const interaction = useRef(null);
   const points = data?.points || [];
   const locked = busy || runningId !== null;
+  const visibleEvents=events.filter(event=>event.event_type===frequencyKind);
 
   const load = useCallback(async (from, to, refresh = false) => {
     request.current?.abort();
@@ -195,7 +197,7 @@ export default function FrequencyPreAnalysis({ busy, onAnalyze, onViewResult, on
       series: [
         { name: "Frequency", type: "line", data: chartData, showSymbol: false, connectNulls: false, sampling: "minmax", lineStyle: { width: 1.8 }, areaStyle: { origin: 50, opacity: .14 },
           markLine: { silent: true, symbol: "none", lineStyle: { type: "dashed", width: 1.5 }, label: { position: "insideEndTop", formatter: "{b}" }, data: [{ name: "49.50 Hz", yAxis: 49.50, lineStyle: { color: "#991B1B" } }, { name: "49.70 Hz", yAxis: 49.70, lineStyle: { color: "#EA580C" } }, { name: "49.90 Hz", yAxis: LOW_HZ, lineStyle: { color: "#DC2626" } }, { name: "50.00 Hz", yAxis: 50, lineStyle: { color: "#64748B" } }, { name: "50.05 Hz", yAxis: HIGH_HZ, lineStyle: { color: "#D97706" } }] } },
-        { name: "Selected events", type: "line", data: [], markArea: { silent: true, label: { position: "insideBottom", color: "#1D4ED8" }, itemStyle: { color: "rgba(37,99,235,.08)", borderColor: "#2563EB", borderWidth: 1 }, data: events.map((event, index) => [{ name: `Event ${index + 1}`, xAxis: istMillis(event.start_time) }, { xAxis: istMillis(event.end_time) }]) } },
+        { name: "Selected events", type: "line", data: [], markArea: { silent: true, label: { position: "insideBottom", color: "#1D4ED8" }, itemStyle: { color: "rgba(37,99,235,.08)", borderColor: "#2563EB", borderWidth: 1 }, data: events.map((event, index) => [{ name: `${event.event_type.toUpperCase()} Event ${index + 1}`, xAxis: istMillis(event.start_time) }, { xAxis: istMillis(event.end_time) }]) } },
       ],
     };
   }, [points, events, selecting]);
@@ -203,8 +205,8 @@ export default function FrequencyPreAnalysis({ busy, onAnalyze, onViewResult, on
   const saveInterval = (range = candidate) => {
     try {
       const summary = summarizeInterval(points, range.start_time, range.end_time);
-      if (events.some(event => event.id !== editingId && event.start_time === summary.start_time && event.end_time === summary.end_time)) throw new Error("This interval is already selected.");
-      const entry = { ...summary, id: editingId || createSelectionId(), db_status: "checking", event_type: summary.min_frequency < LOW_HZ ? "low" : "high", file: null, file_id: null, result: null, status: "Selected" };
+      if (events.some(event => event.id !== editingId && event.event_type === frequencyKind && event.start_time === summary.start_time && event.end_time === summary.end_time)) throw new Error("This interval is already selected.");
+      const entry = { ...summary, id: editingId || createSelectionId(), db_status: "checking", event_type: frequencyKind, file: null, file_id: null, result: null, status: "Selected" };
       setEvents(current => editingId ? current.map(event => event.id === editingId ? entry : event) : [...current, entry]);
       setEditingId(null);
       setCandidate({ start_time: "", end_time: "" });
@@ -239,25 +241,28 @@ export default function FrequencyPreAnalysis({ busy, onAnalyze, onViewResult, on
   };
 
   const verified = event => ["existing", "partial", "new"].includes(event.db_status);
-  const sourcesFor = event => event.stored_event_id || event.analysis_token
-    ? [{ event_id: event.stored_event_id || null, session_token: event.analysis_token || null, start_time: event.start_time, end_time: event.end_time }]
+  const sourcesFor = event => event.stored_event_id || event.analysis_token || automaticSource?.session_token
+    ? [{ event_id: event.stored_event_id || null, session_token: event.stored_event_id ? null : event.analysis_token || automaticSource?.session_token || null, start_time: event.start_time, end_time: event.end_time }]
     : (event.db_match?.matches || []).map(match => ({ event_id: match.event_id, start_time: match.coverage_start, end_time: match.coverage_end }));
   const consolidated = async selected => {
     setRunningId("consolidated"); setError("");
-    try { await onConsolidate(selected.flatMap(sourcesFor)); }
+    try { if(new Set(selected.map(event=>event.event_type)).size>1)throw new Error('Process Low and High selections separately.');await onConsolidate(selected.flatMap(sourcesFor),selected[0]?.event_type || frequencyKind); }
     catch (err) { setError(err?.response?.data?.detail || err.message); }
     finally { setRunningId(null); }
   };
   const process = async event => {
     if (!verified(event)) return;
+    if (!event.stored_event_id && !event.file_id && automaticSource?.session_token) return consolidated([event]);
     if (event.db_status === "existing" && !event.stored_event_id) return consolidated([event]);
     if (event.stored_event_id || event.file_id) return analyze(event);
     setFinalized(true); toggleSelection(false);
   };
   const processSelected = async () => {
-    if (events.some(event => !verified(event))) return;
-    const ready = events.filter(event => event.db_status === "existing" || event.file_id);
-    if (ready.length === events.length && events.every(event => event.db_status === "existing" || event.analysis_token)) return consolidated(events);
+    const selected=events.filter(event=>event.event_type===frequencyKind);
+    if(automaticSource?.session_token && selected.length && selected.every(verified))return consolidated(selected);
+    if (selected.some(event => !verified(event))) return;
+    const ready = selected.filter(event => event.db_status === "existing" || event.file_id);
+    if (ready.length === selected.length && selected.every(event => event.db_status === "existing" || event.analysis_token)) return consolidated(selected);
     setFinalized(true); toggleSelection(false);
     // The existing pipeline processes each ready event, with no duplicate parser.
     for (const event of ready) await process(event);
@@ -266,6 +271,7 @@ export default function FrequencyPreAnalysis({ busy, onAnalyze, onViewResult, on
   const processLabel = event => event.db_status === "existing" ? "Process Existing Data" : event.db_status === "partial" ? "Process / Complete Data" : "Process / Upload Data";
   const renderChart = (modal = false) => <ReactECharts ref={modal ? expandedChartRef : chartRef} option={option} onChartReady={bindSelection} style={{ width: "100%", height: modal ? "calc(100vh - 260px)" : 360 }} />;
   const selectionControls = <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap alignItems="center">
+    <TextField select size="small" label="Select frequency category" value={frequencyKind} onChange={event=>setFrequencyKind(event.target.value)} slotProps={{select:{native:true}}} disabled={locked}><option value="low">Low frequency</option><option value="high">High frequency</option></TextField>
     <Button size="small" variant={!selecting ? "contained" : "outlined"} disabled={locked} onClick={() => toggleSelection(false)}>Zoom/Pan</Button>
     <Button size="small" variant={selecting ? "contained" : "outlined"} startIcon={<MousePointer2 size={15} />} disabled={finalized || locked} onClick={() => toggleSelection(true)}>Select Period</Button>
     <TextField label="Start (IST)" type="datetime-local" size="small" value={candidate.start_time} onChange={event => setCandidate(current => ({ ...current, start_time: event.target.value.length === 16 ? `${event.target.value}:00` : event.target.value }))} slotProps={{ inputLabel: { shrink: true }, htmlInput: { step: 30 } }} disabled={finalized || locked} />
@@ -298,23 +304,23 @@ export default function FrequencyPreAnalysis({ busy, onAnalyze, onViewResult, on
       {!!events.length && <>
         <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mt: 2, mb: 1 }} flexWrap="wrap" gap={1}>
           <Typography sx={{ fontWeight: 850, color: "#0F2F4F" }}>{events.length} selected event{events.length === 1 ? "" : "s"}</Typography>
-          <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap><Button size="small" variant="contained" disabled={locked || events.some(event => !verified(event))} onClick={processSelected}>Process Selected Events</Button><Button size="small" disabled={locked || events.some(event => !verified(event) || (event.db_status !== "existing" && !event.analysis_token))} onClick={() => consolidated(events)}>Consolidated Report</Button><Button size="small" disabled={locked} onClick={() => { setEvents([]); setFinalized(false); setEditingId(null); setCandidate({ start_time: "", end_time: "" }); drag.current?.cancel(); }}>Clear all</Button><Button size="small" variant="outlined" disabled={locked || Boolean(editingId) || events.some(event => !verified(event))} onClick={() => { setFinalized(!finalized); toggleSelection(false); }}>{finalized ? "Edit periods" : "Finalize periods"}</Button></Stack>
+          <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap><Button size="small" variant="contained" disabled={locked || !visibleEvents.length || visibleEvents.some(event => !verified(event))} onClick={processSelected}>Process Selected Events</Button><Button size="small" disabled={locked || !visibleEvents.length || visibleEvents.some(event => !verified(event) || (event.db_status !== "existing" && !event.analysis_token && !automaticSource?.session_token))} onClick={() => consolidated(events.filter(event=>event.event_type===frequencyKind))}>Consolidated Report</Button><Button size="small" disabled={locked} onClick={() => { setEvents([]); setFinalized(false); setEditingId(null); setCandidate({ start_time: "", end_time: "" }); drag.current?.cancel(); }}>Clear all</Button><Button size="small" variant="outlined" disabled={locked || Boolean(editingId) || events.some(event => !verified(event))} onClick={() => { setFinalized(!finalized); toggleSelection(false); }}>{finalized ? "Edit periods" : "Finalize periods"}</Button></Stack>
         </Stack>
         <TableContainer><Table size="small"><TableHead><TableRow>{["Event", "Start (IST)", "End (IST)", "Duration", "Min Hz", "DB Status", "Action"].map(label => <TableCell key={label} sx={{ bgcolor: "#F1F7F5", fontWeight: 850, whiteSpace: "nowrap" }}>{label}</TableCell>)}</TableRow></TableHead><TableBody>
-          {events.map((event, index) => <TableRow key={event.id}><TableCell>Event {index + 1}{event.missing_readings > 0 && <Typography sx={{ fontSize: 10, color: "#B45309" }}>{event.missing_readings} invalid/missing samples</Typography>}</TableCell><TableCell sx={{ whiteSpace: "nowrap" }}>{displayTime(event.start_time)}</TableCell><TableCell sx={{ whiteSpace: "nowrap" }}>{displayTime(event.end_time)}</TableCell><TableCell sx={{ whiteSpace: "nowrap" }}>{duration(event.duration_seconds)}</TableCell><TableCell>{event.min_frequency.toFixed(3)}</TableCell><TableCell><Typography sx={{ fontSize: 12, color: event.db_status === "existing" ? "success.main" : "text.secondary" }}>{statusLabel(event)}</Typography>{event.db_match?.matches.map(match => <Typography key={match.event_id} sx={{ fontSize: 10 }}>{match.name || match.event_id}: {displayTime(match.coverage_start)} – {displayTime(match.coverage_end)}</Typography>)}</TableCell><TableCell><Button size="small" disabled={locked || !verified(event)} onClick={() => process(event)}>{processLabel(event)}</Button><Button size="small" disabled={finalized || locked} onClick={() => { setEditingId(event.id); setCandidate({ start_time: event.start_time, end_time: event.end_time }); }}>Edit</Button><IconButton size="small" aria-label={`Remove Event ${index + 1}`} disabled={finalized || locked} onClick={() => { setEvents(current => current.filter(item => item.id !== event.id)); if (editingId === event.id) { setEditingId(null); setCandidate({ start_time: "", end_time: "" }); } }}><Trash2 size={15} /></IconButton></TableCell></TableRow>)}
+          {visibleEvents.map((event, index) => <TableRow key={event.id}><TableCell>Event {index + 1}{event.missing_readings > 0 && <Typography sx={{ fontSize: 10, color: "#B45309" }}>{event.missing_readings} invalid/missing samples</Typography>}</TableCell><TableCell sx={{ whiteSpace: "nowrap" }}>{displayTime(event.start_time)}</TableCell><TableCell sx={{ whiteSpace: "nowrap" }}>{displayTime(event.end_time)}</TableCell><TableCell sx={{ whiteSpace: "nowrap" }}>{duration(event.duration_seconds)}</TableCell><TableCell>{event.min_frequency.toFixed(3)}</TableCell><TableCell><Typography sx={{ fontSize: 12, color: event.db_status === "existing" ? "success.main" : "text.secondary" }}>{statusLabel(event)}</Typography>{event.db_match?.matches.map(match => <Typography key={match.event_id} sx={{ fontSize: 10 }}>{match.name || match.event_id}: {displayTime(match.coverage_start)} – {displayTime(match.coverage_end)}</Typography>)}</TableCell><TableCell><Button size="small" disabled={locked || !verified(event)} onClick={() => process(event)}>{processLabel(event)}</Button><Button size="small" disabled={finalized || locked} onClick={() => { setEditingId(event.id); setCandidate({ start_time: event.start_time, end_time: event.end_time }); }}>Edit</Button><IconButton size="small" aria-label={`Remove Event ${index + 1}`} disabled={finalized || locked} onClick={() => { setEvents(current => current.filter(item => item.id !== event.id)); if (editingId === event.id) { setEditingId(null); setCandidate({ start_time: "", end_time: "" }); } }}><Trash2 size={15} /></IconButton></TableCell></TableRow>)}
         </TableBody></Table></TableContainer>
       </>}
       {finalized && <Box sx={{ mt: 2, borderTop: "1px solid #DCE9E5", pt: 1.5 }}>
         <Typography sx={{ fontWeight: 850, color: "#0F2F4F", mb: 1 }}>Event files & analysis</Typography>
         <Typography sx={{ color: "#64748B", fontSize: 12, mb: 1 }}>Attach one SCADA workbook to each event. Analyze events in turn; each result stays mapped to its event for reopening in the report workspace.</Typography>
-        {events.map((event, index) => <Stack key={event.id} direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ md: "center" }} sx={{ py: 1, borderBottom: "1px solid #EDF2F7" }}>
+        {visibleEvents.map((event, index) => <Stack key={event.id} direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ md: "center" }} sx={{ py: 1, borderBottom: "1px solid #EDF2F7" }}>
           <Typography sx={{ minWidth: 200, fontSize: 12, fontWeight: 800 }}>Event {index + 1} · {event.start_time.slice(11)}–{event.end_time.slice(11)}</Typography>
           <TextField select size="small" label="Analysis type" value={event.event_type} onChange={e => updateEvent(event.id, { event_type: e.target.value, result: null, status: event.file_id ? "Ready" : "Selected" })} slotProps={{ select: { native: true } }} disabled={locked} sx={{ minWidth: 135 }}><option value="low">Low frequency</option><option value="high">High frequency</option></TextField>
           {verified(event) && event.db_status !== "existing" && <Button component="label" size="small" variant="outlined" disabled={locked}>{event.file ? "Replace file" : "Upload file"}<input hidden type="file" accept=".xlsx,.xlsm" disabled={locked} onChange={e => { const file = e.target.files?.[0]; e.target.value = ""; upload(event, file); }} /></Button>}
           <Typography sx={{ flex: 1, fontSize: 12, overflowWrap: "anywhere" }}>{event.stored_event_name || event.file?.name || "No file attached"}</Typography>
           <Chip size="small" label={event.status} color={event.status === "Complete" ? "success" : "default"} />
-          <Button size="small" variant="contained" disabled={locked || !verified(event) || (!event.file_id && event.db_status !== "existing")} onClick={() => process(event)}>{processLabel(event)}</Button>
-          <Button size="small" variant="outlined" disabled={locked || !verified(event) || (event.db_status !== "existing" && !event.analysis_token)} onClick={() => consolidated([event])}>Threshold Analysis</Button>
+          <Button size="small" variant="contained" disabled={locked || !verified(event) || (!event.file_id && !automaticSource?.session_token && event.db_status !== "existing")} onClick={() => process(event)}>{automaticSource?.session_token && event.db_status !== 'existing' ? 'Process fetched / blanket data' : processLabel(event)}</Button>
+          <Button size="small" variant="outlined" disabled={locked || !verified(event) || (event.db_status !== "existing" && !event.analysis_token && !automaticSource?.session_token)} onClick={() => consolidated([event])}>Threshold Analysis</Button>
           {event.db_status === "partial" && <Box sx={{ maxWidth: 320 }}><Typography sx={{ fontSize: 11 }}>Missing: {event.db_match.missing.map(range => `${displayTime(range.start_time)} – ${displayTime(range.end_time)}`).join("; ")}. Gap-only completion is unavailable in the current upload flow; use a workbook covering this period.</Typography><Button size="small" disabled={locked} onClick={() => consolidated([{ ...event, analysis_token: null }])}>Process Available Data</Button></Box>}
           {event.result && <Button size="small" disabled={locked} onClick={() => onViewResult(event)}>View result</Button>}
           {event.analysis_error && <Typography color="warning.main" sx={{ fontSize: 11 }}>Consolidation unavailable: {event.analysis_error}</Typography>}
