@@ -6,6 +6,7 @@ from html import escape
 from fastapi.responses import StreamingResponse
 from services import frequency_analysis_sessions as sessions
 from services.frequency_event_reporting import supplements_excel,message_category_rows,MESSAGE_CATEGORY_COLUMNS,CHRONOLOGY_COLUMNS
+from services.frequency_report_formatting import format_report_value
 
 
 def number(value):
@@ -20,12 +21,14 @@ def performance_table(rows,levels,high=False):
     columns.append(('message_count','Messages'));output=[]
     for row in rows:
         record={**row,'period':row['period_start'].replace('T',' ')+' - '+row['period_end'].replace('T',' ')}
+        frequency_key = 'highest_frequency' if high else 'lowest_frequency'
+        record[frequency_key] = format_report_value(row.get(frequency_key), frequency_key)
         for level in levels:
             values=row['thresholds'][level];minutes=values['frequency_minutes'];duration=row.get('selected_minutes')
             percent=minutes/duration*100 if duration else None
             record[f'{level}_frequency']=f'{number(minutes)} ({number(percent)}%)'
             record[f'{level}_adverse']=f"{number(values['adverse_minutes'])} ({number(values['adverse_pct'])}%)"
-            record[f'{level}_mw']=f"{number(values['average_od_ui_mw'])} / {number(values['maximum_od_ui_mw'])}"
+            record[f'{level}_mw']=f"{format_report_value(values['average_od_ui_mw'], 'average_od_ui_mw')} / {format_report_value(values['maximum_od_ui_mw'], 'maximum_od_ui_mw')}"
         output.append(record)
     return columns,output
 
@@ -40,14 +43,18 @@ def report_tables(session,result,payload):
     frequency=[]
     for period in summaries:
         summary=period['summary'] or {};record={'date':period['date'],'event':period['event'],**{key:summary.get(key) for key,_ in columns}}
+        record['minimum_frequency'] = format_report_value(record.get('minimum_frequency'), 'minimum_frequency')
+        record['maximum_frequency'] = format_report_value(record.get('maximum_frequency'), 'maximum_frequency')
         record.update(date=period['date'],event=period['event'])
         for level in levels:
             values=summary.get('thresholds',{}).get(level,{})
             record.update({f'{level}_minutes':values.get('frequency_minutes'),f'{level}_pct':values.get('selected_time_pct')})
         frequency.append(record)
     overall=[{'threshold':sign+level,'minutes':values['frequency_minutes'],'percent':values['frequency_minutes']/result['summary']['selected_minutes']*100,
-        'occurrences':values['occurrences'],'longest':values['longest_minutes'],'minimum':result['summary']['minimum_frequency'],'maximum':result['summary']['maximum_frequency']} for level,values in result['summary']['thresholds'].items()]
-    tables=[('Overall Frequency Statistics',[('threshold','Threshold Hz'),('minutes','Minutes'),('percent','% selected'),('occurrences','Occurrences'),('longest','Longest min'),('minimum','Min Hz'),('maximum','Max Hz')],overall),('Event Frequency Statistics',columns,frequency)]
+        'occurrences':values['occurrences'],'longest':values['longest_minutes'],
+        'minimum_frequency':format_report_value(result['summary']['minimum_frequency'],'minimum_frequency'),
+        'maximum_frequency':format_report_value(result['summary']['maximum_frequency'],'maximum_frequency')} for level,values in result['summary']['thresholds'].items()]
+    tables=[('Overall Frequency Statistics',[('threshold','Threshold Hz'),('minutes','Minutes'),('percent','% selected'),('occurrences','Occurrences'),('longest','Longest min'),('minimum_frequency','Min Hz'),('maximum_frequency','Max Hz')],overall),('Event Frequency Statistics',columns,frequency)]
     monthly=defaultdict(list)
     for window in windows:monthly[window['date'][:7]].extend(window['ranges'])
     month_rows,_=sessions.period_statistics(session,result,[{'id':month,'date':month,'event':None,'ranges':ranges} for month,ranges in monthly.items()],entities)

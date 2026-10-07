@@ -7,6 +7,7 @@ import numpy as np
 from fastapi.responses import StreamingResponse
 from services import frequency_analysis_sessions as sessions
 from services.frequency_compact_reports import number, report_tables
+from services.frequency_report_formatting import format_report_value
 from services.frequency_threshold_analysis import calculate, iso, merge_ranges, seconds, segments
 
 TEMPLATE = Path(__file__).resolve().parent.parent / 'report_templates' / 'frequency_monthly.docx'
@@ -45,15 +46,22 @@ def plot_image(kind, title, x, y, high=False, secondary=None,annotations=None):
                 condition=(values>50.05) if high else (values<49.9)
                 ax.fill_between(dates,values,50.,where=condition & np.isfinite(values),color='#d34d41',alpha=.25)
                 for level in (49.50,49.70,49.90,50.,50.05):ax.axhline(level,color='#b3bdc8',linewidth=.6,linestyle='--')
+                from matplotlib.ticker import FormatStrFormatter
+                ax.yaxis.set_major_formatter(FormatStrFormatter('%.3f'))
                 ax.set_ylabel('Hz')
             else:ax.set_ylabel('MW')
             ax.xaxis.set_major_formatter(mdates.DateFormatter('%d %b\n%H:%M'))
             if secondary is not None:
                 twin=ax.twinx();twin.plot(dates,secondary,color='#7958a1',linewidth=.7);twin.set_ylabel('Hz')
+                from matplotlib.ticker import FormatStrFormatter
+                twin.yaxis.set_major_formatter(FormatStrFormatter('%.3f'))
             shown=set()
             for stamp,label in annotations or []:
                 ax.axvline(pd.Timestamp(stamp),color='#19856d' if label=='Physical regulation' else '#c77617',linewidth=.7,linestyle=':',label=label if label not in shown else None);shown.add(label)
             if shown:ax.legend(fontsize=7,loc='upper left')
+            if kind == 'deviation':
+                from matplotlib.ticker import FormatStrFormatter
+                ax.yaxis.set_major_formatter(FormatStrFormatter('%.0f'))
         ax.spines[['top','right']].set_visible(False);ax.grid(axis='y',alpha=.16)
         output=BytesIO();fig.savefig(output,format='png');output.seek(0);return output.getvalue()
 
@@ -107,14 +115,14 @@ def build_blocks(session,result,payload):
     text(f'{first} to {last} | Indian Standard Time | {len(events)} daily event periods')
     heading('1  Executive Summary and General Notes')
     text(notes.executive_summary)
-    text(f"Lowest observed frequency was {number(full['minimum_frequency'])} Hz at {full['minimum_timestamp'].replace('T',' ')} IST. Valid full-period frequency coverage is {number(full['covered_frequency_minutes'])} of {number(full['selected_minutes'])} minutes. Selected-event coverage is {number(result['summary']['covered_frequency_minutes'])} of {number(result['summary']['selected_minutes'])} minutes.")
+    text(f"Lowest observed frequency was {format_report_value(full['minimum_frequency'],'minimum_frequency') or '—'} Hz at {(full['minimum_timestamp'] or '—').replace('T',' ')} IST. Valid full-period frequency coverage is {number(full['covered_frequency_minutes'])} of {number(full['selected_minutes'])} minutes. Selected-event coverage is {number(result['summary']['covered_frequency_minutes'])} of {number(result['summary']['selected_minutes'])} minutes.")
     text(notes.general_notes)
     count=len({(r.get('timestamp'),r.get('message_no')) for r in result['chronology'] if r.get('message_no')}) if result['messages_complete'] else None
     text('Messages issued in the selected reporting windows: '+number(count)+'. Recipient-wise category counts are presented in the actions section.')
     for warning in dict.fromkeys([*result['warnings'],*warnings]):text('Coverage note: '+warning)
     heading('2  Frequency Analysis')
     text('Entire 24-hour reporting period, using available cached frequency readings. Missing and invalid readings are excluded; percentages use the full calendar reporting duration.')
-    indicators=[{'indicator':'Lowest frequency','value':f"{number(full['minimum_frequency'])} Hz at {full['minimum_timestamp']}"},{'indicator':'Highest frequency','value':number(full['maximum_frequency'])+' Hz'},{'indicator':'Average frequency','value':number(full['average_frequency'])+' Hz'},{'indicator':'Valid frequency coverage','value':number(full['covered_frequency_minutes'])+' minutes'}]
+    indicators=[{'indicator':'Lowest frequency','value':f"{format_report_value(full['minimum_frequency'],'minimum_frequency') or '—'} Hz at {full['minimum_timestamp'] or '—'}"},{'indicator':'Highest frequency','value':(format_report_value(full['maximum_frequency'],'maximum_frequency') or '—')+' Hz'},{'indicator':'Average frequency','value':(format_report_value(full['average_frequency'],'frequency_hz') or '—')+' Hz'},{'indicator':'Valid frequency coverage','value':number(full['covered_frequency_minutes'])+' minutes'}]
     for level,v in full['thresholds'].items():indicators.append({'indicator':('Above ' if high else 'Below ')+level+' Hz','value':f"{number(v['frequency_minutes'])} minutes ({number(v['frequency_minutes']/full['selected_minutes']*100)}%); {v['occurrences']} occurrences; longest {number(v['longest_minutes'])} minutes"})
     table('Full-period frequency indicators',[('indicator','Indicator'),('value','Reporting period')],indicators)
     x,y,_=series(dataset,full_ranges);chart('frequency','Frequency plot for the reporting period',x,y)
@@ -131,7 +139,7 @@ def build_blocks(session,result,payload):
     _,daily=sessions.period_statistics(session,result,daily_full,[])
     day_rows=[]
     for d in daily:
-        s=d['summary'] or {};r={'date':d['date'],'minimum':s.get('minimum_frequency'),'at':s.get('minimum_timestamp'),'coverage':s.get('covered_frequency_minutes')}
+        s=d['summary'] or {};r={'date':d['date'],'minimum':format_report_value(s.get('minimum_frequency'),'minimum'),'at':s.get('minimum_timestamp'),'coverage':s.get('covered_frequency_minutes')}
         for level in full['thresholds']:
             v=s.get('thresholds',{}).get(level,{});r[level]=f"{number(v.get('frequency_minutes'))} min ({number(v.get('day_time_pct'))}%)"
         day_rows.append(r)
@@ -233,10 +241,11 @@ def performance_records(rows,high):
     output=[]
     for row in rows:
         intervals=list(dict.fromkeys(a[11:16]+'–'+b[11:16] for a,b in row['selected_ranges']))
-        r={'period':row['date']+(f" / Slot {row['event']}" if row['event'] else ' / Monthly')+'\n'+'; '.join(intervals),'entity':row['entity'],'minimum':f"{value(row.get('highest_frequency') if high else row['lowest_frequency'],3)}\n"+value(row.get('minimum_timestamp') if not high else None)}
+        frequency_value = value(row.get('highest_frequency') if high else row['lowest_frequency'],3)
+        r={'period':row['date']+(f" / Slot {row['event']}" if row['event'] else ' / Monthly')+'\n'+'; '.join(intervals),'entity':row['entity'],'minimum':f"{frequency_value}\n"+value(row.get('minimum_timestamp') if not high else None)}
         if row.get('lowest_frequency') is None:r['minimum']='—'
         for level,v in row['thresholds'].items():
-            r.update({level+'_adverse':f"{value(v['frequency_minutes'])} / {value(v['adverse_minutes'])} ({value(v['adverse_pct'])}%)",level+'_average':value(v['average_od_ui_mw']),level+'_maximum':value(v['maximum_od_ui_mw']),level+'_messages':value(v['message_count'],0)})
+            r.update({level+'_adverse':f"{value(v['frequency_minutes'])} / {value(v['adverse_minutes'])} ({value(v['adverse_pct'])}%)",level+'_average':format_report_value(v['average_od_ui_mw'],'average_od_ui_mw') or '—',level+'_maximum':format_report_value(v['maximum_od_ui_mw'],'maximum_od_ui_mw') or '—',level+'_messages':value(v['message_count'],0)})
             if v['frequency_minutes'] is None:r[level+'_adverse']='—'
         output.append(r)
     return output
@@ -314,7 +323,9 @@ def render_word(blocks):
             for header_row in list(table.rows)[:2 if grouped else 1]:
                 repeat=OxmlElement('w:tblHeader');header_row._tr.get_or_add_trPr().append(repeat)
             for row in rows:
-                for c,(key,_) in zip(table.add_row().cells,cols):c.text=number(row.get(key)) if row.get(key) is not None else '—'
+                for c,(key,_) in zip(table.add_row().cells,cols):
+                    cell_value = format_report_value(row.get(key), key)
+                    c.text=number(cell_value) if cell_value is not None else '—'
             for i,row in enumerate(table.rows):
                 for cell_index,cell in enumerate(row.cells):
                     is_header=i<(2 if grouped else 1)
@@ -396,7 +407,7 @@ def render_pdf(blocks):
                     second.extend(para(label,subheader) for label in ['Freq min / OD/UI min (%)','Avg MW','Max MW','Messages'])
                 spans.extend(('SPAN',(at,0),(at,1)) for at in range(3));data=[first,second]
             else:data=[[para(label,header) for _,label in cols]]
-            data.extend([[para(number(row.get(key)) if row.get(key) is not None else '—',cell) for key,_ in cols] for row in rows])
+            data.extend([[para(number(format_report_value(row.get(key), key)) if row.get(key) is not None else '—',cell) for key,_ in cols] for row in rows])
             weights=[2 if key in ('entity','period','message_details','value','timestamp','minimum') else 1 for key,_ in cols]
             count=2 if grouped else 1
             header_background=[('BACKGROUND',(3,1),(-1,1),colors.HexColor('#DBEAF4'))] if grouped else []

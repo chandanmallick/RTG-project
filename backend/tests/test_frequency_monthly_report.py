@@ -5,13 +5,23 @@ from unittest.mock import patch
 from docx import Document
 from test_frequency_threshold_analysis import fixture, USER, DB
 from services import frequency_analysis_sessions as sessions
-from services.frequency_monthly_report import build_blocks, performance_columns
+from services.frequency_monthly_report import build_blocks, performance_columns, performance_records
 from services.frequency_monthly_data import monthly_model, frequency_statistics, message_summary, frequency_heatmap
 from routes.frequency_analysis_routes import ResultPayload, export_result
 
 
 class MonthlyReportTests(unittest.TestCase):
     def setUp(self):sessions._sessions.clear()
+
+    def test_report_frequency_and_od_display_precision(self):
+        row={'date':'2026-10-03','event':1,'selected_ranges':[('2026-10-03T17:00:00','2026-10-03T17:01:00')],
+             'entity':'Bihar','lowest_frequency':49.876,'minimum_timestamp':'2026-10-03T17:00:00',
+             'thresholds':{'49.90':{'frequency_minutes':1,'adverse_minutes':.5,'adverse_pct':50,
+                                    'average_od_ui_mw':5.49,'maximum_od_ui_mw':12.51,'message_count':0}}}
+        record=performance_records([row],False)[0]
+        self.assertTrue(record['minimum'].startswith('49.876\n'))
+        self.assertEqual(record['49.90_average'],'5')
+        self.assertEqual(record['49.90_maximum'],'13')
 
     def result(self):
         token=sessions._put(USER,fixture(),{'filename':'Report test','crms_enabled':False})['session_token']
@@ -53,6 +63,18 @@ class MonthlyReportTests(unittest.TestCase):
         payload.format='pdf'
         with self.assertRaises(Exception) as caught:export_result(payload,{'employeeId':'other'})
         self.assertEqual(caught.exception.status_code,404)
+
+    def test_exports_selected_month_without_source_coverage(self):
+        result=self.result()
+        payload=ResultPayload(session_token=result['session_token'],result_token=result['result_token'],
+            layout='monthly-template',reporting_month='2026-09',include_chronology=True,
+            include_entity_performance=True,performance_groups=['State','ISGS','IPP'])
+        async def contents(response):
+            return b''.join([chunk async for chunk in response.body_iterator])
+        for fmt,signature in (('pdf',b'%PDF'),('docx',b'PK\x03\x04')):
+            payload.format=fmt
+            data=asyncio.run(contents(export_result(payload,USER)))
+            self.assertTrue(data.startswith(signature))
 
     def test_month_selection_missing_days_and_independent_slots(self):
         result=self.result();payload=ResultPayload(session_token=result['session_token'],result_token=result['result_token'],reporting_month='2026-10')

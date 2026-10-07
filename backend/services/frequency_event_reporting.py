@@ -4,6 +4,7 @@ from collections import defaultdict, OrderedDict
 from datetime import datetime, timedelta
 from threading import Lock
 from time import monotonic
+from services.frequency_report_formatting import format_report_value, number_format_for_key
 
 _cache = OrderedDict()
 _cache_lock = Lock()
@@ -385,7 +386,8 @@ def message_category_rows(chronology,complete=True):
         for (group,entity,category),values in sorted(counts.items())]
 
 
-def cell_text(value):
+def cell_text(value, key=None):
+    value = format_report_value(value, key) if key else value
     if value is None:
         return "-"
     if isinstance(value, float):
@@ -410,10 +412,10 @@ def append_docx_supplements(doc, payload):
         if index:
             doc.add_page_break()
         doc.add_heading(event["event_name"], level=1)
-        doc.add_paragraph(f"Event Date: {event['start_time'][:10]} | Start Time: {event['start_time'].replace('T', ' ')} | End Time: {event['end_time'].replace('T', ' ')} | Lowest Frequency: {cell_text(event.get('lowest_frequency'))} Hz")
+        doc.add_paragraph(f"Event Date: {event['start_time'][:10]} | Start Time: {event['start_time'].replace('T', ' ')} | End Time: {event['end_time'].replace('T', ' ')} | Lowest Frequency: {cell_text(event.get('lowest_frequency'), 'lowest_frequency')} Hz")
         if payload.get("include_analysis_summary") and event.get("threshold_analysis"):
             stats=event["threshold_analysis"]["summary"]
-            doc.add_paragraph(f"Selected: {stats['selected_minutes']} min | Covered frequency: {stats['covered_frequency_minutes']} min | Average frequency: {cell_text(stats['average_frequency'])} Hz | Minimum at: {stats['minimum_timestamp']} | Low-frequency occurrences: {stats['low_frequency_events']} | Sampling interval(s): {stats.get('sampling_intervals_seconds', [stats['sampling_seconds']])} sec")
+            doc.add_paragraph(f"Selected: {stats['selected_minutes']} min | Covered frequency: {stats['covered_frequency_minutes']} min | Average frequency: {cell_text(stats['average_frequency'], 'frequency_hz')} Hz | Minimum at: {stats['minimum_timestamp']} | Low-frequency occurrences: {stats['low_frequency_events']} | Sampling interval(s): {stats.get('sampling_intervals_seconds', [stats['sampling_seconds']])} sec")
         if event.get("selection_note"):
             doc.add_paragraph(event["selection_note"])
         for warning in event.get("warnings", []):
@@ -440,7 +442,7 @@ def append_docx_supplements(doc, payload):
             for row in rows:
                 cells = table.add_row().cells
                 for cell, (key, _) in zip(cells, columns):
-                    cell.text = cell_text(row.get(key))
+                    cell.text = cell_text(row.get(key), key)
             for row in table.rows:
                 row._tr.get_or_add_trPr().append(OxmlElement("w:cantSplit"))
                 for cell, width in zip(row.cells, widths):
@@ -462,7 +464,7 @@ def append_pdf_supplements(story, payload, styles, table_style, pdf_cell, header
         if index or payload.get("include_existing_sections", True):
             story.append(PageBreak())
         story.append(Paragraph(escape(event["event_name"]), styles["Heading2"]))
-        story.append(Paragraph(escape(f"Event Date: {event['start_time'][:10]} | Start Time: {event['start_time'].replace('T', ' ')} | End Time: {event['end_time'].replace('T', ' ')} | Lowest Frequency: {cell_text(event.get('lowest_frequency'))} Hz"), styles["Normal"]))
+        story.append(Paragraph(escape(f"Event Date: {event['start_time'][:10]} | Start Time: {event['start_time'].replace('T', ' ')} | End Time: {event['end_time'].replace('T', ' ')} | Lowest Frequency: {cell_text(event.get('lowest_frequency'), 'lowest_frequency')} Hz"), styles["Normal"]))
         for warning in event.get("warnings", []):
             story.append(Paragraph(escape(warning), styles["Normal"]))
         if payload.get("include_entity_performance"):
@@ -473,7 +475,7 @@ def append_pdf_supplements(story, payload, styles, table_style, pdf_cell, header
                 story.append(Paragraph("No records available for this event period.", styles["Normal"]))
                 continue
             values = [[pdf_cell(label, header_style) for _, label in columns]]
-            values += [[pdf_cell(cell_text(row.get(key))) for key, _ in columns] for row in rows]
+            values += [[pdf_cell(cell_text(row.get(key), key)) for key, _ in columns] for row in rows]
             weights = table_weights(columns, title)
             table = Table(values, colWidths=[weight / sum(weights) * 790 for weight in weights], repeatRows=1, splitInRow=1)
             table.setStyle(table_style)
@@ -490,10 +492,10 @@ def supplements_html(events, payload):
     output = ['<section class="frequency-supplements" style="padding:24px;font-family:Arial,sans-serif;color:#102a43"><style>.frequency-supplements table{border-collapse:collapse;width:100%;font-size:12px;margin-bottom:24px}.frequency-supplements th,.frequency-supplements td{border:1px solid #CBD5E1;padding:7px;text-align:left;vertical-align:top;overflow-wrap:anywhere}.frequency-supplements th{background:#EAF2FF}.frequency-supplements h2{color:#03624C}.frequency-supplements .table-scroll{overflow-x:auto}</style>']
     if payload.get('compact_html'):output.append('<style>.frequency-supplements .table-scroll{max-height:320px;overflow:auto}.frequency-supplements th{position:sticky;top:0}.frequency-supplements details{border-bottom:1px solid #CBD5E1}</style>')
     for event in events:
-        output.append(f"<h2>{escape(event['event_name'])}</h2><p>{escape(event['start_time'])} to {escape(event['end_time'])} IST | Lowest Frequency: {escape(cell_text(event.get('lowest_frequency')))} Hz</p>")
+        output.append(f"<h2>{escape(event['event_name'])}</h2><p>{escape(event['start_time'])} to {escape(event['end_time'])} IST | Lowest Frequency: {escape(cell_text(event.get('lowest_frequency'), 'lowest_frequency'))} Hz</p>")
         if payload.get("include_analysis_summary") and event.get("threshold_analysis"):
             stats=event["threshold_analysis"]["summary"]
-            output.append("<p>"+escape(f"Selected: {stats['selected_minutes']} min | Covered frequency: {stats['covered_frequency_minutes']} min | Average frequency: {cell_text(stats['average_frequency'])} Hz | Minimum at: {stats['minimum_timestamp']} | Low-frequency occurrences: {stats['low_frequency_events']} | Sampling interval(s): {stats.get('sampling_intervals_seconds', [stats['sampling_seconds']])} sec")+"</p>")
+            output.append("<p>"+escape(f"Selected: {stats['selected_minutes']} min | Covered frequency: {stats['covered_frequency_minutes']} min | Average frequency: {cell_text(stats['average_frequency'], 'frequency_hz')} Hz | Minimum at: {stats['minimum_timestamp']} | Low-frequency occurrences: {stats['low_frequency_events']} | Sampling interval(s): {stats.get('sampling_intervals_seconds', [stats['sampling_seconds']])} sec")+"</p>")
         if event.get("selection_note"):
             output.append("<p>"+escape(event["selection_note"])+"</p>")
         output.extend(f"<p>{escape(warning)}</p>" for warning in event.get("warnings", []))
@@ -504,7 +506,7 @@ def supplements_html(events, payload):
             if compact:output.append(f'<details><summary style="cursor:pointer;font-weight:bold;padding:9px">{escape(title)} ({len(rows)} rows)</summary>')
             output.append(f"<h3>{escape(title)}</h3><div class='table-scroll'><table><thead><tr>" + "".join(f"<th>{escape(label)}</th>" for _, label in columns) + "</tr></thead><tbody>")
             for row in rows:
-                output.append("<tr>" + "".join(f"<td>{escape(cell_text(row.get(key)))}</td>" for key, _ in columns) + "</tr>")
+                output.append("<tr>" + "".join(f"<td>{escape(cell_text(row.get(key), key))}</td>" for key, _ in columns) + "</tr>")
             if not rows:
                 output.append(f"<tr><td colspan='{len(columns)}'>No records available for this event period.</td></tr>")
             output.append("</tbody></table></div>")
@@ -514,7 +516,7 @@ def supplements_html(events, payload):
                 output.append(f'<section data-state="{escape(state,quote=True)}" hidden><h3>{escape(state)} — Event statistics and message chronology</h3>')
                 for title,columns,rows in reports:
                     output.append(f'<details><summary style="cursor:pointer;padding:9px;font-weight:bold">{escape(title)} ({len(rows)} rows)</summary><div class="table-scroll" style="max-height:320px;overflow:auto"><table><thead><tr>'+''.join(f'<th>{escape(label)}</th>' for _,label in columns)+'</tr></thead><tbody>')
-                    for row in rows:output.append('<tr>'+''.join(f'<td>{escape(cell_text(row.get(key)))}</td>' for key,_ in columns)+'</tr>')
+                    for row in rows:output.append('<tr>'+''.join(f'<td>{escape(cell_text(row.get(key), key))}</td>' for key,_ in columns)+'</tr>')
                     output.append('</tbody></table></div></details>')
                 output.append('</section>')
     return "".join(output) + "</section>"
@@ -581,8 +583,10 @@ def supplements_excel(events, payload):
                 if isinstance(cell.value, str):
                     # Message text/labels must stay text, including leading '='.
                     cell.data_type = "s"
-                elif isinstance(cell.value, float):
-                    cell.number_format = "0.000"
+                elif isinstance(cell.value, (int, float)):
+                    key_index = cell.column - 4
+                    key = columns[key_index][0] if 0 <= key_index < len(columns) else None
+                    cell.number_format = number_format_for_key(key) or "0.000"
                 cell.alignment = Alignment(vertical="top", wrap_text=True)
         for index, label in enumerate(headers, 1):
             sheet.column_dimensions[get_column_letter(index)].width = 54 if label in {"Message / Details", "Period (IST)"} else 34 if label in {"Event / Instance", "State / Entity", "Entity"} else 24
@@ -607,12 +611,18 @@ def supplements_excel(events, payload):
                 sheet.append([]);sheet.append([title]);sheet.append([label for _,label in columns])
                 for cell in sheet[sheet.max_row]:
                     cell.font=Font(bold=True,color='FFFFFF');cell.fill=PatternFill('solid',fgColor='03624C')
-                for row in rows:sheet.append([row.get(key) for key,_ in columns])
+                for row in rows:
+                    sheet.append([row.get(key) for key,_ in columns])
+                    for index, (key, _) in enumerate(columns, 1):
+                        number_format = number_format_for_key(key)
+                        cell = sheet.cell(sheet.max_row, index)
+                        if number_format and isinstance(cell.value, (int, float)):
+                            cell.number_format = number_format
                 if not rows:sheet.append(['No records available'])
             for row in sheet:
                 for cell in row:
                     if isinstance(cell.value,str):cell.data_type='s'
-                    if isinstance(cell.value,float):cell.number_format='0.000'
+                    if isinstance(cell.value,(int,float)) and cell.number_format == 'General':cell.number_format='0.000'
                     cell.alignment=Alignment(vertical='top',wrap_text=True)
             for index in range(1,sheet.max_column+1):sheet.column_dimensions[get_column_letter(index)].width=50 if index in {1,8} else 25
             sheet.freeze_panes='B6';sheet.sheet_view.showGridLines=False

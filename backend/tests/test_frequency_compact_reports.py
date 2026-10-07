@@ -11,6 +11,7 @@ from routes.frequency_analysis_routes import ResultPayload,FetchSourcesPayload,e
 from services import frequency_analysis_sessions as sessions
 from services.frequency_threshold_analysis import calculate
 from services.frequency_auto_sources import fetch_sources
+from services.frequency_compact_reports import performance_table
 
 
 async def response_bytes(response):
@@ -21,6 +22,15 @@ async def response_bytes(response):
 
 class CompactReportsTests(unittest.TestCase):
     def setUp(self):sessions._sessions.clear()
+
+    def test_compact_daily_and_monthly_rows_format_frequency_and_od(self):
+        row={'date':'2026-10-03','event':1,'entity':'Bihar','period_start':'2026-10-03T17:00:00',
+             'period_end':'2026-10-03T17:01:00','selected_minutes':1,'lowest_frequency':49.876,
+             'thresholds':{'49.90':{'frequency_minutes':1,'adverse_minutes':.5,'adverse_pct':50,
+                                    'average_od_ui_mw':5.49,'maximum_od_ui_mw':12.51}}}
+        _,records=performance_table([row],['49.90'])
+        self.assertEqual(records[0]['lowest_frequency'],'49.876')
+        self.assertEqual(records[0]['49.90_mw'],'5 / 13')
 
     def test_high_uses_opposite_adverse_signs_and_separate_threshold(self):
         data=fixture();data['frequency']=data['frequency'].copy();data['frequency'][:]=50.10
@@ -99,4 +109,3 @@ class CompactReportsTests(unittest.TestCase):
             response=export_result(payload,USER)
             if fmt=='html':self.assertIn('High Frequency Analysis',response['html_document'])
             else:self.assertTrue(asyncio.run(response_bytes(response)))
-

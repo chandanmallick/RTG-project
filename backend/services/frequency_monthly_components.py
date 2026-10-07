@@ -44,6 +44,8 @@ def frequency_plot(model,ranges,title,entity=None,chronology=()):
             ax.plot(dates,y,color='#244366',lw=.8,label='State OD (signed)' if entity else 'Frequency')
             if entity:
                 twin=ax.twinx();twin.plot(dates,f,color='#7958a1',lw=.65,label='Frequency');twin.set_ylabel('Frequency (Hz)');twin.legend(loc='upper right',fontsize=7)
+                from matplotlib.ticker import FormatStrFormatter
+                twin.yaxis.set_major_formatter(FormatStrFormatter('%.3f'))
                 if not np.isfinite(y).any():ax.text(.5,.5,'No OD data available',ha='center',transform=ax.transAxes,color='#64748B',bbox={'facecolor':'white','alpha':.85,'edgecolor':'none'})
             else:
                 ax.fill_between(dates,y,50,where=np.isfinite(y)&(y<49.9),color='#d34d41',alpha=.3,label='<49.90 Hz')
@@ -59,6 +61,8 @@ def frequency_plot(model,ranges,title,entity=None,chronology=()):
             empty(ax)
             if entity is None:ax.set_ylim(49.4,50.2)
         ax.set_xlim(pd.Timestamp(ranges[0][0]),pd.Timestamp(ranges[-1][1]));ax.xaxis.set_major_formatter(mdates.DateFormatter('%d %b\n%H:%M'))
+        from matplotlib.ticker import FormatStrFormatter
+        ax.yaxis.set_major_formatter(FormatStrFormatter('%.0f' if entity else '%.3f'))
         ax.set_xlabel('Time (IST)');ax.set_ylabel('OD (MW)' if entity else 'Frequency (Hz)');ax.grid(alpha=.15)
         if len(x):ax.legend(loc='upper left',fontsize=7)
     return figure(title,draw)
@@ -77,6 +81,8 @@ def duration_curve(model):
             ax.annotate(f'{level:.2f} Hz\n{value(pct)}%',(level,4+i*17),fontsize=7,ha='center')
         ax.set_xlim(min(49.4,float(x.min())) if len(x) else 49.4,max(50.2,float(x.max())) if len(x) else 50.2)
         ax.set_ylim(0,100);ax.set_xlabel('Frequency (Hz)');ax.set_ylabel('Covered monthly time below frequency (%)');ax.grid(alpha=.15);ax.legend(fontsize=7)
+        from matplotlib.ticker import FormatStrFormatter
+        ax.xaxis.set_major_formatter(FormatStrFormatter('%.3f'))
     return figure(f"Frequency duration curve | {model['month']}",draw)
 
 
@@ -116,7 +122,7 @@ def state_comparison(model):
             ax.set_yticks(positions,names);ax.set_ylim(-.6,len(names)-.4)
             ax.set_xlim(0,max([r[k] or 0 for r in rows for k in ('at_minimum','maximum')]+[1])*1.35)
             for bar,row in zip(bars,rows):
-                ax.text(max(row['at_minimum'] or 0,row['maximum'] or 0),bar.get_y()+bar.get_height()/2,'  '+value(row['at_minimum'])+' / '+value(row['maximum']),fontsize=7,va='center')
+                ax.text(max(row['at_minimum'] or 0,row['maximum'] or 0),bar.get_y()+bar.get_height()/2,'  '+value(row['at_minimum'],0)+' / '+value(row['maximum'],0),fontsize=7,va='center')
             ax.invert_yaxis();ax.margins(x=.25);ax.legend(fontsize=7)
         else:empty(ax)
         ax.set_xlabel('Over-drawal (MW), labels: lowest-frequency instant / maximum');ax.set_ylabel('State');ax.grid(axis='x',alpha=.15)
@@ -148,7 +154,7 @@ def monthly_frequency_table(model):
                  {'indicator':'Valid frequency coverage','value':f"{value(s['covered_minutes'])} / {value(s['calendar_minutes'])} calendar minutes"},
                  {'indicator':'UFR Stage-I operation dates/times','value':'; '.join(r['operation_time'] for r in model['defence']['ufr'] if str(r.get('stage','')).lower() in ('1','i','stage i','stage-i')) or '—'}])
     for level in ('49.90','49.50'):
-        largest=model['largest'].get(level);rows.append({'indicator':f'Largest over-drawal below {level} Hz','value':f"{largest['entity']} | {value(largest['mw'])} MW" if largest else '—'})
+        largest=model['largest'].get(level);rows.append({'indicator':f'Largest over-drawal below {level} Hz','value':f"{largest['entity']} | {value(largest['mw'],0)} MW" if largest else '—'})
     adms=adms_statistics(model['defence']['adms'])
     rows.append({'indicator':'ADMS conditions met / actual operations','value':f"{value(adms['due'],0)} / {value(adms['operated'],0)}" if model['defence']['adms'] else '—'})
     return table(f"Monthly frequency summary | {model['month']}",[('indicator','Indicator'),('value',model['month']+' | IST')],rows)
@@ -218,7 +224,7 @@ def build_low_blocks(session,result,payload):
     heading('1  Executive Summary');text(notes.executive_summary)
     s=model['summary'];text(f"Lowest frequency: {value(s['minimum'],3)} Hz at {value(s['minimum_time'])} IST.")
     blocks.append(executive_summary_table(model))
-    text('Major over-drawal: '+('; '.join(f"{r['entity']} {value(r['maximum'])} MW" for r in [r for r in model['comparisons'] if r['maximum'] is not None and r['maximum']>0][:3]) or '—'))
+    text('Major over-drawal: '+('; '.join(f"{r['entity']} {value(r['maximum'],0)} MW" for r in [r for r in model['comparisons'] if r['maximum'] is not None and r['maximum']>0][:3]) or '—'))
     text('ADMS operations: '+value(adms_statistics(model['defence']['adms'])['operated'],0)+' | UFR operations: '+(str(len(model['defence']['ufr'])) if model['defence']['ufr'] else '—'))
     blocks.append(frequency_plot(model,model['ranges'],f'Monthly frequency preview | {month}'));text(notes.general_notes)
     heading('2  Frequency Analysis');blocks.append(monthly_frequency_table(model))

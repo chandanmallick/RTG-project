@@ -686,6 +686,10 @@ thresholds share one entity/event row. HTML paginates the selected table and
 supports daily chronology filtering, event comparisons side by side, table CSV
 (downloadable in Excel) and Download HTML. State workbook sheets are retained.
 Missing source readings/counts remain unavailable; source failures are flagged.
+Across both monthly and daily report tables/plots, frequency readings in Hz
+display with three decimal places and OD/UI values in MW display with zero
+decimal places. This is presentation-only: source readings and calculation
+precision remain unchanged.
 
 Low and High are separate calculation/session/export categories. Low retains
 strict <49.90/<49.70/<49.50 thresholds; High uses strict >50.05 Hz and opposite
