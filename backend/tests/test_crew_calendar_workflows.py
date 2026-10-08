@@ -262,7 +262,7 @@ class ActingSICCandidateTests(unittest.TestCase):
         daily = Mock(find=Mock(return_value=people), find_one=Mock(return_value={"assignedDuty": "Morning"}))
         ctx = load_functions("crew_legacy/api/replacement.py", {"get_sic_candidates"}, {
             "get_current_user": lambda: None, "check_replacement_access": Mock(), "require_replacement_authority": Mock(),
-            "leave_request_collection": Mock(find_one=Mock(return_value=leave)), "employee_daily_collection": daily,
+            "leave_request_collection": Mock(find_one=Mock(return_value=leave), find=Mock(return_value=[])), "employee_daily_collection": daily,
             "employee_collection": master, "ACTIVE_LEAVE_STATUSES": ["Applied", "Approved"],
             "historical_shift_roles": lambda: {"experienced": {"sic"}}, "active_shift_memberships": lambda: {},
             "normalized_duty": lambda value: str(value or "").upper(), "SHIFT_DUTIES": {"MORNING", "EVENING", "NIGHT"},
@@ -270,7 +270,69 @@ class ActingSICCandidateTests(unittest.TestCase):
         })
         candidates = ctx["get_sic_candidates"](str(leave_id), {"role": "admin"})
         self.assertEqual([item["employeeId"] for item in candidates], ["engineer", "qualified", "experienced"])
+        fleet = ctx["get_sic_candidates"](str(leave_id), {"role": "admin"}, scope="fleet")
+        self.assertEqual([item["employeeId"] for item in fleet], [item["employeeId"] for item in people])
+        self.assertNotIn("groupName", daily.find.call_args.args[0])
+        ctx["leave_request_collection"].find.return_value = [{"employeeId": "off"}, {"employeeId": "qualified"}]
+        available = ctx["get_sic_candidates"](str(leave_id), {"role": "admin"}, scope="fleet")
+        self.assertEqual([item["employeeId"] for item in available], ["engineer", "other-shift", "experienced"])
+        with self.assertRaises(HTTPException):
+            ctx["get_sic_candidates"](str(leave_id), {"role": "admin"}, scope="invalid")
+        ctx["leave_request_collection"].find.return_value = []
+        ctx["get_sic_candidates"](str(leave_id), {"role": "admin"})
         query = daily.find.call_args.args[0]
         self.assertEqual(query["groupName"], "A")
         self.assertEqual(query["date"], "2026-10-10")
         self.assertEqual(query["leaveStatus"]["$nin"], ["Applied", "Approved"])
+
+
+class ActingSICCoverageTests(unittest.TestCase):
+    def test_pending_queue_keeps_uncovered_and_junior_replacement_days(self):
+        leaves = [{"_id": ObjectId(), "employeeId": "pranab", "name": "Pranab Debnath", "groupName": "Group-1", "date": "2026-10-18", "replacementRequired": False},
+                  {"_id": ObjectId(), "employeeId": "pranab", "name": "Pranab Debnath", "groupName": "Group-1", "date": "2026-10-19", "replacement": {"employeeId": "junior"}}]
+        ctx = load_functions("crew_legacy/api/replacement.py", {"pending_sic"}, {
+            "get_current_user": lambda: None, "check_replacement_access": Mock(), "has_replacement_authority": lambda *args: True,
+            "datetime": datetime, "timedelta": timedelta, "ACTIVE_LEAVE_STATUSES": {"Approved"},
+            "leave_request_collection": Mock(find=Mock(return_value=leaves)),
+            "employee_daily_collection": Mock(find_one=Mock(side_effect=lambda query: None if "isActingSIC" in query else {"assignedDuty": "Morning"})),
+            "leave_requires_sic": lambda leave, daily: leave["employeeId"] == "pranab",
+        })
+        rows = ctx["pending_sic"]({"role": "admin"})
+        self.assertEqual(len(rows), 2)
+        self.assertFalse(rows[0]["replacementAssigned"])
+        self.assertTrue(rows[1]["replacementAssigned"])
+        self.assertTrue(all(row["isSIC"] for row in rows))
+
+    def test_missing_daily_sic_flag_uses_active_roster(self):
+        ctx = load_functions("crew_legacy/api/replacement.py", {"leave_requires_sic"}, {
+            "group_shift_in_charge_ids": lambda *args: [],
+            "roster_group_collection": Mock(find_one=Mock(return_value={"shiftInCharge": {"employeeId": "pranab"}})),
+        })
+        self.assertTrue(ctx["leave_requires_sic"]({"employeeId": "pranab", "date": "2026-10-18", "groupName": "Group-1"}, {}))
+
+
+class ActingSICSaveTests(unittest.TestCase):
+    def test_fleet_assignment_preserves_roster_and_records_target_group(self):
+        leave_id = ObjectId()
+        leave = {"_id": leave_id, "employeeId": "pranab", "name": "Pranab", "date": "2026-10-18", "groupName": "Group-1"}
+        daily = Mock(find_one=Mock(return_value={"employeeId": "senior", "groupName": "Group-2", "assignedDuty": "Off"}))
+        candidates = Mock(return_value=[{"employeeId": "senior"}])
+        audit = Mock()
+        ctx = load_functions("crew_legacy/api/replacement.py", {"assign_sic"}, {
+            "leave_request_collection": Mock(find_one=Mock(return_value=leave)), "employee_daily_collection": daily,
+            "employee_collection": Mock(find_one=Mock(return_value={"userId": "senior", "name": "Senior", "designation": "Engineer"})),
+            "require_replacement_authority": Mock(), "get_sic_candidates": candidates,
+            "ACTIVE_LEAVE_STATUSES": {"Approved"}, "datetime": datetime, "duty_switch_collection": audit,
+        })
+        result = ctx["assign_sic"](str(leave_id), {"sicEmployeeId": "senior", "scope": "fleet"}, {"employeeId": "50041"})
+        self.assertEqual(result["actingSIC"]["groupName"], "Group-1")
+        candidates.assert_called_once_with(str(leave_id), {"employeeId": "50041"}, scope="fleet")
+        marker = daily.update_one.call_args.args[1]["$set"]
+        self.assertEqual(marker["actingSICGroup"], "Group-1")
+        self.assertNotIn("assignedDuty", marker)
+        self.assertNotIn("groupName", marker)
+        self.assertEqual(audit.insert_one.call_args.args[0]["updated"]["assignedDuty"], "Off")
+        daily.reset_mock()
+        with self.assertRaises(HTTPException):
+            ctx["assign_sic"](str(leave_id), {"sicEmployeeId": "senior"}, {"employeeId": "50041"})
+        daily.update_one.assert_not_called()

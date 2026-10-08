@@ -63,6 +63,7 @@ export default function ReplacementManagement({ initialWorkflow } = {}) {
   const [sicDialogOpen, setSicDialogOpen] = useState(false);
   const [selectedSIC, setSelectedSIC] = useState("");
   const [sicCandidates, setSicCandidates] = useState([]);
+  const [sicScope, setSicScope] = useState("shift");
 
   const [pendingSIC, setPendingSIC] = useState([]);
   const [sicExchangeContext, setSicExchangeContext] = useState(null);
@@ -343,12 +344,13 @@ export default function ReplacementManagement({ initialWorkflow } = {}) {
   // MANUAL SIC BUTTON
   // ===============================
 
-  const openSICDialog = async (leave, source = "Direct acting-SIC assignment") => {
+  const openSICDialog = async (leave, source = "Direct acting-SIC assignment", scope = "shift") => {
     try {
 
       setSelectedLeave({ ...leave, sicAssignmentSource: source });
 
-      const res = await api.get(`/replacement/sic-candidates/${leave.id}`);
+      setSicScope(scope);
+      const res = await api.get(`/replacement/sic-candidates/${leave.id}`, { params: { scope } });
       setSicCandidates(res.data || []);
 
       setSelectedSIC((res.data || []).some(candidate => candidate.employeeId === leave.actingSIC?.employeeId) ? leave.actingSIC.employeeId : "");
@@ -373,6 +375,7 @@ export default function ReplacementManagement({ initialWorkflow } = {}) {
 
       await api.put(`/replacement/assign-sic/${selectedLeave.id}`, {
         sicEmployeeId: selectedSIC,
+        scope: sicScope,
         source: selectedLeave.sicAssignmentSource || "Direct acting-SIC assignment",
       });
 
@@ -890,7 +893,7 @@ export default function ReplacementManagement({ initialWorkflow } = {}) {
     {/* ################# SIC Section ################### */}
 
 
-      <Collapse in={activeWorkflow === "sic"} timeout={420} unmountOnExit>
+      <Collapse in={activeWorkflow === "sic" || (["leave", "board"].includes(activeWorkflow) && pendingSIC.length > 0)} timeout={420} unmountOnExit>
       <Box id="replacement-workflow-sic" sx={{ scrollMarginTop: 110 }}>
       <Accordion
         defaultExpanded
@@ -1208,7 +1211,8 @@ export default function ReplacementManagement({ initialWorkflow } = {}) {
 
         <DialogContent sx={{ mt: 2 }}>
 
-          <Alert severity="info" sx={{ mb: 2 }}>Choose a colleague working the same shift and group on {selectedLeave?.date ? dayjs(selectedLeave.date).format("DD MMM YYYY") : "the leave date"}. You can assign acting SIC with or without replacement duty; the replacement employee can be a different person.</Alert>
+          <Alert severity="info" sx={{ mb: 2 }}>Choose from this shift or the entire fleet on {selectedLeave?.date ? dayjs(selectedLeave.date).format("DD MMM YYYY") : "the leave date"}. You can assign acting SIC with or without replacement duty; the replacement employee can be a different person. Fleet selection designates SIC without changing the employee roster duty; use duty exchange when cover must be moved.</Alert>
+          <TextField select fullWidth size="small" label="Candidate scope" value={sicScope} onChange={(e) => openSICDialog(selectedLeave, selectedLeave.sicAssignmentSource, e.target.value)}><MenuItem value="shift">This group and shift</MenuItem><MenuItem value="fleet">Entire fleet (not on leave)</MenuItem></TextField>
           <TextField
             select
             fullWidth
@@ -1220,12 +1224,12 @@ export default function ReplacementManagement({ initialWorkflow } = {}) {
           >
 
             {sicCandidates.length === 0 && (
-              <MenuItem disabled>No available staff rostered on this shift</MenuItem>
+              <MenuItem disabled>No available staff for this date and scope</MenuItem>
             )}
 
             {sicCandidates.map(s => (
               <MenuItem key={s.employeeId} value={s.employeeId}>
-                {s.name || s.employeeId} ({s.employeeId}) {s.designation ? ` ? ${s.designation}` : ""}
+                {s.name || s.employeeId} ({s.employeeId}) {s.designation ? ` - ${s.designation}` : ""} | {s.groupName || "No group"} | {s.assignedDuty || "No duty"}
               </MenuItem>
             ))}
 

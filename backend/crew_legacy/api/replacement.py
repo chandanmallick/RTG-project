@@ -352,6 +352,19 @@ def group_shift_in_charge_ids(duty_date: str, group_name: str):
     ))
 
 
+def leave_requires_sic(leave, daily):
+    """Identify the absent SIC independently of replacement decisions."""
+    employee_id = str(leave.get("employeeId") or "")
+    if (daily or {}).get("isSIC") or leave.get("isSIC"):
+        return True
+    if employee_id in group_shift_in_charge_ids(leave.get("date"), leave.get("groupName")):
+        return True
+    return bool(roster_group_collection.find_one({
+        "groupName": leave.get("groupName"), "isActive": True,
+        "shiftInCharge.employeeId": employee_id,
+    }))
+
+
 def daily_department_ic_ids(*daily_records):
     return list(dict.fromkeys(
         str((record.get("departmentIC") or {}).get("employeeId") or "").strip()
@@ -2580,7 +2593,7 @@ def pending_replacements(user=Depends(get_authenticated_user)):
         if not l.get("replacementRequired") and normalized_duty(assigned_duty) not in SHIFT_DUTIES:
             continue
 
-        is_sic_flag = duty.get("isSIC", False) if duty else False
+        is_sic_flag = leave_requires_sic(l, duty)
 
         # =============================
         # DATE LOGIC (FIXED POSITION)
@@ -2656,7 +2669,7 @@ def assigned_replacements(user=Depends(get_authenticated_user)):
             "leaveType": leave.get("leaveType"),
             "date": leave.get("date"),
             "assignedDuty": leave_daily.get("assignedDuty") or leave.get("assignedDuty"),
-            "isSIC": bool(leave.get("isSIC") or leave_daily.get("isSIC") or str(leave.get("employeeId") or "") in group_shift_in_charge_ids(leave.get("date"), leave.get("groupName"))),
+            "isSIC": leave_requires_sic(leave, leave_daily),
             "actingSIC": leave.get("actingSIC"),
             "organization": group_organization_context(leave.get("groupName")),
             "replacement": {
@@ -3709,7 +3722,11 @@ def assign_sic(
     if not sic_daily:
         raise HTTPException(400, "SIC must be from same day")
 
-    if sic_daily.get("groupName") != group_name:
+    scope = payload.get("scope", "shift")
+    if scope not in {"shift", "fleet"}:
+        raise HTTPException(400, "Invalid SIC candidate scope")
+
+    if scope == "shift" and sic_daily.get("groupName") != group_name:
         raise HTTPException(400, "SIC must be from same group")
 
     # if sic_daily.get("assignedDuty") not in ["Morning", "Evening", "Night"]:
@@ -3729,8 +3746,8 @@ def assign_sic(
     if not sic_emp:
         raise HTTPException(404, "Employee not found")
 
-    if not any(str(candidate.get("employeeId")) == str(sic_id) for candidate in get_sic_candidates(leave_id, user)):
-        raise HTTPException(409, "Acting SIC must be working the same shift and group on this date and not on leave")
+    if not any(str(candidate.get("employeeId")) == str(sic_id) for candidate in get_sic_candidates(leave_id, user, scope=scope)):
+        raise HTTPException(409, "Selected acting SIC is unavailable for this date or candidate scope")
 
     # =============================
     # 1ï¸âƒ£ REMOVE OLD SIC
@@ -3739,7 +3756,7 @@ def assign_sic(
     employee_daily_collection.update_many(
         {
             "date": leave_date,
-            "groupName": group_name
+            "$or": [{"actingSICGroup": group_name}, {"groupName": group_name, "actingSICGroup": {"$in": [None, ""]}}]
         },
         {
             "$unset": {
@@ -3809,6 +3826,7 @@ def assign_sic(
         "assignedBy": str(user.get("employeeId") or user.get("userId") or ""),
         "assignedOn": datetime.utcnow(),
         "source": str(payload.get("source") or "Direct acting-SIC assignment"),
+        "scope": scope,
     }
     leave_request_collection.update_one(
         {"_id": leave["_id"]},
@@ -3848,7 +3866,7 @@ def assign_sic(
 # =========================================================
 
 @router.get("/sic-candidates/{leave_id}")
-def get_sic_candidates(leave_id: str, user=Depends(get_current_user)):
+def get_sic_candidates(leave_id: str, user=Depends(get_current_user), scope: str = "shift"):
 
     check_replacement_access(user)
 
@@ -3863,9 +3881,12 @@ def get_sic_candidates(leave_id: str, user=Depends(get_current_user)):
     leave_date = leave.get("date")
     group_name = leave.get("groupName")
 
+    if scope not in {"shift", "fleet"}:
+        raise HTTPException(400, "Invalid SIC candidate scope")
+
     shift_people = list(employee_daily_collection.find({
         "date": leave_date,
-        "groupName": group_name,
+        **({"groupName": group_name} if scope == "shift" else {}),
 
         # âœ… only active shift
         # "assignedDuty": {"$in": ["Morning", "Evening", "Night"]},
@@ -3892,15 +3913,21 @@ def get_sic_candidates(leave_id: str, user=Depends(get_current_user)):
         return ""
 
     shift = shift_family(leave.get("assignedDuty") or leave_daily.get("assignedDuty"))
+    blocked_ids = {str(item.get("employeeId")) for item in leave_request_collection.find({"date": leave_date, "$or": [{"finalStatus": {"$in": list(ACTIVE_LEAVE_STATUSES)}}, {"status": {"$in": list(ACTIVE_LEAVE_STATUSES)}}]})}
     for s in shift_people:
+        if s.get("leaveStatus") in ACTIVE_LEAVE_STATUSES or str(s.get("employeeId")) in blocked_ids:
+            continue
+        if s.get("isActingSIC") and (s.get("actingSICGroup") or s.get("groupName")) != group_name:
+            continue
         duty = shift_family(s.get("assignedDuty"))
-        if not duty or (shift and duty != shift):
+        if scope == "shift" and (not duty or (shift and duty != shift)):
             continue
         result.append({
             "employeeId": s.get("employeeId"),
             "name": s.get("name"),
             "designation": s.get("designation"),
             "assignedDuty": s.get("assignedDuty"),
+            "groupName": s.get("groupName"),
             "isReplacement": s.get("replacementDuty", False)
         })
 
@@ -3938,19 +3965,15 @@ def pending_sic(user=Depends(get_current_user)):
         })
 
         # â— only if SIC required
-        leave_employee_id = str(l.get("employeeId") or "")
-        is_sic_leave = bool(
-            (duty or {}).get("isSIC")
-            or l.get("isSIC")
-            or leave_employee_id in group_shift_in_charge_ids(l.get("date"), l.get("groupName"))
-        )
+        is_sic_leave = leave_requires_sic(l, duty)
         if not is_sic_leave:
             continue
 
         # â— skip if already assigned
         existing_sic = employee_daily_collection.find_one({
             "date": l["date"],
-            "groupName": l["groupName"],
+            "$or": [{"actingSICGroup": l["groupName"]}, {"groupName": l["groupName"], "actingSICGroup": {"$in": [None, ""]}}],
+            "leaveStatus": {"$nin": list(ACTIVE_LEAVE_STATUSES)},
             "isActingSIC": True
         })
 

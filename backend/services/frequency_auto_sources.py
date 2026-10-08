@@ -1,5 +1,6 @@
 """Operator-selected source retrieval through the existing Frequency integrations."""
 import asyncio
+import logging
 from datetime import datetime
 import numpy as np
 import pandas as pd
@@ -18,7 +19,7 @@ def fetch_sources(payload,user,db=None):
     from services.curve_frequency_service import load_curve_frequency_range
     from services.frequency_event_reporting import event_entities
     from routes.frequency_routes import (get_schedule_data_actual,fetch_wbes_schedule_raw,fetch_rtg_schedule_raw,
-        get_wbes_identifier,normalize_wbes_identifier,fetch_crms_frequency_messages)
+        get_wbes_identifier,normalize_wbes_identifier,fetch_crms_frequency_messages,get_event_raw_data,get_source_series)
     sources=set(payload.sources)
     if not sources or sources-{'wbes','rtg','mis','crms'}:raise ValueError('Select WBES, RTG, MIS or CRMS.')
     db=db or MongoService();warnings=[];status=[]
@@ -49,26 +50,34 @@ def fetch_sources(payload,user,db=None):
             entity[key]=np.array(entity.get(key,np.full(len(times),np.nan)),copy=True)
     for day in days:
         midnight=seconds(day+'T00:00:00');indexes=np.arange(np.searchsorted(times,midnight),np.searchsorted(times,midnight+86400));minutes=(times[indexes]-midnight)/60
-        wbes=[e for e in entities if e['group'] in sessions.GROUPS]
+        # Follow the operator's mapping, not the report classification. ISGS/IPP
+        # may use RTG schedules and state-sector plants may use WBES.
+        def schedule_source(entity):
+            mapped=str(entity['mapping'].get('schedule_source') or '').upper()
+            return mapped or ('WBES' if get_wbes_identifier(entity['mapping']) else 'RTG')
+        wbes=[e for e in entities if schedule_source(e)=='WBES']
         if 'wbes' in sources:
             names=sorted({get_wbes_identifier(e['mapping']) for e in wbes if get_wbes_identifier(e['mapping'])})
             try:raw=fetch_wbes_schedule_raw(datetime.fromisoformat(day).strftime('%d-%m-%Y'),names,force_refresh=True) if names else []
-            except Exception:raw=[]
+            except Exception:
+                logging.getLogger(__name__).exception('Automatic WBES fetch failed for %s',day);raw=[]
             schedules={normalize_wbes_identifier(r.get('Acronym')):(r.get('NetScheduleSummary') or {}).get('TotalNetSchdAmount') or [] for r in raw or [] if isinstance(r,dict)}
             for entity in wbes:
                 name=get_wbes_identifier(entity['mapping']);values=schedules.get(normalize_wbes_identifier(name),[])
+                if name and not values and hasattr(db,'db'): values=get_source_series(get_event_raw_data(db,day,wbes_name=name),'wbes','schedule') or []
                 available=apply_readings(entity,'schedule',indexes,[pd.to_numeric(values[int(m//15)],errors='coerce') if int(m//15)<len(values) else np.nan for m in minutes])
                 status.append({'date':day,'entity':entity['display_name'],'source':'WBES','available':available})
         if 'rtg' in sources:
             cache={}
             for entity in entities:
-                utility=str(entity['mapping'].get('utility_type') or entity['mapping'].get('type') or '').upper().replace(' ','_')
-                if entity['group']=='State' or utility not in {'STATE','STATE_IPP','STATE_GENERATOR','STATE_SECTOR'}:continue
+                if schedule_source(entity)!='RTG':continue
                 pid=entity['mapping'].get('rtg_plant_id') or entity['point'].get('plant_id')
                 if pid not in cache:
                     try:cache[pid]=fetch_rtg_schedule_raw(day,pid,force_refresh=True)
-                    except Exception:cache[pid]={}
+                    except Exception:
+                        logging.getLogger(__name__).exception('Automatic RTG fetch failed for %s %s',day,pid);cache[pid]={}
                 values=(cache[pid] or {}).get('schedule') or []
+                if not values and hasattr(db,'db'): values=get_source_series(get_event_raw_data(db,day,plant_id=pid),'rtg','schedule') or []
                 available=apply_readings(entity,'schedule',indexes,[pd.to_numeric(values[int(m//15)],errors='coerce') if int(m//15)<len(values) else np.nan for m in minutes])
                 status.append({'date':day,'entity':entity['display_name'],'source':'RTG','available':available})
         if 'mis' in sources:
@@ -76,13 +85,18 @@ def fetch_sources(payload,user,db=None):
                 selected=[e for e in entities if (e['group']=='State')==(kind=='state')]
                 names=sorted({str(e['mapping'].get('mis_name') or '').strip() for e in selected}-{''})
                 try:rows=asyncio.run(get_schedule_data_actual(day,day,','.join(names),1,kind))['rows'] if names else []
-                except Exception:rows=[]
+                except Exception:
+                    logging.getLogger(__name__).exception('Automatic MIS %s fetch failed for %s',kind,day);rows=[]
                 lookup={seconds(row['timestamp']):row for row in rows}
                 for entity in selected:
                     name=str(entity['mapping'].get('mis_name') or '').strip()
                     available=apply_readings(entity,'actual',indexes,[pd.to_numeric(lookup.get(np.floor(times[i]/60)*60,{}).get(name),errors='coerce') for i in indexes])
                     status.append({'date':day,'entity':entity['display_name'],'source':'MIS','available':bool(name and available)})
-    for entity in entities:entity['deviation']=entity['actual']-entity['schedule']
+    for entity in entities:
+        deviation=np.array(entity.get('deviation',np.full(len(times),np.nan)),copy=True)
+        valid=np.isfinite(entity['actual']) & np.isfinite(entity['schedule'])
+        deviation[valid]=entity['actual'][valid]-entity['schedule'][valid]
+        entity['deviation']=deviation
     missing=[]
     for source in ('WBES','RTG','MIS'):
         failed=[row for row in status if row['source']==source and not row['available']]

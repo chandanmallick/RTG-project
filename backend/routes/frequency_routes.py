@@ -1544,10 +1544,11 @@ async def _build_frequency_message_timeline(payload, *, event_context=None, alia
 
     db = db or MongoService()
     event_doc = event_context
+    if event_doc is not None or payload.event_id:
+        from services.frequency_event_reporting import event_period, timeline_aliases, timeline_point_values
     warnings = []
     messages_complete = True
     if payload.event_id and event_doc is None:
-        from services.frequency_event_reporting import event_period, timeline_aliases, timeline_point_values
         event_doc = db.db[EVENT_COLLECTION].find_one({"event_id": payload.event_id}, {"_id": 0})
         if not event_doc:
             raise HTTPException(404, "Saved event not found.")
@@ -2213,7 +2214,25 @@ def build_saved_event_response(
                 "missing": missing,
             })
 
-        summary = point.get("summary") or {}
+        summary = dict(point.get("summary") or {})
+        # Prepared events store the source series, while older manually saved
+        # events also store scalar workspace summaries. Restore missing scalars
+        # from this event's clipped readings when opening either kind.
+        from services.frequency_event_reporting import number
+        n = len(filtered_series['timestamps'])
+        deviations = []
+        for index in range(n):
+            def reading(key):
+                values = filtered_series.get(key) or []
+                return number(values[index]) if index < len(values) else None
+            deviation = reading('deviation')
+            actual, schedule = reading('actual'), reading('schedule')
+            deviations.append(deviation if deviation is not None else (actual-schedule if actual is not None and schedule is not None else None))
+        filtered_series['deviation'] = deviations
+        for key in ('actual','schedule','dc','deviation'):
+            if summary.get(key) is None:
+                values = [value for raw in filtered_series[key] if (value := number(raw)) is not None]
+                summary[key] = sum(values)/len(values) if values else None
         rtg_pid = entity.get("rtg_plant_id") or pid
         cap_on_bar = summary.get("cap_on_bar") or point.get("cap_on_bar") or cap_on_bar_by_id.get(rtg_pid) or cap_on_bar_by_id.get(pid)
         cap_55 = summary.get("cap_on_bar_55") or cap_on_bar_reference(cap_on_bar, event_type)

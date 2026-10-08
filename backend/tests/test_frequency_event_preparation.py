@@ -36,6 +36,15 @@ class PreparationTests(unittest.TestCase):
         again=save_periods(periods,USER,self.db)
         self.assertEqual([p['event_id'] for p in response['periods']],[p['event_id'] for p in again['periods']])
         self.assertEqual(len(self.collection.records),2)
+    def test_refetched_session_updates_existing_period_without_duplicate(self):
+        first=save_periods([self.period()],USER,self.db)
+        session=sessions.get_session(self.token,USER)
+        session['dataset']['entities'][0]['deviation'][1]=99
+        again=save_periods([self.period()],USER,self.db)
+        self.assertEqual(first['periods'][0]['event_id'],again['periods'][0]['event_id'])
+        self.assertEqual(len(self.collection.records),1)
+        self.assertEqual(self.collection.records[0]['data_points'][0]['series']['deviation'][0],99)
+
     def test_foreign_session_fails_before_any_write(self):
         foreign=sessions._put({'employeeId':'someone'},fixture(),{})['session_token']
         bad={**self.period('two'),'session_token':foreign}

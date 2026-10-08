@@ -96,6 +96,19 @@ class CompactReportsTests(unittest.TestCase):
             self.assertFalse(failed['source_status'][0]['available'])
             self.assertTrue(failed['warnings'])
 
+    def test_source_fetch_respects_mapped_schedule_source_and_preserves_deviation(self):
+        dataset=fixture()
+        dataset['entities'][0]['mapping']={**dataset['entities'][0]['mapping'],'schedule_source':'SCADA'}
+        dataset['entities'][1]['mapping']={**dataset['entities'][1]['mapping'],'schedule_source':'RTG','rtg_plant_id':'rtg-unit'}
+        token=sessions._put(USER,dataset,{'filename':'Blanket'})['session_token']
+        with patch.object(frequency_routes,'fetch_rtg_schedule_raw',return_value={'schedule':[100]*96}) as rtg:
+            response=fetch_sources(FetchSourcesPayload(start_date='2026-10-03',end_date='2026-10-03',sources=['rtg'],session_token=token),USER,DB)
+        restored=sessions.get_session(response['session_token'],USER)['dataset']
+        rtg.assert_called_once_with('2026-10-03','rtg-unit',force_refresh=True)
+        self.assertEqual(restored['entities'][1]['schedule'][0],100)
+        self.assertEqual(restored['entities'][1]['deviation'][0],-10)
+        self.assertEqual(restored['entities'][0]['deviation'][0],10)
+
     def test_low_high_cache_segregation_and_all_high_exports(self):
         dataset=fixture();dataset['frequency']=dataset['frequency'].copy();dataset['frequency'][1]=50.1
         token=sessions._put(USER,dataset,{'filename':'Mixed frequency','crms_enabled':False})['session_token']

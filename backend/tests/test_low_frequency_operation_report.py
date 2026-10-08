@@ -100,6 +100,26 @@ class OperationReportTests(unittest.TestCase):
         row=next(value[1][0] for kind,value in blocks if kind=='table')
         self.assertEqual(row[11],'Data not available')
 
+    def test_prepared_event_workspace_restores_missing_scalar_deviation(self):
+        doc={'event_id':'one','event_type':'low','data_points':[{'plant_id':'STATE_TEST','plant_name':'State','type':'State','series':{'timestamps':['2026-10-02T04:00:00','2026-10-02T04:01:00'],'frequency':[49.4,49.5],'actual':[30,50],'schedule':[10,20]}}]}
+        with patch.object(routes,'lookup_unit_fuel_name',return_value=''),patch.object(routes,'build_source_status',return_value={}):
+            from datetime import datetime
+            response,error=routes.build_saved_event_response(None,'one',[],datetime(2026,10,2,4),datetime(2026,10,2,5),saved_document=doc,refresh_capacity=False)
+        self.assertIsNone(error)
+        self.assertEqual(response['rows'][0]['deviation'],25)
+        self.assertEqual(response['rows'][0]['series']['deviation'],[20,30])
+
+    def test_saved_message_context_uses_point_lookup_when_crms_is_offline(self):
+        event,_=fixture()
+        event['data_points']=[{'plant_id':'state','plant_name':'Bihar','type':'State','series':{'timestamps':['2026-10-02T04:01:00'],'frequency':[49.5],'deviation':[20]},'crms_messages':[{'timestamp':'2026-10-02T04:01:00','message_no':'M1','remarks':'Reduce drawal','issued_to':['Bihar']}]}]
+        db=SimpleNamespace(map_collection=SimpleNamespace(find=lambda *args:[]))
+        from services.frequency_event_reporting import timeline_aliases
+        async def run():
+            with patch.object(routes,'fetch_crms_frequency_messages',new=AsyncMock(side_effect=RuntimeError('offline'))):
+                result=await routes._build_frequency_message_timeline(routes.FrequencyMessageTimelinePayload(event_id='one',ranges=[routes.FrequencyMessageRange(start_time=event['start_time'],end_time=event['end_time'])]),event_context=event,aliases_override=timeline_aliases(db,event),db=db)
+            self.assertEqual(result['rows'][0]['deviation_mw'],20)
+        asyncio.run(run())
+
     def test_frequency_only_event_can_capture_its_existing_system_plot(self):
         event,_=fixture()
         doc={**event,'updated_at':'revision','data_points':[{'plant_id':'SYSTEM_FREQUENCY','is_frequency':True,'series':{'timestamps':['2026-10-02T04:00:00','2026-10-02T04:01:00'],'frequency':[49.8,49.7]}}]}

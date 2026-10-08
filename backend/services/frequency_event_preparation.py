@@ -25,7 +25,9 @@ def save_periods(periods,user,db=None):
         try:
             if not existing:
                 candidate=db.db[EVENT_COLLECTION].find_one({'start_time':iso(a),'end_time':iso(b),'event_type':period['event_type']},{'_id':0})
-                if candidate and candidate.get('data_points'):existing=candidate;session=None
+                # A freshly fetched/uploaded session is an explicit data update.
+                # Reuse the event identity, but do not discard its new readings.
+                if candidate and candidate.get('data_points'):existing=candidate
             if existing and not session:
                 output.append({'id':period['id'],'event_id':existing['event_id'],'name':existing['name'],'status':'existing'});continue
             dataset=session['dataset'];times=dataset['times'];mask=(times>=a)&(times<b)
