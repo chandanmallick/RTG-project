@@ -9,6 +9,12 @@ SECTIONS = ('summary', 'states', 'generators', 'actions', 'defence', 'annexure_s
 NAVY = '17365D'
 
 
+def event_title(event):
+    from datetime import datetime
+    start, end = (datetime.fromisoformat(event[key]) for key in ('start_time', 'end_time'))
+    return f"Low Frequency Report {start:%d-%b-%y} {start:%H:%M}-{end:%H:%M} hrs."
+
+
 def text(value):
     return 'Data not available' if value is None else str(round(value, 3) if isinstance(value, float) else value)
 
@@ -19,6 +25,8 @@ def report_blocks(event, options, charts):
     summary = analysis.get('summary') or {}
     performance = analysis.get('overall_performance') or {}
     included = options.get('operation_sections', SECTIONS)
+    selected = options.get('operation_entity_ids')
+    charts = [chart for chart in charts if chart.get('kind') == 'System Frequency' or selected is None or chart.get('entity_id') in selected]
     blocks = []
     def heading(title): blocks.append(('heading', title))
     def paragraph(value): blocks.append(('paragraph', value))
@@ -45,7 +53,7 @@ def report_blocks(event, options, charts):
                 key = next((c for c in CATEGORIES if c.lower().replace('-', '').replace(' ', '') == str(category).lower().replace('-', '').replace(' ', '')), None)
                 if key: counts[key].add((row.get('timestamp'), row.get('message_no'), row.get('message_details')))
         table(list(CATEGORIES), [[len(counts[c]) if event.get('messages_complete') else None for c in CATEGORIES]])
-        majors = sorted(performance.get('State', []), key=lambda row: row.get('thresholds', {}).get('49.90', {}).get('maximum_od_ui_mw') or 0, reverse=True)
+        majors = sorted([row for row in performance.get('State', []) if selected is None or row.get('entity_id') in selected], key=lambda row: row.get('thresholds', {}).get('49.90', {}).get('maximum_od_ui_mw') or 0, reverse=True)
         paragraph('Major state overdrawal: ' + ('; '.join(f"{r['entity']}: {text(r['thresholds']['49.90'].get('maximum_od_ui_mw'))} MW" for r in majors[:3]) if majors else 'Data not available'))
     for section, title, groups in [('states', '2 State Performance Details', ['State']), ('generators', '3 Central Sector Generator Performance', ['ISGS', 'IPP'])]:
         if section not in included: continue
@@ -56,6 +64,7 @@ def report_blocks(event, options, charts):
         rows = []
         for group in groups:
             for row in performance.get(group, []):
+                if selected is not None and row.get('entity_id') not in selected: continue
                 thresholds = row.get('thresholds', {})
                 if section == 'generators' and not any((v.get('adverse_minutes') or 0) > 0 for v in thresholds.values()): continue
                 values = [compact_period, row['entity'] + (f' ({group})' if section == 'generators' else ''), compact_minimum]
@@ -95,22 +104,26 @@ def report_blocks(event, options, charts):
     for section, title, state in [('annexure_states', 'Annexure 1 State-wise Low Frequency Analysis', True), ('annexure_generators', 'Annexure 2 Generator-wise Low Frequency Analysis', False)]:
         if section not in included: continue
         heading(title)
-        selected = [c for c in charts if c.get('kind') != 'System Frequency' and bool(c.get('is_state')) == state]
-        if not selected: paragraph('Data not available')
+        selected_charts = [c for c in charts if c.get('kind') != 'System Frequency' and bool(c.get('is_state')) == state]
+        if not selected_charts: paragraph('Data not available')
         for entity in event.get('report_entities', []):
-            if (entity['group'] == 'State') != state or entity['group'] not in ('State', 'ISGS', 'IPP'): continue
+            if (entity['group'] == 'State') != state: continue
+            if selected is not None and entity['entity_id'] not in selected: continue
+            if not any(chart.get('entity_id') == entity['entity_id'] for chart in selected_charts): continue
             heading(entity['display_name'] + ' | Analysis window: ' + period)
-            for chart in selected:
+            for chart in selected_charts:
                 if chart.get('entity_id') == entity['entity_id']: blocks.append(('image', chart))
             heading(entity['display_name'] + ' CRMS Messages Issued')
             rows = [[r.get('timestamp'), r.get('message_type'), r.get('message_no'), r.get('message_details')] for r in event.get('chronology', []) if r.get('entity_id') == entity['entity_id']]
+            if not rows:
+                rows = [[r.get('timestamp'), ' / '.join(r.get('category') or []) if isinstance(r.get('category'), list) else r.get('category'), r.get('message_no'), r.get('remarks')] for r in sorted(entity.get('report_messages', []), key=lambda message: message.get('timestamp') or '')]
             table(['Time (IST)', 'Message Type', 'Message No.', 'Details'], rows)
     return blocks, summary
 
 
 def render(event, options, charts, fmt):
     blocks, summary = report_blocks(event, options, charts)
-    title = 'LOW FREQUENCY OPERATION REPORT'
+    title = event_title(event)
     def group_labels():
         return [f"Freq <{float(level):g} Hz" for level in LEVELS]
     def duration_labels():

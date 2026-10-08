@@ -5766,6 +5766,8 @@ class FrequencySavedReportPayload(BaseModel):
     chart_event_id: Optional[str] = None
     chart_revision: Optional[str] = None
     operation_charts: List[dict] = []
+    operation_entity_ids: Optional[List[str]] = None
+    operation_chart_kinds: Optional[List[str]] = None
 
 
 async def _saved_report_events(payload):
@@ -5816,16 +5818,19 @@ async def export_saved_frequency_events(payload: FrequencySavedReportPayload, us
             rows = []
             for row in result['rows']:
                 entity = next((item for item in entities if str(item['point'].get('plant_id')) == str(row['plant_id']) and str(item['point'].get('stage_id') or item['point'].get('STAGE_ID') or '') == str(row.get('stage_id') or '')), None)
-                if entity and entity['group'] in GROUPS:
-                    row.update(entity_id=entity['entity_id'], is_state=entity['group']=='State', plant_name=entity['display_name'], type=entity['group'])
-                    row['crms_messages'] = [{'timestamp': message['timestamp'], 'message_no': message.get('message_no'), 'remarks': message.get('message_details'), 'category': message.get('message_categories') or [message.get('message_type')]} for message in event['chronology'] if message.get('entity_id') == entity['entity_id']]
+                if entity:
+                    utility = str(entity['mapping'].get('utility_type') or entity['mapping'].get('type') or '').upper().replace(' ', '_')
+                    row.update(entity_id=entity['entity_id'], is_state=entity['group']=='State', plant_name=entity['display_name'], type=entity['group'] or ('State Gen' if utility.startswith('STATE') else 'Other Generator'))
+                    if entity['group'] in GROUPS:
+                        row['crms_messages'] = [{'timestamp': message['timestamp'], 'message_no': message.get('message_no'), 'remarks': message.get('message_details'), 'category': message.get('message_categories') or [message.get('message_type')]} for message in event['chronology'] if message.get('entity_id') == entity['entity_id']]
                     rows.append(row)
             frequency_point = next((point for point in documents[0].get('data_points', []) if point.get('is_frequency') or str(point.get('plant_id')) == 'SYSTEM_FREQUENCY'), None)
             if frequency_point:
                 samples = point_samples(frequency_point, start, end)
                 rows.append({'plant_id': 'SYSTEM_FREQUENCY', 'plant_name': 'System Frequency', 'is_frequency': True, 'event_type': 'low',
                              'series': {'timestamps': [stamp.isoformat() for stamp, _, _ in samples], 'frequency': [value for _, value, _ in samples]}})
-            return {'success': True, 'capture_required': True, 'rows': rows, 'chart_revision': str(documents[0].get('updated_at') or ''), 'context': {'title': event['event_name'], 'start_time': event['start_time'], 'end_time': event['end_time'], 'event_type': 'low'}}
+            from services.low_frequency_operation_report import event_title
+            return {'success': True, 'capture_required': True, 'rows': rows, 'chart_revision': str(documents[0].get('updated_at') or ''), 'context': {'title': event_title(event), 'start_time': event['start_time'], 'end_time': event['end_time'], 'event_type': 'low'}}
         if payload.chart_event_id != event['event_id']:
             raise HTTPException(400, 'Chart capture does not match this event.')
         if payload.chart_revision != str(documents[0].get('updated_at') or ''):
@@ -5835,6 +5840,8 @@ async def export_saved_frequency_events(payload: FrequencySavedReportPayload, us
             if len(payload.operation_charts) > 500:
                 raise ValueError('Too many chart images')
             allowed = {entity['entity_id']: entity['group'] for entity in event.get('report_entities', [])}
+            if payload.operation_entity_ids is not None and set(payload.operation_entity_ids)-set(allowed):
+                raise ValueError('Selected entity does not belong to this event')
             for chart in payload.operation_charts:
                 if chart.get('event_id') != event['event_id'] or not isinstance(chart.get('title'), str) or len(chart['title']) > 1000:
                     raise ValueError('Invalid chart identity')
@@ -5849,7 +5856,8 @@ async def export_saved_frequency_events(payload: FrequencySavedReportPayload, us
                         raise ValueError('Invalid chart image')
                     image.verify()
             import asyncio
-            output = await asyncio.to_thread(render, event, options, payload.operation_charts, payload.format)
+            selected_charts = [chart for chart in payload.operation_charts if (payload.operation_chart_kinds is None or chart.get('kind') in payload.operation_chart_kinds) and (chart.get('kind') == 'System Frequency' or payload.operation_entity_ids is None or chart.get('entity_id') in payload.operation_entity_ids)]
+            output = await asyncio.to_thread(render, event, options, selected_charts, payload.format)
         except Exception:
             logging.getLogger(__name__).exception('Low frequency operation report export failed')
             raise HTTPException(400, 'The report could not be generated. Please retry chart capture.')

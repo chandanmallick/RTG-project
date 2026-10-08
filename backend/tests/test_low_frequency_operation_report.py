@@ -43,6 +43,23 @@ class OperationReportTests(unittest.TestCase):
         self.assertNotIn('Annexure',only); self.assertNotIn('Executive Summary',only)
         self.assertIn('Data not available',only)
 
+    def test_operator_selection_includes_state_generator_html_charts_only(self):
+        from services.low_frequency_operation_report import report_blocks
+        event,charts=fixture()
+        event['report_entities'].append({'entity_id':'local','display_name':'State Plant','group':None})
+        local=[{**chart,'entity_id':'local','title':'State Plant '+chart['kind']} for chart in charts if chart.get('entity_id')=='gen']
+        blocks,_=report_blocks(event,{'operation_sections':list(SECTIONS),'operation_entity_ids':['local']},charts+local)
+        images=[chart for kind,chart in blocks if kind=='image']
+        self.assertEqual(len(images),3)
+        self.assertEqual({chart['entity_id'] for chart in images if chart['kind']!='System Frequency'},{'local'})
+        self.assertTrue(any('State Plant' in value for kind,value in blocks if kind=='heading'))
+        self.assertFalse(any('Bihar CRMS' in value for kind,value in blocks if kind=='heading'))
+        html=render(event,{'operation_sections':['states']},charts,'html')
+        self.assertIn('Low Frequency Report 02-Oct-26 04:00-04:05 hrs.',html)
+        rows=next(value[1] for kind,value in report_blocks(event,{'operation_sections':['states']},charts)[0] if kind=='table')
+        self.assertEqual(len(rows),1)
+        self.assertEqual(len(rows[0]),15)
+
     def test_export_rejects_cross_event_and_stale_capture(self):
         event,charts = fixture()
         async def run():

@@ -327,6 +327,20 @@ async def saved_event_analysis(db, event_id, refresh=False, include_physical=Fal
     if any(not entity["group"] for entity in entities):
         result["warnings"].append("State-sector generator rows retain their existing classification and are outside the State drawal / ISGS / IPP tables.")
     result['report_entities'] = [{key: entity[key] for key in ('entity_id', 'display_name', 'group')} for entity in entities]
+    # State-sector generator messages remain outside the ISGS/IPP calculations,
+    # but their own saved records belong alongside their selected annexure plots.
+    from routes.frequency_routes import parse_crms_message_datetime, normalize_crms_message
+    for metadata, entity in zip(result['report_entities'], entities):
+        if entity['group'] is not None: continue
+        metadata['report_messages'] = []
+        seen = set()
+        for message in entity['point'].get('crms_messages') or []:
+            stamp = parse_crms_message_datetime(message.get('timestamp') or message.get('message_date'))
+            if stamp is None or not start <= stamp <= end: continue
+            normalized = normalize_crms_message(message, stamp)
+            key = (normalized.get('timestamp'), normalized.get('message_no'), normalized.get('remarks'))
+            if key not in seen:
+                seen.add(key); metadata['report_messages'].append(normalized)
     if include_physical:
         await _operation_chronology(db, event, result, dataset if threshold_analysis else None, entities)
     with _cache_lock:

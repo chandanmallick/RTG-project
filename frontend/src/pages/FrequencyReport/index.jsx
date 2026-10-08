@@ -1770,10 +1770,11 @@ export default function FrequencyReport() {
       title: htmlTitle,
       start_time: htmlStart,
       end_time: htmlEnd,
-      includeFrequency: reportContext.captureAll || exportIncludeFrequencyPlot,
-      includeDeviation: reportContext.captureAll || exportIncludeDeviationPlot,
-      includeStateScheduleActual: reportContext.captureAll || exportIncludeStateScheduleActualPlot,
-      includeGeneratorScheduleActual: reportContext.captureAll || exportIncludeGeneratorScheduleActualPlot,
+      includeFrequency: reportContext.chartKinds ? reportContext.chartKinds.includes('System Frequency') : reportContext.captureAll || exportIncludeFrequencyPlot,
+      includeDeviation: reportContext.chartKinds ? reportContext.chartKinds.includes('Annexure - Deviation / Frequency') : reportContext.captureAll || exportIncludeDeviationPlot,
+      includeStateScheduleActual: reportContext.chartKinds ? reportContext.chartKinds.includes('Annexure - State Schedule / Actual') : reportContext.captureAll || exportIncludeStateScheduleActualPlot,
+      includeGeneratorScheduleActual: reportContext.chartKinds ? reportContext.chartKinds.includes('Annexure - Generator Schedule / Actual') : reportContext.captureAll || exportIncludeGeneratorScheduleActualPlot,
+      includeGenerationComparison: !reportContext.chartKinds || reportContext.chartKinds.includes('Generation comparison'),
       frequencyRow: htmlFrequency ? {
         plant_id: htmlFrequency.plant_id,
         plant_name: "System Frequency",
@@ -2274,7 +2275,7 @@ export default function FrequencyReport() {
       }
       report.rows.forEach((row) => {
         if (report.includeDeviation) addCard(row, "Annexure - Deviation / Frequency", makeDeviationOption(row), { collapsible: true, open: true });
-        if (Object.values(row.series.generation_categories || {}).some((values) => (values || []).some((value) => value !== null && value !== undefined && value !== "")) || (row.series.purulia_psp_net || []).some((value) => value !== null && value !== undefined && value !== "")) addCard(row, "Generation comparison", makeGenerationComparisonOption(row), { collapsible: true, open: true });
+        if (report.includeGenerationComparison && (Object.values(row.series.generation_categories || {}).some((values) => (values || []).some((value) => value !== null && value !== undefined && value !== "")) || (row.series.purulia_psp_net || []).some((value) => value !== null && value !== undefined && value !== ""))) addCard(row, "Generation comparison", makeGenerationComparisonOption(row), { collapsible: true, open: true });
         if (row.is_state && report.includeStateScheduleActual) addCard(row, "Annexure - State Schedule / Actual", makeScheduleOption(row), { collapsible: true, open: false });
         if (!row.is_state && report.includeGeneratorScheduleActual) addCard(row, "Annexure - Generator Schedule / Actual", makeScheduleOption(row));
       });
@@ -2310,12 +2311,13 @@ export default function FrequencyReport() {
   const generateOperationReport = async (options) => {
     const id = options.event_ids[0];
     const version = availableEvents.find(event => event.event_id === id)?.updated_at || '';
-    const key = `${id}:${version}`;
+    const key = `${id}:${version}:${JSON.stringify([options.operation_entity_ids, options.operation_chart_kinds])}`;
     let captured = operationCaptureCache.current.get(key);
     if (!captured || Date.now() - captured.time > 240000) {
       const source = await API.exportSavedFrequencyReport({ ...options, format: 'html', operation_charts: [], chart_event_id: null });
       if (!source.capture_required) throw new Error('Event chart data is unavailable.');
-      const context = { ...source.context, captureAll: true, frequencyRow: source.rows.find(row => row.is_frequency) || source.rows.find(row => row.series?.frequency?.length) };
+      const context = { ...source.context, captureAll: true, chartKinds: options.operation_chart_kinds, frequencyRow: source.rows.find(row => row.is_frequency) || source.rows.find(row => row.series?.frequency?.length) };
+      const selectedRows = source.rows.filter(row => row.is_frequency || options.operation_entity_ids == null || options.operation_entity_ids.includes(row.entity_id));
       const frame = document.createElement('iframe');
       frame.title = 'Event report chart capture';
       frame.style.cssText = 'position:fixed;left:-20000px;top:0;width:1400px;height:900px;border:0;';
@@ -2325,7 +2327,7 @@ export default function FrequencyReport() {
         frame.contentWindow.echarts = echarts;
         doc.open();
         // Use the already-installed ECharts runtime with the exact HTML options.
-        doc.write(buildInteractiveChartsHtml(source.rows, context).replace(/<script src="[^"]*echarts[^\"]*"><\/script>/, ''));
+        doc.write(buildInteractiveChartsHtml(selectedRows, context).replace(/<script src="[^"]*echarts[^\"]*"><\/script>/, ''));
         doc.close();
         await new Promise(resolve => setTimeout(resolve, 100));
         doc.querySelectorAll('details').forEach(card => { card.open = true; });
@@ -2333,7 +2335,7 @@ export default function FrequencyReport() {
         const deadline = Date.now() + 15000;
         while (true) {
           const nodes = [...doc.querySelectorAll('.chart')];
-          if (nodes.length && nodes.every(node => echarts.getInstanceByDom(node))) break;
+          if (nodes.every(node => echarts.getInstanceByDom(node))) break;
           if (Date.now() > deadline) throw new Error('Chart capture is unavailable. Please retry.');
           await new Promise(resolve => setTimeout(resolve, 100));
         }
@@ -3308,7 +3310,17 @@ export default function FrequencyReport() {
       <Dialog fullScreen open={Boolean(consolidatedAnalysis)} onClose={() => setConsolidatedAnalysis(null)}><DialogTitle>Consolidated Event Analysis<IconButton sx={{ float: "right" }} onClick={() => setConsolidatedAnalysis(null)}>?</IconButton></DialogTitle><DialogContent><FrequencyAnalysisResults result={consolidatedAnalysis} saveBlob={saveBlobToFile} onHtmlReport={viewConsolidatedHtml} /></DialogContent></Dialog>
       <div style={{ display: analysisMode === "automatic" ? "block" : "none" }}>
       <FrequencyPreAnalysis onEventsSaved={loadAvailableDates} onConsolidate={consolidateSelectedEvents} storedEvents={availableEvents} busy={dataLoading || mapLoading} onAnalyze={analyzeSelectedPeriod} onViewResult={viewSelectedPeriodResult} />
-      <SavedEventReports onOperationReport={generateOperationReport} onConsolidateAnalysis={consolidateSelectedEvents} availableEvents={availableEvents} busy={dataLoading || mapLoading} saveBlob={saveBlobToFile} onOpenEvent={async id => {
+      <SavedEventReports onLoadGraphs={async id => API.exportSavedFrequencyReport({ event_ids: [id], operation_report: true, format: 'html', operation_sections: ['summary', 'annexure_states', 'annexure_generators'] })} onRenderGraphs={(frame, source, selection) => {
+        frame.contentDocument?.querySelectorAll('.chart').forEach(node => echarts.getInstanceByDom(node)?.dispose());
+        const frequencyRow = source.rows.find(row => row.is_frequency) || source.rows.find(row => row.series?.frequency?.length);
+        const context = { ...source.context, frequencyRow, chartKinds: selection.kinds };
+        const chosen = source.rows.filter(row => row.is_frequency || selection.entities.includes(row.entity_id));
+        const doc = frame.contentDocument;
+        frame.contentWindow.echarts = echarts;
+        doc.open(); doc.write(buildInteractiveChartsHtml(chosen, context).replace(/<script src="[^"]*echarts[^\"]*"><\/script>/, '')); doc.close();
+        doc.querySelectorAll('details').forEach(card => { card.open = true; });
+        frame.contentWindow.captureReportCharts?.();
+      }} onOperationReport={generateOperationReport} onConsolidateAnalysis={consolidateSelectedEvents} availableEvents={availableEvents} busy={dataLoading || mapLoading} saveBlob={saveBlobToFile} onOpenEvent={async id => {
         const event = availableEvents.find(item => item.event_id === id);
         if (event) await analyzeSelectedPeriod({ ...event, stored_event_id: id, event_type: event.event_type || "low" });
       }} onViewHtml={async (_, options) => {
