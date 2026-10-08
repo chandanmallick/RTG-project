@@ -310,7 +310,7 @@ async def saved_event_analysis(db, event_id, refresh=False, include_physical=Fal
     from services.frequency_threshold_analysis import dataset_from_event, calculate
     try:
         dataset = dataset_from_event(db,event,entities)
-        threshold_analysis=calculate(dataset,[(start.isoformat(),end.isoformat())],timeline["rows"],timeline.get("messages_complete",True))
+        threshold_analysis=calculate(dataset,[(start.isoformat(),end.isoformat())],timeline["rows"],timeline.get("messages_complete",True),include_annexure_entities=True)
     except ValueError as exc:
         import logging
         logging.getLogger(__name__).exception('Threshold calculation failed for saved event %s', event_id)

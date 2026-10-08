@@ -26,6 +26,10 @@ def report_blocks(event, options, charts):
     performance = analysis.get('overall_performance') or {}
     included = options.get('operation_sections', SECTIONS)
     selected = options.get('operation_entity_ids')
+    notes = options.get('operation_section_notes') or {}
+    annexure_performance = dict(analysis.get('annexure_performance') or {})
+    for rows in performance.values():
+        for row in rows: annexure_performance.setdefault(row['entity_id'], row)
     charts = [chart for chart in charts if chart.get('kind') == 'System Frequency' or selected is None or chart.get('entity_id') in selected]
     blocks = []
     def heading(title): blocks.append(('heading', title))
@@ -39,7 +43,7 @@ def report_blocks(event, options, charts):
     if 'summary' in included:
         heading('1 Executive Summary & General Notes')
         duration = summary.get('thresholds', {}).get('49.90', {}).get('frequency_minutes')
-        paragraph(options.get('executive_summary') or f"On {event['start_time'][:10]}, a low-frequency event occurred from {event['start_time'][11:]} to {event['end_time'][11:]} IST. Frequency was below 49.9 Hz for {text(duration)} minutes. Minimum frequency was {minimum}.")
+        paragraph(notes.get('summary') or options.get('executive_summary') or f"On {event['start_time'][:10]}, a low-frequency event occurred from {event['start_time'][11:]} to {event['end_time'][11:]} IST. Frequency was below 49.9 Hz for {text(duration)} minutes. Minimum frequency was {minimum}.")
         # Metadata remains authoritative even when the narrative is edited.
         paragraph(f'Reporting period: {period}. Duration below 49.9 Hz: {text(duration)} minutes. Minimum frequency: {minimum}.')
         for chart in charts:
@@ -74,9 +78,10 @@ def report_blocks(event, options, charts):
                     values.extend([duration, stats.get('average_od_ui_mw'), stats.get('maximum_od_ui_mw'), stats.get('message_count')])
                 rows.append(values)
         table(headers, rows, True)
+        if notes.get(section): paragraph(notes[section])
     if 'actions' in included:
         heading('4 Action & Chronology of Events')
-        paragraph(options.get('action_summary') or 'Data not available')
+        paragraph(notes.get('actions') or options.get('action_summary') or 'Data not available')
         headers = ['Time (IST)', 'Frequency (Hz)', 'State / Entity', 'OD/UI (MW)', 'Message Type / Action', 'Message No.', 'Message / Details']
         messages = {}; rows = []
         for row in sorted(event.get('report_chronology', event.get('chronology', [])), key=lambda r: r['timestamp']):
@@ -93,6 +98,7 @@ def report_blocks(event, options, charts):
         table(headers, rows)
     if 'defence' in included:
         heading('5 Action of Defence Mechanism (ADMS & UFR)')
+        if notes.get('defence'): paragraph(notes['defence'])
         defence = []
         for row in event.get('chronology', []):
             categories = row.get('message_categories') or [row.get('message_type')]
@@ -104,6 +110,7 @@ def report_blocks(event, options, charts):
     for section, title, state in [('annexure_states', 'Annexure 1 State-wise Low Frequency Analysis', True), ('annexure_generators', 'Annexure 2 Generator-wise Low Frequency Analysis', False)]:
         if section not in included: continue
         heading(title)
+        if notes.get(section): paragraph(notes[section])
         selected_charts = [c for c in charts if c.get('kind') != 'System Frequency' and bool(c.get('is_state')) == state]
         if not selected_charts: paragraph('Data not available')
         for entity in event.get('report_entities', []):
@@ -112,7 +119,15 @@ def report_blocks(event, options, charts):
             if not any(chart.get('entity_id') == entity['entity_id'] for chart in selected_charts): continue
             heading(entity['display_name'] + ' | Analysis window: ' + period)
             for chart in selected_charts:
-                if chart.get('entity_id') == entity['entity_id']: blocks.append(('image', chart))
+                if chart.get('entity_id') != entity['entity_id']: continue
+                blocks.append(('image', chart))
+                thresholds = annexure_performance.get(entity['entity_id'], {}).get('thresholds', {})
+                rows = []
+                for level in ('49.90','49.70','49.50'):
+                    stats = thresholds.get(level, {})
+                    unknown = (stats.get('unknown_deviation_minutes') or 0) > 0
+                    rows.append([f'<{float(level):g} Hz', stats.get('frequency_minutes'), None if unknown else stats.get('adverse_minutes'), None if unknown else stats.get('adverse_pct')])
+                table(['Frequency Threshold', 'Frequency Duration (Min)', 'OD/UI Duration (Min)', 'OD/UI Duration (%)'], rows)
             heading(entity['display_name'] + ' CRMS Messages Issued')
             rows = [[r.get('timestamp'), r.get('message_type'), r.get('message_no'), r.get('message_details')] for r in event.get('chronology', []) if r.get('entity_id') == entity['entity_id']]
             if not rows:
@@ -129,6 +144,7 @@ def render(event, options, charts, fmt):
     def duration_labels():
         return [f"Total frequency duration: {text(summary.get('thresholds', {}).get(level, {}).get('frequency_minutes'))} min" for level in LEVELS]
     def widths(headers, grouped):
+        if headers[0] == 'Frequency Threshold': return [1]*len(headers)
         if grouped: return [1.35,1.25,1.35]+[.68,.55,.55,.48]*3
         if len(headers)==7: return [1.3,.7,1.2,.7,1.1,1.1,3.65]
         if len(headers)==4: return [1.4,1.2,1.2,6.0]
@@ -221,7 +237,7 @@ def render(event, options, charts, fmt):
                         for p in c.paragraphs:
                             for r in p.runs: r.font.size = Pt(7 if grouped else 9)
         output = io.BytesIO(); doc.save(output); output.seek(0); return output
-    from reportlab.platypus import SimpleDocTemplate, Paragraph, Table, TableStyle, Image, PageBreak, Spacer
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Table, TableStyle, Image, PageBreakIfNotEmpty, Spacer
     from reportlab.lib.pagesizes import A4, landscape
     from reportlab.lib.styles import getSampleStyleSheet
     from reportlab.lib import colors
@@ -230,14 +246,17 @@ def render(event, options, charts, fmt):
     styles['Heading1'].textColor = styles['Heading2'].textColor = colors.HexColor('#'+NAVY)
     styles['Heading1'].alignment = 1; styles['Heading1'].fontSize = 21
     styles['Heading2'].keepWithNext = True
+    styles.add(styles['Heading2'].clone('AnnexureHeading', keepWithNext=False))
     styles['Normal'].fontSize = 8; styles['Normal'].leading = 10
     styles.add(styles['Normal'].clone('ChartCaption', keepWithNext=True))
     story = [Paragraph(title, styles['Heading1'])]
     width = landscape(A4)[0]-48
     for kind, value in blocks:
         if kind == 'heading':
-            if value.startswith('Annexure'): story.append(PageBreak())
-            story.append(Paragraph(escape(value), styles['Heading2']))
+            if value.startswith('Annexure'):
+                if story and isinstance(story[-1], Spacer): story.pop()
+                story.append(PageBreakIfNotEmpty())
+            story.append(Paragraph(escape(value), styles['AnnexureHeading'] if value.startswith('Annexure') else styles['Heading2']))
         elif kind == 'paragraph': story.append(Paragraph(escape(value).replace('\n','<br/>'), styles['ChartCaption'] if value.startswith('Reporting period:') else styles['Normal']))
         elif kind == 'image':
             raw = base64.b64decode(value['image']); image = PILImage.open(io.BytesIO(raw))
@@ -257,8 +276,9 @@ def render(event, options, charts, fmt):
                 commands += [('SPAN',(3+4*i,r),(6+4*i,r)) for i in range(3) for r in (0,1)]
             for row_index, row in enumerate(data[:3 if grouped else 1]):
                 for column_index, p in enumerate(row):
-                    p.style = styles['Normal'].clone('Header')
-                    p.style.textColor = colors.black if grouped and row_index > 0 and column_index >= 3 else colors.white
+                    header_style = styles['Normal'].clone('Header')
+                    header_style.textColor = colors.black if grouped and row_index > 0 and column_index >= 3 else colors.white
+                    row[column_index] = Paragraph(p.text, header_style)
             weights = widths(headers, grouped)
             table = Table(data, colWidths=[width*w/sum(weights) for w in weights], repeatRows=3 if grouped else 1, splitInRow=1)
             table.setStyle(TableStyle(commands)); story.extend([table, Spacer(1,10)])

@@ -60,6 +60,33 @@ class OperationReportTests(unittest.TestCase):
         self.assertEqual(len(rows),1)
         self.assertEqual(len(rows[0]),15)
 
+    def test_section_notes_and_threshold_statistics_follow_every_annexure_curve(self):
+        from services.low_frequency_operation_report import report_blocks
+        event,charts=fixture()
+        notes={key:'Operator notes for '+key for key in SECTIONS}
+        blocks,_=report_blocks(event,{'operation_section_notes':notes},charts)
+        for value in notes.values(): self.assertIn(('paragraph',value),blocks)
+        for at,(kind,chart) in enumerate(blocks):
+            if kind!='image' or chart['kind']=='System Frequency':continue
+            next_kind,(headers,rows,grouped)=blocks[at+1]
+            self.assertEqual(next_kind,'table')
+            self.assertEqual(headers[-2:],['OD/UI Duration (Min)','OD/UI Duration (%)'])
+            self.assertEqual(rows[0],['<49.9 Hz',2,1,50])
+        document=Document(render(event,{'operation_section_notes':notes},charts,'docx'))
+        self.assertEqual(str(document.tables[0].cell(0,0).paragraphs[0].runs[0].font.color.rgb),'FFFFFF')
+
+    def test_state_generator_annexure_uses_the_existing_timestamp_weighted_calculation(self):
+        import numpy as np
+        from services.frequency_threshold_analysis import timeline,calculate
+        times,frequency,cadence=timeline(['2026-10-05T16:34:30','2026-10-05T16:35:00','2026-10-05T16:35:30'],[49.8,49.6,49.4])
+        dataset={'times':times,'frequency':frequency,'cadence':cadence,'entities':[{'entity_id':'local','display_name':'State Plant','group':None,'deviation':np.array([-10,20,-20])}]}
+        result=calculate(dataset,[('2026-10-05T16:34:30','2026-10-05T16:36:00')],[],include_annexure_entities=True)
+        values=result['annexure_performance']['local']['thresholds']
+        self.assertEqual(values['49.90']['adverse_minutes'],1)
+        self.assertAlmostEqual(values['49.90']['adverse_pct'],66.666667,places=5)
+        self.assertEqual(values['49.50']['adverse_minutes'],.5)
+        self.assertEqual(result['overall_performance']['ISGS'],[])
+
     def test_export_rejects_cross_event_and_stale_capture(self):
         event,charts = fixture()
         async def run():

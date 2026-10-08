@@ -137,7 +137,7 @@ def metrics(freq, deviation, weights, codes, size, is_state, high=False):
     return result
 
 
-def calculate(dataset, selections, chronology, messages_complete=True, include_blocks=True, event_type='low'):
+def calculate(dataset, selections, chronology, messages_complete=True, include_blocks=True, event_type='low', include_annexure_entities=False):
     if event_type not in {'low','high'}:raise ValueError('Choose Low or High frequency.')
     high=event_type=='high'
     ranges = merge_ranges(selections)
@@ -162,6 +162,7 @@ def calculate(dataset, selections, chronology, messages_complete=True, include_b
     block_starts=np.full(len(blocks),np.inf);block_ends=np.full(len(blocks),-np.inf)
     np.minimum.at(block_starts,codes,starts);np.maximum.at(block_ends,codes,ends)
     performance, overall = {group:[] for group in GROUPS}, {group:[] for group in GROUPS}
+    annexure = {}
     message_map = {}
     for row in chronology:
         stamp=seconds(row['timestamp'])
@@ -169,10 +170,11 @@ def calculate(dataset, selections, chronology, messages_complete=True, include_b
         message_map.setdefault(row.get('entity_id'),{})[(row.get('timestamp'),row.get('message_no'))]=row.get('frequency_raw_hz',row.get('frequency_hz'))
     for entity in dataset['entities']:
         group = entity['group']
-        if group not in GROUPS:
+        annexure_only = group not in GROUPS
+        if annexure_only and not include_annexure_entities:
             continue
         deviation = entity['deviation'][index]
-        block_metrics = metrics(freq,deviation,weights,codes,len(blocks),group=='State',high) if include_blocks else {}
+        block_metrics = metrics(freq,deviation,weights,codes,len(blocks),group=='State',high) if include_blocks and not annexure_only else {}
         total_metrics = metrics(freq,deviation,weights,np.zeros(len(index),dtype=int),1,group=='State',high)
         lowest=np.full(len(blocks),np.inf);np.minimum.at(lowest,codes[valid],freq[valid])
         highest=np.full(len(blocks),-np.inf);np.maximum.at(highest,codes[valid],freq[valid])
@@ -189,12 +191,16 @@ def calculate(dataset, selections, chronology, messages_complete=True, include_b
             return {'entity_id':entity['entity_id'],'entity':entity['display_name'], 'period_start':iso(period_start),'period_end':iso(period_end),
                 'thresholds':{level:{**{key:finite(array[at]) for key,array in entry.items()},'message_count': (None if not messages_complete or (bool(unknown_message_blocks) if values is total_metrics else int(blocks[at]) in unknown_message_blocks) else sum(threshold_counts[level].values()) if values is total_metrics else threshold_counts[level].get(int(blocks[at]),0))} for level,entry in values.items()},
                 'lowest_frequency':finite(low),'highest_frequency':finite(freq[valid].max() if values is total_metrics else highest[at]),'message_count':count if messages_complete else None}
-        if include_blocks:
+        if include_blocks and not annexure_only:
             for at,block in enumerate(blocks):
                 performance[group].append(row(block_starts[at],block_ends[at],block_metrics,at,lowest[at],message_counts.get(int(block),0)))
-        overall[group].append(row(ranges[0][0],ranges[-1][1],total_metrics,0,freq[valid].min(),len(entity_messages)))
+        total = row(ranges[0][0],ranges[-1][1],total_metrics,0,freq[valid].min(),len(entity_messages))
+        if not annexure_only: overall[group].append(total)
+        if include_annexure_entities: annexure[entity['entity_id']] = total
     note=NOTE if not high else NOTE.replace('Thresholds are nested and strict.','High frequency is strictly >50.05 Hz.').replace('State OD is positive, generator UI negative.','Adverse State under-drawal is negative; adverse generator over-injection is positive.')
-    return {'summary':summary,'performance':performance,'overall_performance':overall,'calculation_note':note,'event_type':event_type}
+    result = {'summary':summary,'performance':performance,'overall_performance':overall,'calculation_note':note,'event_type':event_type}
+    if include_annexure_entities: result['annexure_performance'] = annexure
+    return result
 
 
 def chart_points(dataset, selections, entity_id, limit=2400):

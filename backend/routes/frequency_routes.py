@@ -5768,6 +5768,7 @@ class FrequencySavedReportPayload(BaseModel):
     operation_charts: List[dict] = []
     operation_entity_ids: Optional[List[str]] = None
     operation_chart_kinds: Optional[List[str]] = None
+    operation_section_notes: dict[str, str] = {}
 
 
 async def _saved_report_events(payload):
@@ -5821,6 +5822,7 @@ async def export_saved_frequency_events(payload: FrequencySavedReportPayload, us
                 if entity:
                     utility = str(entity['mapping'].get('utility_type') or entity['mapping'].get('type') or '').upper().replace(' ', '_')
                     row.update(entity_id=entity['entity_id'], is_state=entity['group']=='State', plant_name=entity['display_name'], type=entity['group'] or ('State Gen' if utility.startswith('STATE') else 'Other Generator'))
+                    row['annexure_thresholds'] = ((event.get('threshold_analysis') or {}).get('annexure_performance', {}).get(entity['entity_id']) or {}).get('thresholds', {})
                     if entity['group'] in GROUPS:
                         row['crms_messages'] = [{'timestamp': message['timestamp'], 'message_no': message.get('message_no'), 'remarks': message.get('message_details'), 'category': message.get('message_categories') or [message.get('message_type')]} for message in event['chronology'] if message.get('entity_id') == entity['entity_id']]
                     rows.append(row)

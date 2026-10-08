@@ -1751,6 +1751,7 @@ export default function FrequencyReport() {
         plant_name: row.plant_name || row.entity || row.state || row.plant_id,
         is_state: !!row.is_state,
         type: row.type || (row.is_state ? "state" : "generator"),
+        annexure_thresholds: row.annexure_thresholds,
         event_type: row.event_type || eventType,
         series: {
           timestamps: row.series?.timestamps || [],
@@ -1785,6 +1786,7 @@ export default function FrequencyReport() {
         },
       } : null,
       rows: chartRows,
+      hideHeading: !!reportContext.hideHeading,
     }).replace(/</g, "\\u003c");
 
     return `<!doctype html>
@@ -1823,7 +1825,7 @@ export default function FrequencyReport() {
   </style>
 </head>
 <body>
-  <header>
+  <header${reportContext.hideHeading ? ' style="display:none"' : ''}>
     <h1>${reportContext.title ? escapeTitle(htmlTitle) : "Annexure: Frequency Event Plots"}</h1>
     <div class="meta">${escapeTitle(htmlStart)} to ${escapeTitle(htmlEnd)} | Hover chart lines and CRMS pins for details</div>
   </header>
@@ -2215,6 +2217,15 @@ export default function FrequencyReport() {
       card.innerHTML = collapsible
         ? '<summary>' + heading + '</summary><div class="chart-wrap">' + axisControls + '<div class="chart ' + (kind.includes("Schedule") ? "small" : "") + '"></div></div>'
         : '<div class="card-title">' + heading + '</div>' + axisControls + '<div class="chart ' + (kind.includes("Schedule") ? "small" : "") + '"></div>';
+      if (row.annexure_thresholds && kind !== 'System Frequency') {
+        const metrics = ['49.90', '49.70', '49.50'].map(level => {
+          const values = row.annexure_thresholds[level] || {};
+          const value = number => number == null || !Number.isFinite(Number(number)) ? 'Data not available' : String(Number(Number(number).toFixed(3)));
+          const unknown = Number(values.unknown_deviation_minutes || 0) > 0;
+          return '<tr><td>&lt;' + Number(level) + ' Hz</td><td>' + value(values.frequency_minutes) + '</td><td>' + value(unknown ? null : values.adverse_minutes) + '</td><td>' + value(unknown ? null : values.adverse_pct) + '</td></tr>';
+        }).join('');
+        card.insertAdjacentHTML('beforeend', '<table style="width:100%;border-collapse:collapse;margin:12px 0;font-size:12px"><thead><tr>' + ['Frequency Threshold','Frequency Duration (Min)','OD/UI Duration (Min)','OD/UI Duration (%)'].map(label => '<th style="background:#17365D;color:#fff!important;padding:8px;text-align:left">' + label + '</th>').join('') + '</tr></thead><tbody>' + metrics + '</tbody></table>');
+      }
       root.appendChild(card);
       let chart = null;
       const renderChart = () => {
@@ -3313,11 +3324,17 @@ export default function FrequencyReport() {
       <SavedEventReports onLoadGraphs={async id => API.exportSavedFrequencyReport({ event_ids: [id], operation_report: true, format: 'html', operation_sections: ['summary', 'annexure_states', 'annexure_generators'] })} onRenderGraphs={(frame, source, selection) => {
         frame.contentDocument?.querySelectorAll('.chart').forEach(node => echarts.getInstanceByDom(node)?.dispose());
         const frequencyRow = source.rows.find(row => row.is_frequency) || source.rows.find(row => row.series?.frequency?.length);
-        const context = { ...source.context, frequencyRow, chartKinds: selection.kinds };
+        const context = { ...source.context, frequencyRow, chartKinds: selection.kinds, hideHeading: true };
         const chosen = source.rows.filter(row => row.is_frequency || selection.entities.includes(row.entity_id));
         const doc = frame.contentDocument;
+        const html = buildInteractiveChartsHtml(chosen, context);
+        const script = html.match(/<script>([\s\S]*?)<\/script>/)?.[1];
+        doc.open(); doc.write(html.replace(/<script[\s\S]*?<\/script>/g, '')); doc.close();
+        if (!script) throw new Error('Event chart initialization is unavailable.');
         frame.contentWindow.echarts = echarts;
-        doc.open(); doc.write(buildInteractiveChartsHtml(chosen, context).replace(/<script src="[^"]*echarts[^\"]*"><\/script>/, '')); doc.close();
+        // Initialize after the iframe document exists; do not depend on inline
+        // script execution during React's iframe mount/navigation.
+        frame.contentWindow.Function('echarts', script)(echarts);
         doc.querySelectorAll('details').forEach(card => { card.open = true; });
         frame.contentWindow.captureReportCharts?.();
       }} onOperationReport={generateOperationReport} onConsolidateAnalysis={consolidateSelectedEvents} availableEvents={availableEvents} busy={dataLoading || mapLoading} saveBlob={saveBlobToFile} onOpenEvent={async id => {

@@ -8,8 +8,8 @@ const stamp = value => String(value || "").replace("T", " ");
 export default function ThresholdPerformanceTable({ rows = [], levels = LEVELS, high = false, report = false, summary = {} }) {
   if (report) {
     const thresholds = ['49.50', '49.70', '49.90'];
-    const header = { bgcolor: '#17365D', color: 'white', fontWeight: 850, border: '1px solid #17365D', position: 'static' };
-    const subheader = { ...header, bgcolor: '#DBE5F1', color: '#17365D', fontSize: 11 };
+    const header = { bgcolor: '#17365D', color: '#FFFFFF !important', '& *': { color: '#FFFFFF !important' }, fontWeight: 850, border: '1px solid #17365D', position: 'static' };
+    const subheader = { ...header, bgcolor: '#DBE5F1', color: '#17365D !important', '& *': { color: '#17365D !important' }, fontSize: 11 };
     const cell = { border: '1px solid #CBD5E1', fontSize: 11 };
     return <TableContainer sx={{ overflowX: 'auto', border: '1px solid #CBD5E1' }}><Table size="small" sx={{ minWidth: 1500 }}>
       <TableHead><TableRow><TableCell rowSpan={3} sx={header}>Reporting Period</TableCell><TableCell rowSpan={3} sx={header}>Entity Name</TableCell><TableCell rowSpan={3} sx={header}>Min. Freq. (Hz) &amp; Time</TableCell>{thresholds.map(level => <TableCell key={level} colSpan={4} align="center" sx={header}>Freq &lt;{Number(level)} Hz</TableCell>)}</TableRow>
