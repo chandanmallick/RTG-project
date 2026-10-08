@@ -8,7 +8,7 @@ const GROUPS = ["State", "ISGS", "IPP"];
 const value = number => number == null ? "—" : typeof number === "number" ? Number(number.toFixed(3)).toLocaleString("en-IN") : number;
 const stamp = text => String(text || "").replace("T", " ");
 
-export default function SavedEventReports({ availableEvents, busy, onOpenEvent, onViewHtml, saveBlob, onConsolidateAnalysis }) {
+export default function SavedEventReports({ availableEvents, busy, onOpenEvent, onViewHtml, saveBlob, onConsolidateAnalysis, onOperationReport }) {
   const [eventType,setEventType]=useState('low');
   const [selectedIds, setSelectedIds] = useState([]);
   const [analyses, setAnalyses] = useState([]);
@@ -18,11 +18,25 @@ export default function SavedEventReports({ availableEvents, busy, onOpenEvent, 
   const [performancePage, setPerformancePage] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [operationSections, setOperationSections] = useState(['summary', 'states', 'generators', 'actions', 'defence', 'annexure_states', 'annexure_generators']);
+  const [operationNotes, setOperationNotes] = useState({});
   const [consolidatedOpen, setConsolidatedOpen] = useState(false);
   const [sections, setSections] = useState({ include_threshold_performance: true, include_existing_sections: true, include_chronology: true, include_entity_performance: true, performance_groups: GROUPS });
   const selected = availableEvents.filter(event => selectedIds.includes(event.event_id));
   const active = analyses.find(event => event.event_id === activeId);
   const locked = busy || loading;
+  const stats = active?.threshold_analysis?.summary;
+  const defaultSummary = active ? `On ${active.start_time.slice(0, 10)}, a low-frequency event occurred from ${active.start_time.slice(11)} to ${active.end_time.slice(11)} IST. Frequency was below 49.9 Hz for ${stats?.thresholds?.['49.90']?.frequency_minutes ?? 'Data not available'} minutes. Minimum frequency was ${stats?.minimum_frequency ?? 'Data not available'} Hz at ${stats?.minimum_timestamp ?? 'Data not available'}.` : '';
+  const operationExport = async (format, all = false) => {
+    setLoading(true); setError('');
+    try {
+      for (const id of all ? selectedIds : [activeId]) {
+        await onOperationReport({ event_ids: [id], format, operation_report: true, operation_sections: operationSections,
+          executive_summary: operationNotes[id]?.summary ?? '', action_summary: operationNotes[id]?.actions ?? '' });
+      }
+    } catch (err) { setError('The operation report could not be generated. Please retry or check event data.'); }
+    finally { setLoading(false); }
+  };
 
   const load = async () => {
     setLoading(true);
@@ -90,6 +104,19 @@ export default function SavedEventReports({ availableEvents, busy, onOpenEvent, 
       </Stack>
       <Stack direction="row" spacing={1} sx={{ mb: 1 }}><Button size="small" disabled={locked} onClick={() => generate("docx")}>Generate Word</Button><Button size="small" disabled={locked} onClick={() => generate("pdf")}>Generate PDF</Button><Button size="small" disabled={locked} onClick={() => generate("html")}>View HTML</Button></Stack>
       {active && <>
+        <Typography sx={{ fontWeight: 850, color: '#17365D', mt: 2 }}>Low Frequency Operation Report</Typography>
+        <Stack direction="row" flexWrap="wrap">
+          {[["summary", "1 Executive Summary"], ["states", "2 State Performance"], ["generators", "3 Generator Performance"], ["actions", "4 Action & Chronology"], ["defence", "5 ADMS & UFR"], ["annexure_states", "Annexure 1 States"], ["annexure_generators", "Annexure 2 Generators"]].map(([key, label]) => <FormControlLabel key={key} control={<Checkbox size="small" checked={operationSections.includes(key)} disabled={locked} onChange={() => setOperationSections(current => current.includes(key) ? current.filter(item => item !== key) : [...current, key])} />} label={label} />)}
+        </Stack>
+        <TextField fullWidth multiline minRows={3} label="Executive summary and general notes" value={operationNotes[activeId]?.summary ?? defaultSummary} disabled={locked} onChange={event => setOperationNotes(current => ({ ...current, [activeId]: { ...current[activeId], summary: event.target.value } }))} sx={{ my: 1 }} />
+        <TextField fullWidth multiline minRows={2} label="Action summary" value={operationNotes[activeId]?.actions ?? ''} disabled={locked} onChange={event => setOperationNotes(current => ({ ...current, [activeId]: { ...current[activeId], actions: event.target.value } }))} sx={{ my: 1 }} />
+        <Stack direction="row" spacing={1} sx={{ mb: 2 }}>
+          <Button disabled={locked || !operationSections.length} onClick={() => operationExport('html')}>Preview operation report</Button>
+          <Button disabled={locked || !operationSections.length} onClick={() => operationExport('docx')}>Download operation Word</Button>
+          <Button disabled={locked || !operationSections.length} onClick={() => operationExport('pdf')}>Download operation PDF</Button>
+          {selectedIds.length > 1 && <Button disabled={locked || !operationSections.length} onClick={() => operationExport('docx', true)}>Word for each selected event</Button>}
+          {selectedIds.length > 1 && <Button disabled={locked || !operationSections.length} onClick={() => operationExport('pdf', true)}>PDF for each selected event</Button>}
+        </Stack>
         <Typography sx={{ color: "#475569", fontSize: 12 }}>{stamp(active.start_time)} to {stamp(active.end_time)} IST · Lowest Frequency: {frequencyValue(active.lowest_frequency)} Hz</Typography>
         {active.warnings.map((warning, index) => <Alert key={index} severity="warning" sx={{ mt: 1 }}>{warning}</Alert>)}
         <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mt: 2, mb: 1 }}><Typography sx={{ fontWeight: 850 }}>Chronology of Messages</Typography><Button size="small" startIcon={<Download size={15} />} disabled={locked} onClick={() => generate("xlsx", false, { include_existing_sections: false, include_chronology: true, include_entity_performance: false })}>Export Excel</Button></Stack>

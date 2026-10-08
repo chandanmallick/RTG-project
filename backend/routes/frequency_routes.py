@@ -1581,6 +1581,8 @@ async def _build_frequency_message_timeline(payload, *, event_context=None, alia
         try:
             messages, range_skipped = messages_override if messages_override is not None else await fetch_crms_frequency_messages(start_dt, end_dt)
         except Exception as exc:
+            import logging
+            logging.getLogger(__name__).exception('CRMS frequency message fetch failed')
             if not event_doc:
                 raise HTTPException(502, f"CRMS message fetch failed: {exc}") from exc
             messages_complete = False
@@ -2131,8 +2133,10 @@ def build_saved_event_response(
     start_dt: datetime,
     end_dt: datetime,
     include_generation_comparison: bool = False,
+    saved_document: Optional[dict] = None,
+    refresh_capacity: bool = True,
 ):
-    event_doc = db.db[EVENT_COLLECTION].find_one({"event_id": event_id}, {"_id": 0})
+    event_doc = saved_document if saved_document is not None else db.db[EVENT_COLLECTION].find_one({"event_id": event_id}, {"_id": 0})
     if not event_doc:
         return None, f"Saved event not found for id {event_id}."
 
@@ -2146,7 +2150,7 @@ def build_saved_event_response(
     rows = []
     event_type = normalize_event_type(event_doc.get("event_type"))
     date_strings = get_unique_date_strings(start_dt, end_dt)
-    cap_on_bar_by_id = lookup_rtg_capacity_on_bar(db, entity_list or event_points, date_strings)
+    cap_on_bar_by_id = lookup_rtg_capacity_on_bar(db, entity_list or event_points, date_strings) if refresh_capacity else {}
 
     source_entities = entity_list or event_points
 
@@ -2170,6 +2174,9 @@ def build_saved_event_response(
         for idx, ts in enumerate(timestamps):
             try:
                 parsed_ts = pd.to_datetime(ts).to_pydatetime()
+                if saved_document is not None and parsed_ts.tzinfo:
+                    from zoneinfo import ZoneInfo
+                    parsed_ts = parsed_ts.astimezone(ZoneInfo('Asia/Kolkata')).replace(tzinfo=None)
                 if start_dt <= parsed_ts <= end_dt:
                     keep_indexes.append(idx)
             except Exception:
@@ -2178,7 +2185,7 @@ def build_saved_event_response(
         def take(key):
             values = series.get(key) or []
             if not keep_indexes:
-                return values
+                return [] if saved_document is not None else values
             return [values[idx] for idx in keep_indexes if idx < len(values)]
 
         filtered_series = {
@@ -2190,7 +2197,7 @@ def build_saved_event_response(
             "deviation": take("deviation"),
             "purulia_psp_net": take("purulia_psp_net"),
             "generation_categories": {
-                label: ([values[idx] for idx in keep_indexes if idx < len(values)] if keep_indexes else values)
+                label: ([values[idx] for idx in keep_indexes if idx < len(values)] if keep_indexes else ([] if saved_document is not None else values))
                 for label, values in (series.get("generation_categories") or {}).items()
                 if isinstance(values, list)
             },
@@ -5733,6 +5740,13 @@ class FrequencySavedReportPayload(BaseModel):
     performance_groups: List[str] = ["State", "ISGS", "IPP"]
     refresh: bool = False
     include_threshold_performance: bool = False
+    operation_report: bool = False
+    operation_sections: List[str] = ['summary', 'states', 'generators', 'actions', 'defence', 'annexure_states', 'annexure_generators']
+    executive_summary: str = ''
+    action_summary: str = ''
+    chart_event_id: Optional[str] = None
+    chart_revision: Optional[str] = None
+    operation_charts: List[dict] = []
 
 
 async def _saved_report_events(payload):
@@ -5744,7 +5758,7 @@ async def _saved_report_events(payload):
     output, documents = [], []
     for event_id in ids:
         try:
-            result, document = await saved_event_analysis(db, event_id, refresh=payload.refresh)
+            result, document = await saved_event_analysis(db, event_id, refresh=payload.refresh, include_physical=payload.operation_report and 'actions' in payload.operation_sections)
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
         output.append(result)
@@ -5760,6 +5774,70 @@ async def analyse_saved_frequency_events(payload: FrequencySavedReportPayload, u
 
 @router.post("/events/report-export")
 async def export_saved_frequency_events(payload: FrequencySavedReportPayload, user=Depends(get_authenticated_user)):
+    if payload.operation_report:
+        from services.low_frequency_operation_report import render, SECTIONS
+        from services.frequency_event_reporting import event_period, event_entities, point_samples, GROUPS
+        import logging
+        if payload.consolidated or len(set(payload.event_ids)) != 1 or payload.format not in {'html', 'docx', 'pdf'}:
+            raise HTTPException(400, 'Select one low-frequency event per operation report.')
+        if not payload.operation_sections or any(section not in SECTIONS for section in payload.operation_sections):
+            raise HTTPException(400, 'Select valid report sections.')
+        db, events, documents = await _saved_report_events(payload)
+        event = events[0]
+        if event['event_type'] != 'low':
+            raise HTTPException(400, 'Operation reports require a low-frequency event.')
+        options = payload.model_dump() if hasattr(payload, 'model_dump') else payload.dict()
+        if not payload.operation_charts and payload.chart_event_id is None:
+            start, end = event_period(documents[0])
+            result, error = build_saved_event_response(db, event['event_id'], [], start, end, include_generation_comparison=False, saved_document=documents[0], refresh_capacity=False)
+            if error:
+                logging.getLogger(__name__).error('Operation report source failed: %s', error)
+                raise HTTPException(400, 'Event report data is unavailable.')
+            entities = event_entities(db, documents[0])
+            rows = []
+            for row in result['rows']:
+                entity = next((item for item in entities if str(item['point'].get('plant_id')) == str(row['plant_id']) and str(item['point'].get('stage_id') or item['point'].get('STAGE_ID') or '') == str(row.get('stage_id') or '')), None)
+                if entity and entity['group'] in GROUPS:
+                    row.update(entity_id=entity['entity_id'], is_state=entity['group']=='State', plant_name=entity['display_name'], type=entity['group'])
+                    row['crms_messages'] = [{'timestamp': message['timestamp'], 'message_no': message.get('message_no'), 'remarks': message.get('message_details'), 'category': message.get('message_categories') or [message.get('message_type')]} for message in event['chronology'] if message.get('entity_id') == entity['entity_id']]
+                    rows.append(row)
+            frequency_point = next((point for point in documents[0].get('data_points', []) if point.get('is_frequency') or str(point.get('plant_id')) == 'SYSTEM_FREQUENCY'), None)
+            if frequency_point:
+                samples = point_samples(frequency_point, start, end)
+                rows.append({'plant_id': 'SYSTEM_FREQUENCY', 'plant_name': 'System Frequency', 'is_frequency': True, 'event_type': 'low',
+                             'series': {'timestamps': [stamp.isoformat() for stamp, _, _ in samples], 'frequency': [value for _, value, _ in samples]}})
+            return {'success': True, 'capture_required': True, 'rows': rows, 'chart_revision': str(documents[0].get('updated_at') or ''), 'context': {'title': event['event_name'], 'start_time': event['start_time'], 'end_time': event['end_time'], 'event_type': 'low'}}
+        if payload.chart_event_id != event['event_id']:
+            raise HTTPException(400, 'Chart capture does not match this event.')
+        if payload.chart_revision != str(documents[0].get('updated_at') or ''):
+            raise HTTPException(409, 'Event data changed. Please capture the report again.')
+        try:
+            from PIL import Image as PILImage
+            if len(payload.operation_charts) > 500:
+                raise ValueError('Too many chart images')
+            allowed = {entity['entity_id']: entity['group'] for entity in event.get('report_entities', [])}
+            for chart in payload.operation_charts:
+                if chart.get('event_id') != event['event_id'] or not isinstance(chart.get('title'), str) or len(chart['title']) > 1000:
+                    raise ValueError('Invalid chart identity')
+                if chart.get('kind') != 'System Frequency' and (chart.get('entity_id') not in allowed or (allowed[chart['entity_id']] == 'State') != bool(chart.get('is_state'))):
+                    raise ValueError('Chart entity does not belong to this event')
+                encoded = chart.get('image', '')
+                if len(encoded) > 16_000_000:
+                    raise ValueError('Chart image too large')
+                raw = base64.b64decode(encoded, validate=True)
+                with PILImage.open(io.BytesIO(raw)) as image:
+                    if image.format != 'PNG' or image.width * image.height > 20_000_000:
+                        raise ValueError('Invalid chart image')
+                    image.verify()
+            import asyncio
+            output = await asyncio.to_thread(render, event, options, payload.operation_charts, payload.format)
+        except Exception:
+            logging.getLogger(__name__).exception('Low frequency operation report export failed')
+            raise HTTPException(400, 'The report could not be generated. Please retry chart capture.')
+        if payload.format == 'html':
+            return {'success': True, 'html': output}
+        media = 'application/pdf' if payload.format == 'pdf' else 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+        return StreamingResponse(output, media_type=media, headers={'Content-Disposition': f'attachment; filename="low_frequency_operation_report.{payload.format}"'})
     from services.frequency_event_reporting import GROUPS, event_period, supplements_excel, supplements_html
     if payload.format not in {"xlsx", "docx", "pdf", "html"}:
         raise HTTPException(400, "Unsupported report format.")

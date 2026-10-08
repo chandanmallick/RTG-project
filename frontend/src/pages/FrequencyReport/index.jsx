@@ -4,6 +4,7 @@
  */
 import React, { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import ReactECharts from "echarts-for-react";
+import * as echarts from "echarts";
 import AppShell from "../../components/layout/AppShell";
 import PlantMappingGrid from "../../components/PlantMappingGrid";
 import DataSourceAuditPanel from "../../components/frequency/DataSourceAuditPanel";
@@ -1746,6 +1747,7 @@ export default function FrequencyReport() {
       .filter((row) => row.series?.timestamps?.length > 0 && !row.is_frequency)
       .map((row) => ({
         plant_id: row.plant_id,
+        entity_id: row.entity_id,
         plant_name: row.plant_name || row.entity || row.state || row.plant_id,
         is_state: !!row.is_state,
         type: row.type || (row.is_state ? "state" : "generator"),
@@ -1768,10 +1770,10 @@ export default function FrequencyReport() {
       title: htmlTitle,
       start_time: htmlStart,
       end_time: htmlEnd,
-      includeFrequency: exportIncludeFrequencyPlot,
-      includeDeviation: exportIncludeDeviationPlot,
-      includeStateScheduleActual: exportIncludeStateScheduleActualPlot,
-      includeGeneratorScheduleActual: exportIncludeGeneratorScheduleActualPlot,
+      includeFrequency: reportContext.captureAll || exportIncludeFrequencyPlot,
+      includeDeviation: reportContext.captureAll || exportIncludeDeviationPlot,
+      includeStateScheduleActual: reportContext.captureAll || exportIncludeStateScheduleActualPlot,
+      includeGeneratorScheduleActual: reportContext.captureAll || exportIncludeGeneratorScheduleActualPlot,
       frequencyRow: htmlFrequency ? {
         plant_id: htmlFrequency.plant_id,
         plant_name: "System Frequency",
@@ -2195,9 +2197,15 @@ export default function FrequencyReport() {
         ],
       };
     };
+    const captureRenderers = [];
+    window.captureReportCharts = () => captureRenderers.forEach(render => render());
     const addCard = (row, kind, option, { collapsible = false, open = true } = {}) => {
       const card = document.createElement(collapsible ? "details" : "section");
       card.className = "card";
+      card.dataset.kind = kind;
+      card.dataset.isState = String(!!row.is_state);
+      card.dataset.entity = row.plant_name;
+      card.dataset.entityId = row.entity_id || '';
       if (collapsible) card.open = open;
       const isGenerationComparison = kind === "Generation comparison";
       const axisControls = isGenerationComparison ? '<div class="axis-controls"><strong>Generation axis:</strong><span class="axis-buttons"></span><span>Deviation always remains on Secondary.</span></div>' : '';
@@ -2217,6 +2225,7 @@ export default function FrequencyReport() {
           chart.resize();
         }
       };
+      captureRenderers.push(renderChart);
       if (isGenerationComparison) {
         const controls = card.querySelector(".axis-buttons");
         const categoryLabels = Object.keys(row.series.generation_categories || {});
@@ -2257,7 +2266,7 @@ export default function FrequencyReport() {
       if (!collapsible || open) requestAnimationFrame(renderChart);
       if (collapsible) card.addEventListener("toggle", () => { if (card.open) requestAnimationFrame(renderChart); });
     };
-    if (!report.rows.length) {
+    if (!report.rows.length && !(report.includeFrequency && report.frequencyRow?.series?.timestamps?.length)) {
       root.innerHTML = '<div class="empty">No selected chart rows available for this export.</div>';
     } else {
       if (report.includeFrequency && report.frequencyRow?.series?.timestamps?.length) {
@@ -2295,6 +2304,71 @@ export default function FrequencyReport() {
     } finally {
       setExportingHtml(false);
     }
+  };
+
+  const operationCaptureCache = useRef(new Map());
+  const generateOperationReport = async (options) => {
+    const id = options.event_ids[0];
+    const version = availableEvents.find(event => event.event_id === id)?.updated_at || '';
+    const key = `${id}:${version}`;
+    let captured = operationCaptureCache.current.get(key);
+    if (!captured || Date.now() - captured.time > 240000) {
+      const source = await API.exportSavedFrequencyReport({ ...options, format: 'html', operation_charts: [], chart_event_id: null });
+      if (!source.capture_required) throw new Error('Event chart data is unavailable.');
+      const context = { ...source.context, captureAll: true, frequencyRow: source.rows.find(row => row.is_frequency) || source.rows.find(row => row.series?.frequency?.length) };
+      const frame = document.createElement('iframe');
+      frame.title = 'Event report chart capture';
+      frame.style.cssText = 'position:fixed;left:-20000px;top:0;width:1400px;height:900px;border:0;';
+      document.body.appendChild(frame);
+      try {
+        const doc = frame.contentDocument;
+        frame.contentWindow.echarts = echarts;
+        doc.open();
+        // Use the already-installed ECharts runtime with the exact HTML options.
+        doc.write(buildInteractiveChartsHtml(source.rows, context).replace(/<script src="[^"]*echarts[^\"]*"><\/script>/, ''));
+        doc.close();
+        await new Promise(resolve => setTimeout(resolve, 100));
+        doc.querySelectorAll('details').forEach(card => { card.open = true; });
+        frame.contentWindow.captureReportCharts?.();
+        const deadline = Date.now() + 15000;
+        while (true) {
+          const nodes = [...doc.querySelectorAll('.chart')];
+          if (nodes.length && nodes.every(node => echarts.getInstanceByDom(node))) break;
+          if (Date.now() > deadline) throw new Error('Chart capture is unavailable. Please retry.');
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
+        // Let the existing chart animation finish before taking the image.
+        await new Promise(resolve => setTimeout(resolve, 1200));
+        const charts = [...doc.querySelectorAll('.chart')].map(node => {
+          const card = node.closest('.card');
+          return { event_id: id, entity_id: card.dataset.entityId, kind: card.dataset.kind, is_state: card.dataset.isState === 'true', title: `${card.dataset.entity} — ${card.dataset.kind}`, image: echarts.getInstanceByDom(node).getDataURL({ type: 'png', pixelRatio: 2, backgroundColor: '#fff' }).split(',')[1] };
+        });
+        captured = { charts, revision: source.chart_revision, time: Date.now() };
+        for (const [cacheKey, item] of operationCaptureCache.current) {
+          if (Date.now() - item.time > 240000) operationCaptureCache.current.delete(cacheKey);
+        }
+        while (operationCaptureCache.current.size >= 3) operationCaptureCache.current.delete(operationCaptureCache.current.keys().next().value);
+        operationCaptureCache.current.set(key, captured);
+      } finally {
+        frame.contentDocument?.querySelectorAll('.chart').forEach(node => echarts.getInstanceByDom(node)?.dispose());
+        frame.remove();
+      }
+    }
+    let response;
+    try {
+      response = await API.exportSavedFrequencyReport({ ...options, chart_event_id: id, chart_revision: captured.revision, operation_charts: captured.charts });
+    } catch (error) {
+      operationCaptureCache.current.delete(key);
+      throw error;
+    }
+    if (options.format === 'html') {
+      const blob = new Blob([response.html], { type: 'text/html;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const preview = window.open(url, '_blank');
+      if (preview) preview.opener = null;
+      else await saveBlobToFile(blob, `Low_Frequency_Operation_${id}.html`);
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+    } else await saveBlobToFile(response, `Low_Frequency_Operation_${id}.${options.format}`);
   };
 
   const handleExportDocx = async () => {
@@ -3234,7 +3308,7 @@ export default function FrequencyReport() {
       <Dialog fullScreen open={Boolean(consolidatedAnalysis)} onClose={() => setConsolidatedAnalysis(null)}><DialogTitle>Consolidated Event Analysis<IconButton sx={{ float: "right" }} onClick={() => setConsolidatedAnalysis(null)}>?</IconButton></DialogTitle><DialogContent><FrequencyAnalysisResults result={consolidatedAnalysis} saveBlob={saveBlobToFile} onHtmlReport={viewConsolidatedHtml} /></DialogContent></Dialog>
       <div style={{ display: analysisMode === "automatic" ? "block" : "none" }}>
       <FrequencyPreAnalysis onEventsSaved={loadAvailableDates} onConsolidate={consolidateSelectedEvents} storedEvents={availableEvents} busy={dataLoading || mapLoading} onAnalyze={analyzeSelectedPeriod} onViewResult={viewSelectedPeriodResult} />
-      <SavedEventReports onConsolidateAnalysis={consolidateSelectedEvents} availableEvents={availableEvents} busy={dataLoading || mapLoading} saveBlob={saveBlobToFile} onOpenEvent={async id => {
+      <SavedEventReports onOperationReport={generateOperationReport} onConsolidateAnalysis={consolidateSelectedEvents} availableEvents={availableEvents} busy={dataLoading || mapLoading} saveBlob={saveBlobToFile} onOpenEvent={async id => {
         const event = availableEvents.find(item => item.event_id === id);
         if (event) await analyzeSelectedPeriod({ ...event, stored_event_id: id, event_type: event.event_type || "low" });
       }} onViewHtml={async (_, options) => {

@@ -263,28 +263,59 @@ def build_performance(event, entities, chronology, messages_complete=True):
     return result, lowest
 
 
-async def saved_event_analysis(db, event_id, refresh=False):
-    from routes.frequency_routes import EVENT_COLLECTION, FrequencyMessageTimelinePayload, FrequencyMessageRange, build_frequency_message_timeline
-    event = db.db[EVENT_COLLECTION].find_one({"event_id": event_id}, {"_id": 0})
-    if not event:
-        raise ValueError(f"Saved event not found: {event_id}")
-    if not event.get("data_points"):
-        raise ValueError("This saved instance contains no entity datasets.")
+async def _operation_chronology(db, event, result, dataset, entities=None):
+    """Fetch optional physical records only for the operation report, once per cache entry."""
+    if not dataset or 'report_chronology' in result:
+        return
+    from services.frequency_analysis_sessions import report_chronology
+    from routes.frequency_routes import get_crms_frequency_transmission_lines
+    import logging
     start, end = event_period(event)
-    key = (event_id, str(event.get("updated_at")))
+    try:
+        physical = await get_crms_frequency_transmission_lines(start.isoformat(), end.isoformat())
+        if not physical.get('success'):
+            logging.getLogger(__name__).warning('Event physical regulation unavailable: %s', physical.get('error', 'unavailable'))
+    except Exception:
+        logging.getLogger(__name__).exception('Event physical regulation fetch failed')
+        physical = {'success': False, 'events': []}
+    session = {'lock': Lock(), 'dataset': dataset, 'report_aliases': timeline_aliases(db, event, entities),
+               'physical_report': {'start': start.isoformat(), 'end': end.isoformat(), 'response': physical}}
+    result['report_chronology'], physical_warnings = report_chronology(session, {**result, 'ranges': [(start.isoformat(), end.isoformat())]})
+    result['warnings'].extend(physical_warnings)
+
+
+async def saved_event_analysis(db, event_id, refresh=False, include_physical=False):
+    from routes.frequency_routes import EVENT_COLLECTION, FrequencyMessageTimelinePayload, FrequencyMessageRange, build_frequency_message_timeline
+    collection = db.db[EVENT_COLLECTION]
+    metadata = collection.find_one({'event_id': event_id}, {'_id': 0, 'event_id': 1, 'updated_at': 1})
+    if not metadata:
+        raise ValueError(f"Saved event not found: {event_id}")
+    key = (event_id, str(metadata.get("updated_at")))
     with _cache_lock:
         cached = _cache.get(key)
-        if not refresh and cached and monotonic() - cached[0] < 300:
-            return cached[1], event
-    timeline = await build_frequency_message_timeline(FrequencyMessageTimelinePayload(ranges=[FrequencyMessageRange(start_time=start.isoformat(), end_time=end.isoformat())], event_id=event_id))
+    if not refresh and cached and monotonic() - cached[0] < 300:
+        event = cached[3]
+        if include_physical:
+            await _operation_chronology(db, event, cached[1], cached[2])
+        return cached[1], event
+    event = collection.find_one({'event_id': event_id}, {'_id': 0})
+    if not event or not event.get('data_points'):
+        raise ValueError('This saved instance contains no entity datasets.')
+    start, end = event_period(event)
+    key = (event_id, str(event.get('updated_at')))
     entities = event_entities(db, event)
+    from routes.frequency_routes import _build_frequency_message_timeline
+    timeline = await _build_frequency_message_timeline(FrequencyMessageTimelinePayload(ranges=[FrequencyMessageRange(start_time=start.isoformat(), end_time=end.isoformat())], event_id=event_id), event_context=event, aliases_override=timeline_aliases(db, event, entities), db=db)
     performance, lowest = build_performance(event, entities, timeline["rows"], timeline.get("messages_complete", True))
     from services.frequency_threshold_analysis import dataset_from_event, calculate
     try:
-        threshold_analysis=calculate(dataset_from_event(db,event),[(start.isoformat(),end.isoformat())],timeline["rows"],timeline.get("messages_complete",True))
+        dataset = dataset_from_event(db,event,entities)
+        threshold_analysis=calculate(dataset,[(start.isoformat(),end.isoformat())],timeline["rows"],timeline.get("messages_complete",True))
     except ValueError as exc:
+        import logging
+        logging.getLogger(__name__).exception('Threshold calculation failed for saved event %s', event_id)
         threshold_analysis=None
-        timeline.setdefault("warnings",[]).append(f"Threshold analysis unavailable: {exc}")
+        timeline.setdefault("warnings",[]).append('Threshold analysis data is unavailable for this event.')
     result = {
         "threshold_analysis": threshold_analysis,
         "event_id": event_id, "event_name": event.get("name") or event_id,
@@ -295,8 +326,11 @@ async def saved_event_analysis(db, event_id, refresh=False):
     }
     if any(not entity["group"] for entity in entities):
         result["warnings"].append("State-sector generator rows retain their existing classification and are outside the State drawal / ISGS / IPP tables.")
+    result['report_entities'] = [{key: entity[key] for key in ('entity_id', 'display_name', 'group')} for entity in entities]
+    if include_physical:
+        await _operation_chronology(db, event, result, dataset if threshold_analysis else None, entities)
     with _cache_lock:
-        _cache[key] = (monotonic(), result)
+        _cache[key] = (monotonic(), result, dataset if threshold_analysis else None, event)
         while len(_cache) > 32:
             _cache.popitem(last=False)
     return result, event

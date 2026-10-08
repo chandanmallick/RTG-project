@@ -230,9 +230,9 @@ def chart_points(dataset, selections, entity_id, limit=2400):
     return {'entity_id':entity_id,'entity':entity['display_name'],'points':output,'aggregated':True,'point_budget':limit,'point_count':len(output),
             'note':'Envelope display preserves sampled frequency extrema and OD maxima; durations and occurrences use every original reading.'}
 
-def dataset_from_event(db, event):
+def dataset_from_event(db, event, entities=None):
     from services.frequency_event_reporting import event_entities
-    entities = event_entities(db,event)
+    entities = [dict(entity) for entity in (entities if entities is not None else event_entities(db,event))]
     points = event.get('data_points') or []
     frequency_point = next((point for point in points if point.get('is_frequency') or str(point.get('plant_id'))=='SYSTEM_FREQUENCY'),None)
     if frequency_point is None:
