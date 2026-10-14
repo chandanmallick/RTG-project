@@ -650,6 +650,55 @@ def get_curve_frequency_series(
         raise HTTPException(400, str(exc)) from exc
 
 
+@router.post("/curve-series/export-excel")
+def export_curve_frequency_excel_post(
+    payload: dict = Body(...),
+    user=Depends(get_authenticated_user),
+):
+    """Export loaded Curve frequency overview and statistics to Excel."""
+    from services.curve_frequency_service import export_curve_frequency_excel_bytes
+    start_date = str(payload.get("start_date") or "").strip()
+    end_date = str(payload.get("end_date") or start_date).strip()
+    points = payload.get("points")
+    if not start_date:
+        raise HTTPException(400, "start_date is required.")
+    try:
+        output = export_curve_frequency_excel_bytes(start_date, end_date, points=points)
+        filename = f"Frequency_Overview_{start_date}_{end_date}.xlsx"
+        return StreamingResponse(
+            output,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(500, f"Failed to generate Excel: {str(exc)}") from exc
+
+
+@router.get("/curve-series/export-excel")
+def export_curve_frequency_excel_get(
+    start_date: str = Query(...),
+    end_date: str = Query(...),
+    user=Depends(get_authenticated_user),
+):
+    """Export loaded Curve frequency overview and statistics to Excel (GET)."""
+    from services.curve_frequency_service import export_curve_frequency_excel_bytes
+    try:
+        output = export_curve_frequency_excel_bytes(start_date, end_date)
+        filename = f"Frequency_Overview_{start_date}_{end_date}.xlsx"
+        return StreamingResponse(
+            output,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(500, f"Failed to generate Excel: {str(exc)}") from exc
+
+
+
 @router.get("/schedule-data/generators")
 async def get_schedule_data_generators():
     return {"success": True, "data": _schedule_data_generators()}

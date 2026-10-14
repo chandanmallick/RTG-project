@@ -1068,6 +1068,17 @@ const API = {
     })
   ).data,
 
+  downloadCurveFrequencyExcel: async (startDate, endDate, points = null) => {
+    const res = await axios.post(`${BASE_URL}/frequency/curve-series/export-excel`, {
+      start_date: startDate,
+      end_date: endDate,
+      points: points && points.length ? points : undefined,
+    }, {
+      responseType: "blob",
+    });
+    return res.data;
+  },
+
   checkFrequencyPeriods: async (periods, signal) => (
     await axios.post(`${BASE_URL}/frequency/analysis/check-periods`, { periods }, { signal })
   ).data,

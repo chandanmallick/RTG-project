@@ -89,6 +89,63 @@ class CurveFrequencyTests(unittest.TestCase):
                 if force_fallback:
                     self.assertEqual(meta["reader"], "openpyxl")
 
+    def test_calculate_curve_frequency_stats_all_bands(self):
+        from services.curve_frequency_service import calculate_curve_frequency_stats
+        points = [
+            {"timestamp": "2026-10-05T00:00:00", "frequency": 49.40},  # < 49.5, < 49.7, < 49.9
+            {"timestamp": "2026-10-05T00:00:30", "frequency": 49.65},  # < 49.7, < 49.9
+            {"timestamp": "2026-10-05T00:01:00", "frequency": 49.85},  # < 49.9
+            {"timestamp": "2026-10-05T00:01:30", "frequency": 49.95},  # Normal
+            {"timestamp": "2026-10-05T00:02:00", "frequency": 50.00},  # Normal
+            {"timestamp": "2026-10-05T00:02:30", "frequency": 50.08},  # > 50.05
+            {"timestamp": "2026-10-05T00:03:00", "frequency": 50.15},  # > 50.05, > 50.10
+            {"timestamp": "2026-10-05T00:03:30", "frequency": 50.25},  # > 50.05, > 50.10, > 50.20
+            {"timestamp": "2026-10-05T00:04:00", "frequency": 50.35},  # > 50.05, > 50.10, > 50.20, > 50.30
+            {"timestamp": "2026-10-05T00:04:30", "frequency": 50.55},  # > 50.05, > 50.10, > 50.20, > 50.30, > 50.50
+            {"timestamp": "2026-10-05T00:05:00", "frequency": None},   # Missing
+        ]
+        stats = calculate_curve_frequency_stats(points, sample_seconds=30)
+        self.assertEqual(stats["total_samples"], 11)
+        self.assertEqual(stats["valid_samples"], 10)
+        self.assertEqual(stats["missing_samples"], 1)
+        self.assertEqual(stats["covered_minutes"], 5.0)
+        self.assertEqual(stats["max_frequency"], 50.55)
+        self.assertEqual(stats["max_timestamp"], "2026-10-05T00:04:30")
+        self.assertEqual(stats["min_frequency"], 49.40)
+        self.assertEqual(stats["min_timestamp"], "2026-10-05T00:00:00")
+
+        by_id = {r["id"]: r for r in stats["rows"]}
+        self.assertEqual(by_id["normal"]["count"], 2)
+        self.assertEqual(by_id["normal"]["percent"], 20.0)
+        self.assertEqual(by_id["lt49_9"]["count"], 3)
+        self.assertEqual(by_id["lt49_7"]["count"], 2)
+        self.assertEqual(by_id["lt49_5"]["count"], 1)
+        self.assertEqual(by_id["gt50_05"]["count"], 5)
+        self.assertEqual(by_id["gt50_10"]["count"], 4)
+        self.assertEqual(by_id["gt50_20"]["count"], 3)
+        self.assertEqual(by_id["gt50_30"]["count"], 2)
+        self.assertEqual(by_id["gt50_50"]["count"], 1)
+
+    def test_export_curve_frequency_excel_bytes(self):
+        from openpyxl import load_workbook
+        from services.curve_frequency_service import export_curve_frequency_excel_bytes
+        points = [
+            {"timestamp": "2026-10-05T00:00:00", "frequency": 49.80},
+            {"timestamp": "2026-10-05T00:00:30", "frequency": 50.00},
+            {"timestamp": "2026-10-05T00:01:00", "frequency": 50.20},
+        ]
+        buf = export_curve_frequency_excel_bytes("2026-10-05", "2026-10-05", points=points)
+        wb = load_workbook(buf)
+        self.assertIn("Frequency Statistics", wb.sheetnames)
+        self.assertIn("30SEC Frequency Data", wb.sheetnames)
+        ws1 = wb["Frequency Statistics"]
+        self.assertIn("FREQUENCY OVERVIEW & STATISTICS", str(ws1["A1"].value))
+        ws2 = wb["30SEC Frequency Data"]
+        self.assertEqual(ws2["C2"].value, 49.8)
+        self.assertEqual(ws2["C3"].value, 50.0)
+        self.assertEqual(ws2["C4"].value, 50.2)
+
 
 if __name__ == "__main__":
     unittest.main()
+

@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ReactECharts from "echarts-for-react";
 import { Alert, Box, Button, Chip, CircularProgress, Dialog, DialogContent, DialogTitle, IconButton, Paper, Stack, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, TextField, Typography } from "@mui/material";
-import { Expand, MousePointer2, Plus, Trash2, X } from "lucide-react";
+import { Download, Expand, FileSpreadsheet, MousePointer2, Plus, Trash2, X } from "lucide-react";
 import CalendarInput from "../../../components/ui/CalendarInput";
 import GradientButton from "../../../components/ui/GradientButton";
 import API from "../../../services/api";
 import LongPeriodAnalysis from "./LongPeriodAnalysis";
-import { HIGH_HZ, LOW_HZ, createSelectionId, validCurveFrequency, istMillis, nearestPoint, summarizeInterval } from "./frequencyIntervals";
+import { HIGH_HZ, LOW_HZ, createSelectionId, validCurveFrequency, istMillis, nearestPoint, summarizeInterval, calculateFrequencyStats, formatIstDateTime } from "./frequencyIntervals";
 
 const istToday = () => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
 const displayTime = (stamp) => stamp.replace("T", " ");
@@ -29,6 +29,7 @@ export default function FrequencyPreAnalysis({ busy, onAnalyze, onViewResult, on
   const [expanded, setExpanded] = useState(false);
   const [selecting, setSelecting] = useState(false);
   const [runningId, setRunningId] = useState(null);
+  const [downloadingExcel, setDownloadingExcel] = useState(false);
   const cache = useRef(new Map());
   const request = useRef(null);
   const chartRef = useRef(null);
@@ -36,6 +37,7 @@ export default function FrequencyPreAnalysis({ busy, onAnalyze, onViewResult, on
   const drag = useRef(null);
   const interaction = useRef(null);
   const points = data?.points || [];
+  const stats = useMemo(() => calculateFrequencyStats(points, data?.sample_seconds || 30), [points, data]);
   const locked = busy || preparing || runningId !== null;
   const visibleEvents=events.filter(event=>event.event_type===frequencyKind);
 
@@ -254,6 +256,28 @@ export default function FrequencyPreAnalysis({ busy, onAnalyze, onViewResult, on
     finally { setRunningId(null); }
   };
 
+  const handleDownloadExcel = async () => {
+    if (!data) return;
+    setDownloadingExcel(true);
+    setError("");
+    try {
+      const blob = await API.downloadCurveFrequencyExcel(startDate, endDate || startDate, points);
+      if (!blob || blob.size === 0) throw new Error("Generated Excel file is empty.");
+      const url = window.URL.createObjectURL(new Blob([blob], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `Frequency_Overview_${startDate}_${endDate || startDate}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => window.URL.revokeObjectURL(url), 1000);
+    } catch (err) {
+      setError(err?.response?.data?.detail || err.message || "Failed to download frequency Excel.");
+    } finally {
+      setDownloadingExcel(false);
+    }
+  };
+
   const verified = event => ["existing", "partial", "new"].includes(event.db_status);
   const sourcesFor = event => event.stored_event_id || event.analysis_token || automaticSource?.session_token
     ? [{ event_id: event.stored_event_id || null, session_token: event.stored_event_id ? null : event.analysis_token || automaticSource?.session_token || null, start_time: event.start_time, end_time: event.end_time }]
@@ -300,6 +324,25 @@ export default function FrequencyPreAnalysis({ busy, onAnalyze, onViewResult, on
       <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
         <CalendarInput mode="range" value={startDate} endValue={endDate} onChange={value => changeDates(value, value)} onRangeChange={(from, to) => changeDates(from, to)} disabled={locked} />
         <GradientButton size="small" disabled={loading || locked} onClick={() => load(startDate, endDate || startDate, true)}>{loading ? "Loading…" : data ? "Refresh Curve" : "Load Curve"}</GradientButton>
+        {data && (
+          <Button
+            size="small"
+            variant="contained"
+            disabled={loading || locked || downloadingExcel}
+            onClick={handleDownloadExcel}
+            startIcon={downloadingExcel ? <CircularProgress size={14} color="inherit" /> : <FileSpreadsheet size={15} />}
+            sx={{
+              bgcolor: "#059669",
+              color: "#fff",
+              fontWeight: 800,
+              textTransform: "none",
+              boxShadow: "0 2px 6px rgba(5,150,105,0.25)",
+              "&:hover": { bgcolor: "#047857" },
+            }}
+          >
+            {downloadingExcel ? "Downloading Excel…" : "Download Excel"}
+          </Button>
+        )}
       </Stack>
     </Stack>
     {error && <Alert severity="error" sx={{ mt: 1.5 }}>{error}</Alert>}
@@ -314,6 +357,166 @@ export default function FrequencyPreAnalysis({ busy, onAnalyze, onViewResult, on
       </Stack>
       {renderChart()}
       <Typography sx={{ mb: 1, fontSize: 12, color: "#64748B" }}>{selecting ? "Drag across the chart and release to add a period. DB availability is checked after release." : "Scroll to zoom; drag to pan or use the navigator. Choose Select Period to add events."}</Typography>
+      {stats && (
+        <Paper
+          elevation={0}
+          sx={{
+            my: 2,
+            p: 2,
+            borderRadius: 2.5,
+            border: "1px solid #CBD5E1",
+            background: "linear-gradient(180deg, #F8FAFC 0%, #FFFFFF 100%)",
+            boxShadow: "0 4px 16px rgba(15, 23, 42, 0.04)",
+          }}
+        >
+          <Stack direction={{ xs: "column", sm: "row" }} justifyContent="space-between" alignItems={{ sm: "center" }} spacing={1} sx={{ mb: 1.5 }}>
+            <Box>
+              <Typography sx={{ fontSize: 16, fontWeight: 900, color: "#0F2F4F", display: "flex", alignItems: "center", gap: 1 }}>
+                <span>Frequency Statistics</span>
+                <Chip size="small" label={`${stats.validSamples.toLocaleString()} valid samples`} sx={{ bgcolor: "#E0F2FE", color: "#0369A1", fontWeight: 700, fontSize: 11 }} />
+              </Typography>
+              <Typography sx={{ color: "#64748B", fontSize: 11.5 }}>
+                IEGC operating band breakdown and extreme values for {data.start_date} to {data.end_date} (IST)
+              </Typography>
+            </Box>
+            <Button
+              size="small"
+              variant="outlined"
+              disabled={loading || locked || downloadingExcel}
+              onClick={handleDownloadExcel}
+              startIcon={downloadingExcel ? <CircularProgress size={13} color="inherit" /> : <FileSpreadsheet size={15} />}
+              sx={{
+                color: "#047857",
+                borderColor: "#059669",
+                fontWeight: 800,
+                textTransform: "none",
+                "&:hover": { borderColor: "#047857", bgcolor: "rgba(5, 150, 105, 0.08)" }
+              }}
+            >
+              {downloadingExcel ? "Downloading Excel…" : "Download Excel"}
+            </Button>
+          </Stack>
+
+          <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "1fr 1fr", lg: "repeat(4, 1fr)" }, gap: 1.5, mb: 2 }}>
+            <Paper elevation={0} sx={{ p: 1.5, borderRadius: 2, border: "1px solid #FED7AA", bgcolor: "#FFFBEB" }}>
+              <Typography sx={{ fontSize: 11, fontWeight: 800, color: "#9A3412", textTransform: "uppercase", letterSpacing: 0.5 }}>
+                Maximum Frequency
+              </Typography>
+              <Typography sx={{ fontSize: 22, fontWeight: 950, color: "#C2410C", my: 0.2 }}>
+                {stats.maxFrequency.toFixed(3)} <span style={{ fontSize: 13, fontWeight: 600 }}>Hz</span>
+              </Typography>
+              <Typography sx={{ fontSize: 11, color: "#78350F", fontWeight: 600 }}>
+                {formatIstDateTime(stats.maxTimestamp)}
+              </Typography>
+            </Paper>
+
+            <Paper elevation={0} sx={{ p: 1.5, borderRadius: 2, border: "1px solid #FECACA", bgcolor: "#FEF2F2" }}>
+              <Typography sx={{ fontSize: 11, fontWeight: 800, color: "#991B1B", textTransform: "uppercase", letterSpacing: 0.5 }}>
+                Minimum Frequency
+              </Typography>
+              <Typography sx={{ fontSize: 22, fontWeight: 950, color: "#DC2626", my: 0.2 }}>
+                {stats.minFrequency.toFixed(3)} <span style={{ fontSize: 13, fontWeight: 600 }}>Hz</span>
+              </Typography>
+              <Typography sx={{ fontSize: 11, color: "#7F1D1D", fontWeight: 600 }}>
+                {formatIstDateTime(stats.minTimestamp)}
+              </Typography>
+            </Paper>
+
+            <Paper elevation={0} sx={{ p: 1.5, borderRadius: 2, border: "1px solid #A7F3D0", bgcolor: "#ECFDF5" }}>
+              <Typography sx={{ fontSize: 11, fontWeight: 800, color: "#065F46", textTransform: "uppercase", letterSpacing: 0.5 }}>
+                IEGC Band (49.90–50.05 Hz)
+              </Typography>
+              <Typography sx={{ fontSize: 22, fontWeight: 950, color: "#047857", my: 0.2 }}>
+                {stats.rows[0].percent.toFixed(2)} <span style={{ fontSize: 13, fontWeight: 600 }}>%</span>
+              </Typography>
+              <Typography sx={{ fontSize: 11, color: "#064E3B", fontWeight: 600 }}>
+                {stats.rows[0].minutes.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 })} min ({stats.rows[0].count.toLocaleString()} samples)
+              </Typography>
+            </Paper>
+
+            <Paper elevation={0} sx={{ p: 1.5, borderRadius: 2, border: "1px solid #BAE6FD", bgcolor: "#F0F9FF" }}>
+              <Typography sx={{ fontSize: 11, fontWeight: 800, color: "#0369A1", textTransform: "uppercase", letterSpacing: 0.5 }}>
+                Average Frequency
+              </Typography>
+              <Typography sx={{ fontSize: 22, fontWeight: 950, color: "#0284C7", my: 0.2 }}>
+                {stats.averageFrequency.toFixed(3)} <span style={{ fontSize: 13, fontWeight: 600 }}>Hz</span>
+              </Typography>
+              <Typography sx={{ fontSize: 11, color: "#0C4A6E", fontWeight: 600 }}>
+                Covered: {stats.totalMinutes.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 })} min ({(stats.totalMinutes / 60).toFixed(1)} hrs)
+              </Typography>
+            </Paper>
+          </Box>
+
+          <TableContainer sx={{ border: "1px solid #E2E8F0", borderRadius: 2, overflow: "hidden" }}>
+            <Table size="small">
+              <TableHead>
+                <TableRow sx={{ bgcolor: "#F1F5F9" }}>
+                  <TableCell sx={{ fontWeight: 850, color: "#0F2F4F", fontSize: 12 }}>Frequency Band / Condition</TableCell>
+                  <TableCell sx={{ fontWeight: 850, color: "#0F2F4F", fontSize: 12 }}>Category</TableCell>
+                  <TableCell align="right" sx={{ fontWeight: 850, color: "#0F2F4F", fontSize: 12 }}>Time (Minutes)</TableCell>
+                  <TableCell align="right" sx={{ fontWeight: 850, color: "#0F2F4F", fontSize: 12 }}>% of Time</TableCell>
+                  <TableCell sx={{ fontWeight: 850, color: "#0F2F4F", fontSize: 12, width: 140 }}>Distribution</TableCell>
+                  <TableCell align="right" sx={{ fontWeight: 850, color: "#0F2F4F", fontSize: 12 }}>Samples (30s)</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {stats.rows.map((row) => (
+                  <TableRow
+                    key={row.id}
+                    sx={{
+                      "&:nth-of-type(even)": { bgcolor: "#FAFCFF" },
+                      "&:hover": { bgcolor: "#F1F7F5" },
+                    }}
+                  >
+                    <TableCell sx={{ fontWeight: 800, color: "#1E293B", fontSize: 12 }}>
+                      <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                        <Box sx={{ width: 8, height: 8, borderRadius: "50%", bgcolor: row.color, flexShrink: 0 }} />
+                        <span>{row.label}</span>
+                      </Box>
+                    </TableCell>
+                    <TableCell sx={{ fontSize: 12 }}>
+                      <Chip
+                        size="small"
+                        label={row.category}
+                        sx={{
+                          fontSize: 11,
+                          fontWeight: 700,
+                          bgcolor: row.bg,
+                          color: row.color,
+                          height: 22,
+                        }}
+                      />
+                    </TableCell>
+                    <TableCell align="right" sx={{ fontWeight: 800, fontSize: 12, color: "#0F172A" }}>
+                      {row.minutes.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 })} min
+                    </TableCell>
+                    <TableCell align="right" sx={{ fontWeight: 900, fontSize: 12, color: row.color }}>
+                      {row.percent.toFixed(2)}%
+                    </TableCell>
+                    <TableCell sx={{ py: 1 }}>
+                      <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                        <Box sx={{ flex: 1, height: 6, bgcolor: "#E2E8F0", borderRadius: 3, overflow: "hidden" }}>
+                          <Box
+                            sx={{
+                              width: `${Math.min(100, Math.max(0, row.percent))}%`,
+                              height: "100%",
+                              bgcolor: row.color,
+                              borderRadius: 3,
+                            }}
+                          />
+                        </Box>
+                      </Box>
+                    </TableCell>
+                    <TableCell align="right" sx={{ fontSize: 12, color: "#64748B", fontWeight: 600 }}>
+                      {row.count.toLocaleString()}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </TableContainer>
+        </Paper>
+      )}
       {selectionControls}
       {!!events.length && <>
         <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mt: 2, mb: 1 }} flexWrap="wrap" gap={1}>
@@ -345,7 +548,23 @@ export default function FrequencyPreAnalysis({ busy, onAnalyze, onViewResult, on
         </Stack>)}
       </Box>}
       <Dialog fullScreen open={expanded} onClose={() => setExpanded(false)}>
-        <DialogTitle sx={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}><Box>Frequency overview<Typography sx={{ color: "#64748B", fontSize: 12 }}>{data.start_date} to {data.end_date} · IST · LOW &lt; 49.90 Hz · HIGH &gt; 50.05 Hz</Typography></Box><IconButton aria-label="Close expanded chart" onClick={() => setExpanded(false)}><X /></IconButton></DialogTitle>
+        <DialogTitle sx={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <Box>Frequency overview<Typography sx={{ color: "#64748B", fontSize: 12 }}>{data.start_date} to {data.end_date} · IST · LOW &lt; 49.90 Hz · HIGH &gt; 50.05 Hz</Typography></Box>
+          <Stack direction="row" spacing={1} alignItems="center">
+            <Button
+              size="small"
+              variant="outlined"
+              color="success"
+              disabled={downloadingExcel}
+              onClick={handleDownloadExcel}
+              startIcon={downloadingExcel ? <CircularProgress size={13} color="inherit" /> : <Download size={14} />}
+              sx={{ textTransform: "none", fontWeight: 800 }}
+            >
+              {downloadingExcel ? "Exporting…" : "Download Excel"}
+            </Button>
+            <IconButton aria-label="Close expanded chart" onClick={() => setExpanded(false)}><X /></IconButton>
+          </Stack>
+        </DialogTitle>
         <DialogContent>{renderChart(true)}{selectionControls}{error && <Alert severity="error" sx={{ mt: 1 }}>{error}</Alert>}<Typography sx={{ mt: 1, color: "#64748B", fontSize: 12 }}>{events.length} intervals selected. Close the chart to review the list and attach event files.</Typography></DialogContent>
       </Dialog>
     </>}
