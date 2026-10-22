@@ -70,6 +70,8 @@ export default function ReplacementRosterPanel({ onRefreshReplacements }) {
   const [selectedMonth, setSelectedMonth] = useState(dayjs().format("YYYY-MM"));
   const [activeTab, setActiveTab] = useState(0); // 0: Matrix, 1: SIC Pool, 2: Shift Engineer Pool, 3: Long Duration Policy
   const [searchQuery, setSearchQuery] = useState("");
+  const [selectedPoolFilter, setSelectedPoolFilter] = useState("ALL");
+  const [dutySortAsc, setDutySortAsc] = useState(true);
   const [actionNotice, setActionNotice] = useState(null);
 
   // Auto Allocate state
@@ -332,17 +334,40 @@ export default function ReplacementRosterPanel({ onRefreshReplacements }) {
 
   // Filter matrix data
   const filteredMatrix = useMemo(() => {
-    if (!searchQuery.trim()) return matrixData;
-    const q = searchQuery.toLowerCase();
-    return matrixData.filter(
-      (m) =>
-        (m.employeeName || "").toLowerCase().includes(q) ||
-        (m.employeeId || "").toLowerCase().includes(q) ||
-        (m.designation || "").toLowerCase().includes(q)
-    );
-  }, [matrixData, searchQuery]);
+    let list = matrixData;
+    if (selectedPoolFilter && selectedPoolFilter !== "ALL") {
+      list = list.filter((m) => m.poolCategory === selectedPoolFilter || m.pool === selectedPoolFilter);
+    }
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      list = list.filter(
+        (m) =>
+          (m.employeeName || "").toLowerCase().includes(q) ||
+          (m.employeeId || "").toLowerCase().includes(q) ||
+          (m.designation || "").toLowerCase().includes(q)
+      );
+    }
+    return list;
+  }, [matrixData, searchQuery, selectedPoolFilter]);
 
-  // Overall metrics
+  // Dynamic max duty columns count (at least 5 duty columns)
+  const maxDutiesCount = useMemo(() => {
+    const counts = filteredMatrix.map((m) => (m.duties || []).length);
+    const max = counts.length > 0 ? Math.max(...counts) : 0;
+    return Math.max(5, max);
+  }, [filteredMatrix]);
+
+  // Overall metrics & fallback pool counts (guarantees pools never show 0 if data exists)
+  const sicPoolCount = useMemo(() => {
+    if (config?.sicPool && config.sicPool.length > 0) return config.sicPool.length;
+    return matrixData.filter((m) => m.pool === "SIC" || m.poolCategory === "SIC").length;
+  }, [config, matrixData]);
+
+  const shiftEngPoolCount = useMemo(() => {
+    if (config?.shiftEngineerPool && config.shiftEngineerPool.length > 0) return config.shiftEngineerPool.length;
+    return matrixData.filter((m) => m.pool === "Shift Engineer" || m.poolCategory === "Shift Engineer").length;
+  }, [config, matrixData]);
+
   const totalDutiesAssigned = useMemo(
     () => matrixData.reduce((acc, curr) => acc + (curr.totalDuties || 0), 0),
     [matrixData]
@@ -490,9 +515,9 @@ export default function ReplacementRosterPanel({ onRefreshReplacements }) {
                   SIC Pool Active
                 </Typography>
                 <Typography variant="h5" sx={{ fontWeight: 800, color: "#0F172A" }}>
-                  {config?.sicPool?.length || 0}
+                  {sicPoolCount}
                   <Typography component="span" variant="caption" sx={{ ml: 1, color: "#10B981", fontWeight: 700 }}>
-                    Next: #{((config?.nextSicIndex || 0) % (config?.sicPool?.length || 1)) + 1}
+                    Next: #{((config?.nextSicIndex || 0) % (sicPoolCount || 1)) + 1}
                   </Typography>
                 </Typography>
               </Box>
@@ -511,9 +536,9 @@ export default function ReplacementRosterPanel({ onRefreshReplacements }) {
                   Shift Engg Pool
                 </Typography>
                 <Typography variant="h5" sx={{ fontWeight: 800, color: "#0F172A" }}>
-                  {config?.shiftEngineerPool?.length || 0}
+                  {shiftEngPoolCount}
                   <Typography component="span" variant="caption" sx={{ ml: 1, color: "#10B981", fontWeight: 700 }}>
-                    Next: #{((config?.nextShiftEngineerIndex || 0) % (config?.shiftEngineerPool?.length || 1)) + 1}
+                    Next: #{((config?.nextShiftEngineerIndex || 0) % (shiftEngPoolCount || 1)) + 1}
                   </Typography>
                 </Typography>
               </Box>
@@ -631,7 +656,7 @@ export default function ReplacementRosterPanel({ onRefreshReplacements }) {
             label={
               <Stack direction="row" spacing={0.8} alignItems="center">
                 <span>SIC Pool</span>
-                <Chip size="small" label={config?.sicPool?.length || 0} sx={{ height: 20, fontSize: 11, fontWeight: 800 }} />
+                <Chip size="small" label={sicPoolCount} sx={{ height: 20, fontSize: 11, fontWeight: 800 }} />
               </Stack>
             }
           />
@@ -641,7 +666,7 @@ export default function ReplacementRosterPanel({ onRefreshReplacements }) {
             label={
               <Stack direction="row" spacing={0.8} alignItems="center">
                 <span>Shift Engineer Pool</span>
-                <Chip size="small" label={config?.shiftEngineerPool?.length || 0} sx={{ height: 20, fontSize: 11, fontWeight: 800 }} />
+                <Chip size="small" label={shiftEngPoolCount} sx={{ height: 20, fontSize: 11, fontWeight: 800 }} />
               </Stack>
             }
           />
@@ -669,16 +694,53 @@ export default function ReplacementRosterPanel({ onRefreshReplacements }) {
         {/* ========================================================= */}
         {activeTab === 0 && (
           <Box sx={{ p: 2.5 }}>
-            {/* Filter Bar */}
-            <Stack direction={{ xs: "column", sm: "row" }} spacing={2} justifyContent="space-between" alignItems="center" sx={{ mb: 2.5 }}>
-              <Stack direction="row" spacing={1.5} alignItems="center" sx={{ width: { xs: "100%", sm: "auto" } }}>
+            {/* Filter and Control Bar */}
+            <Stack
+              direction={{ xs: "column", md: "row" }}
+              spacing={2}
+              justifyContent="space-between"
+              alignItems={{ xs: "stretch", md: "center" }}
+              sx={{ mb: 2.5 }}
+            >
+              {/* Left: Search & Filters */}
+              <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5} alignItems="center" flexWrap="wrap">
                 <TextField
                   size="small"
                   placeholder="Search employee by name, ID or role..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  sx={{ minWidth: 280 }}
+                  sx={{ minWidth: 260 }}
                 />
+
+                {/* Pool Filter Chips */}
+                <Stack direction="row" spacing={0.8}>
+                  <Chip
+                    label={`All (${matrixData.length})`}
+                    onClick={() => setSelectedPoolFilter("ALL")}
+                    color={selectedPoolFilter === "ALL" ? "primary" : "default"}
+                    variant={selectedPoolFilter === "ALL" ? "filled" : "outlined"}
+                    size="small"
+                    sx={{ fontWeight: 700, cursor: "pointer" }}
+                  />
+                  <Chip
+                    label={`SIC (${sicPoolCount})`}
+                    onClick={() => setSelectedPoolFilter("SIC")}
+                    color={selectedPoolFilter === "SIC" ? "primary" : "default"}
+                    variant={selectedPoolFilter === "SIC" ? "filled" : "outlined"}
+                    size="small"
+                    sx={{ fontWeight: 700, cursor: "pointer" }}
+                  />
+                  <Chip
+                    label={`Shift Engg (${shiftEngPoolCount})`}
+                    onClick={() => setSelectedPoolFilter("Shift Engineer")}
+                    color={selectedPoolFilter === "Shift Engineer" ? "primary" : "default"}
+                    variant={selectedPoolFilter === "Shift Engineer" ? "filled" : "outlined"}
+                    size="small"
+                    sx={{ fontWeight: 700, cursor: "pointer" }}
+                  />
+                </Stack>
+
+                {/* Month Selector */}
                 <TextField
                   size="small"
                   type="month"
@@ -686,188 +748,334 @@ export default function ReplacementRosterPanel({ onRefreshReplacements }) {
                   InputLabelProps={{ shrink: true }}
                   value={selectedMonth}
                   onChange={(e) => setSelectedMonth(e.target.value)}
+                  sx={{ width: 150 }}
                 />
                 {selectedMonth && (
                   <Button
                     size="small"
                     variant="text"
                     onClick={() => setSelectedMonth("")}
-                    sx={{ textTransform: "none", color: "#64748B", fontWeight: 700 }}
+                    sx={{ textTransform: "none", color: "#64748B", fontWeight: 700, minWidth: "auto", px: 1 }}
                   >
                     All Months
                   </Button>
                 )}
               </Stack>
 
-              <Button
-                variant="outlined"
-                size="small"
-                onClick={loadData}
-                startIcon={<RefreshCw size={14} />}
-                disabled={loading}
-                sx={{ textTransform: "none", fontWeight: 800, borderRadius: 2 }}
-              >
-                Refresh Matrix
-              </Button>
+              {/* Right: Sort Order & Refresh */}
+              <Stack direction="row" spacing={1} alignItems="center" justifyContent="flex-end">
+                <Tooltip title={dutySortAsc ? "Showing Duty 1 as earliest duty assigned" : "Showing Duty 1 as most recent duty assigned"}>
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    onClick={() => setDutySortAsc(!dutySortAsc)}
+                    startIcon={dutySortAsc ? <ArrowUp size={14} /> : <ArrowDown size={14} />}
+                    sx={{
+                      textTransform: "none",
+                      fontWeight: 700,
+                      borderRadius: 2,
+                      borderColor: "#CBD5E1",
+                      color: "#334155",
+                      fontSize: 12,
+                    }}
+                  >
+                    {dutySortAsc ? "Duty 1 = Earliest" : "Duty 1 = Recent"}
+                  </Button>
+                </Tooltip>
+
+                <Button
+                  variant="contained"
+                  size="small"
+                  onClick={loadData}
+                  startIcon={<RefreshCw size={14} />}
+                  disabled={loading}
+                  sx={{
+                    textTransform: "none",
+                    fontWeight: 800,
+                    borderRadius: 2,
+                    bgcolor: "#2563EB",
+                    "&:hover": { bgcolor: "#1D4ED8" },
+                  }}
+                >
+                  Refresh Matrix
+                </Button>
+              </Stack>
             </Stack>
 
-            {/* Matrix Table */}
-            <TableContainer sx={{ border: "1px solid #E2E8F0", borderRadius: 2.5, maxHeight: 520 }}>
+            {/* Simple Matrix Table: Employee vs Duty 1, Duty 2, Duty 3... */}
+            <TableContainer
+              sx={{
+                border: "1px solid #E2E8F0",
+                borderRadius: 2.5,
+                maxHeight: 560,
+                boxShadow: "0 2px 8px rgba(0,0,0,0.03)",
+                overflowX: "auto",
+              }}
+            >
               <Table stickyHeader size="small">
                 <TableHead>
-                  <TableRow sx={{ "& th": { bgcolor: "#F1F5F9", fontWeight: 800, color: "#334155" } }}>
-                    <TableCell width="60">#</TableCell>
-                    <TableCell>Employee</TableCell>
-                    <TableCell>Pool Category</TableCell>
-                    <TableCell align="center">Total Replacement Duties</TableCell>
-                    <TableCell>Duty Types Performed</TableCell>
-                    <TableCell>Assigned Dates ({selectedMonth || "All"})</TableCell>
-                    <TableCell align="center">Rejection Counter</TableCell>
-                    <TableCell align="center">Actions</TableCell>
+                  <TableRow sx={{ "& th": { bgcolor: "#F1F5F9", fontWeight: 800, color: "#334155", py: 1.4 } }}>
+                    <TableCell width="50" align="center">#</TableCell>
+                    <TableCell sx={{ minWidth: 200 }}>Employee</TableCell>
+                    <TableCell sx={{ minWidth: 120 }}>Pool</TableCell>
+
+                    {/* Dynamic Duty Columns: Duty 1, Duty 2, Duty 3... */}
+                    {Array.from({ length: maxDutiesCount }).map((_, i) => (
+                      <TableCell key={i} align="center" sx={{ minWidth: 135 }}>
+                        Duty {i + 1}
+                      </TableCell>
+                    ))}
+
+                    <TableCell align="center" sx={{ minWidth: 100 }}>Total Duties</TableCell>
+                    <TableCell align="center" sx={{ minWidth: 110 }}>Rejections</TableCell>
+                    <TableCell align="center" sx={{ minWidth: 90 }}>Actions</TableCell>
                   </TableRow>
                 </TableHead>
+
                 <TableBody>
                   {filteredMatrix.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={8} align="center" sx={{ py: 4, color: "#64748B" }}>
-                        {loading ? <CircularProgress size={24} /> : "No replacement duty records found."}
+                      <TableCell colSpan={maxDutiesCount + 6} align="center" sx={{ py: 6, color: "#64748B" }}>
+                        {loading ? <CircularProgress size={26} /> : "No replacement duty records found."}
                       </TableCell>
                     </TableRow>
                   ) : (
-                    filteredMatrix.map((item, idx) => (
-                      <TableRow key={item.employeeId} hover sx={{ "&:hover": { bgcolor: "#F8FAFC" } }}>
-                        <TableCell sx={{ fontWeight: 700, color: "#64748B" }}>{idx + 1}</TableCell>
-                        <TableCell>
-                          <Typography variant="body2" sx={{ fontWeight: 800, color: "#0F172A" }}>
-                            {item.employeeName}
-                          </Typography>
-                          <Typography variant="caption" sx={{ color: "#64748B" }}>
-                            {item.employeeId} &bull; {item.designation || "Shift Crew"}
-                          </Typography>
-                        </TableCell>
-                        <TableCell>
-                          <Chip
-                            size="small"
-                            label={item.poolCategory || "Shift Engineer"}
-                            sx={{
-                              fontWeight: 700,
-                              fontSize: 11,
-                              bgcolor:
-                                item.poolCategory === "SIC"
-                                  ? "#EFF6FF"
-                                  : item.poolCategory === "SIC & Shift Engineer"
-                                  ? "#FAF5FF"
-                                  : "#F0FDF4",
-                              color:
-                                item.poolCategory === "SIC"
-                                  ? "#1E40AF"
-                                  : item.poolCategory === "SIC & Shift Engineer"
-                                  ? "#7E22CE"
-                                  : "#15803D",
-                              border: "1px solid rgba(0,0,0,0.06)",
-                            }}
-                          />
-                        </TableCell>
-                        <TableCell align="center">
-                          <Chip
-                            size="small"
-                            label={item.totalDuties}
-                            sx={{
-                              fontWeight: 800,
-                              bgcolor: item.totalDuties > 0 ? "#DBEAFE" : "#F1F5F9",
-                              color: item.totalDuties > 0 ? "#1E40AF" : "#64748B",
-                            }}
-                          />
-                        </TableCell>
-                        <TableCell>
-                          <Stack direction="row" spacing={0.5} flexWrap="wrap">
-                            {Object.entries(item.dutiesByType || {}).map(([type, cnt]) => (
-                              <Chip
-                                key={type}
+                    filteredMatrix.map((item, idx) => {
+                      // Sort duties per employee according to dutySortAsc
+                      const sortedDuties = [...(item.duties || [])].sort((a, b) => {
+                        const da = a.date || "";
+                        const db = b.date || "";
+                        return dutySortAsc ? da.localeCompare(db) : db.localeCompare(da);
+                      });
+
+                      return (
+                        <TableRow
+                          key={item.employeeId}
+                          hover
+                          sx={{
+                            "&:hover": { bgcolor: "#F8FAFC" },
+                            "& td": { py: 1 },
+                          }}
+                        >
+                          {/* Row Index */}
+                          <TableCell align="center" sx={{ fontWeight: 700, color: "#64748B", fontSize: 12 }}>
+                            {idx + 1}
+                          </TableCell>
+
+                          {/* Employee Name & Meta */}
+                          <TableCell>
+                            <Typography variant="body2" sx={{ fontWeight: 800, color: "#0F172A", lineHeight: 1.3 }}>
+                              {item.employeeName}
+                            </Typography>
+                            <Typography variant="caption" sx={{ color: "#64748B", fontSize: 11 }}>
+                              {item.employeeId} &bull; {item.designation || "Shift Crew"}
+                            </Typography>
+                          </TableCell>
+
+                          {/* Pool Badge */}
+                          <TableCell>
+                            <Chip
+                              size="small"
+                              label={item.poolCategory || item.pool || "Shift Engineer"}
+                              sx={{
+                                fontWeight: 700,
+                                fontSize: 11,
+                                height: 22,
+                                bgcolor:
+                                  (item.poolCategory || item.pool) === "SIC"
+                                    ? "#EFF6FF"
+                                    : (item.poolCategory || item.pool) === "SIC & Shift Engineer"
+                                    ? "#FAF5FF"
+                                    : "#F0FDF4",
+                                color:
+                                  (item.poolCategory || item.pool) === "SIC"
+                                    ? "#1E40AF"
+                                    : (item.poolCategory || item.pool) === "SIC & Shift Engineer"
+                                    ? "#7E22CE"
+                                    : "#15803D",
+                                border: "1px solid rgba(0,0,0,0.06)",
+                              }}
+                            />
+                          </TableCell>
+
+                          {/* Duty Columns: Duty 1, Duty 2, Duty 3... */}
+                          {Array.from({ length: maxDutiesCount }).map((_, i) => {
+                            const duty = sortedDuties[i];
+                            if (!duty) {
+                              return (
+                                <TableCell key={i} align="center" sx={{ color: "#CBD5E1", fontSize: 14 }}>
+                                  —
+                                </TableCell>
+                              );
+                            }
+
+                            const dutyName = duty.duty || "Shift";
+                            const isMorning = dutyName.toLowerCase().includes("morn");
+                            const isEvening = dutyName.toLowerCase().includes("eve");
+                            const isNight = dutyName.toLowerCase().includes("night");
+
+                            const dutyDateStr = dayjs(duty.date).isValid()
+                              ? dayjs(duty.date).format("DD-MMM-YYYY")
+                              : duty.date || "—";
+
+                            const replacedName =
+                              typeof duty.replacedFor === "object"
+                                ? duty.replacedFor?.name
+                                : duty.replacedFor;
+
+                            return (
+                              <TableCell key={i} align="center" sx={{ p: 0.8 }}>
+                                <Box
+                                  sx={{
+                                    p: 0.7,
+                                    px: 1,
+                                    borderRadius: 1.8,
+                                    bgcolor: "#FFFFFF",
+                                    border: "1px solid #E2E8F0",
+                                    boxShadow: "0 1px 3px rgba(0,0,0,0.03)",
+                                    display: "inline-flex",
+                                    flexDirection: "column",
+                                    gap: 0.3,
+                                    alignItems: "center",
+                                    minWidth: 115,
+                                  }}
+                                >
+                                  {/* Date */}
+                                  <Typography variant="caption" sx={{ fontWeight: 800, color: "#1E293B", fontSize: 11 }}>
+                                    {dutyDateStr}
+                                  </Typography>
+
+                                  {/* Duty Type Chip */}
+                                  <Stack direction="row" spacing={0.4} alignItems="center">
+                                    <Chip
+                                      size="small"
+                                      label={dutyName}
+                                      sx={{
+                                        height: 18,
+                                        fontSize: 10,
+                                        fontWeight: 800,
+                                        bgcolor: isMorning
+                                          ? "#EFF6FF"
+                                          : isEvening
+                                          ? "#FEF3C7"
+                                          : isNight
+                                          ? "#EDE9FE"
+                                          : "#F1F5F9",
+                                        color: isMorning
+                                          ? "#1D4ED8"
+                                          : isEvening
+                                          ? "#B45309"
+                                          : isNight
+                                          ? "#6D28D9"
+                                          : "#334155",
+                                        border: "1px solid rgba(0,0,0,0.06)",
+                                      }}
+                                    />
+                                    {duty.isSIC && (
+                                      <Chip
+                                        size="small"
+                                        label="SIC"
+                                        sx={{
+                                          height: 16,
+                                          fontSize: 9,
+                                          fontWeight: 900,
+                                          bgcolor: "#FEF2F2",
+                                          color: "#DC2626",
+                                          border: "1px solid #FCA5A5",
+                                        }}
+                                      />
+                                    )}
+                                  </Stack>
+
+                                  {/* Replaced For */}
+                                  {replacedName && (
+                                    <Typography
+                                      variant="caption"
+                                      sx={{
+                                        color: "#64748B",
+                                        fontSize: 9.5,
+                                        display: "block",
+                                        maxWidth: 120,
+                                        whiteSpace: "nowrap",
+                                        overflow: "hidden",
+                                        textOverflow: "ellipsis",
+                                      }}
+                                      title={`Cover for ${replacedName}`}
+                                    >
+                                      For: {replacedName}
+                                    </Typography>
+                                  )}
+                                </Box>
+                              </TableCell>
+                            );
+                          })}
+
+                          {/* Total Duties */}
+                          <TableCell align="center">
+                            <Chip
+                              size="small"
+                              label={item.totalDuties || 0}
+                              sx={{
+                                fontWeight: 800,
+                                fontSize: 12,
+                                height: 24,
+                                minWidth: 32,
+                                bgcolor: item.totalDuties > 0 ? "#DBEAFE" : "#F1F5F9",
+                                color: item.totalDuties > 0 ? "#1E40AF" : "#64748B",
+                              }}
+                            />
+                          </TableCell>
+
+                          {/* Rejection Counter */}
+                          <TableCell align="center">
+                            <Tooltip
+                              title={
+                                item.rejectionCount > 0
+                                  ? "Click to view full rejection audit trail"
+                                  : "No rejections recorded"
+                              }
+                            >
+                              <Button
                                 size="small"
-                                label={`${type}: ${cnt}`}
-                                sx={{
-                                  height: 22,
-                                  fontSize: 10,
-                                  fontWeight: 800,
-                                  bgcolor: "#F8FAFC",
-                                  border: "1px solid #CBD5E1",
-                                  mb: 0.5,
+                                variant={item.rejectionCount > 0 ? "contained" : "text"}
+                                color="error"
+                                onClick={() => {
+                                  const empRejections = rejections.filter((r) => r.employeeId === item.employeeId);
+                                  setAuditDialog({ open: true, employee: item, records: empRejections });
                                 }}
-                              />
-                            ))}
-                            {Object.keys(item.dutiesByType || {}).length === 0 && (
-                              <Typography variant="caption" sx={{ color: "#94A3B8" }}>
-                                None
-                              </Typography>
-                            )}
-                          </Stack>
-                        </TableCell>
-                        <TableCell>
-                          <Stack direction="row" spacing={0.5} flexWrap="wrap">
-                            {(item.dutyDates || []).slice(0, 4).map((d) => (
-                              <Chip
-                                key={d}
-                                size="small"
-                                label={dayjs(d).format("DD MMM")}
-                                sx={{ height: 20, fontSize: 10, bgcolor: "#E2E8F0", mb: 0.5 }}
-                              />
-                            ))}
-                            {(item.dutyDates || []).length > 4 && (
-                              <Tooltip title={(item.dutyDates || []).join(", ")}>
-                                <Chip
-                                  size="small"
-                                  label={`+${item.dutyDates.length - 4} more`}
-                                  sx={{ height: 20, fontSize: 10, bgcolor: "#CBD5E1", cursor: "pointer", mb: 0.5 }}
-                                />
-                              </Tooltip>
-                            )}
-                            {(item.dutyDates || []).length === 0 && (
-                              <Typography variant="caption" sx={{ color: "#94A3B8" }}>
-                                -
-                              </Typography>
-                            )}
-                          </Stack>
-                        </TableCell>
-                        <TableCell align="center">
-                          <Tooltip title={item.rejectionCount > 0 ? "Click to view rejection audit trail" : "No rejections recorded"}>
+                                disabled={item.rejectionCount === 0}
+                                sx={{
+                                  minWidth: 36,
+                                  height: 24,
+                                  fontWeight: 800,
+                                  borderRadius: 1.5,
+                                  textTransform: "none",
+                                  fontSize: 12,
+                                  bgcolor: item.rejectionCount > 0 ? "#DC2626" : undefined,
+                                }}
+                              >
+                                {item.rejectionCount || 0}
+                              </Button>
+                            </Tooltip>
+                          </TableCell>
+
+                          {/* Actions */}
+                          <TableCell align="center">
                             <Button
                               size="small"
-                              variant={item.rejectionCount > 0 ? "contained" : "text"}
-                              color="error"
+                              variant="text"
                               onClick={() => {
                                 const empRejections = rejections.filter((r) => r.employeeId === item.employeeId);
                                 setAuditDialog({ open: true, employee: item, records: empRejections });
                               }}
-                              disabled={item.rejectionCount === 0}
-                              sx={{
-                                minWidth: 36,
-                                height: 26,
-                                fontWeight: 800,
-                                borderRadius: 1.5,
-                                textTransform: "none",
-                                fontSize: 12,
-                              }}
+                              sx={{ textTransform: "none", fontWeight: 700, fontSize: 11 }}
                             >
-                              {item.rejectionCount}
+                              History
                             </Button>
-                          </Tooltip>
-                        </TableCell>
-                        <TableCell align="center">
-                          <Button
-                            size="small"
-                            variant="text"
-                            onClick={() => {
-                              const empRejections = rejections.filter((r) => r.employeeId === item.employeeId);
-                              setAuditDialog({ open: true, employee: item, records: empRejections });
-                            }}
-                            sx={{ textTransform: "none", fontWeight: 700, fontSize: 11 }}
-                          >
-                            History
-                          </Button>
-                        </TableCell>
-                      </TableRow>
-                    ))
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })
                   )}
                 </TableBody>
               </Table>

@@ -122,23 +122,34 @@ def init_default_pools() -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
 def get_replacement_roster_config() -> Dict[str, Any]:
     """Retrieve replacement roster configuration or create default if not present."""
     config = replacement_roster_config_collection.find_one({"_id": CONFIG_ID})
-    if not config:
+    if not config or not config.get("sicPool") or not config.get("shiftEngineerPool"):
         sic_pool, shift_eng_pool = init_default_pools()
-        config = {
-            "_id": CONFIG_ID,
-            "testMode": False,  # False = Live All Future Duty, True = Test Basis
-            "allocationDaysNotice": 5,  # D-5
-            "longDurationThreshold": 3,  # Leaves with >= 3 consecutive days prompt Admin
-            "sicPool": sic_pool,
-            "shiftEngineerPool": shift_eng_pool,
-            "nextSicIndex": 0,
-            "nextShiftEngineerIndex": 0,
-            "rejectionCounters": {},
-            "longDurationPolicies": {},
-            "createdAt": datetime.utcnow(),
-            "updatedAt": datetime.utcnow(),
-        }
-        replacement_roster_config_collection.insert_one(config)
+        if not config:
+            config = {
+                "_id": CONFIG_ID,
+                "testMode": False,  # False = Live All Future Duty, True = Test Basis
+                "allocationDaysNotice": 5,  # D-5
+                "longDurationThreshold": 3,  # Leaves with >= 3 consecutive days prompt Admin
+                "sicPool": sic_pool,
+                "shiftEngineerPool": shift_eng_pool,
+                "nextSicIndex": 0,
+                "nextShiftEngineerIndex": 0,
+                "rejectionCounters": {},
+                "longDurationPolicies": {},
+                "createdAt": datetime.utcnow(),
+                "updatedAt": datetime.utcnow(),
+            }
+            replacement_roster_config_collection.insert_one(config)
+        else:
+            updates = {}
+            if not config.get("sicPool"):
+                updates["sicPool"] = sic_pool
+                config["sicPool"] = sic_pool
+            if not config.get("shiftEngineerPool"):
+                updates["shiftEngineerPool"] = shift_eng_pool
+                config["shiftEngineerPool"] = shift_eng_pool
+            if updates:
+                replacement_roster_config_collection.update_one({"_id": CONFIG_ID}, {"$set": updates})
     return config
 
 

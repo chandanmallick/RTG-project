@@ -735,17 +735,6 @@ export default function TopNavbar() {
                           active={location.pathname === "/crew/reports"}
                           onClick={handleNavigate}
                         />
-                        <DropdownItem
-                          title="Replacement Roster & Matrix"
-                          description="Sequential D-5 replacement & duty matrix"
-                          icon={CalendarPlus}
-                          iconColor="#03624C"
-                          iconBg="#E8F5F1"
-                          path="/crew/replacement?tab=roster"
-                          alwaysVisible
-                          active={location.pathname === "/crew/replacement" || location.pathname === "/crew/replacement-roster"}
-                          onClick={handleNavigate}
-                        />
                       </Box>
                     </Box>
 
@@ -819,17 +808,6 @@ export default function TopNavbar() {
                               iconBg="#EAF2FF"
                               path="/crew/morning-presentation"
                               active={location.pathname === "/crew/morning-presentation"}
-                              onClick={handleNavigate}
-                            />
-                            <DropdownItem
-                              title="Replacement Roster & Matrix"
-                              description="Sequential D-5 allocation & duty matrix"
-                              icon={CalendarRange}
-                              iconColor="#03624C"
-                              iconBg="#E8F5F1"
-                              path="/crew/replacement?tab=roster"
-                              alwaysVisible
-                              active={location.pathname === "/crew/replacement" || location.pathname === "/crew/replacement-roster"}
                               onClick={handleNavigate}
                             />
                           </Box>

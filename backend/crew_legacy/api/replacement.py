@@ -4179,12 +4179,14 @@ def deny_duty(id: str, payload: dict, user=Depends(get_current_user)):
 # -------------------------------------------------------------
 # Replacement Roster & Matrix Endpoints
 # -------------------------------------------------------------
+@router.get("/roster/config")
 @router.get("/replacement/roster/config")
 def get_roster_config(user=Depends(get_current_user)):
     from crew_legacy.services.replacement_roster_service import get_replacement_roster_config
     return get_replacement_roster_config()
 
 
+@router.put("/roster/config")
 @router.put("/replacement/roster/config")
 def update_roster_config(payload: dict, user=Depends(get_current_user)):
     from crew_legacy.services.replacement_roster_service import save_replacement_roster_config
@@ -4195,12 +4197,14 @@ def update_roster_config(payload: dict, user=Depends(get_current_user)):
     return save_replacement_roster_config(payload)
 
 
+@router.get("/roster/matrix")
 @router.get("/replacement/roster/matrix")
 def get_roster_matrix(month: Optional[str] = Query(None), user=Depends(get_current_user)):
     from crew_legacy.services.replacement_roster_service import get_employee_duty_matrix
     return get_employee_duty_matrix(month=month)
 
 
+@router.post("/roster/auto-allocate")
 @router.post("/replacement/roster/auto-allocate")
 def trigger_auto_allocation(payload: dict = None, user=Depends(get_current_user)):
     from crew_legacy.services.replacement_roster_service import auto_allocate_d5_replacements
@@ -4210,6 +4214,7 @@ def trigger_auto_allocation(payload: dict = None, user=Depends(get_current_user)
     return auto_allocate_d5_replacements(force=force, test_mode=test_mode)
 
 
+@router.get("/roster/can-reject/{leave_id}")
 @router.get("/replacement/roster/can-reject/{leave_id}")
 def check_can_reject(leave_id: str, user=Depends(get_current_user)):
     from crew_legacy.services.replacement_roster_service import can_reject_replacement
@@ -4230,6 +4235,7 @@ def check_can_reject(leave_id: str, user=Depends(get_current_user)):
     }
 
 
+@router.post("/roster/reject/{leave_id}")
 @router.post("/replacement/roster/reject/{leave_id}")
 def reject_replacement_endpoint(leave_id: str, payload: dict, user=Depends(get_current_user)):
     from crew_legacy.services.replacement_roster_service import reject_replacement_assignment
@@ -4237,6 +4243,7 @@ def reject_replacement_endpoint(leave_id: str, payload: dict, user=Depends(get_c
     return reject_replacement_assignment(leave_id=leave_id, comment=comment, user=user)
 
 
+@router.post("/roster/long-duration-policy")
 @router.post("/replacement/roster/long-duration-policy")
 def set_roster_long_duration_policy(payload: dict, user=Depends(get_current_user)):
     from crew_legacy.services.replacement_roster_service import set_long_duration_policy
