@@ -619,6 +619,15 @@ export default function LeaveManagement({ embeddedApproval = false, embeddedAppl
     return sameKind.slice(start, end + 1);
   }, [embeddedApproval, leaves, initialApprovalDate, initialEmployeeId, initialLeaveId]);
   const workflowLeaves = embeddedApproval ? embeddedScopeLeaves : leaves;
+
+  useEffect(() => {
+    if (!embeddedApproval) return;
+    if (!embeddedScopeLeaves.length) return;
+    const actionable = embeddedScopeLeaves.filter((l) => l.canSICAct || l.canFinalAct).map((l) => l.id);
+    if (actionable.length > 0) {
+      setSelectedWorkflowIds((current) => current.length ? current : actionable);
+    }
+  }, [embeddedApproval, embeddedScopeLeaves]);
   const pending = useMemo(() => workflowLeaves.filter((leave) => !["Approved", "Rejected", "Withdrawn", "Cancelled"].includes(leave.finalStatus)), [workflowLeaves]);
   const completed = useMemo(() => workflowLeaves.filter((leave) => ["Approved", "Rejected", "Withdrawn", "Cancelled"].includes(leave.finalStatus)), [workflowLeaves]);
   const trackedLeaves = useMemo(
@@ -1610,6 +1619,22 @@ export default function LeaveManagement({ embeddedApproval = false, embeddedAppl
         <DialogActions sx={{ px: 3, pb: 2 }}>
           <Button onClick={() => setRejectDialog((current) => ({ ...current, open: false }))}>Cancel</Button>
           <Button color="error" variant="contained" onClick={confirmReject}>Reject leave</Button>
+        </DialogActions>
+      </Dialog>
+      <Dialog open={approveDialog.open} onClose={() => setApproveDialog((current) => ({ ...current, open: false }))} fullWidth maxWidth="sm">
+        <DialogTitle sx={{ fontWeight: 950 }}>Approve leave at current stage</DialogTitle>
+        <DialogContent>
+          <Typography sx={{ mb: 1.2, color: "#64748B", fontSize: 12 }}>
+            {approveDialog.leaves.length} selected date(s). To approve only particular dates, select or expand those dates before opening this dialog.
+          </Typography>
+          <Stack direction="row" spacing={.6} useFlexGap flexWrap="wrap" sx={{ mb: 1.5 }}>
+            {approveDialog.leaves.map((leave) => <Chip key={leave.id} size="small" label={dayjs(leave.date).format("DD MMM YYYY")} />)}
+          </Stack>
+          <TextField autoFocus required fullWidth multiline minRows={3} label="Approval remarks" placeholder="Enter remarks for approval..." value={approveComment} onChange={(event) => setApproveComment(event.target.value)} inputProps={{ maxLength: 1000 }} />
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2 }}>
+          <Button onClick={() => setApproveDialog((current) => ({ ...current, open: false }))}>Cancel</Button>
+          <Button color="success" variant="contained" disabled={!approveComment.trim()} onClick={confirmApprove}>Approve selected dates</Button>
         </DialogActions>
       </Dialog>
       {working && <Box sx={{ position: "absolute", inset: 0, zIndex: 2, display: "grid", placeItems: "center", background: "rgba(255,255,255,.58)", pointerEvents: "none" }}><CircularProgress /></Box>}

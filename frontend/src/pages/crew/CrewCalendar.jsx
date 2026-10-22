@@ -15,6 +15,7 @@ import crewApi from "../../services/crewApi";
 import LeaveManagement from "../../crewLegacy/LeaveManagement";
 import TrainingHolidayMaster from "../../crewLegacy/TrainingHolidayMaster";
 import SportsManagement from "./SportsManagement";
+import api from "../../crewLegacy/api";
 
 const iso = (date) => {
   const y = date.getFullYear();
@@ -144,8 +145,8 @@ const eventTone = {
 function EventCalendar({ dates, month, events, loading, onAddHoliday, onOpenTraining, onOpenSports }) {
   const [selected, setSelected] = useState(null);
   const monthEvents = events.filter((item) => String(item.startDate || "").slice(0, 7) <= month && String(item.endDate || item.startDate || "").slice(0, 7) >= month);
-  return <GlassCard hover={false} padding={0} sx={{ overflow: "hidden", flex: 1, minHeight: 0, display: "flex", flexDirection: "column", border: "1px solid #B7E4D5" }}>
-    <Box sx={{ px: 1.5, py: .9, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 1, flexWrap: "wrap", color: "#FFF", background: "linear-gradient(90deg,#08624F,#12B981)" }}>
+  return <Paper elevation={0} sx={{ overflow: "hidden", flex: 1, minHeight: 0, display: "flex", flexDirection: "column", border: "1px solid #B7E4D5", borderRadius: 2.5 }}>
+    <Box sx={{ px: 1.5, py: .9, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 1, flexWrap: "wrap", color: "#FFF", background: "linear-gradient(90deg,#08624F,#12B981)", flexShrink: 0 }}>
       <Box><Typography sx={{ fontSize: 15.5, fontWeight: 950 }}>Event calendar</Typography><Typography sx={{ fontSize: 10, opacity: .9 }}>Training, holidays and sports in one calendar.</Typography></Box>
       <Stack direction="row" spacing={.7} useFlexGap flexWrap="wrap">
         <Button size="small" variant="outlined" startIcon={<CalendarDays size={14} />} onClick={onAddHoliday} sx={{ color: "#FFF", borderColor: "#FFFFFFAA", textTransform: "none", fontWeight: 900 }}>Add holiday</Button>
@@ -173,7 +174,7 @@ function EventCalendar({ dates, month, events, loading, onAddHoliday, onOpenTrai
         {selected ? <Box sx={{ mt: 1, p: 1.2, borderRadius: 2, border: `1px solid ${(eventTone[selected.kind] || eventTone.training).border}`, background: (eventTone[selected.kind] || eventTone.training).background }}><Chip size="small" label={(eventTone[selected.kind] || eventTone.training).label} sx={{ height: 21, fontWeight: 900 }} /><Typography sx={{ mt: .8, fontSize: 12, fontWeight: 950, color: "#0F172A" }}>{selected.title}</Typography><Typography sx={{ mt: .45, fontSize: 9.5, color: "#475569" }}>{displayDate(selected.startDate)}{selected.endDate !== selected.startDate ? ` – ${displayDate(selected.endDate)}` : ""}</Typography><Typography sx={{ mt: .35, fontSize: 9.5, color: "#64748B" }}>{selected.detail}</Typography><Button size="small" onClick={() => setSelected(null)} sx={{ mt: .7, px: 0, textTransform: "none" }}>Back to all events</Button></Box> : <Stack spacing={.65} sx={{ mt: 1 }}>{monthEvents.map((item) => { const tone = eventTone[item.kind] || eventTone.training; return <Button key={`${item.kind}-${item.id}-side`} onClick={() => setSelected(item)} sx={{ p: .8, display: "block", textAlign: "left", textTransform: "none", borderRadius: 1.7, color: "#0F172A", background: "#FFF", border: "1px solid #D9E4EC", borderLeft: `4px solid ${tone.color}`, "&:hover": { background: tone.background } }}><Typography sx={{ fontSize: 10, fontWeight: 950, lineHeight: 1.2 }}>{item.title}</Typography><Typography sx={{ mt: .25, fontSize: 8.4, color: "#64748B" }}>{displayDate(item.startDate)}{item.endDate !== item.startDate ? ` – ${displayDate(item.endDate)}` : ""}</Typography></Button>; })}{!monthEvents.length && <Typography sx={{ py: 3, textAlign: "center", color: "#94A3B8", fontSize: 10 }}>No events this month</Typography>}</Stack>}
       </Box>
     </Box>}
-  </GlassCard>;
+  </Paper>;
 }
 
 const EmployeeRow = memo(({ person, groupName, active, dates, selectedColumn, onSelectRow, onSelectDuty, onTrainingDrop, applicationMode = false, applicationKeys = new Set(), readOnly = false }) => {
@@ -267,6 +268,14 @@ export default function CrewCalendar({ publicView = false, applicationOnly = fal
   const [reassignmentContext, setReassignmentContext] = useState({ mode: "exchange", date: "", employeeId: "" });
   const [selectedDuty, setSelectedDuty] = useState(null);
   const [leaveApprovalPopup, setLeaveApprovalPopup] = useState(null);
+  const [directApproveDialog, setDirectApproveDialog] = useState({
+    open: false,
+    dutySelection: null,
+    comment: "",
+    replacementRequired: false,
+    submitting: false,
+    notice: null,
+  });
   const [trainingApprovalPopup, setTrainingApprovalPopup] = useState(null);
   const [replacementPopup, setReplacementPopup] = useState(null);
   const [replacementCandidates, setReplacementCandidates] = useState([]);
@@ -405,6 +414,62 @@ export default function CrewCalendar({ publicView = false, applicationOnly = fal
     if (!selectedDuty) return;
     setLeaveApprovalPopup(selectedDuty);
     setSelectedDuty(null);
+  };
+
+  const openDirectApproveModal = (selection) => {
+    setSelectedDuty(null);
+    setDirectApproveDialog({
+      open: true,
+      dutySelection: selection,
+      comment: "",
+      replacementRequired: Boolean(selection?.duty?.replacementRequired),
+      submitting: false,
+      notice: null,
+    });
+  };
+
+  const confirmDirectApprove = async () => {
+    const selection = directApproveDialog.dutySelection;
+    if (!selection) return;
+    if (!directApproveDialog.comment.trim()) {
+      setDirectApproveDialog((prev) => ({ ...prev, notice: "Please enter approval remarks." }));
+      return;
+    }
+    const leaveId = selection.duty?.leaveRequestId;
+    if (!leaveId) {
+      setDirectApproveDialog((prev) => ({ ...prev, notice: "Missing leave request reference ID. Open full workflow to approve." }));
+      return;
+    }
+    setDirectApproveDialog((prev) => ({ ...prev, submitting: true, notice: null }));
+    try {
+      const isSicStage = selection.duty?.leaveStatus === "Applied";
+      const endpoint = isSicStage ? "/leave/sic-forward-bulk" : "/leave/approve-bulk";
+      await api.put(endpoint, {
+        leaves: [{ id: leaveId, replacementRequired: directApproveDialog.replacementRequired }],
+        comment: directApproveDialog.comment.trim(),
+      });
+      setDirectApproveDialog({ open: false, dutySelection: null, comment: "", replacementRequired: false, submitting: false, notice: null });
+      setCalendarNotice("Leave approved successfully.");
+      await load();
+      window.dispatchEvent(new Event("crew-workflows-changed"));
+    } catch (err) {
+      try {
+        await api.put("/leave/approve-bulk", {
+          leaves: [{ id: leaveId, replacementRequired: directApproveDialog.replacementRequired }],
+          comment: directApproveDialog.comment.trim(),
+        });
+        setDirectApproveDialog({ open: false, dutySelection: null, comment: "", replacementRequired: false, submitting: false, notice: null });
+        setCalendarNotice("Leave approved successfully.");
+        await load();
+        window.dispatchEvent(new Event("crew-workflows-changed"));
+      } catch (fallbackErr) {
+        setDirectApproveDialog((prev) => ({
+          ...prev,
+          submitting: false,
+          notice: fallbackErr.response?.data?.detail || err.response?.data?.detail || "Approval could not be completed.",
+        }));
+      }
+    }
   };
   const openReplacementWorkflow = () => {
     if (!selectedDuty) return;
@@ -674,34 +739,34 @@ export default function CrewCalendar({ publicView = false, applicationOnly = fal
   const CalendarPageShell = applicationOnly ? ApplicationOnlyShell : publicView ? PublicCalendarShell : AppShell;
   return (
     <CalendarPageShell viewportLocked={!publicView}>
-      {!applicationOnly && <Box sx={{ height: publicView ? "calc(100dvh - 16px)" : "100%", minHeight: 0, overflow: "hidden", display: "flex", flexDirection: "column", gap: 1.15 }}>
-      <Box sx={{ px: { xs: 1.5, md: 2 }, py: 1.25, borderRadius: 3, background: "linear-gradient(105deg,#081F5C 0%,#075DB8 62%,#1678D4 100%)", color: "#FFF", display: "flex", alignItems: "center", gap: 1.2, flexWrap: { xs: "wrap", xl: "nowrap" } }}>
+      {!applicationOnly && <Box sx={{ height: publicView ? "calc(100dvh - 16px)" : "100%", flex: 1, minHeight: 0, overflow: "hidden", display: "flex", flexDirection: "column", gap: 0.85 }}>
+      <Box sx={{ px: { xs: 1.2, md: 1.8 }, py: 0.85, borderRadius: 2.5, background: "linear-gradient(105deg,#081F5C 0%,#075DB8 62%,#1678D4 100%)", color: "#FFF", display: "flex", alignItems: "center", gap: 1, flexWrap: { xs: "wrap", xl: "nowrap" }, flexShrink: 0 }}>
         <Box sx={{ minWidth: { md: 220 }, mr: { xl: "auto" } }}>
-          <Typography sx={{ fontSize: 19, fontWeight: 950, lineHeight: 1.05 }}>{calendarView === "events" ? "Crew Event Calendar" : "Daily Duty Calendar"}</Typography>
-          <Typography sx={{ mt: .25, fontSize: 10.5, color: "rgba(255,255,255,.82)" }}>{calendarView === "events" ? "Training, holidays and sports in one planning view" : "Click a duty to apply, review approval or assign cover"}</Typography>
+          <Typography sx={{ fontSize: 18, fontWeight: 950, lineHeight: 1.05 }}>{calendarView === "events" ? "Crew Event Calendar" : "Daily Duty Calendar"}</Typography>
+          <Typography sx={{ mt: .2, fontSize: 10, color: "rgba(255,255,255,.82)" }}>{calendarView === "events" ? "Training, holidays and sports in one planning view" : "Click a duty to apply, review approval or assign cover"}</Typography>
         </Box>
         {!publicView && <><Stack direction="row" spacing={.35} alignItems="center" sx={{ p: .3, border: "1px solid rgba(255,255,255,.4)", borderRadius: 2 }}>
           <Button size="small" onClick={() => { setCalendarView("duty"); window.history.replaceState(null, "", `${window.location.pathname}?view=duty`); }} sx={{ minHeight: 28, px: 1, color: calendarView === "duty" ? "#073B75" : "#FFF", background: calendarView === "duty" ? "#FFF" : "transparent", textTransform: "none", fontWeight: 900 }}>Duty view</Button>
           <Button size="small" onClick={() => { setCalendarView("events"); window.history.replaceState(null, "", `${window.location.pathname}?view=events`); }} sx={{ minHeight: 28, px: 1, color: calendarView === "events" ? "#073B75" : "#FFF", background: calendarView === "events" ? "#FFF" : "transparent", textTransform: "none", fontWeight: 900 }}>Event view</Button>
         </Stack><Stack direction="row" spacing={.35} alignItems="center">
           <Tooltip title={calendarView === "events" ? "Previous month" : "Previous 7 days"}><IconButton size="small" onClick={() => calendarView === "events" ? setEventMonth((value) => shiftMonth(value, -1)) : move(-7)} sx={{ color: "#FFF", border: "1px solid rgba(255,255,255,.35)" }}><ChevronLeft size={17} /></IconButton></Tooltip>
-          <Button onClick={() => calendarView === "events" ? setEventMonth(today.slice(0, 7)) : (setStartDate(addDays(today, -7)), setEndDate(addDays(today, 7)))} startIcon={<CalendarDays size={15} />} size="small" sx={{ minHeight: 32, color: "#073B75", background: "#FFF", borderRadius: 2, textTransform: "none", fontWeight: 900, "&:hover": { background: "#F1F5F9" } }}>Today</Button>
+          <Button onClick={() => calendarView === "events" ? setEventMonth(today.slice(0, 7)) : (setStartDate(addDays(today, -7)), setEndDate(addDays(today, 7)))} startIcon={<CalendarDays size={15} />} size="small" sx={{ minHeight: 30, color: "#073B75", background: "#FFF", borderRadius: 2, textTransform: "none", fontWeight: 900, "&:hover": { background: "#F1F5F9" } }}>Today</Button>
           <Tooltip title={calendarView === "events" ? "Next month" : "Next 7 days"}><IconButton size="small" onClick={() => calendarView === "events" ? setEventMonth((value) => shiftMonth(value, 1)) : move(7)} sx={{ color: "#FFF", border: "1px solid rgba(255,255,255,.35)" }}><ChevronRight size={17} /></IconButton></Tooltip>
         </Stack>
-        {calendarView === "events" ? <input aria-label="Event month" type="month" value={eventMonth} onChange={(event) => setEventMonth(event.target.value)} style={{ width: 132, border: "1px solid rgba(255,255,255,.55)", borderRadius: 8, padding: "6px 8px", fontSize: 11, fontWeight: 750 }} /> : <Stack direction="row" spacing={.55} alignItems="center">
-          <input aria-label="Start date" type="date" value={startDate} onChange={(event) => setStartDate(event.target.value)} style={{ width: 126, border: "1px solid rgba(255,255,255,.55)", borderRadius: 8, padding: "6px 8px", fontSize: 11, fontWeight: 750 }} />
+        {calendarView === "events" ? <input aria-label="Event month" type="month" value={eventMonth} onChange={(event) => setEventMonth(event.target.value)} style={{ width: 132, border: "1px solid rgba(255,255,255,.55)", borderRadius: 8, padding: "5px 8px", fontSize: 11, fontWeight: 750 }} /> : <Stack direction="row" spacing={.55} alignItems="center">
+          <input aria-label="Start date" type="date" value={startDate} onChange={(event) => setStartDate(event.target.value)} style={{ width: 126, border: "1px solid rgba(255,255,255,.55)", borderRadius: 8, padding: "5px 8px", fontSize: 11, fontWeight: 750 }} />
           <Typography sx={{ color: "rgba(255,255,255,.8)", fontSize: 11 }}>to</Typography>
-          <input aria-label="End date" type="date" min={startDate} value={endDate} onChange={(event) => setEndDate(event.target.value)} style={{ width: 126, border: "1px solid rgba(255,255,255,.55)", borderRadius: 8, padding: "6px 8px", fontSize: 11, fontWeight: 750 }} />
+          <input aria-label="End date" type="date" min={startDate} value={endDate} onChange={(event) => setEndDate(event.target.value)} style={{ width: 126, border: "1px solid rgba(255,255,255,.55)", borderRadius: 8, padding: "5px 8px", fontSize: 11, fontWeight: 750 }} />
         </Stack>}
-        <Button size="small" startIcon={<RefreshCw size={15} />} onClick={load} sx={{ minHeight: 32, color: "#FFF", border: "1px solid rgba(255,255,255,.55)", borderRadius: 2, textTransform: "none", fontWeight: 850 }}>Refresh</Button>
-        {calendarView === "duty" && <><Button size="small" startIcon={<MousePointer2 size={15} />} onClick={openCalendarApplication} sx={{ minHeight: 32, color: applicationMode ? "#073B75" : "#FFF", background: applicationMode ? "#FFF" : "transparent", border: "1px solid rgba(255,255,255,.65)", borderRadius: 2, textTransform: "none", fontWeight: 900 }}>{applicationMode ? `Continue application${applicationSelections.length ? ` (${applicationSelections.length})` : ""}` : "Apply from calendar"}</Button>
+        <Button size="small" startIcon={<RefreshCw size={15} />} onClick={load} sx={{ minHeight: 30, color: "#FFF", border: "1px solid rgba(255,255,255,.55)", borderRadius: 2, textTransform: "none", fontWeight: 850 }}>Refresh</Button>
+        {calendarView === "duty" && <><Button size="small" startIcon={<MousePointer2 size={15} />} onClick={openCalendarApplication} sx={{ minHeight: 30, color: applicationMode ? "#073B75" : "#FFF", background: applicationMode ? "#FFF" : "transparent", border: "1px solid rgba(255,255,255,.65)", borderRadius: 2, textTransform: "none", fontWeight: 900 }}>{applicationMode ? `Continue application${applicationSelections.length ? ` (${applicationSelections.length})` : ""}` : "Apply from calendar"}</Button>
         {applicationMode && <Tooltip title="Cancel application selection"><IconButton size="small" onClick={() => { setApplicationMode(false); setApplicationSelections([]); setApplicationNotice(""); }} sx={{ color: "#FFF", border: "1px solid rgba(255,255,255,.55)" }}><X size={16} /></IconButton></Tooltip>}
-        <Button size="small" startIcon={<ArrowLeftRight size={15} />} onClick={() => { setReassignmentContext({ mode: "exchange", date: selectedColumn || today, employeeId: "" }); setExchangeOpen(true); }} sx={{ minHeight: 32, color: "#0755A5", background: "#FFF", borderRadius: 2, textTransform: "none", fontWeight: 900, whiteSpace: "nowrap", "&:hover": { background: "#F1F5F9" } }}>Duty exchange / reassignment</Button></>}</>}
+        <Button size="small" startIcon={<ArrowLeftRight size={15} />} onClick={() => { setReassignmentContext({ mode: "exchange", date: selectedColumn || today, employeeId: "" }); setExchangeOpen(true); }} sx={{ minHeight: 30, color: "#0755A5", background: "#FFF", borderRadius: 2, textTransform: "none", fontWeight: 900, whiteSpace: "nowrap", "&:hover": { background: "#F1F5F9" } }}>Duty exchange / reassignment</Button></>}</>}
       </Box>
 
-      {error && <Alert severity="error">{error}</Alert>}
-      {calendarNotice && <Alert severity="success" onClose={() => setCalendarNotice("")}>{calendarNotice}</Alert>}
-      {applicationNotice && <Alert severity="info" sx={{ py: 0 }}>{applicationNotice}</Alert>}
+      {error && <Alert severity="error" sx={{ py: 0.25, flexShrink: 0 }}>{error}</Alert>}
+      {calendarNotice && <Alert severity="success" onClose={() => setCalendarNotice("")} sx={{ py: 0.25, flexShrink: 0 }}>{calendarNotice}</Alert>}
+      {applicationNotice && <Alert severity="info" sx={{ py: 0, flexShrink: 0 }}>{applicationNotice}</Alert>}
       {calendarView === "events" ? <EventCalendar
         dates={eventDates}
         month={eventMonth}
@@ -711,13 +776,13 @@ export default function CrewCalendar({ publicView = false, applicationOnly = fal
         onOpenTraining={() => navigate("/crew/training?section=training")}
         onOpenSports={() => navigate("/crew/sports?section=events")}
       /> : <>
-      {!publicView && <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
+      {!publicView && <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap sx={{ flexShrink: 0 }}>
         <TextField size="small" label="Find employee or group" value={employeeSearch} onChange={(event) => setEmployeeSearch(event.target.value)} sx={{ minWidth: 220 }} />
         {[["all", "All duties"], ["pending", "Pending approval"], ["coverage", "Replacement needed"]].map(([value, label]) => <Button key={value} variant={calendarFilter === value ? "contained" : "outlined"} onClick={() => setCalendarFilter(value)} sx={{ textTransform: "none" }}>{label}</Button>)}
         <Button onClick={() => { setApplicationActivity("training"); openCalendarApplication(); }} startIcon={<GraduationCap size={16} />}>Apply training</Button>
         <Button onClick={() => { setApplicationMode(true); setApplicationSelections([]); setApplicationNotice("Select dates for one employee, then click Continue application."); }}>Select several dates</Button>
       </Stack>}
-      <Box sx={{ px: 1, py: .45, display: "flex", alignItems: "center", gap: 1.05, flexWrap: "wrap", border: "1px solid #CBD5E1", borderRadius: 2, background: "#FFFFFF" }}>
+      <Box sx={{ px: 1, py: .35, display: "flex", alignItems: "center", gap: 1.05, flexWrap: "wrap", border: "1px solid #CBD5E1", borderRadius: 2, background: "#FFFFFF", flexShrink: 0 }}>
         {[
           ["Morning", "#DCFCE7", "#86EFAC"],
           ["Evening", "#FEF3C7", "#FCD34D"],
@@ -730,22 +795,56 @@ export default function CrewCalendar({ publicView = false, applicationOnly = fal
         <Stack direction="row" spacing={.4} alignItems="center"><Box sx={{ width: 18, height: 18, borderRadius: .7, display: "grid", placeItems: "center", background: "#2563EB", color: "#FFF", fontSize: 9, fontWeight: 950 }}>R</Box><Typography sx={{ color: "#475569", fontSize: 10, fontWeight: 800 }}>Replacement assigned</Typography></Stack>
         <Stack direction="row" spacing={.4} alignItems="center"><Box sx={{ width: 18, height: 18, borderRadius: "50%", display: "grid", placeItems: "center", background: "#9333EA", color: "#FFF", fontSize: 9, fontWeight: 950 }}>H</Box><Typography sx={{ color: "#475569", fontSize: 10, fontWeight: 800 }}>Holiday (shift duty continues)</Typography></Stack>
       </Box>
-      <GlassCard hover={false} padding={0} sx={{ overflow: "hidden", flex: 1, minHeight: 0, display: "flex", flexDirection: "column", "& > .MuiBox-root:last-child": { flex: 1, minHeight: 0, display: "flex", flexDirection: "column" } }}>
+      <Paper
+        elevation={0}
+        sx={{
+          overflow: "hidden",
+          flex: 1,
+          minHeight: 0,
+          display: "flex",
+          flexDirection: "column",
+          borderRadius: 2.5,
+          border: "1px solid #CBD5E1",
+          boxShadow: "0 4px 18px rgba(15, 23, 42, 0.05)",
+          background: "#FFFFFF",
+        }}
+      >
         {loading ? (
           <Box sx={{ minHeight: 360, display: "grid", placeItems: "center" }}><CircularProgress sx={{ color: "#03624C" }} /></Box>
         ) : (
-          <Box sx={{ position: "relative", flex: 1, minHeight: 0, overflow: "auto", overscrollBehavior: "contain" }}>
+          <Box
+            sx={{
+              position: "relative",
+              flex: 1,
+              minHeight: 0,
+              width: "100%",
+              height: "100%",
+              overflow: "auto",
+              overscrollBehavior: "contain",
+              "&::-webkit-scrollbar": {
+                width: 10,
+                height: 10,
+              },
+              "&::-webkit-scrollbar-thumb": {
+                background: "#94A3B8",
+                borderRadius: 5,
+              },
+              "&::-webkit-scrollbar-track": {
+                background: "#F1F5F9",
+              },
+            }}
+          >
             <Table stickyHeader size="small" sx={{ borderCollapse: "separate", borderSpacing: 0 }}>
               <TableHead>
                 <TableRow>
-                  <TableCell sx={{ position: "sticky !important", top: 0, left: 0, zIndex: 8, minWidth: 210, py: .7, background: "#F8FAFC", fontWeight: 900, color: "#334155", borderRight: "1px solid #E2E8F0" }}>Name / designation</TableCell>
-                  {dates.map((date) => { const holidayName = holidayByDate[date]; return <TableCell key={date} title={holidayName || undefined} align="center" onClick={() => setSelectedColumn(date)} sx={{ position: "sticky !important", top: 0, zIndex: 7, minWidth: 96, py: .55, cursor: "pointer", fontWeight: 900, color: holidayName ? "#6B21A8" : date === today ? "#03624C" : "#334155", background: holidayName ? "#F3E8FF" : selectedColumn === date ? "#D1FAE5" : date === today ? "#ECFDF5" : "#F8FAFC", borderBottom: holidayName ? "3px solid #A855F7" : date === today ? "3px solid #00A86B" : undefined }}><Box>{displayDate(date)}</Box><Typography variant="caption" sx={{ fontWeight: 800, color: holidayName ? "#7E22CE" : "#94A3B8" }}>{weekday(date)}{holidayName ? " · Holiday" : ""}</Typography></TableCell>; })}
+                  <TableCell sx={{ position: "sticky !important", top: 0, left: 0, zIndex: 8, minWidth: 210, py: .65, background: "#F8FAFC", fontWeight: 900, color: "#334155", borderRight: "1px solid #E2E8F0" }}>Name / designation</TableCell>
+                  {dates.map((date) => { const holidayName = holidayByDate[date]; return <TableCell key={date} title={holidayName || undefined} align="center" onClick={() => setSelectedColumn(date)} sx={{ position: "sticky !important", top: 0, zIndex: 7, minWidth: 96, py: .5, cursor: "pointer", fontWeight: 900, color: holidayName ? "#6B21A8" : date === today ? "#03624C" : "#334155", background: holidayName ? "#F3E8FF" : selectedColumn === date ? "#D1FAE5" : date === today ? "#ECFDF5" : "#F8FAFC", borderBottom: holidayName ? "3px solid #A855F7" : date === today ? "3px solid #00A86B" : undefined }}><Box>{displayDate(date)}</Box><Typography variant="caption" sx={{ fontWeight: 800, color: holidayName ? "#7E22CE" : "#94A3B8" }}>{weekday(date)}{holidayName ? " · Holiday" : ""}</Typography></TableCell>; })}
                 </TableRow>
               </TableHead>
               <TableBody>
                 {!activeGroups.length && <TableRow><TableCell colSpan={dates.length + 1} align="center" sx={{ py: 8, color: "#64748B", fontWeight: 700 }}>{data.length ? "No duties match this filter. Choose All duties or clear the search." : "No calendar roster has been published yet."}</TableCell></TableRow>}
                 {activeGroups.map((group) => [
-                  <TableRow key={`${group.groupName}-header`}><TableCell colSpan={dates.length + 1} sx={{ py: .65, background: "linear-gradient(90deg,#E8F5F1,#F8FAFC)", color: "#03624C", fontWeight: 900, letterSpacing: ".03em" }}>{group.groupName}</TableCell></TableRow>,
+                  <TableRow key={`${group.groupName}-header`}><TableCell colSpan={dates.length + 1} sx={{ py: .55, background: "linear-gradient(90deg,#E8F5F1,#F8FAFC)", color: "#03624C", fontWeight: 900, letterSpacing: ".03em" }}>{group.groupName}</TableCell></TableRow>,
                   ...group.employees.map((person) => (
                     <EmployeeRow
                       key={`${group.groupName}-${person.employeeId}`}
@@ -767,7 +866,7 @@ export default function CrewCalendar({ publicView = false, applicationOnly = fal
             </Table>
           </Box>
         )}
-      </GlassCard>
+      </Paper>
       </>}
       </Box>}
       <Dialog open={applicationDialogOpen} onClose={dismissCalendarApplication} fullWidth maxWidth="xl" PaperProps={{ sx: { maxHeight: "92dvh", borderRadius: 3 } }}>
@@ -842,7 +941,23 @@ export default function CrewCalendar({ publicView = false, applicationOnly = fal
               )}
               {(selectedDuty.duty.leaveStatus || selectedDuty.duty.trainingName || selectedDuty.duty.trainingAdjacentOffStatus || selectedDuty.duty.sportsName) && (
                 <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-                  {selectedDuty.duty.leaveStatus && <Button size="small" variant="contained" onClick={openLeaveWorkflow} sx={{ textTransform: "none", fontWeight: 900, background: "#0057B7" }}>Track / manage leave</Button>}
+                  {selectedDuty.duty.leaveStatus && (
+                    <>
+                      {String(selectedDuty.duty.leaveStatus).toLowerCase() !== "approved" && (
+                        <Button
+                          size="small"
+                          variant="contained"
+                          color="success"
+                          startIcon={<CheckCircle2 size={14} />}
+                          onClick={() => openDirectApproveModal(selectedDuty)}
+                          sx={{ textTransform: "none", fontWeight: 900 }}
+                        >
+                          Approve leave
+                        </Button>
+                      )}
+                      <Button size="small" variant="contained" onClick={openLeaveWorkflow} sx={{ textTransform: "none", fontWeight: 900, background: "#0057B7" }}>Track / manage leave</Button>
+                    </>
+                  )}
                   {(selectedDuty.duty.trainingName || selectedDuty.duty.trainingAdjacentOffStatus) && <Button size="small" variant="contained" onClick={openTrainingWorkflow} sx={{ textTransform: "none", fontWeight: 900, background: "#6A1B9A" }}>{selectedDuty.duty.trainingAdjacentOffStatus ? "Review OFF approval" : "Manage training"}</Button>}
                   {selectedDuty.duty.sportsName && <Button size="small" variant="contained" onClick={() => navigate("/crew/sports?section=approval")} sx={{ textTransform: "none", fontWeight: 900, background: "#047857" }}>Open sports approval</Button>}
                   {canManageReplacement && String(selectedDuty.duty.leaveStatus || "").toLowerCase() === "approved" && <Button size="small" variant="outlined" onClick={openReplacementWorkflow} sx={{ textTransform: "none", fontWeight: 900, borderColor: "#D97706", color: "#B45309", ...(selectedDuty.duty.replacementRequired && !selectedDuty.duty.replacementEmployee?.name ? { animation: "calendarReplacementPulse 1s ease-in-out infinite" } : {}) }}>Assign replacement</Button>}
@@ -901,6 +1016,83 @@ export default function CrewCalendar({ publicView = false, applicationOnly = fal
             onApprovalChanged={load}
           />}
         </DialogContent>
+      </Dialog>
+
+      {/* Direct Calendar Leave Approval Dialog with Remarks */}
+      <Dialog
+        open={directApproveDialog.open}
+        onClose={() => setDirectApproveDialog((prev) => ({ ...prev, open: false }))}
+        fullWidth
+        maxWidth="sm"
+        PaperProps={{ sx: { borderRadius: 3 } }}
+      >
+        <DialogTitle sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", color: "#0F172A", fontWeight: 900 }}>
+          Approve Leave
+          <IconButton onClick={() => setDirectApproveDialog((prev) => ({ ...prev, open: false }))}><X size={19} /></IconButton>
+        </DialogTitle>
+        <DialogContent dividers sx={{ p: 2.5 }}>
+          {directApproveDialog.notice && (
+            <Alert severity="error" sx={{ mb: 2, borderRadius: 2 }}>{directApproveDialog.notice}</Alert>
+          )}
+          {directApproveDialog.dutySelection && (
+            <Stack spacing={2}>
+              <Paper variant="outlined" sx={{ p: 1.5, background: "#F8FAFC", borderRadius: 2 }}>
+                <Typography sx={{ fontWeight: 900, fontSize: 15, color: "#0F172A" }}>
+                  {directApproveDialog.dutySelection.person.name || directApproveDialog.dutySelection.person.employeeId}
+                </Typography>
+                <Typography sx={{ color: "#64748B", fontSize: 12, fontWeight: 700 }}>
+                  {directApproveDialog.dutySelection.person.designation || "Shift Crew"} · {directApproveDialog.dutySelection.person.employeeId}
+                </Typography>
+                <Stack direction="row" spacing={1} sx={{ mt: 1 }}>
+                  <Chip size="small" label={displayDate(directApproveDialog.dutySelection.date)} sx={{ fontWeight: 800 }} />
+                  <Chip size="small" label={directApproveDialog.dutySelection.duty.shift || "Duty"} sx={{ fontWeight: 800, color: "#0057B7", background: "#E8F1FF" }} />
+                  <Chip size="small" label={directApproveDialog.dutySelection.duty.leaveStatus || "Pending"} color="warning" sx={{ fontWeight: 800 }} />
+                </Stack>
+              </Paper>
+
+              <TextField
+                autoFocus
+                required
+                fullWidth
+                multiline
+                minRows={3}
+                label="Approval remarks *"
+                placeholder="Enter remarks for approving this leave..."
+                value={directApproveDialog.comment}
+                onChange={(e) => setDirectApproveDialog((prev) => ({ ...prev, comment: e.target.value }))}
+                helperText="Remarks are recorded with your employee ID and timestamp."
+              />
+
+              <FormControlLabel
+                control={
+                  <Checkbox
+                    size="small"
+                    checked={directApproveDialog.replacementRequired}
+                    onChange={(e) => setDirectApproveDialog((prev) => ({ ...prev, replacementRequired: e.target.checked }))}
+                  />
+                }
+                label={<Typography sx={{ fontSize: 12, fontWeight: 700 }}>Replacement required for this duty</Typography>}
+              />
+            </Stack>
+          )}
+        </DialogContent>
+        <DialogActions sx={{ px: 3, py: 2 }}>
+          <Button
+            onClick={() => setDirectApproveDialog((prev) => ({ ...prev, open: false }))}
+            sx={{ textTransform: "none", fontWeight: 700, color: "#64748B" }}
+          >
+            Cancel
+          </Button>
+          <Button
+            color="success"
+            variant="contained"
+            disabled={directApproveDialog.submitting || !directApproveDialog.comment.trim()}
+            onClick={confirmDirectApprove}
+            sx={{ fontWeight: 800, textTransform: "none", borderRadius: 2, px: 2.5 }}
+          >
+            {directApproveDialog.submitting ? "Approving..." : "Confirm & Approve"}
+          </Button>
+        </DialogActions>
       </Dialog>
 
       <Dialog open={Boolean(trainingApprovalPopup)} onClose={() => setTrainingApprovalPopup(null)} fullWidth maxWidth="sm">

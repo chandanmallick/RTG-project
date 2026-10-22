@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useState } from "react";
+import React, { useEffect, useState } from "react";
 import api from "./api";
 import dayjs from "dayjs";
 
@@ -41,6 +41,7 @@ import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import ExpandLessIcon from "@mui/icons-material/ExpandLess";
 import DutyReassignmentPanel from "../components/crew/DutyReassignmentPanel";
 import WorkflowHeader from "../components/crew/WorkflowHeader";
+import ReplacementRosterPanel from "../components/crew/ReplacementRosterPanel";
 
 export default function ReplacementManagement({ initialWorkflow } = {}) {
 
@@ -87,12 +88,14 @@ export default function ReplacementManagement({ initialWorkflow } = {}) {
   const [requiredReplacementOnly, setRequiredReplacementOnly] = useState(true);
   const sicShortcutHandled = React.useRef(false);
   const [activeWorkflow, setActiveWorkflow] = useState(() => {
-    if (["duty", "leave", "board", "sic"].includes(initialWorkflow)) return initialWorkflow;
     const params = new URLSearchParams(window.location.search);
-    if (["duty", "leave", "board", "sic"].includes(params.get("section"))) return params.get("section");
+    const tabParam = params.get("tab") || params.get("section");
+    if (["duty", "leave", "board", "sic", "roster"].includes(tabParam)) return tabParam;
+    if (["duty", "leave", "board", "sic", "roster"].includes(initialWorkflow)) return initialWorkflow;
     if (params.get("action") === "assign-sic") return "sic";
     if (params.get("action") === "leave") return "leave";
-    return "duty";
+    if (params.get("action") === "review") return "roster";
+    return "roster";
   });
 
   useEffect(() => {
@@ -497,6 +500,73 @@ export default function ReplacementManagement({ initialWorkflow } = {}) {
       <Box sx={{ mb: 2 }}><WorkflowHeader title="Manpower coverage" subtitle="One guided window for replacement, additional manpower, exchange and duty reallocation." accent="#0057B7">
         <Button onClick={() => { setHistoryVisible((value) => !value); if (!historyVisible) fetchHistory(); }} size="small" sx={{ color: "#4338CA", border: "1px solid #C7D2FE", background: "#FFF", textTransform: "none", fontWeight: 850 }}>{historyVisible ? "Hide history" : "View history"}</Button>
       </WorkflowHeader></Box>
+
+      {/* Workflow Navigation Bar */}
+      <Paper elevation={0} sx={{ mb: 2.5, p: 0.8, borderRadius: 3, border: "1px solid #D8E4F0", bgcolor: "#F8FAFC" }}>
+        <Stack direction="row" spacing={1} flexWrap="wrap">
+          {[
+            { id: "roster", label: "Replacement Roster & Matrix", badge: "Sequential D-5", icon: "✨" },
+            { id: "duty", label: "Duty Reassignment", badge: null, icon: "🔁" },
+            { id: "leave", label: "Leave Replacements", badge: pendingLeaves.length, icon: "📋" },
+            { id: "board", label: "Replacement Board", badge: assignedReplacements.length, icon: "📊" },
+            { id: "sic", label: "SIC Coverage", badge: pendingSIC.length, icon: "🛡️" },
+          ].map((tab) => {
+            const isActive = activeWorkflow === tab.id;
+            return (
+              <Button
+                key={tab.id}
+                onClick={() => setActiveWorkflow(tab.id)}
+                sx={{
+                  px: 2,
+                  py: 0.9,
+                  borderRadius: 2.2,
+                  textTransform: "none",
+                  fontWeight: isActive ? 850 : 700,
+                  fontSize: "0.88rem",
+                  bgcolor: isActive ? "#0057B7" : "transparent",
+                  color: isActive ? "#FFFFFF" : "#475569",
+                  boxShadow: isActive ? "0 4px 12px rgba(0, 87, 183, 0.25)" : "none",
+                  "&:hover": {
+                    bgcolor: isActive ? "#004899" : "#EDF2F7",
+                    color: isActive ? "#FFFFFF" : "#1E293B",
+                  },
+                }}
+              >
+                <Stack direction="row" spacing={0.8} alignItems="center">
+                  <span>{tab.icon}</span>
+                  <span>{tab.label}</span>
+                  {tab.badge !== null && tab.badge !== undefined && (
+                    <Chip
+                      size="small"
+                      label={tab.badge}
+                      sx={{
+                        height: 20,
+                        fontSize: 10.5,
+                        fontWeight: 800,
+                        bgcolor: isActive ? "rgba(255, 255, 255, 0.25)" : "#E2E8F0",
+                        color: isActive ? "#FFFFFF" : "#334155",
+                      }}
+                    />
+                  )}
+                </Stack>
+              </Button>
+            );
+          })}
+        </Stack>
+      </Paper>
+
+      {/* ################# Sequential Roster & Matrix Section ################### */}
+      <Collapse in={activeWorkflow === "roster"} timeout={420} unmountOnExit>
+        <Box id="replacement-workflow-roster" sx={{ scrollMarginTop: 110 }}>
+          <ReplacementRosterPanel
+            onRefreshReplacements={() => {
+              fetchPendingLeaves();
+              fetchAssignedReplacements();
+              fetchDecisionAudit();
+            }}
+          />
+        </Box>
+      </Collapse>
 
       <Collapse in={activeWorkflow === "duty"} timeout={420} unmountOnExit>
       <Box id="replacement-workflow-duty" sx={{ scrollMarginTop: 110 }}>

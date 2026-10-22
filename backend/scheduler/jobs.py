@@ -22,6 +22,7 @@ from services.db_handler import MongoService
 from crew_legacy.api.replacement import auto_accept_pending_duty_notifications
 from crew_legacy.api.morning_presentation import send_morning_presentation_reminders
 from crew_legacy.services.leave_reminder_service import scan_and_send_leave_approval_reminders
+from crew_legacy.services.replacement_roster_service import auto_allocate_d5_replacements
 
 scheduler = BackgroundScheduler()
 
@@ -159,6 +160,19 @@ scheduler.add_job(
     minute=0,
     timezone="Asia/Kolkata",
     id="leave_approval_twice_daily_reminders",
+    max_instances=1,
+    coalesce=True,
+    misfire_grace_time=3600,
+    replace_existing=True,
+)
+
+scheduler.add_job(
+    auto_allocate_d5_replacements,
+    trigger="cron",
+    hour=7,
+    minute=0,
+    timezone="Asia/Kolkata",
+    id="replacement_roster_d5_allocation",
     max_instances=1,
     coalesce=True,
     misfire_grace_time=3600,

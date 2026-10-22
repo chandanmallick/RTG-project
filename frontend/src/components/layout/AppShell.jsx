@@ -11,31 +11,40 @@ export default function AppShell({ children, viewportLocked = false }) {
       className="ui-kit-app"
       sx={{
         minHeight: viewportLocked ? 0 : "100vh",
-        height: viewportLocked ? "100dvh" : undefined,
+        height: viewportLocked ? "100%" : undefined,
+        maxHeight: viewportLocked ? "100%" : undefined,
+        flex: viewportLocked ? 1 : undefined,
         overflow: viewportLocked ? "hidden" : undefined,
         boxSizing: "border-box",
         backgroundColor: "var(--bg-surface)",
-        p: { xs: 1.25, md: 2.5 },
+        p: viewportLocked ? { xs: 1, md: 1.25 } : { xs: 1.25, md: 2.5 },
         position: "relative",
         display: "flex",
         flexDirection: "column",
-        gap: 2.5,
+        gap: viewportLocked ? 1.2 : 2.5,
       }}
     >
       <CrewTableTools />
       {/* Top Navigation Menu Bar */}
-      <TopNavbar />
-      {pathname.startsWith("/crew/") && <SpecialEventNotice />}
+      <Box sx={{ flexShrink: 0 }}>
+        <TopNavbar />
+      </Box>
+      {pathname.startsWith("/crew/") && (
+        <Box sx={{ flexShrink: 0 }}>
+          <SpecialEventNotice />
+        </Box>
+      )}
 
       {/* Main Content Area */}
       <Box
         sx={{
           display: "flex",
           flexDirection: "column",
-          gap: 2.5,
+          gap: viewportLocked ? 1.2 : 2.5,
           width: "100%",
           flex: viewportLocked ? 1 : undefined,
           minHeight: viewportLocked ? 0 : undefined,
+          height: viewportLocked ? "100%" : undefined,
           overflow: viewportLocked ? "hidden" : undefined,
         }}
       >

@@ -44,11 +44,14 @@ const categories = [
     track: [{ key: "sportsTracking", title: "Track sports", note: "Application status and history", icon: ClipboardList, to: "/crew/sports?section=approval" }],
     report: [{ key: "categoryReport", title: "Sports report", note: "Employee and event analysis", icon: BarChart3, to: "/crew/reports?kind=Sports" }],
   } },
-  { id: "exchange", title: "Duty exchange", subtitle: "One continuous exchange workflow", icon: ArrowLeftRight, color: "#0F766E", tint: "#F0FDFA", actions: {
-    prepare: [],
+  { id: "exchange", title: "Duty exchange & replacement", subtitle: "Sequential roster & exchange workflows", icon: ArrowLeftRight, color: "#0F766E", tint: "#F0FDFA", actions: {
+    prepare: [{ key: "replacementRoster", title: "Sequential Roster", note: "D-5 Auto allocation & pool", icon: Users, to: "/crew/replacement?tab=roster" }],
     request: [{ key: "requestExchange", title: "Request exchange", note: "Select employee and duties", icon: ArrowLeftRight, to: "/crew/replacement?section=duty&mode=exchange" }],
     decide: [{ key: "exchangeApproval", title: "Approve exchange", note: "Employee, SIC and DIC decisions", icon: CheckCircle2, to: "/crew/replacement?section=duty&focus=approvals" }],
-    cover: [{ key: "leaveReplacement", title: "All replacements", note: "Single replacement workspace", icon: Users, to: "/crew/replacement" }],
+    cover: [
+      { key: "leaveReplacement", title: "All replacements", note: "Single replacement workspace", icon: Users, to: "/crew/replacement" },
+      { key: "replacementRosterMatrix", title: "Duty Matrix", note: "Duty counts & reject audit", icon: BarChart3, to: "/crew/replacement?tab=roster" }
+    ],
     track: [{ key: "exchangeTracking", title: "Track exchange", note: "History and current stage", icon: ClipboardList, to: "/crew/replacement?section=duty&focus=history" }],
     report: [{ key: "categoryReport", title: "Duty report", note: "Replacement duty analysis", icon: BarChart3, to: "/crew/reports?kind=Replacement%20duty" }],
   } },
@@ -56,7 +59,7 @@ const categories = [
 
 const fallbackAccess = (item, actions) => actions[item.key]
   || (item.key === "trainingHistory" ? actions.trainingAssignment : undefined)
-  || (item.key === "categoryReport" ? { enabled: true, pending: 0 } : undefined);
+  || (item.key === "categoryReport" || item.key === "replacementRoster" || item.key === "replacementRosterMatrix" ? { enabled: true, pending: 0 } : undefined);
 
 function ActionCard({ item, stage, actions, onOpen, checking }) {
   const access = fallbackAccess(item, actions);

@@ -234,6 +234,14 @@ export default function App() {
           )}
         />
         <Route
+          path="/crew/replacement-roster"
+          element={(
+            <ProtectedRoute pageKey="crew_replacement" allowWorkflowAccess>
+              <CrewLegacyShell><CrewReplacement initialWorkflow="roster" /></CrewLegacyShell>
+            </ProtectedRoute>
+          )}
+        />
+        <Route
           path="/crew/training"
           element={(
             <ProtectedRoute pageKey="crew_training" allowWorkflowAccess>

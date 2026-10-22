@@ -28,7 +28,8 @@ DEFAULT_REPLACEMENT_BODY = (
     "Date / period: {date}\n"
     "In place of: {leave_person}\n"
     "Group: {group_name}\n\n"
-    "Please check the duty calendar for details."
+    "Please check the duty calendar for details.\n\n"
+    "{rejection_prompt}"
 )
 
 WORKFLOW_MAIL_DEFAULTS = {
@@ -407,6 +408,9 @@ def send_replacement_duty_email(to_list, values):
     try:
         subject = str(template["subjectTemplate"]).format_map(rendered_values)
         body = str(template["bodyTemplate"]).format_map(rendered_values)
+        rejection_prompt = (values or {}).get("rejection_prompt")
+        if rejection_prompt and rejection_prompt not in body:
+            body = f"{body.rstrip()}\n\n{rejection_prompt}"
     except (KeyError, ValueError):
         return {"status": "failed", "recipientCount": len(_clean_recipients(to_list)), "error": "Mail template is invalid"}
     return send_email(

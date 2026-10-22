@@ -98,11 +98,36 @@ export default function ProtectedRoute({ pageKey, children, allowWorkflowAccess 
       </Box>
     );
   }
-  if (availableToAllEmployees) return <Box className="permission-write">{children}</Box>;
+  if (availableToAllEmployees) return <Box className="permission-write" sx={{ height: "100%", minHeight: "100vh", display: "flex", flexDirection: "column" }}>{children}</Box>;
   return (
-    <Box className={access.write ? "permission-write" : "permission-read-only"}>
-      {!access.write && <Alert severity="info" sx={{ borderRadius: 0 }}>Read-only access: viewing and exports are available; data-changing actions are blocked.</Alert>}
-      {children}
+    <Box
+      className={access.write ? "permission-write" : "permission-read-only"}
+      sx={{
+        height: "100%",
+        minHeight: "100vh",
+        display: "flex",
+        flexDirection: "column",
+      }}
+    >
+      {!access.write && (
+        <Alert
+          severity="info"
+          sx={{
+            borderRadius: 0,
+            py: 0.4,
+            px: 2,
+            flexShrink: 0,
+            fontSize: "0.82rem",
+            "& .MuiAlert-message": { py: 0 },
+            "& .MuiAlert-icon": { py: 0, mr: 1 },
+          }}
+        >
+          Read-only access: viewing and exports are available; data-changing actions are blocked.
+        </Alert>
+      )}
+      <Box sx={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", overflow: "auto" }}>
+        {children}
+      </Box>
     </Box>
   );
 }

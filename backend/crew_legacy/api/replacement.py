@@ -1,4 +1,4 @@
-﻿from fastapi import APIRouter, HTTPException, Depends, Query
+from fastapi import APIRouter, HTTPException, Depends, Query
 from bson import ObjectId
 from crew_legacy.admin_logic.auth_utils import check_replacement_access, get_authenticated_user, get_current_user
 from datetime import datetime, timedelta, timezone
@@ -4174,3 +4174,79 @@ def deny_duty(id: str, payload: dict, user=Depends(get_current_user)):
         )
 
     return {"message": "Denied"}
+
+
+# -------------------------------------------------------------
+# Replacement Roster & Matrix Endpoints
+# -------------------------------------------------------------
+@router.get("/replacement/roster/config")
+def get_roster_config(user=Depends(get_current_user)):
+    from crew_legacy.services.replacement_roster_service import get_replacement_roster_config
+    return get_replacement_roster_config()
+
+
+@router.put("/replacement/roster/config")
+def update_roster_config(payload: dict, user=Depends(get_current_user)):
+    from crew_legacy.services.replacement_roster_service import save_replacement_roster_config
+    user_role = str(user.get("role") or "").lower()
+    actor_id = str(user.get("employeeId") or user.get("userId") or "")
+    if not (user.get("isAdmin") or user_role == "admin" or actor_id == "50041"):
+        raise HTTPException(403, "Only administrators can configure replacement rosters")
+    return save_replacement_roster_config(payload)
+
+
+@router.get("/replacement/roster/matrix")
+def get_roster_matrix(month: Optional[str] = Query(None), user=Depends(get_current_user)):
+    from crew_legacy.services.replacement_roster_service import get_employee_duty_matrix
+    return get_employee_duty_matrix(month=month)
+
+
+@router.post("/replacement/roster/auto-allocate")
+def trigger_auto_allocation(payload: dict = None, user=Depends(get_current_user)):
+    from crew_legacy.services.replacement_roster_service import auto_allocate_d5_replacements
+    payload = payload or {}
+    force = bool(payload.get("force", False))
+    test_mode = payload.get("test_mode")
+    return auto_allocate_d5_replacements(force=force, test_mode=test_mode)
+
+
+@router.get("/replacement/roster/can-reject/{leave_id}")
+def check_can_reject(leave_id: str, user=Depends(get_current_user)):
+    from crew_legacy.services.replacement_roster_service import can_reject_replacement
+    if not ObjectId.is_valid(leave_id):
+        raise HTTPException(400, "Invalid leave ID")
+    leave = leave_request_collection.find_one({"_id": ObjectId(leave_id)})
+    if not leave:
+        raise HTTPException(404, "Leave not found")
+    can_rej, role_title = can_reject_replacement(user, leave)
+    return {
+        "canReject": can_rej,
+        "roleTitle": role_title,
+        "leaveId": leave_id,
+        "replacement": leave.get("replacement"),
+        "employeeName": leave.get("employeeName"),
+        "date": leave.get("date"),
+        "assignedDuty": leave.get("assignedDuty"),
+    }
+
+
+@router.post("/replacement/roster/reject/{leave_id}")
+def reject_replacement_endpoint(leave_id: str, payload: dict, user=Depends(get_current_user)):
+    from crew_legacy.services.replacement_roster_service import reject_replacement_assignment
+    comment = str((payload or {}).get("comment") or (payload or {}).get("reason") or "").strip()
+    return reject_replacement_assignment(leave_id=leave_id, comment=comment, user=user)
+
+
+@router.post("/replacement/roster/long-duration-policy")
+def set_roster_long_duration_policy(payload: dict, user=Depends(get_current_user)):
+    from crew_legacy.services.replacement_roster_service import set_long_duration_policy
+    leave_group_id = str(payload.get("leaveGroupId") or "")
+    policy = str(payload.get("policy") or "sequential")
+    permanent_employee_id = payload.get("permanentEmployeeId")
+    if not leave_group_id:
+        raise HTTPException(400, "leaveGroupId is required")
+    return set_long_duration_policy(
+        leave_group_id=leave_group_id,
+        policy=policy,
+        permanent_employee_id=permanent_employee_id,
+    )

@@ -20,13 +20,16 @@ api.interceptors.request.use((config) => {
   const requestUrl = String(config.url || "");
   const isDutyDecision = (
     method === "PUT" && (
-      requestUrl.includes("/replacement/notifications/accept/") ||
-      requestUrl.includes("/replacement/notifications/deny/") ||
-      requestUrl.includes("/replacement/assign/") ||
-      requestUrl.includes("/replacement/duty-switch/exchange") ||
-      requestUrl.includes("/replacement/duty-switch/cross-date")
-    )
-  ) || (method === "DELETE" && requestUrl.includes("/replacement/assign/"));
+        requestUrl.includes("/replacement/notifications/accept/") ||
+        requestUrl.includes("/replacement/notifications/deny/") ||
+        requestUrl.includes("/replacement/assign/") ||
+        requestUrl.includes("/replacement/duty-switch/exchange") ||
+        requestUrl.includes("/replacement/duty-switch/cross-date") ||
+        requestUrl.includes("/replacement/roster/")
+      )
+    ) || (
+      method === "POST" && requestUrl.includes("/replacement/roster/")
+    ) || (method === "DELETE" && requestUrl.includes("/replacement/assign/"));
   // Training approval is a reporting-hierarchy workflow action, not a page edit.
   // The API verifies that the logged-in employee is the nomination's current
   // approver, so Crew Training Write access must not be required.
