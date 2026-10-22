@@ -38,6 +38,8 @@ import groupLeaveApplications from "../components/crew/groupLeaveApplications";
 import LeaveTracking from "../components/crew/LeaveTracking";
 import LeaveBlockedPeriods from "../components/crew/LeaveBlockedPeriods";
 import WorkflowHeader from "../components/crew/WorkflowHeader";
+import UrgencyChip, { computeUrgencyTag } from "../components/crew/UrgencyChip";
+import UrgencyPromptDialog from "../components/crew/UrgencyPromptDialog";
 
 const employeeIdOf = (employee) => String(employee?.employeeId || employee?.userId || "").trim();
 const statusColor = (status) => ({
@@ -151,7 +153,8 @@ export default function LeaveManagement({ embeddedApproval = false, embeddedAppl
   const [rejectComment, setRejectComment] = useState("");
   const [approveDialog, setApproveDialog] = useState({ open: false, stage: "sic", leaves: [] });
   const [approveComment, setApproveComment] = useState("");
-    const [activeSection] = useState(() => embeddedApplication ? "apply" : new URLSearchParams(window.location.search).get("section") || "apply");
+  const [urgencyPrompt, setUrgencyPrompt] = useState({ open: false, rows: [] });
+  const [activeSection] = useState(() => embeddedApplication ? "apply" : new URLSearchParams(window.location.search).get("section") || "apply");
   const [applyPopupOpen, setApplyPopupOpen] = useState(embeddedApplication);
   const [trackingPopupOpen, setTrackingPopupOpen] = useState(() => !embeddedApplication && !embeddedApproval && new URLSearchParams(window.location.search).get("section") === "tracking");
   const [approvedPopupOpen, setApprovedPopupOpen] = useState(false);
@@ -390,16 +393,7 @@ export default function LeaveManagement({ embeddedApproval = false, embeddedAppl
     updateRow(index, { leaveType: dragFill.current.leaveType, compOffId: "", selected: true });
   };
 
-  const submit = async () => {
-    const selectedRows = rows.filter((row) => row.selected);
-    if (!selectedRows.length) return setNotice({ severity: "warning", text: "Select at least one duty row." });
-    const invalidNonWorkingType = selectedRows.find((row) => row.stationLeaveOnlyAllowed && row.leaveType);
-    if (invalidNonWorkingType) return setNotice({ severity: "warning", text: `Remove the leave type from ${invalidNonWorkingType.date}; only Station Leave is allowed.` });
-    const missingType = selectedRows.find((row) => !row.stationLeaveOnlyAllowed && !row.leaveType);
-    if (missingType) return setNotice({ severity: "warning", text: `Select a leave type for working day ${missingType.date}.` });
-    const missingCompOff = selectedRows.find((row) => row.leaveType === "C-OFF" && !row.compOffId);
-    if (missingCompOff) return setNotice({ severity: "warning", text: `Select a C-OFF credit for ${missingCompOff.date}.` });
-    if (!reason.trim()) return setNotice({ severity: "warning", text: "Enter the reason for leave." });
+  const executeSubmit = async (selectedRows) => {
     setWorking(true);
     try {
       const { data } = await api.post("/leave/apply", {
@@ -411,6 +405,7 @@ export default function LeaveManagement({ embeddedApproval = false, embeddedAppl
       setRows([]);
       setReason("");
       setDateRange([]);
+      setUrgencyPrompt({ open: false, rows: [] });
       await loadLeaves();
       onApplicationChanged?.(data);
     } catch (error) {
@@ -418,6 +413,31 @@ export default function LeaveManagement({ embeddedApproval = false, embeddedAppl
     } finally {
       setWorking(false);
     }
+  };
+
+  const submit = async () => {
+    const selectedRows = rows.filter((row) => row.selected);
+    if (!selectedRows.length) return setNotice({ severity: "warning", text: "Select at least one duty row." });
+    const invalidNonWorkingType = selectedRows.find((row) => row.stationLeaveOnlyAllowed && row.leaveType);
+    if (invalidNonWorkingType) return setNotice({ severity: "warning", text: `Remove the leave type from ${invalidNonWorkingType.date}; only Station Leave is allowed.` });
+    const missingType = selectedRows.find((row) => !row.stationLeaveOnlyAllowed && !row.leaveType);
+    if (missingType) return setNotice({ severity: "warning", text: `Select a leave type for working day ${missingType.date}.` });
+    const missingCompOff = selectedRows.find((row) => row.leaveType === "C-OFF" && !row.compOffId);
+    if (missingCompOff) return setNotice({ severity: "warning", text: `Select a C-OFF credit for ${missingCompOff.date}.` });
+    if (!reason.trim()) return setNotice({ severity: "warning", text: "Enter the reason for leave." });
+
+    const today = dayjs().startOf("day");
+    const urgentOrEmergency = selectedRows.filter((r) => {
+      const tag = computeUrgencyTag(today, r.date);
+      return tag === "Urgent" || tag === "Emergency";
+    });
+
+    if (urgentOrEmergency.length > 0) {
+      setUrgencyPrompt({ open: true, rows: selectedRows });
+      return;
+    }
+
+    await executeSubmit(selectedRows);
   };
 
   const act = async (endpoint, payload, successText) => {
@@ -1114,6 +1134,7 @@ export default function LeaveManagement({ embeddedApproval = false, embeddedAppl
                         const timeline = leave ? (
                           <Box sx={{ p: .35 }}>
                             <Typography sx={{ fontSize: 11, fontWeight: 950 }}>{leave.name} · {stationLeaveLabel(leave)}</Typography>
+                            {leave.urgencyTag && <Typography sx={{ mt: .2, fontSize: 10, color: leave.urgencyTag === "Emergency" ? "#EF4444" : leave.urgencyTag === "Urgent" ? "#F59E0B" : "#10B981", fontWeight: 900 }}>Urgency: {leave.urgencyTag}</Typography>}
                             <Typography sx={{ mt: .45, fontSize: 10 }}>Applied: {leave.createdOn ? dayjs(leave.createdOn).format("DD MMM YYYY, HH:mm") : "Time not recorded"}</Typography>
                             {leave.approvalMode === "Organization" && <Typography sx={{ fontSize: 10 }}>Hierarchy: {(leave.approvalChain || []).map((step) => `${step.level}: ${step.status}`).join(" → ")} · {leave.approvalProgress}</Typography>}
                             <Typography sx={{ fontSize: 10, display: leave.approvalMode === "Organization" ? "none" : "block" }}>SIC: {sicForwarded ? "Approved & Forwarded" : leave.sicApprovalStatus || "Pending"}{sicDecision?.decidedOn ? ` · ${dayjs(sicDecision.decidedOn).format("DD MMM YYYY, HH:mm")}` : ""}</Typography>
@@ -1356,6 +1377,7 @@ export default function LeaveManagement({ embeddedApproval = false, embeddedAppl
                 <TableCell sx={{ fontWeight: 900 }}>Days</TableCell>
                 <TableCell sx={{ fontWeight: 900 }}>Group</TableCell>
                 <TableCell sx={{ fontWeight: 900 }}>Leave</TableCell>
+                <TableCell sx={{ fontWeight: 900 }}>Urgency</TableCell>
                 <TableCell sx={{ fontWeight: 900 }}>Other persons on leave</TableCell>
                 <TableCell sx={{ fontWeight: 900 }}>Approval progress</TableCell>
                 <TableCell sx={{ fontWeight: 900 }}>Final Status</TableCell>
@@ -1403,6 +1425,7 @@ export default function LeaveManagement({ embeddedApproval = false, embeddedAppl
                       <TableCell><Chip size="small" label={application.dayCount} sx={{ fontWeight: 900 }} /></TableCell>
                       <TableCell>{application.groupName}</TableCell>
                       <TableCell sx={{ fontWeight: 800 }}>{application.stationLeaveOnly ? "Station Leave" : `${application.leaveType || "-"}${application.stationLeave ? " + Station Leave" : ""}`}</TableCell>
+                      <TableCell><UrgencyChip value={application.urgencyTag || application.anchor?.urgencyTag} /></TableCell>
                       <TableCell sx={{ minWidth: 150 }}>{application.othersOnLeave.length ? <Typography sx={{ fontSize: 10.5, color: "#B45309", fontWeight: 800 }}>{application.othersOnLeave.join(", ")}</Typography> : <Typography sx={{ color: "#94A3B8", fontSize: 11 }}>None</Typography>}</TableCell>
                       <TableCell><Chip size="small" variant="outlined" label={compactApprovalProgress(application)} sx={{ maxWidth: 220, fontWeight: 850, color: "#334155", background: "#F8FAFC" }} /></TableCell>
                       <TableCell><StatusChip value={application.finalStatus} /></TableCell>
@@ -1424,6 +1447,7 @@ export default function LeaveManagement({ embeddedApproval = false, embeddedAppl
                         <TableCell />
                         <TableCell><Typography sx={{ fontSize: 10.5, color: "#64748B" }}>{leave.groupName}</Typography></TableCell>
                         <TableCell sx={{ fontSize: 11.5 }}>{stationLeaveLabel(leave)}</TableCell>
+                        <TableCell><UrgencyChip value={leave.urgencyTag} /></TableCell>
                         <TableCell><StatusChip value={leave.finalStatus} /></TableCell>
                         <TableCell><Typography sx={{ fontSize: 10.5, color: "#64748B" }}>{leave.approvalMode === "Organization" ? leave.currentApproverLevel || "Reporting Officer" : leave.canSICAct ? "SIC review" : "Final authority"}</Typography></TableCell>
                         <TableCell><StatusChip value={leave.canSICAct ? (leave.sicApprovalStatus || "Pending") : (leave.deptApprovalStatus || "Pending")} /></TableCell>
@@ -1451,7 +1475,7 @@ export default function LeaveManagement({ embeddedApproval = false, embeddedAppl
                   </Fragment>
                 );
               })}
-              {!pendingApplications.length && <TableRow><TableCell colSpan={10} align="center" sx={{ py: 4, color: "#94A3B8" }}>No leave is awaiting your approval.</TableCell></TableRow>}
+              {!pendingApplications.length && <TableRow><TableCell colSpan={11} align="center" sx={{ py: 4, color: "#94A3B8" }}>No leave is awaiting your approval.</TableCell></TableRow>}
             </TableBody>
           </Table>
         </TableContainer>
@@ -1501,6 +1525,7 @@ export default function LeaveManagement({ embeddedApproval = false, embeddedAppl
             <TableCell sx={{ fontWeight: 900 }}>Application dates</TableCell>
             <TableCell sx={{ fontWeight: 900 }}>Days</TableCell>
             <TableCell sx={{ fontWeight: 900 }}>Leave</TableCell>
+            <TableCell sx={{ fontWeight: 900 }}>Urgency</TableCell>
             <TableCell sx={{ fontWeight: 900 }}>Group</TableCell>
             <TableCell sx={{ fontWeight: 900 }}>Status</TableCell>
             <TableCell sx={{ fontWeight: 900 }}>Approval progress</TableCell>
@@ -1514,6 +1539,7 @@ export default function LeaveManagement({ embeddedApproval = false, embeddedAppl
               <TableCell sx={{ whiteSpace: "nowrap" }}>{application.dayCount > 1 ? `${dayjs(application.startDate).format("DD MMM YYYY")} → ${dayjs(application.endDate).format("DD MMM YYYY")}` : dayjs(application.startDate).format("DD MMM YYYY")}</TableCell>
               <TableCell><Chip size="small" label={application.dayCount} sx={{ fontWeight: 900 }} /></TableCell>
               <TableCell sx={{ fontWeight: 800 }}>{application.stationLeaveOnly ? "Station Leave" : `${application.leaveType || "-"}${application.stationLeave ? " + Station Leave" : ""}`}</TableCell>
+              <TableCell><UrgencyChip value={application.urgencyTag || application.anchor?.urgencyTag} /></TableCell>
               <TableCell>{application.groupName}</TableCell>
               <TableCell><StatusChip value={application.finalStatus} /></TableCell>
               <TableCell><Typography sx={{ fontSize: 11, color: "#64748B", fontWeight: 750 }}>{application.rows.map((row) => `${dayjs(row.date).format("DD MMM")}: ${row.finalStatus}`).join(" · ")}</Typography></TableCell>
@@ -1525,7 +1551,7 @@ export default function LeaveManagement({ embeddedApproval = false, embeddedAppl
               </TableCell>
             </TableRow>
           ))}
-          {!applications.length && <TableRow><TableCell colSpan={8} align="center" sx={{ py: 4, color: "#94A3B8" }}>No leave records</TableCell></TableRow>}
+          {!applications.length && <TableRow><TableCell colSpan={9} align="center" sx={{ py: 4, color: "#94A3B8" }}>No leave records</TableCell></TableRow>}
         </TableBody>
       </Table>
     </TableContainer>
@@ -1542,7 +1568,10 @@ export default function LeaveManagement({ embeddedApproval = false, embeddedAppl
                 <Typography noWrap sx={{ fontWeight: 950, fontSize: 13.5 }}>{application.name}</Typography>
                 <Typography noWrap sx={{ fontSize: 10.5, color: "#64748B" }}>{application.employeeId} · {application.groupName}</Typography>
               </Box>
-              <StatusChip value={application.finalStatus} />
+              <Stack direction="row" spacing={.6} alignItems="center">
+                <UrgencyChip value={application.urgencyTag || application.anchor?.urgencyTag} />
+                <StatusChip value={application.finalStatus} />
+              </Stack>
             </Stack>
             <Stack direction="row" spacing={.7} useFlexGap flexWrap="wrap">
               <Chip size="small" label={application.dayCount > 1 ? `${dayjs(application.startDate).format("DD MMM")} → ${dayjs(application.endDate).format("DD MMM YYYY")}` : dayjs(application.startDate).format("DD MMM YYYY")} sx={{ fontWeight: 800 }} />
@@ -1635,7 +1664,13 @@ export default function LeaveManagement({ embeddedApproval = false, embeddedAppl
           <TableHead><TableRow><TableCell padding="checkbox"><Checkbox checked={rows.some((row) => !row.stationLeaveOnlyAllowed) && rows.filter((row) => !row.stationLeaveOnlyAllowed).every((row) => row.selected)} indeterminate={rows.filter((row) => !row.stationLeaveOnlyAllowed).some((row) => row.selected) && !rows.filter((row) => !row.stationLeaveOnlyAllowed).every((row) => row.selected)} onChange={(event) => setRows((current) => current.map((row) => row.stationLeaveOnlyAllowed ? row : { ...row, selected: event.target.checked }))} /></TableCell><TableCell>Date</TableCell><TableCell>Duty</TableCell><TableCell>Group</TableCell><TableCell>Others on Leave</TableCell><TableCell sx={{ minWidth: 260 }}>Leave Type / C-OFF Credit</TableCell><TableCell sx={{ minWidth: 150 }}>Station Leave</TableCell><TableCell width={48}>Fill</TableCell></TableRow></TableHead>
           <TableBody>{rows.map((row, index) => { const nonShiftHoliday = row.isHoliday && !row.isShiftEmployee; return <TableRow key={row.date} hover onPointerEnter={() => continueFill(index)} title={row.isHoliday ? row.holidayName || "Holiday" : undefined} sx={{ background: nonShiftHoliday ? "#E9D5FF" : row.selected ? "#F8FBFF" : "#fff", boxShadow: row.isHoliday && !nonShiftHoliday ? "inset 4px 0 #A855F7" : undefined }}>
             <TableCell padding="checkbox"><Checkbox disabled={row.stationLeaveOnlyAllowed} checked={row.stationLeaveOnlyAllowed ? Boolean(row.stationLeave) : row.selected} onChange={(event) => updateRow(index, { selected: event.target.checked })} /></TableCell>
-            <TableCell sx={{ fontWeight: 850, whiteSpace: "nowrap", color: row.isHoliday ? "#6B21A8" : undefined }}>{dayjs(row.date).format("ddd, DD MMM YYYY")}{row.isHoliday && <Chip size="small" label={nonShiftHoliday ? "Holiday" : "H · duty continues"} sx={{ ml: .7, height: 19, background: "#F3E8FF", color: "#6B21A8", border: "1px solid #A855F7", fontSize: 8.5, fontWeight: 900 }} />}</TableCell><TableCell>{nonShiftHoliday ? "Holiday" : row.assignedDuty || "-"}</TableCell><TableCell>{row.groupName}</TableCell>
+            <TableCell sx={{ fontWeight: 850, whiteSpace: "nowrap", color: row.isHoliday ? "#6B21A8" : undefined }}>
+              <Stack direction="row" spacing={.7} alignItems="center">
+                <span>{dayjs(row.date).format("ddd, DD MMM YYYY")}</span>
+                <UrgencyChip value={computeUrgencyTag(dayjs(), row.date)} />
+                {row.isHoliday && <Chip size="small" label={nonShiftHoliday ? "Holiday" : "H · duty continues"} sx={{ height: 19, background: "#F3E8FF", color: "#6B21A8", border: "1px solid #A855F7", fontSize: 8.5, fontWeight: 900 }} />}
+              </Stack>
+            </TableCell><TableCell>{nonShiftHoliday ? "Holiday" : row.assignedDuty || "-"}</TableCell><TableCell>{row.groupName}</TableCell>
             <TableCell>{row.othersOnLeave?.length ? row.othersOnLeave.map((person) => <Chip key={person.employeeId} label={person.name} size="small" color="warning" variant="outlined" sx={{ mr: .5 }} />) : "-"}</TableCell>
             <TableCell><Stack spacing={.8}>{row.stationLeaveOnlyAllowed ? <TextField size="small" fullWidth disabled value="No leave required" helperText="Station Leave only" /> : <FormControl size="small" fullWidth><InputLabel>Leave type</InputLabel><Select value={row.leaveType} label="Leave type" onChange={(event) => setLeaveType(index, event.target.value)}>{leaveTypes.map((type) => <MenuItem key={type.value} value={type.value}>{type.label}</MenuItem>)}</Select></FormControl>}{row.leaveType === "C-OFF" && !row.stationLeaveOnlyAllowed && <FormControl size="small" fullWidth><InputLabel>C-OFF credit</InputLabel><Select value={row.compOffId} label="C-OFF credit" onChange={(event) => updateRow(index, { compOffId: event.target.value })}>{compOffs.filter((credit) => !usedCompOffIds.includes(credit.id) || credit.id === row.compOffId).map((credit) => <MenuItem key={credit.id} value={credit.id}>{dayjs(credit.earnedDate).format("DD MMM YYYY")} · expires {dayjs(credit.expiryDate).format("DD MMM YYYY")}</MenuItem>)}</Select></FormControl>}</Stack></TableCell>
             <TableCell><FormControlLabel control={<Checkbox checked={Boolean(row.stationLeave)} onChange={(event) => { const checked = event.target.checked; updateRow(index, { stationLeave: checked, ...(row.stationLeaveOnlyAllowed ? { selected: checked, leaveType: "", compOffId: "" } : {}) }); }} />} label={row.stationLeaveOnlyAllowed ? "Required" : ""} sx={{ m: 0, "& .MuiFormControlLabel-label": { fontSize: 11, fontWeight: 800, color: "#B45309" } }} /></TableCell>
@@ -1645,6 +1680,15 @@ export default function LeaveManagement({ embeddedApproval = false, embeddedAppl
         <TextField fullWidth multiline minRows={2} label="Reason" value={reason} onChange={(event) => setReason(event.target.value)} sx={{ mt: 2 }} />
         <Box sx={{ display: "flex", justifyContent: "flex-end", mt: 1.5 }}><Button variant="contained" startIcon={<Send size={16} />} onClick={submit} disabled={working}>Submit for approval</Button></Box>
       </Paper>}
+      <UrgencyPromptDialog
+        open={urgencyPrompt.open}
+        onClose={() => setUrgencyPrompt({ open: false, rows: [] })}
+        onConfirm={() => executeSubmit(urgencyPrompt.rows)}
+        rows={urgencyPrompt.rows}
+        reason={reason}
+        employeeName={selectedEmployee?.name || employeeIdOf(selectedEmployee)}
+        submitting={working}
+      />
     </Box>
   );
 

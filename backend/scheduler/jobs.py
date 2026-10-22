@@ -21,6 +21,7 @@ from services.psp_service import PSPService
 from services.db_handler import MongoService
 from crew_legacy.api.replacement import auto_accept_pending_duty_notifications
 from crew_legacy.api.morning_presentation import send_morning_presentation_reminders
+from crew_legacy.services.leave_reminder_service import scan_and_send_leave_approval_reminders
 
 scheduler = BackgroundScheduler()
 
@@ -148,6 +149,19 @@ scheduler.add_job(
     max_instances=1,
     coalesce=True,
     misfire_grace_time=1800,
+    replace_existing=True,
+)
+
+scheduler.add_job(
+    scan_and_send_leave_approval_reminders,
+    trigger="cron",
+    hour="9,16",
+    minute=0,
+    timezone="Asia/Kolkata",
+    id="leave_approval_twice_daily_reminders",
+    max_instances=1,
+    coalesce=True,
+    misfire_grace_time=3600,
     replace_existing=True,
 )
 

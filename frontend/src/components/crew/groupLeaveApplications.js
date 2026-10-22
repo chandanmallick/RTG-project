@@ -57,6 +57,7 @@ export default function groupLeaveApplications(leaves = []) {
         endDate: sorted[sorted.length - 1].date,
         dayCount: sorted.length,
         finalStatus: overallStatus,
+        urgencyTag: anchor.urgencyTag || sorted.find((r) => r.urgencyTag)?.urgencyTag,
         canSICAct: sorted.some((row) => row.canSICAct),
         canFinalAct: sorted.some((row) => row.canFinalAct),
         canCancel: sorted.some((row) => row.canCancel),

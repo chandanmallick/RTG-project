@@ -4,6 +4,7 @@ import { Alert, Box, Button, Checkbox, Chip, Dialog, DialogActions, DialogConten
 import LeaveProgress from "./LeaveProgress";
 import LeavePeriodEditor from "./LeavePeriodEditor";
 import LeaveDelete from "./LeaveDelete";
+import UrgencyChip from "./UrgencyChip";
 
 const when = value => value ? new Date(value).toLocaleString() : "";
 const activeStatuses = ["Applied", "Forwarded", "Forwarded by SIC", "Approved"];
@@ -62,7 +63,14 @@ export default function LeaveTracking({ leave, onCancel, onCancelGroup, busy, gr
     <Dialog open={open} onClose={() => setOpen(false)} fullWidth maxWidth="md" slotProps={{ paper: { sx: { borderRadius: 5, overflow: "hidden", boxShadow: "0 24px 80px #32305730" } } }}>
       <DialogTitle sx={{ bgcolor: "#F0EDFF", p: 3, color: "#343055", fontWeight: 850 }}>Leave tracking<Typography variant="body2" color="text.secondary">{leave.name} ({leave.employeeId}) · {leave.date}</Typography></DialogTitle>
       <DialogContent dividers><Stack sx={{ gap: 2 }}>
-        <Box><Chip label={leave.finalStatus || "Applied"} /><Typography sx={{ mt: 1 }}>{leave.leaveType || "Station leave"}</Typography>{leave.reason && <Typography color="text.secondary">{leave.reason}</Typography>}</Box>
+        <Box>
+          <Stack direction="row" spacing={1} alignItems="center">
+            <Chip label={leave.finalStatus || "Applied"} />
+            <UrgencyChip value={leave.urgencyTag} />
+          </Stack>
+          <Typography sx={{ mt: 1 }}>{leave.leaveType || "Station leave"}</Typography>
+          {leave.reason && <Typography color="text.secondary">{leave.reason}</Typography>}
+        </Box>
         {!selectedDatesOnly && onReapply && leave.isOwner && applicationRows.some(row => row.finalStatus === "Approved") && <Alert severity="info">To change an approved period, cancel the dates you no longer need and apply for revised dates. The new dates require approval.</Alert>}
         {leave.createdOn && <Typography variant="body2">Submitted {when(leave.createdOn)}</Typography>}
         <Box sx={{ p: 2.5, bgcolor: "#F7F7FE", borderRadius: 4 }}><LeaveProgress leave={leave} /></Box>

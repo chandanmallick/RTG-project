@@ -847,6 +847,46 @@ def leave_authority_id(leave: dict) -> str:
     return next(iter(leave_authority_ids(leave)), "")
 
 
+def compute_urgency_tag(application_date, leave_date) -> str:
+    """
+    Computes urgency tag based on advance notice:
+    > 7 days prior -> "Planned"
+    2 to 7 days prior -> "Urgent"
+    < 2 days prior (or same-day/back-dated) -> "Emergency"
+    """
+    try:
+        if isinstance(application_date, datetime):
+            app_date = application_date.date()
+        elif isinstance(application_date, date):
+            app_date = application_date
+        elif isinstance(application_date, str):
+            app_date = datetime.strptime(str(application_date)[:10], "%Y-%m-%d").date()
+        else:
+            app_date = datetime.now().date()
+    except Exception:
+        app_date = datetime.now().date()
+
+    try:
+        if isinstance(leave_date, datetime):
+            lv_date = leave_date.date()
+        elif isinstance(leave_date, date):
+            lv_date = leave_date
+        elif isinstance(leave_date, str):
+            lv_date = datetime.strptime(str(leave_date)[:10], "%Y-%m-%d").date()
+        else:
+            return "Urgent"
+    except Exception:
+        return "Urgent"
+
+    diff_days = (lv_date - app_date).days
+    if diff_days > 7:
+        return "Planned"
+    elif diff_days >= 2:
+        return "Urgent"
+    else:
+        return "Emergency"
+
+
 def can_apply_for(user: dict, employee_id: str, date_str: str = None) -> bool:
     actor = clean_id(user.get("employeeId"))
     target = clean_id(employee_id)
@@ -1604,6 +1644,7 @@ def apply_leave(data: dict, user=Depends(get_authenticated_user)):
             "replacement": None,
 
             "compOffId": comp_off_id if leave_type == "C-OFF" else None,
+            "urgencyTag": compute_urgency_tag(datetime.utcnow().date(), date_str),
 
             "createdOn": datetime.utcnow()
         }).inserted_id
@@ -1809,6 +1850,7 @@ def edit_leave_period(leave_id: str, data: dict, user=Depends(get_authenticated_
                 "editedBy": employee_id, "editedOn": now, "previousDates": sorted(old_by_date),
                 "newDates": sorted(entry["date"] for entry in prepared), "previousReason": reference.get("reason"),
             }]
+            document["urgencyTag"] = compute_urgency_tag(now, item["date"])
             if original:
                 row_id = original["_id"]
                 leave_request_collection.update_one({"_id": row_id, "editToken": token}, {"$set": document})
@@ -2065,6 +2107,7 @@ def apply_leave_v2(data: dict, user=Depends(get_authenticated_user)):
             "replacement": None,
             "compOffId": item["compOffId"] if item["leaveType"].upper() == "C-OFF" else None,
             "createdBy": clean_id(user.get("employeeId")),
+            "urgencyTag": compute_urgency_tag(datetime.utcnow().date(), item["date"]),
             "createdOn": datetime.utcnow(),
         }
         leave_id = leave_request_collection.insert_one(document).inserted_id
@@ -2117,19 +2160,23 @@ def apply_leave_v2(data: dict, user=Depends(get_authenticated_user)):
         if approval_chain:
             notified_reporting_officers.update(step_approver_ids(approval_chain[0]))
 
+    tags = [compute_urgency_tag(datetime.utcnow().date(), item["date"]) for item in prepared]
+    highest_tag = "Emergency" if "Emergency" in tags else ("Urgent" if "Urgent" in tags else "Planned")
+
     # Application-stage notification is intentionally limited to the SIC(s)
     # responsible for the affected shift group.
     notified_sics.discard(employee_id)
     if notified_sics:
         groups = ", ".join(sorted({item["groupName"] for item in prepared if item.get("groupName")})) or "Not mapped"
         date_text = leave_date_summary(prepared)
+        subject_prefix = f"[{highest_tag.upper()}] " if highest_tag != "Planned" else ""
         notify_all(
             email_list=recipient_emails(sorted(notified_sics)),
             employee_ids=sorted(notified_sics),
-            subject="Leave application for SIC review",
+            subject=f"{subject_prefix}Leave application for SIC review - {employee.get('name')}",
             message=(
                 f"{employee.get('name')} ({employee_id}) applied for "
-                f"{len(inserted_ids)} leave day(s): {date_text}. Group: {groups}."
+                f"{len(inserted_ids)} leave day(s): {date_text}. Urgency: {highest_tag}. Group: {groups}."
             ),
             ref_id=leave_group_id,
             action="VIEW_LEAVE",
@@ -2147,11 +2194,12 @@ def apply_leave_v2(data: dict, user=Depends(get_authenticated_user)):
     notified_reporting_officers.discard(employee_id)
     if notified_reporting_officers:
         date_text = leave_date_summary(prepared)
+        subject_prefix = f"[{highest_tag.upper()}] " if highest_tag != "Planned" else ""
         notify_all(
             email_list=recipient_emails(sorted(notified_reporting_officers)),
             employee_ids=sorted(notified_reporting_officers),
-            subject="Leave application for Reporting Officer approval",
-            message=f"{employee.get('name')} ({employee_id}) applied for {len(inserted_ids)} leave day(s): {date_text}.",
+            subject=f"{subject_prefix}Leave application for Reporting Officer approval - {employee.get('name')}",
+            message=f"{employee.get('name')} ({employee_id}) applied for {len(inserted_ids)} leave day(s): {date_text}. Urgency: {highest_tag}.",
             ref_id=leave_group_id, action="VIEW_LEAVE", type="LEAVE",
             template_key="leave_reporting_applied",
             template_values={
@@ -2162,7 +2210,11 @@ def apply_leave_v2(data: dict, user=Depends(get_authenticated_user)):
         )
 
     route_label = "Shift-in-Charge" if notified_sics else "Reporting Officer"
-    return {"message": f"Leave application submitted to the {route_label}", "leaveRecords": inserted_ids}
+    return {
+        "message": f"{highest_tag} leave application submitted to the {route_label}",
+        "urgencyTag": highest_tag,
+        "leaveRecords": inserted_ids,
+    }
 
 # =========================================================
 # GET ALL LEAVES
@@ -2193,7 +2245,8 @@ def get_all_leave(fromDate: str = Query(...), toDate: str = Query(...), user=Dep
             "leaveType": r.get("leaveType"),
             "stationLeave": bool(r.get("stationLeave")),
             "stationLeaveOnly": bool(r.get("stationLeaveOnly")),
-            "finalStatus": r.get("finalStatus")
+            "finalStatus": r.get("finalStatus"),
+            "urgencyTag": r.get("urgencyTag") or compute_urgency_tag(r.get("createdOn"), r.get("date")),
         })
 
     return result
@@ -2950,6 +3003,7 @@ def get_leave_list(
             "rejectedOn": r.get("rejectedOn"),
             "reason": r.get("reason"),
             "compOffId": r.get("compOffId"),
+            "urgencyTag": r.get("urgencyTag") or compute_urgency_tag(r.get("createdOn") or (r.get("_id").generation_time if r.get("_id") else None), r.get("date")),
             "createdOn": r.get("createdOn"),
             "cancellationHistory": r.get("cancellationHistory") or [],
             "cancelledBy": r.get("cancelledBy"),
@@ -3787,3 +3841,70 @@ def withdraw_leave(leave_id: str, user=Depends(get_authenticated_user)):
     restore_comp_off(leave)
 
     return {"message": "Leave withdrawn successfully"}
+
+
+# =========================================================
+# LEAVE APPROVAL REMINDERS
+# =========================================================
+
+@router.get("/reminders/pending")
+def get_pending_reminders(user=Depends(get_authenticated_user)):
+    """Inspect leave requests pending approval for 6+ days along with target approvers."""
+    from crew_legacy.services.leave_reminder_service import PENDING_STATUSES, get_pending_approver_details, resolve_employee_emails
+    from zoneinfo import ZoneInfo
+    kolkata_tz = ZoneInfo("Asia/Kolkata")
+    today_date = datetime.now(kolkata_tz).date()
+
+    records = list(leave_request_collection.find({"finalStatus": {"$in": PENDING_STATUSES}}))
+    items = []
+    for leave in records:
+        created_on = leave.get("createdOn")
+        if isinstance(created_on, datetime):
+            app_date = created_on.date()
+        elif isinstance(created_on, str):
+            try:
+                app_date = datetime.fromisoformat(created_on.replace("Z", "+00:00")).date()
+            except Exception:
+                app_date = datetime.strptime(created_on[:10], "%Y-%m-%d").date()
+        elif leave.get("_id"):
+            app_date = leave["_id"].generation_time.date()
+        else:
+            app_date = today_date
+
+        days_pending = (today_date - app_date).days
+        approver_ids, stage_label = get_pending_approver_details(leave)
+        recipient_mails = resolve_employee_emails(approver_ids)
+        items.append({
+            "id": str(leave["_id"]),
+            "leaveGroupId": leave.get("leaveGroupId"),
+            "employeeId": leave.get("employeeId"),
+            "name": leave.get("name"),
+            "date": leave.get("date"),
+            "leaveType": leave.get("leaveType"),
+            "urgencyTag": leave.get("urgencyTag") or compute_urgency_tag(app_date, leave.get("date")),
+            "finalStatus": leave.get("finalStatus"),
+            "appliedDate": app_date.strftime("%Y-%m-%d"),
+            "daysPending": days_pending,
+            "isEligibleForReminder": days_pending >= 6,
+            "stage": stage_label,
+            "approverIds": approver_ids,
+            "approverEmails": recipient_mails,
+            "lastReminderSentAt": leave.get("lastReminderSentAt"),
+            "reminderCount": leave.get("reminderCount", 0),
+        })
+    items.sort(key=lambda x: x["daysPending"], reverse=True)
+    return {
+        "totalPending": len(items),
+        "eligible6DaysOrMore": sum(1 for item in items if item["isEligibleForReminder"]),
+        "records": items,
+    }
+
+
+@router.post("/reminders/trigger")
+def trigger_leave_reminders(force: bool = False, user=Depends(get_authenticated_user)):
+    """Manually trigger the twice-daily reminder scan (admin only)."""
+    if not is_admin(user):
+        raise HTTPException(403, "Administrator access required to trigger reminders")
+    from crew_legacy.services.leave_reminder_service import scan_and_send_leave_approval_reminders
+    return scan_and_send_leave_approval_reminders(force=force)
+

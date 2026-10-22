@@ -144,6 +144,24 @@ WORKFLOW_MAIL_DEFAULTS = {
             "Location: {training_location}\nApproved OFF: {adjacent_off}"
         ),
     },
+    "leave_approval_reminder": {
+        "label": "Leave approval pending reminder",
+        "enabled": True,
+        "subjectTemplate": "Reminder: Leave Approval Pending ({urgency_tag}) - {employee_name}",
+        "bodyTemplate": (
+            "Dear Sir/Madam,\n\n"
+            "This is a reminder that the following leave application has been pending approval for {pending_days} day(s):\n\n"
+            "Employee: {employee_name} ({employee_id})\n"
+            "Leave Date: {leave_date}\n"
+            "Leave Type: {leave_type}\n"
+            "Urgency Tag: {urgency_tag}\n"
+            "Current Stage: {approval_stage}\n"
+            "Status: {final_status}\n"
+            "Applied On: {applied_date}\n"
+            "Reason: {reason}\n\n"
+            "Please review and take appropriate action on the duty calendar/portal."
+        ),
+    },
 }
 
 
