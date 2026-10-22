@@ -39,30 +39,70 @@ def _purge():
         if now-session['accessed']>TTL:_sessions.pop(token,None)
 
 
-def _put(user, dataset, metadata):
-    size=memory(dataset)
-    if size>MAX_MEMORY:raise HTTPException(413,'Parsed data exceeds the temporary-session memory limit. Use a shorter base period.')
+def _put(user, dataset, metadata, raw_bytes=None, od_frequency=None):
+    size = memory(dataset)
+    if size > MAX_MEMORY:
+        raise HTTPException(413, 'Parsed data exceeds the temporary-session memory limit. Use a shorter base period.')
     with _lock:
         _purge()
-        while _sessions and (len(_sessions)>=MAX_SESSIONS or sum(s['bytes']+s.get('result_bytes',0) for s in _sessions.values())+size>MAX_MEMORY):
+        while _sessions and (len(_sessions) >= MAX_SESSIONS or sum(s['bytes'] + s.get('result_bytes', 0) for s in _sessions.values()) + size > MAX_MEMORY):
             _sessions.popitem(last=False)
-        token=secrets.token_urlsafe(32)
-        _sessions[token]={'owner':owner(user),'dataset':dataset,'metadata':metadata,'accessed':time.monotonic(),'bytes':size,'results':OrderedDict(),'result_bytes':0,'messages':None,'lock':RLock()}
-    return {**metadata,'session_token':token,'expires_after_seconds':TTL,'storage':'temporary process memory; raw MongoDB persistence disabled'}
+        token = secrets.token_urlsafe(32)
+        _sessions[token] = {
+            'owner': owner(user),
+            'dataset': dataset,
+            'metadata': metadata,
+            'raw_bytes': raw_bytes,
+            'od_frequency': od_frequency,
+            'accessed': time.monotonic(),
+            'bytes': size,
+            'results': OrderedDict(),
+            'result_bytes': 0,
+            'messages': None,
+            'lock': RLock(),
+        }
+    return {
+        **metadata,
+        'session_token': token,
+        'has_od_frequency': bool(od_frequency and od_frequency.get('plots_base64')),
+        'od_period': od_frequency.get('period') if od_frequency else None,
+        'expires_after_seconds': TTL,
+        'storage': 'temporary process memory; raw MongoDB persistence disabled',
+    }
 
 
-def get_session(token,user):
+def get_session(token, user):
     with _lock:
-        _purge();session=_sessions.get(token)
-        if not session or session['owner']!=owner(user):raise HTTPException(404,'Analysis session expired or unavailable. Upload/select the source again.')
-        session['accessed']=time.monotonic();_sessions.move_to_end(token)
+        _purge()
+        session = _sessions.get(token)
+        if not session or session['owner'] != owner(user):
+            raise HTTPException(404, 'Analysis session expired or unavailable. Upload/select the source again.')
+        session['accessed'] = time.monotonic()
+        _sessions.move_to_end(token)
         return session
 
 
-def release_session(token,user):
-    get_session(token,user)
-    with _lock:_sessions.pop(token,None)
-    return {'success':True}
+def get_od_frequency(token, user, dpi=400):
+    session = get_session(token, user)
+    cached = session.get('od_frequency')
+    if cached and (dpi <= 150 or cached.get('dpi') == dpi):
+        return cached
+    if session.get('raw_bytes'):
+        from services.od_frequency_report import generate_od_frequency_plots
+        out_dir = Path('.runtime') / 'od_frequency' / token
+        out_dir.mkdir(parents=True, exist_ok=True)
+        res = generate_od_frequency_plots(session['raw_bytes'], output_dir=out_dir, dpi=dpi)
+        res['dpi'] = dpi
+        session['od_frequency'] = res
+        return res
+    return cached
+
+
+def release_session(token, user):
+    get_session(token, user)
+    with _lock:
+        _sessions.pop(token, None)
+    return {'success': True}
 
 
 def upload_session(contents,name,user,db=None):
@@ -101,9 +141,27 @@ def upload_session(contents,name,user,db=None):
     excluded=[entity['display_name'] for entity in entities if entity['group'] not in GROUPS]
     if excluded:warnings.append('State-sector or unclassified generators excluded from State drawal / ISGS / IPP: '+', '.join(excluded))
     dataset={'times':times,'frequency':freq,'cadence':cadence,'entities':entities,'warnings':warnings}
-    metadata={'success':True,'filename':Path(name).name,'row_count':len(frame),'file_bytes':len(contents),'parsed_array_bytes':memory(dataset),'sampling_seconds':cadence,
-        'start_time':iso(times[0]),'end_time':iso(times[-1]+cadence),'entity_counts':{group:sum(entity['group']==group for entity in entities) for group in GROUPS},'warnings':warnings}
-    return _put(user,dataset,metadata)
+    metadata = {
+        'success': True,
+        'filename': Path(name).name,
+        'row_count': len(frame),
+        'file_bytes': len(contents),
+        'parsed_array_bytes': memory(dataset),
+        'sampling_seconds': cadence,
+        'start_time': iso(times[0]),
+        'end_time': iso(times[-1] + cadence),
+        'entity_counts': {group: sum(entity['group'] == group for entity in entities) for group in GROUPS},
+        'warnings': warnings,
+    }
+    od_frequency = None
+    try:
+        from services.od_frequency_report import generate_od_frequency_plots
+        od_frequency = generate_od_frequency_plots(contents, dpi=300)
+    except Exception as exc:
+        warnings.append(f"State Overdrawal vs Frequency plots: {exc}")
+    return _put(user, dataset, metadata, raw_bytes=contents, od_frequency=od_frequency)
+
+
 
 
 def session_from_temp(file_id,user):
@@ -200,10 +258,26 @@ def analyse(token,user,ranges,db=None,event_type='low'):
 
 
 def compact(token,session,result):
-    return {'success':True,'session_token':token,'result_token':result['result_token'],'event_type':result.get('event_type','low'),'summary':result['summary'],'overall_performance':result['overall_performance'],
-        'chronology_count':len(result['chronology']),'messages_complete':result['messages_complete'],'warnings':result['warnings'],'ranges':result['ranges'],'event_windows':result['event_windows'],
-        'calculation_note':result['calculation_note'],'states':[{'entity_id':e['entity_id'],'entity':e['display_name']} for e in session['dataset']['entities'] if e['group']=='State'],
-        'source':session['metadata']}
+    od_frequency = session.get('od_frequency')
+    return {
+        'success': True,
+        'session_token': token,
+        'result_token': result['result_token'],
+        'event_type': result.get('event_type', 'low'),
+        'summary': result['summary'],
+        'overall_performance': result['overall_performance'],
+        'chronology_count': len(result['chronology']),
+        'messages_complete': result['messages_complete'],
+        'warnings': result['warnings'],
+        'ranges': result['ranges'],
+        'event_windows': result['event_windows'],
+        'calculation_note': result['calculation_note'],
+        'states': [{'entity_id': e['entity_id'], 'entity': e['display_name']} for e in session['dataset']['entities'] if e['group'] == 'State'],
+        'source': session['metadata'],
+        'has_od_frequency': bool(od_frequency and (od_frequency.get('plots_base64') or od_frequency.get('plots'))),
+        'od_period': od_frequency.get('period') if od_frequency else None,
+    }
+
 
 
 def get_result(token,result_token,user):

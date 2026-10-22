@@ -1119,7 +1119,13 @@ const API = {
   getFrequencyAnalysisTable: async (payload) => (await axios.post(`${BASE_URL}/frequency/analysis/table`, payload)).data,
   getFrequencyAnalysisChart: async (payload) => (await axios.post(`${BASE_URL}/frequency/analysis/chart`, payload)).data,
   exportFrequencyAnalysis: async (payload) => (await axios.post(`${BASE_URL}/frequency/analysis/export`, payload, { responseType: payload.format === "html" ? "json" : "blob" })).data,
+  getOdFrequencyPlots: async (sessionToken) => (await axios.get(`${BASE_URL}/frequency/analysis/od-frequency/${encodeURIComponent(sessionToken)}`)).data,
+  downloadOdFrequencyStatistics: async (sessionToken) => (await axios.get(`${BASE_URL}/frequency/analysis/od-frequency-download/${encodeURIComponent(sessionToken)}/statistics`, { responseType: "blob" })).data,
+  downloadOdFrequencyPlot: async (sessionToken, state) => (await axios.get(`${BASE_URL}/frequency/analysis/od-frequency-download/${encodeURIComponent(sessionToken)}/plot/${encodeURIComponent(state)}`, { responseType: "blob" })).data,
+  getFrequencyEventTables: async (payload) => (await axios.post(`${BASE_URL}/frequency/analysis/event-tables`, payload)).data,
+  downloadFrequencyEventTablesExcel: async (payload) => (await axios.post(`${BASE_URL}/frequency/analysis/event-tables/excel`, payload, { responseType: "blob" })).data,
   releaseFrequencyAnalysis: async (token) => (await axios.delete(`${BASE_URL}/frequency/analysis/session/${encodeURIComponent(token)}`)).data,
+
 
   getSavedFrequencyAnalysis: async (eventIds, refresh = false) => (
     await axios.post(`${BASE_URL}/frequency/events/report-analysis`, { event_ids: eventIds, refresh })

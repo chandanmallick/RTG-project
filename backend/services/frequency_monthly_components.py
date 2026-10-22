@@ -260,9 +260,25 @@ def build_low_blocks(session,result,payload):
     heading('3  Frequency Duration Curve');blocks.append(duration_curve(model))
     heading('4  Time-of-Day Frequency Heatmap');blocks.append(time_of_day_heatmap(model))
     heading('5  State Performance');text(notes.state_observations)
+    od_frequency = session.get('od_frequency')
+    if not od_frequency and session.get('raw_bytes'):
+        from services.od_frequency_report import generate_od_frequency_plots
+        try:
+            od_frequency = generate_od_frequency_plots(session['raw_bytes'], dpi=300)
+            session['od_frequency'] = od_frequency
+        except Exception as exc:
+            print(f"Error generating OD frequency plots for monthly report: {exc}")
+    if od_frequency and od_frequency.get('plots_bytes'):
+        period = od_frequency.get('period') or 'September–October 2026'
+        heading(f'State-wise Overdrawal vs Frequency Analysis ({period})')
+        text('Scatter analysis of positive Actual - Schedule deviations (Overdrawal for states, Under-injection for DVC) versus Frequency (Hz). Color-coded by frequency bands (<49.50 Hz red, 49.50–<49.70 Hz orange, 49.70–<49.90 Hz purple, ≥49.90 Hz green) with cumulative threshold statistics.')
+        for state, png_bytes in od_frequency['plots_bytes'].items():
+            measure = 'Under-injection' if state == 'DVC' else 'Overdrawal'
+            blocks.append(('image', (f"{state} — {period}: Frequency vs {measure}", png_bytes)))
     blocks.append(state_comparison(model))
     for slot in model['slot_rows']:blocks.append(performance_table(model,'State',slot))
     heading('6  State Heatmaps');blocks.append(state_heatmap(model,'maximum'));blocks.append(state_heatmap(model,'duration'))
+
     heading('7  Generator Performance');text(notes.generator_observations)
     text('ISGS and IPP generators with observed under-injection only. State-sector generators and State IPPs are excluded. MW remains signed Actual minus Schedule; generator UI is negative.')
     for slot in model['slot_rows']:blocks.append(performance_table(model,'Generators',slot))

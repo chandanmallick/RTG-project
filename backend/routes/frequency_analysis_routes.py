@@ -157,6 +157,131 @@ async def release(token:str,user=Depends(get_authenticated_user)):
     return await checked(sessions.release_session,token,user)
 
 
+@router.get('/od-frequency/{token}')
+async def get_od_frequency(token: str, user=Depends(get_authenticated_user)):
+    def fetch():
+        res = sessions.get_od_frequency(token, user, dpi=300)
+        if not res:
+            raise HTTPException(404, "State Overdrawal vs Frequency plots are not available for this session.")
+        return {
+            'success': True,
+            'period': res.get('period'),
+            'plots_base64': res.get('plots_base64', {}),
+            'state_stats': res.get('state_stats', {}),
+            'statistics_rows': res.get('statistics_rows', []),
+            'states': list(res.get('plots_base64', {}).keys())
+        }
+    return await checked(fetch)
+
+
+@router.get('/od-frequency-download/{token}/statistics')
+async def download_od_statistics(token: str, user=Depends(get_authenticated_user)):
+    import io
+    def fetch():
+        res = sessions.get_od_frequency(token, user, dpi=400)
+        if not res or not res.get('statistics_bytes'):
+            raise HTTPException(404, "OD Frequency statistics are not available.")
+        return StreamingResponse(
+            io.BytesIO(res['statistics_bytes']),
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": 'attachment; filename="OD_Frequency_Statistics.xlsx"'}
+        )
+    return await checked(fetch)
+
+
+@router.get('/od-frequency-download/{token}/plot/{state}')
+async def download_od_plot(token: str, state: str, user=Depends(get_authenticated_user)):
+    import io
+    from services.od_frequency_report import _safe_name
+    def fetch():
+        res = sessions.get_od_frequency(token, user, dpi=400)
+        if not res or not res.get('plots_bytes') or state not in res['plots_bytes']:
+            raise HTTPException(404, f"OD Frequency plot for {state} is not available.")
+        raw = res['plots_bytes'][state]
+        return StreamingResponse(
+            io.BytesIO(raw),
+            media_type="image/png",
+            headers={"Content-Disposition": f'attachment; filename="{_safe_name(state)}_OD_Frequency.png"'}
+        )
+    return await checked(fetch)
+
+
+class EventTablesPayload(BaseModel):
+    session_token: str
+    result_token: Optional[str] = None
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
+    thresholds: List[float] = Field(default_factory=lambda: [49.5])
+    constituents: List[str] = Field(default_factory=lambda: ["Bihar", "Jharkhand", "Odisha", "West Bengal", "DVC"])
+
+
+def _get_session_source(payload: EventTablesPayload, user):
+    try:
+        session = sessions.get_session(payload.session_token, user)
+    except Exception:
+        if payload.result_token:
+            session, _ = sessions.get_result(payload.session_token, payload.result_token, user)
+        else:
+            raise
+    raw_source = session.get('raw_bytes')
+    if raw_source:
+        return raw_source
+    dataset = session.get('dataset', {})
+    times = dataset.get('times', [])
+    if not times:
+        raise ValueError("No 1-minute frequency data available for the selected period.")
+    import pandas as pd
+    df = pd.DataFrame({
+        'DATETIME_PARSED': pd.to_datetime(times, unit='s'),
+        'FREQUENCY': dataset.get('frequency', [])
+    })
+    for entity in dataset.get('entities', []):
+        name = entity.get('display_name', '')
+        if 'actual' in entity:
+            df[f"{name.upper()} ACTUAL"] = entity['actual']
+        if 'schedule' in entity:
+            df[f"{name.upper()} SCHEDULE"] = entity['schedule']
+    return df
+
+
+@router.post('/event-tables')
+async def get_event_tables(payload: EventTablesPayload, user=Depends(get_authenticated_user)):
+    def compute():
+        from services.frequency_event_tables import generate_frequency_event_tables
+        source = _get_session_source(payload, user)
+        return generate_frequency_event_tables(
+            source=source,
+            start_date=payload.start_date,
+            end_date=payload.end_date,
+            thresholds=payload.thresholds,
+            constituents=payload.constituents
+        )
+    return await checked(compute)
+
+
+@router.post('/event-tables/excel')
+async def download_event_tables_excel(payload: EventTablesPayload, user=Depends(get_authenticated_user)):
+    import io
+    def generate():
+        from services.frequency_event_tables import generate_frequency_event_tables, generate_event_tables_excel
+        source = _get_session_source(payload, user)
+        tables_res = generate_frequency_event_tables(
+            source=source,
+            start_date=payload.start_date,
+            end_date=payload.end_date,
+            thresholds=payload.thresholds,
+            constituents=payload.constituents
+        )
+        excel_bytes = generate_event_tables_excel(tables_res)
+        return StreamingResponse(
+            io.BytesIO(excel_bytes),
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": 'attachment; filename="Frequency_Event_Tables.xlsx"'}
+        )
+    return await checked(generate)
+
+
+
 @router.post('/run')
 async def run(payload:RunPayload,user=Depends(get_authenticated_user)):
     def analyse():

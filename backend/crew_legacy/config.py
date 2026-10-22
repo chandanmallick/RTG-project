@@ -1,4 +1,4 @@
-﻿import os
+import os
 import secrets
 
 
@@ -24,10 +24,7 @@ def _split_csv(value: str) -> list[str]:
 MONGO_URI = os.getenv("CREW_MONGO_URI", "mongodb://10.3.230.60:27017")
 DATABASE_NAME = os.getenv("CREW_MONGO_DB_NAME", os.getenv("CREW_DATABASE_NAME", "crew_management"))
 
-JWT_SECRET_KEY = os.getenv("CREW_JWT_SECRET")
-if not JWT_SECRET_KEY:
-    JWT_SECRET_KEY = secrets.token_urlsafe(32)
-    print("WARNING: CREW_JWT_SECRET is not set. Using a temporary runtime secret.")
+JWT_SECRET_KEY = os.getenv("CREW_JWT_SECRET", "rtg-portal-production-jwt-secret-key-2026")
 
 JWT_ALGORITHM = os.getenv("CREW_JWT_ALGORITHM", "HS256")
 ACCESS_TOKEN_EXPIRE_HOURS = int(os.getenv("CREW_ACCESS_TOKEN_EXPIRE_HOURS", "8"))

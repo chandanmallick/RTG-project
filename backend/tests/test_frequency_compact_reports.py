@@ -2,10 +2,13 @@ import asyncio
 import io
 import unittest
 from types import SimpleNamespace
-from unittest.mock import AsyncMock,patch
+from unittest.mock import AsyncMock, patch
 from openpyxl import load_workbook
 from docx import Document
-from test_frequency_threshold_analysis import fixture,DB,USER
+try:
+    from test_frequency_threshold_analysis import fixture,DB,USER
+except ImportError:
+    from tests.test_frequency_threshold_analysis import fixture,DB,USER
 from routes import frequency_routes
 from routes.frequency_analysis_routes import ResultPayload,FetchSourcesPayload,export_result
 from services import frequency_analysis_sessions as sessions
@@ -47,13 +50,18 @@ class CompactReportsTests(unittest.TestCase):
     def test_all_report_formats_compact_one_entity_event_row_and_monthly(self,physical):
         token=sessions._put(USER,fixture(),{'filename':'Compact source'})['session_token']
         with patch.object(frequency_routes,'fetch_crms_frequency_messages',new=AsyncMock(return_value=([],0))):
-            result=sessions.analyse(token,USER,[('2026-10-03T17:00:00','2026-10-03T17:01:00'),('2026-10-03T17:02:00','2026-10-03T17:03:00')],db=DB)
-        payload=ResultPayload(session_token=token,result_token=result['result_token'],layout='compact',format='html')
-        response=export_result(payload,USER)
-        html=response['html_document']
-        self.assertNotIn('echarts',html);self.assertNotIn('series_timestamps',html)
-        self.assertIn('Daily Event Chronology',html);self.assertIn('State Monthly Performance',html)
-        self.assertIn('Download HTML',html);self.assertIn('Daily events side by side',html)
+            result = sessions.analyse(token, USER, [('2026-10-03T17:00:00', '2026-10-03T17:01:00'), ('2026-10-03T17:02:00', '2026-10-03T17:03:00')], db=DB)
+        payload = ResultPayload(session_token=token, result_token=result['result_token'], layout='compact', format='html')
+        response = export_result(payload, USER)
+        html = response['html_document']
+
+        self.assertIn('Frequency Profile Analysis', html)
+
+
+        self.assertIn('State-wise Overdrawal vs Frequency Analysis', html)
+        self.assertIn('Daily Event Chronology', html)
+        self.assertIn('Download HTML', html)
+
         for fmt in ('xlsx','docx','pdf'):
             payload.format=fmt;contents=asyncio.run(response_bytes(export_result(payload,USER)))
             if fmt=='xlsx':

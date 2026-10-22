@@ -144,6 +144,33 @@ def build_blocks(session,result,payload):
             v=s.get('thresholds',{}).get(level,{});r[level]=f"{number(v.get('frequency_minutes'))} min ({number(v.get('day_time_pct'))}%)"
         day_rows.append(r)
     table('Day-wise frequency statistics',[('date','Date'),('minimum','Minimum Hz'),('at','At IST'),('coverage','Covered min'),*[(k,k+' Hz min (%)') for k in full['thresholds']]],day_rows)
+    if not high:
+        try:
+            from services.frequency_event_tables import generate_frequency_event_tables
+            raw_source = session.get('raw_bytes')
+            if raw_source:
+                tables_res = generate_frequency_event_tables(raw_source, start_date=first, end_date=last, thresholds=[49.5])
+                for tbl in tables_res.get('tables', []):
+                    cols = [('sr_no', 'Sr. No'), ('date', 'Date'), ('window', 'Window (IST)'), ('duration', tbl['threshold_col_name']), ('lowest', 'Lowest Hz'), ('at', 'At IST')]
+                    for c in tbl['constituents']:
+                        cols.extend([(f'{c}_max_od', f'{c}\nMax OD'), (f'{c}_avg_dev', f'{c}\nAvg Dev')])
+                    t_rows = []
+                    for r in tbl.get('rows', []):
+                        rec = {
+                            'sr_no': r['sr_no'],
+                            'date': r['date'],
+                            'window': r['window_hrs'],
+                            'duration': r['duration_min'],
+                            'lowest': f"{r['lowest_freq']:.3f}",
+                            'at': r['lowest_at_time'],
+                        }
+                        for c in tbl['constituents']:
+                            rec[f'{c}_max_od'] = str(r['constituents_data'].get(c, {}).get('max_od', '–'))
+                            rec[f'{c}_avg_dev'] = str(r['constituents_data'].get(c, {}).get('avg_dev', '–'))
+                        t_rows.append(rec)
+                    table(tbl['title'], cols, t_rows, wide=True)
+        except Exception as exc:
+            print(f"Monthly report event tables note: {exc}")
     heat=[]
     for d in daily_full:
         try:idx,left,right=segments(dataset,merge_ranges(d['ranges']))
