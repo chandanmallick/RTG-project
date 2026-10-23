@@ -128,6 +128,7 @@ def upload_session(contents,name,user,db=None):
     db=db or MongoService()
     mappings=list(db.map_collection.find({}, {'_id':0}))
     points=[];deviations=[];source_values=[];warnings=[]
+    missing_schedule=[]
     for mapping in mappings:
         if mapping.get('is_frequency') or str(mapping.get('plant_id'))=='SYSTEM_FREQUENCY':continue
         columns=match_scada_columns([mapping],headers,keys).get(mapping.get('plant_id'),{})
@@ -139,9 +140,13 @@ def upload_session(contents,name,user,db=None):
         actual,schedule=numeric(actual_col),numeric(schedule_col)
         deviation=actual-schedule
         source_values.append((actual,schedule))
-        if schedule_col is None:warnings.append(f"{mapping.get('plant_name') or mapping.get('plant_id')}: no separate schedule column; OD/UI remains unavailable.")
+        if schedule_col is None:
+            missing_schedule.append(mapping.get('plant_name') or mapping.get('STAGE_NAME') or str(mapping.get('plant_id')))
         points.append({**mapping,'stage_id':mapping.get('STAGE_ID') or '', 'stage_name':mapping.get('STAGE_NAME') or '', 'type':'State' if mapping.get('is_state') else (mapping.get('type') if str(mapping.get('type')).upper() in {'ISGS','IPP'} else 'Generator'),'plant_name':mapping.get('plant_name') or mapping.get('STAGE_NAME') or str(mapping.get('plant_id'))})
         deviations.append(deviation)
+    if missing_schedule:
+        uniq_missing = list(dict.fromkeys(missing_schedule))
+        warnings.append(f"{len(uniq_missing)} generating station(s) without separate schedule column (OD/UI unavailable): {', '.join(uniq_missing)}")
     entities=event_entities(db,{'data_points':points})
     for entity,deviation,(actual,schedule) in zip(entities,deviations,source_values):entity.update(deviation=deviation,actual=actual,schedule=schedule)
     if not any(entity['group'] in GROUPS for entity in entities):raise ValueError('No State/ISGS/IPP actual columns match the existing plant mapping.')

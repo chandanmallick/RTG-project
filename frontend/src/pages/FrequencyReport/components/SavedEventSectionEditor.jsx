@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Alert, Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, TextField, Typography } from '@mui/material';
 import ThresholdPerformanceTable, { frequencyValue, overdrawalValue } from './ThresholdPerformanceTable';
+import OptimizedWarnings from './OptimizedWarnings';
 
 const stamp = value => String(value || '').replace('T', ' ');
 const display = value => value == null ? 'Data not available' : value;
@@ -49,7 +50,7 @@ export default function SavedEventSectionEditor({ event, source, selection, sect
   return <>
     <Typography component="h1" sx={{ color: '#17365D', fontSize: 21, fontWeight: 850, mt: 2 }}>{source?.context?.title || event.event_name}</Typography>
     <Typography sx={{ color: '#475569', my: 1 }}>{stamp(event.start_time)} to {stamp(event.end_time)} IST</Typography>
-    {(event.warnings || []).map((warning, index) => <Alert severity="warning" key={index} sx={{ my: 1 }}>{warning}</Alert>)}
+    <OptimizedWarnings warnings={event.warnings} />
     {section('summary', '1 Executive Summary & General Notes', <>
       <DataTable headers={['Reporting Period (IST)', 'Duration below 49.9 Hz (Min)', 'Minimum Frequency (Hz)', 'Minimum Frequency at (IST)']} rows={[[`${stamp(event.start_time)} to ${stamp(event.end_time)}`, summary.thresholds?.['49.90']?.frequency_minutes, frequencyValue(summary.minimum_frequency), stamp(summary.minimum_timestamp)]]} />
       <DataTable headers={messageCategories} rows={[counts]} />

@@ -871,9 +871,9 @@ Acting SIC can be assigned separately from replacement coverage on the Replaceme
 
 The monthly low-frequency Word/PDF generator applies `Observation.docx` presentation rules through `frequency_monthly_components.py`, `frequency_monthly_data.py`, `frequency_monthly_report.py` and `monthly_display` in `frequency_report_formatting.py`. Dates display DD-MMM-YY HH:MM, months MMM-YYYY, and minutes without decimals; threshold duration cells show OD/UI minutes (%). ER is excluded from report entities and chronology. Only actual selected event slots and populated daily slot ranges are emitted. Automatic validation, generated coverage notes and UFR output are omitted. Frequency overview charts use severity bands, selected-event shading and an overview strip; state event comparisons use signed deviation, frequency, over-drawal/helping-grid fills and message/physical-action markers. Heatmaps use contrast-aware labels; occurrence plots highlight the top three nonzero hours by percentage. Raw arrays and threshold calculations are unchanged. September report regeneration requires the original source analysis session/data; the supplied DOCX is a visual reference, not a source time-series dataset.
 
-### State Overdrawal vs Frequency Scatter Plots and Continuous Visualizer
+### State Overdrawal vs Frequency Scatter Plots, Continuous Visualizer, and HTML Report Restructuring
 
-The OD vs Frequency analysis module (`backend/services/od_frequency_report.py`, `backend/services/frequency_analysis_sessions.py`, `backend/services/frequency_compact_reports.py`, `backend/services/frequency_monthly_components.py`, `frontend/src/pages/FrequencyReport/components/StateOverdrawalPanel.jsx`) supports arbitrary uploaded SCADA/WBES dataset periods:
+The OD vs Frequency analysis module (`backend/services/od_frequency_report.py`, `backend/services/frequency_analysis_sessions.py`, `backend/services/frequency_compact_reports.py`, `backend/services/frequency_curves_service.py`, `frontend/src/pages/FrequencyReport/components/StateOverdrawalPanel.jsx`, `frontend/src/pages/FrequencyReport/components/FrequencyAnalysisResults.jsx`) supports arbitrary uploaded SCADA/WBES dataset periods:
 - **Dataset for Any Uploaded Period:** The scatter plots and statistics operate dynamically over any uploaded dataset period (e.g. single day, weekly span, single month such as `September 2026`, multi-month such as `September–October 2026`, or arbitrary date ranges like `15-Oct-2026 to 22-Oct-2026`). Period labels are auto-detected via `format_period_label` and `detect_period_from_dataframe` using the dataset timestamps or session metadata, without hardcoded dates or assumptions.
 - **Data Filtering & Integrity:**
   - Row 2 containing meter codes/metadata is automatically skipped; data processing begins from Row 3 onwards.
@@ -881,16 +881,51 @@ The OD vs Frequency analysis module (`backend/services/od_frequency_report.py`, 
   - Safe numeric conversion handles blanks, non-numeric strings, and NaN values gracefully.
   - Frequency is validated within the permissible range of 45.0–51.0 Hz.
   - `Deviation = Actual - Schedule`. Only strictly positive deviations (> 0 MW; Overdrawal for states, Under-injection for DVC) are plotted.
-- **Plot Styling & Standards:**
+- **Plot Styling & Deduplication:**
   - 4 frequency bands: `<49.50 Hz` (Red `#D7191C`), `49.50–<49.70 Hz` (Orange `#F07800`), `49.70–<49.90 Hz` (Purple `#7B2CBF`), and `≥49.90 Hz` (Green `#159447`).
   - Fixed horizontal axis limits from 49.3 to 50.5 Hz with 0.1 Hz major tick gridlines for cross-state comparison consistency.
   - Embedded tabular summary below each scatter chart detailing total valid 1-minute blocks below each threshold (<49.50, <49.70, <49.90 Hz), positive deviation count and percentage, and peak OD/UI MW.
+  - **No Duplicate Tables:** The redundant secondary HTML table below the scatter image in both the React frontend and standalone HTML report was eliminated, preserving only the high-resolution table embedded directly inside the matplotlib chart along with clean zoom/download controls.
   - Full export suite: individual high-resolution PNGs (400 DPI), comprehensive multi-state Excel workbook (`OD_Frequency_Statistics.xlsx`), and complete ZIP archive (`OD_Frequency_Plots.zip`).
-- **Continuous 3-Panel Visualizer:**
-  - Panel 1 (Top): Drawal (MW) with black step line (`#0F172A`) for Schedule and coral line (`#DC2626`) for Actual drawal.
-  - Panel 2 (Middle): Deviation (MW) with zero baseline, red fill for Overdrawal (`#EF4444`), blue fill for Underdrawal (`#3B82F6`), superimposed with CRMS violation speech-bubble markers and physical regulatory transmission line outage tower markers with full interactive tooltips.
-  - Panel 3 (Bottom): Frequency (Hz) curve (`#2563EB`), IEGC reference lines (50.05 Hz, 49.90 Hz, 49.50 Hz), and red area shading for dips below 49.90 Hz.
+- **Continuous 3-Panel Visualizer (Inbuilt Palette Harmonization):**
+  - Panel 1 (Top): Drawal (MW) with Indigo step line (`#4F46E5`) for Schedule and Emerald line (`#059669`) for Actual drawal.
+  - Panel 2 (Middle): Deviation (MW) with Emerald line (`#059669`) and Primary Navy (`#17365D`) zero baseline, Adverse gold/amber fill (`rgba(234, 179, 8, 0.38)`, outline `#D97706`) for Overdrawal, Helping Grid cyan fill (`rgba(6, 182, 212, 0.35)`, outline `#0284C7`) for Underdrawal, superimposed with CRMS violation speech-bubble markers and physical regulatory transmission line outage tower markers with full interactive tooltips.
+  - Panel 3 (Bottom): Frequency (Hz) curve in Violet (`#7C3AED`) matching the frequency axis, IEGC reference lines (50.05 Hz dotted amber, 50.00 Hz dotted slate, 49.90 Hz dashed red, 49.50 Hz dashed dark red), and area shading for dips below 49.90 Hz.
   - Vertical shading bands across all three panels for intervals where $f \le 49.90$ Hz.
   - Dynamic footnote calculating: `Shaded = f ≤ 49.90 Hz. Over drawing at f ≤ 49.90 Hz: X of Y min; max over drawal at f ≤ 49.90 Hz: Z MW`.
   - 2-day default window, scrollable slider, Frequency Overview & Event Selection chip bar, and visible window PNG download. Confined strictly to HTML report and web UI (excluded from PDF/Word).
+- **Standalone HTML Report Restructuring:**
+  - **Collapsible Sections:** All 6 major sections (1. Frequency Profile Analysis, 2. Frequency Analysis Curves, 3. State Scatter, 4. Event Overdrawal Plots, 5. Event Chronology & Messages, 6. Performance Tables) are collapsible via `<details class="report-section report-section-collapsible" open>` with `<summary class="section-summary-header">` and rotating indicator chevrons (`▼` / `▶`), accompanied by top navigation global `▼ Expand All` and `▶ Collapse All` buttons. Action buttons inside headers use stop-propagation to avoid accidental toggling.
+  - **Publication Frequency Curves Integration:** Section 2 embeds the 3 ERLDC publication-quality frequency analysis curves (Graph 1: Daily Minimum Frequency + Low-Frequency Duration, Graph 2: Frequency Duration Curve FDC with IEGC band markers, and Graph 3: Average Daily 24-hr Diurnal Profile with middle 80% range [10th–90th percentile]), with high-resolution modal enlargement, individual PNG downloads, and a full `.zip` bundle export.
+- **Section 3.2 Discrete Event Detail Plots & Regulatory Breakup (Interactive Slotting & Auto-Detection):**
+  - **⚡ Auto Detect Workflow:** Automatically identifies critical low-frequency grid events across the 1-minute time series according to the strict rule:
+    - Continuous frequency $F < 49.90$ Hz for **more than 15 minutes** (`duration > 15 min`), OR
+    - Continuous frequency $F < 49.50$ Hz for **more than 5 minutes** (`duration > 5 min`).
+    - Automatically slices data, calculates peak OD MW, OD at lowest frequency, CRMS violation notices, and transmission line physical regulations for each constituent State (West Bengal, Bihar, DVC, Jharkhand, Odisha, Sikkim). If no event meets the threshold in smaller datasets, gracefully defaults to the top deepest/longest dips so the section remains populated.
+  - **📋 Select from Frequency Dips ("I will select the event") Workflow:**
+    - Provides a full-featured modal dialog listing every low-frequency dip below 49.90 Hz detected across the uploaded dataset.
+    - Displays Event #, Date, Time Window (Start – End IST), Duration (minutes), Minimum Frequency reached (Hz), Duration below 49.50 Hz, and Auto-Qualification badge.
+    - Features quick-action buttons: "Select Auto-Qualified", "Select All", "Clear All", and "Apply Selection (N Events)".
+  - **➕ Slot Manually Workflow:**
+    - Dedicated modal dialog enabling users to specify custom time slots with Date (picked from dataset unique dates), Start Time (`HH:MM`), End Time (`HH:MM`), and custom Event Label.
+    - Supports multiple custom slots, input validation, individual slot deletion, and instant application.
+  - **Client-Side Reactivity & Offline HTML Report Parity:**
+    - Pure client-side data slicing and re-rendering in the React web UI (`StateOverdrawalPanel.jsx`) with 15-minute padding context and immediate recalculation of all statistic cards.
+    - Identical client-side interactive toolbar, modals, and dynamic ECharts slicing implemented in the exported standalone offline HTML report (`frequency_compact_reports.py`).
+- **Terminology Refinement ("Blocks" renamed to "Minutes"):**
+  - Updated all State Overdrawal vs Frequency scatter plot tables and statistics in `od_frequency_report.py`:
+    - Column 2: `Total Duration (Minutes)` (previously `Total No. of 1-min Blocks`).
+    - Column 3: `Overdrawal Time (Minutes and %)` / `Under-injection Time (Minutes and %)` (previously `Time Blocks (No. and %)`).
+    - Dataframe exports and statistics records now maintain duration-in-minutes as first-class metrics alongside legacy block aliases for seamless backward-compatibility.
+- **Executive Visual Optimization & Warning De-cluttering (World-Class UI):**
+  - **Eliminated Repetitive Warning Spam:** Replaced the cascading vertical stack of 15–20 full-width yellow warning alerts (`{station}: no separate schedule column; OD/UI remains unavailable`) with the compact, executive `OptimizedWarnings` component in `FrequencyAnalysisResults.jsx`, `LongPeriodAnalysis.jsx`, and `SavedEventSectionEditor.jsx`.
+  - **Single Slim Notification Bar:** Displays a subtle, lucrative 36px amber bar summarizing total data notes (e.g., `8 generating stations without separate schedule column · State-sector units classified`) with a clean `[View Details ▾]` toggle.
+  - **Expandable Clean Chips Tray:** When expanded, stations are organized into compact chips (`#FEF3C7` background, `#92400E` text) inside a scrollable container rather than dominating screen real estate.
+  - **De-duplication:** Suppressed duplicate warning displays between parent `LongPeriodAnalysis` and child `FrequencyAnalysisResults` once analysis results are generated.
+  - **Lucrative & Compact HTML Report:**
+    - Compact section padding (`16px 20px`), reduced margins, and refined typography with Inter/system font stack.
+    - High-density styled tables (`padding: 4px 8px; font-size: 11px;`) with sticky executive navy headers (`#17365D`).
+    - Balanced continuous chart height (`560px`) preventing bulky vertical stretching.
+    - Top navigation bar styled with sleek modern dark gradient (`linear-gradient(135deg, #0F172A 0%, #17365D 55%, #1E3A8A 100%)`).
+    - Integrated compact collapsible warning banner within the offline HTML report.
 

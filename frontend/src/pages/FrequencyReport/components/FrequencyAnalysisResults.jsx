@@ -8,6 +8,7 @@ import FrequencyPeriodStatistics from "./FrequencyPeriodStatistics";
 import FrequencyEventTables from "./FrequencyEventTables";
 import FrequencyCurvesPanel from "./FrequencyCurvesPanel";
 import StateOverdrawalPanel from "./StateOverdrawalPanel";
+import OptimizedWarnings from "./OptimizedWarnings";
 const GROUPS = ["State", "ISGS", "IPP"];
 const reportMonth = month => /^\d{4}-\d{2}$/.test(month || "") ? `${["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][Number(month.slice(5))-1]}-${month.slice(0,4)}` : "";
 const stamp = text => String(text || "").replace("T", " ");
@@ -98,9 +99,64 @@ export default function FrequencyAnalysisResults({ result, saveBlob, onHtmlRepor
   return <Paper elevation={0} sx={{ p: 2, border: "1px solid #BFE2D9", borderRadius: 3, mt: 2 }}>
     <Typography sx={{ fontSize: 19, fontWeight: 900, color: "#0F2F4F" }}>{high ? "High" : "Low"} frequency performance</Typography>
     <Typography sx={{ fontSize: 12, color: "#64748B", mb: 1 }}>{stamp(summary.analysis_start)} to {stamp(summary.analysis_end)} IST · {(result.event_windows || result.ranges).length} selected event period(s)</Typography>
-    <Stack direction="row" flexWrap="wrap" useFlexGap spacing={2} sx={{ my: 1 }}>{[["Selected duration", `${metricValue(summary.selected_minutes)} min`], ["Covered frequency", `${metricValue(summary.covered_frequency_minutes)} min`], ["Minimum frequency", `${frequencyValue(summary.minimum_frequency)} Hz`], ["Minimum at", stamp(summary.minimum_timestamp)], ["Average frequency", `${frequencyValue(summary.average_frequency)} Hz`], [high ? "High-frequency events" : "Low-frequency events", high ? summary.high_frequency_events : summary.low_frequency_events]].map(([label, value]) => <Box key={label} sx={{ p: 1, border: "1px solid #DCE9E5", bgcolor: "#F8FAFC", borderRadius: 1 }}><Typography sx={{ fontSize: 10, color: "#64748B" }}>{label}</Typography><Typography sx={{ fontSize: 13, fontWeight: 800 }}>{value}</Typography></Box>)}</Stack>
-    <TableContainer><Table size="small"><TableHead><TableRow>{["Nested threshold", "Frequency minutes", "Occurrences", "Longest continuous (min)", "Lowest Hz"].map(label => <TableCell key={label} sx={{ fontWeight: 850 }}>{label}</TableCell>)}</TableRow></TableHead><TableBody>{levels.map(level => <TableRow key={level}><TableCell>{high ? ">" : "<"}{level} Hz</TableCell>{["frequency_minutes", "occurrences", "longest_minutes", "lowest_frequency"].map(key => <TableCell key={key}>{key === "lowest_frequency" ? frequencyValue(summary.thresholds[level][key]) : metricValue(summary.thresholds[level][key])}</TableCell>)}</TableRow>)}</TableBody></Table></TableContainer>
-    {result.warnings.map((warning, index) => <Alert key={index} severity="warning" sx={{ mt: 1 }}>{warning}</Alert>)}
+    <Stack direction="row" flexWrap="wrap" useFlexGap spacing={1.5} sx={{ my: 1.5 }}>
+      {[
+        ["Selected duration", `${metricValue(summary.selected_minutes)} min`],
+        ["Covered frequency", `${metricValue(summary.covered_frequency_minutes)} min`],
+        ["Minimum frequency", `${frequencyValue(summary.minimum_frequency)} Hz`],
+        ["Minimum at", stamp(summary.minimum_timestamp)],
+        ["Average frequency", `${frequencyValue(summary.average_frequency)} Hz`],
+        [high ? "High-frequency events" : "Low-frequency events", high ? summary.high_frequency_events : summary.low_frequency_events],
+      ].map(([label, value]) => (
+        <Box
+          key={label}
+          sx={{
+            px: 1.5,
+            py: 1,
+            border: "1px solid #CBD5E1",
+            bgcolor: "#FFFFFF",
+            borderRadius: 2,
+            boxShadow: "0 1px 3px rgba(15,23,42,0.04)",
+            minWidth: 140,
+          }}
+        >
+          <Typography sx={{ fontSize: 10.5, fontWeight: 700, color: "#64748B", textTransform: "uppercase", letterSpacing: 0.3 }}>
+            {label}
+          </Typography>
+          <Typography sx={{ fontSize: 14, fontWeight: 850, color: "#0F2F4F", mt: 0.2 }}>
+            {value}
+          </Typography>
+        </Box>
+      ))}
+    </Stack>
+    <TableContainer sx={{ borderRadius: 1.5, border: "1px solid #CBD5E1", overflow: "hidden", mb: 1 }}>
+      <Table size="small">
+        <TableHead>
+          <TableRow sx={{ bgcolor: "#17365D" }}>
+            {["Nested threshold", "Frequency minutes", "Occurrences", "Longest continuous (min)", "Lowest Hz"].map(label => (
+              <TableCell key={label} sx={{ fontWeight: 800, color: "#FFFFFF", fontSize: 11.5, py: 1 }}>
+                {label}
+              </TableCell>
+            ))}
+          </TableRow>
+        </TableHead>
+        <TableBody>
+          {levels.map((level, idx) => (
+            <TableRow key={level} sx={{ bgcolor: idx % 2 === 1 ? "#F8FAFC" : "#FFFFFF" }}>
+              <TableCell sx={{ fontWeight: 700, fontSize: 11.5 }}>
+                {high ? ">" : "<"}{level} Hz
+              </TableCell>
+              {["frequency_minutes", "occurrences", "longest_minutes", "lowest_frequency"].map(key => (
+                <TableCell key={key} sx={{ fontSize: 11.5, fontWeight: key === "lowest_frequency" ? 800 : 500, color: key === "lowest_frequency" ? "#DC2626" : "inherit" }}>
+                  {key === "lowest_frequency" ? frequencyValue(summary.thresholds[level][key]) : metricValue(summary.thresholds[level][key])}
+                </TableCell>
+              ))}
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </TableContainer>
+    <OptimizedWarnings warnings={result.warnings} />
     {error && <Alert severity="error" sx={{ mt: 1 }}>{error}</Alert>}
     <Typography sx={{ fontSize: 11, color: "#64748B", my: 1 }}>{result.calculation_note}</Typography>
     <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>{[["include_chronology", "Chronology"], ["include_entity_performance", "Entity Performance"]].map(([key, label]) => <FormControlLabel key={key} control={<Checkbox size="small" checked={sections[key]} disabled={exporting} onChange={event => setSections(current => ({ ...current, [key]: event.target.checked }))} />} label={label} />)}{GROUPS.map(item => <FormControlLabel key={item} control={<Checkbox size="small" checked={sections.performance_groups.includes(item)} disabled={exporting || !sections.include_entity_performance} onChange={() => setSections(current => ({ ...current, performance_groups: current.performance_groups.includes(item) ? current.performance_groups.filter(group => group !== item) : [...current.performance_groups, item] }))} />} label={item} />)}</Stack>
@@ -175,29 +231,6 @@ export default function FrequencyAnalysisResults({ result, saveBlob, onHtmlRepor
                 sx={{ width: "100%", borderRadius: 1, border: "1px solid #E2E8F0", cursor: "zoom-in" }}
                 title="Click to enlarge plot"
               />
-              {!!odData?.state_stats?.[stateName]?.length && (
-                <TableContainer sx={{ mt: 1 }}>
-                  <Table size="small">
-                    <TableHead>
-                      <TableRow sx={{ bgcolor: "#17365D" }}>
-                        {["Frequency Threshold", "Total 1-min Blocks", `${stateName === "DVC" ? "Under-injection" : "Overdrawal"} Blocks (No. & %)`, `Maximum ${stateName === "DVC" ? "Under-injection" : "Overdrawal"}`].map(h => (
-                          <TableCell key={h} sx={{ color: "white", fontWeight: 800, fontSize: 11, py: 0.5 }}>{h}</TableCell>
-                        ))}
-                      </TableRow>
-                    </TableHead>
-                    <TableBody>
-                      {odData.state_stats[stateName].map((row, rIdx) => (
-                        <TableRow key={rIdx} sx={{ bgcolor: rIdx % 2 ? "#F8FAFC" : "#FFFFFF" }}>
-                          <TableCell sx={{ fontWeight: 800, fontSize: 11, py: 0.5 }}>{row.threshold}</TableCell>
-                          <TableCell sx={{ fontSize: 11, py: 0.5 }}>{Number(row.total_blocks).toLocaleString()}</TableCell>
-                          <TableCell sx={{ fontSize: 11, py: 0.5 }}>{Number(row.positive_blocks).toLocaleString()} ({row.percentage?.toFixed(1)}%)</TableCell>
-                          <TableCell sx={{ fontWeight: 800, fontSize: 11, py: 0.5 }}>{row.maximum_mw?.toFixed(1)} MW</TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </TableContainer>
-              )}
             </Paper>
           ))}
         </Box>
@@ -282,32 +315,9 @@ export default function FrequencyAnalysisResults({ result, saveBlob, onHtmlRepor
                 component="img"
                 src={enlargedScatterState.img}
                 alt={enlargedScatterState.name}
-                sx={{ maxWidth: "100%", maxHeight: "72vh", objectFit: "contain", borderRadius: 1 }}
+                sx={{ maxWidth: "100%", maxHeight: "82vh", objectFit: "contain", borderRadius: 1 }}
               />
             </Box>
-            {!!enlargedScatterState.stats?.length && (
-              <TableContainer component={Paper} variant="outlined" sx={{ borderRadius: 1.5 }}>
-                <Table size="small">
-                  <TableHead>
-                    <TableRow sx={{ bgcolor: "#17365D" }}>
-                      {["Frequency Threshold", "Total 1-min Blocks", "OD/UI Blocks (No. & %)", "Maximum OD/UI"].map(h => (
-                        <TableCell key={h} sx={{ color: "white", fontWeight: 800, fontSize: 11.5, py: 0.8 }}>{h}</TableCell>
-                      ))}
-                    </TableRow>
-                  </TableHead>
-                  <TableBody>
-                    {enlargedScatterState.stats.map((row, rIdx) => (
-                      <TableRow key={rIdx} sx={{ bgcolor: rIdx % 2 ? "#F8FAFC" : "#FFFFFF" }}>
-                        <TableCell sx={{ fontWeight: 800, fontSize: 11.5, py: 0.6 }}>{row.threshold}</TableCell>
-                        <TableCell sx={{ fontSize: 11.5, py: 0.6 }}>{Number(row.total_blocks).toLocaleString()}</TableCell>
-                        <TableCell sx={{ fontSize: 11.5, py: 0.6 }}>{Number(row.positive_blocks).toLocaleString()} ({row.percentage?.toFixed(1)}%)</TableCell>
-                        <TableCell sx={{ fontWeight: 800, fontSize: 11.5, py: 0.6 }}>{row.maximum_mw?.toFixed(1)} MW</TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </TableContainer>
-            )}
           </Stack>
         )}
       </DialogContent>

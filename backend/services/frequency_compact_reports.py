@@ -95,19 +95,142 @@ def report_tables(session, result, payload):
     return tables, warnings
 
 
-def build_event_charts_data(session, result):
-    """Build detailed event curves for Section 3: State Overdrawal plots for each event."""
+def build_event_charts_data(session, result=None, custom_event_windows=None):
+    """
+    Build detailed event curves for Section 3.2 / 4.2: State Overdrawal plots for each event.
+    Supports:
+      1. custom_event_windows: list of dicts/tuples specifying custom date/time windows
+      2. result['event_windows']: explicit granular slots if provided
+      3. Auto-detection rule:
+         f < 49.90 Hz for > 15 min OR f < 49.50 Hz for > 5 min
+         (with fallback to top deepest/longest dips if none qualify)
+    """
     from routes.frequency_analysis_routes import _window_bounds
-    states = [e for e in session['dataset']['entities'] if e['group'] == 'State']
-    event_windows = result.get('event_windows', result['ranges'])
-    chronology, _ = sessions.report_chronology(session, result)
+    dataset = session.get('dataset', {})
+    states = [e for e in dataset.get('entities', []) if e.get('group') == 'State']
+    if not states:
+        return []
+
+    times = dataset.get('times', [])
+    freq_arr = dataset.get('frequency', [])
+    import numpy as np
+    from services.frequency_threshold_analysis import iso
+    timestamps = [iso(t)[:16].replace('T', ' ') for t in times] if times is not None else []
+    freq_clean = [round(float(f), 3) if np.isfinite(f) else None for f in freq_arr] if freq_arr is not None else []
+
+    chronology = []
+    if result:
+        try:
+            chronology, _ = sessions.report_chronology(session, result)
+        except Exception:
+            chronology = result.get('chronology', [])
+
+    windows_to_process = []
+    if custom_event_windows:
+        for index, cw in enumerate(custom_event_windows, 1):
+            s = str(cw.get('start_time') or cw.get('start') or '')
+            e = str(cw.get('end_time') or cw.get('end') or '')
+            lbl = cw.get('label') or cw.get('name') or f"Event {index} | {s[:10]} | {s[11:16]} - {e[11:16]}"
+            if s and e:
+                windows_to_process.append((s, e, lbl))
+    elif result and result.get('event_windows'):
+        ew = result.get('event_windows', [])
+        is_all_full_day = True
+        for w in ew:
+            s, e = _window_bounds(w)
+            if not (str(s)[11:19] == '00:00:00' and str(e)[11:19] in ('23:59:59', '00:00:00')):
+                is_all_full_day = False
+                break
+        if not is_all_full_day:
+            for index, w in enumerate(ew, 1):
+                s, e = _window_bounds(w)
+                windows_to_process.append((s, e, f"Event {index} | {str(s)[:10]} | {str(s)[11:16]} - {str(e)[11:16]}"))
+
+    if not windows_to_process and timestamps and freq_clean:
+        # User criteria: Auto selection of event if F < 49.9 for more than 15 min or < 49.5 for more than 5 min
+        detected_dips = []
+        in_dip = False
+        start_idx = 0
+        for idx, (ts, f) in enumerate(zip(timestamps, freq_clean)):
+            if f is not None and f < 49.90:
+                if not in_dip:
+                    in_dip = True
+                    start_idx = idx
+            else:
+                if in_dip:
+                    in_dip = False
+                    dur = idx - start_idx
+                    sub_f = [v for v in freq_clean[start_idx:idx] if v is not None]
+                    min_val = min(sub_f) if sub_f else 50.0
+                    c495 = sum(1 for v in sub_f if v < 49.50)
+                    is_auto = (dur > 15) or (c495 > 5)
+                    detected_dips.append({
+                        'start_idx': start_idx,
+                        'end_idx': idx - 1,
+                        'start_time': timestamps[start_idx],
+                        'end_time': timestamps[idx - 1],
+                        'duration_min': dur,
+                        'min_freq': round(min_val, 3),
+                        'c495_min': c495,
+                        'auto_qualified': is_auto,
+                    })
+        if in_dip:
+            dur = len(timestamps) - start_idx
+            sub_f = [v for v in freq_clean[start_idx:] if v is not None]
+            min_val = min(sub_f) if sub_f else 50.0
+            c495 = sum(1 for v in sub_f if v < 49.50)
+            is_auto = (dur > 15) or (c495 > 5)
+            detected_dips.append({
+                'start_idx': start_idx,
+                'end_idx': len(timestamps) - 1,
+                'start_time': timestamps[start_idx],
+                'end_time': timestamps[-1],
+                'duration_min': dur,
+                'min_freq': round(min_val, 3),
+                'c495_min': c495,
+                'auto_qualified': is_auto,
+            })
+
+        qualified = [d for d in detected_dips if d['auto_qualified']]
+        if not qualified:
+            qualified = sorted(detected_dips, key=lambda d: (d['min_freq'], -d['duration_min']))[:3]
+
+        for index, q in enumerate(qualified, 1):
+            s_ts = q['start_time']
+            e_ts = q['end_time']
+            lbl = f"Event {index} | {s_ts[:10]} | {s_ts[11:16]} - {e_ts[11:16]} (Min {q['min_freq']:.3f} Hz)"
+            windows_to_process.append((s_ts, e_ts, lbl))
+
     events = []
     for entity in states:
-        for index, window in enumerate(event_windows, 1):
-            start, end = _window_bounds(window)
-            chart = sessions.chart_points(session['dataset'], [(start, end)], entity['entity_id'], limit=1200)
-            points = chart.get('points', [])
-            messages = [row for row in chronology if row.get('entity_id') == entity['entity_id'] and start <= row['timestamp'] < end]
+        for index, (start, end, label) in enumerate(windows_to_process, 1):
+            points = []
+            try:
+                chart = sessions.chart_points(session['dataset'], [(start, end)], entity['entity_id'], limit=1200)
+                points = chart.get('points', [])
+            except Exception:
+                pass
+            if not points and timestamps:
+                s_i = next((i for i, t in enumerate(timestamps) if t >= start[:16]), 0)
+                e_i = next((i for i, t in enumerate(timestamps) if t > end[:16]), len(timestamps))
+                s_pad = max(0, s_i - 15)
+                e_pad = min(len(timestamps), e_i + 15)
+                sch = entity.get('schedule', [])
+                act = entity.get('actual', [])
+                dev = entity.get('deviation', [])
+                points = [{
+                    'timestamp': timestamps[i],
+                    'frequency': freq_clean[i] if i < len(freq_clean) else None,
+                    'deviation_mw': round(float(dev[i]), 1) if i < len(dev) and np.isfinite(dev[i]) else None,
+                    'schedule': round(float(sch[i]), 1) if i < len(sch) and np.isfinite(sch[i]) else None,
+                    'actual': round(float(act[i]), 1) if i < len(act) and np.isfinite(act[i]) else None,
+                } for i in range(s_pad, e_pad)]
+
+            messages = [
+                row for row in chronology
+                if (row.get('entity_id') == entity.get('entity_id') or row.get('state') == entity.get('display_name'))
+                and (start[:16] <= str(row.get('timestamp') or '').replace('T', ' ')[:16] <= end[:16])
+            ]
             trans_events = []
             crms_msgs = []
             for r in messages:
@@ -136,8 +259,8 @@ def build_event_charts_data(session, result):
             events.append({
                 'event_id': f"{entity['entity_id']}:{index}",
                 'event_index': index,
-                'event_name': f"Event {index} | {start[:10]} | {start[11:16]} - {end[11:16]}",
-                'event_type': result.get('event_type', 'low'),
+                'event_name': label,
+                'event_type': (result.get('event_type') if result else 'low') or 'low',
                 'state': entity['display_name'],
                 'start_time': start,
                 'end_time': end,
@@ -189,7 +312,9 @@ def build_continuous_drawal_data(session, result=None):
     if in_low:
         low_freq_intervals.append([{"xAxis": start_ts}, {"xAxis": timestamps[-1]}])
 
-    detected_events = []
+    # Detect ALL low-frequency dips and classify against Auto Selection rule:
+    # Rule: F < 49.9 for > 15 min OR < 49.5 for > 5 min
+    all_dips = []
     in_dip = False
     dip_start_idx = 0
     for idx, (ts, f) in enumerate(zip(timestamps, freq_clean)):
@@ -205,34 +330,69 @@ def build_continuous_drawal_data(session, result=None):
                 if sub_f:
                     min_val = min(sub_f)
                     min_at = dip_start_idx + sub_f.index(min_val)
-                    if duration >= 4 or min_val < 49.75:
-                        detected_events.append({
-                            "start_time": timestamps[dip_start_idx],
-                            "end_time": timestamps[idx - 1],
-                            "start_idx": dip_start_idx,
-                            "end_idx": idx - 1,
-                            "duration_min": duration,
-                            "min_freq": round(min_val, 3),
-                            "min_time": timestamps[min_at][11:16],
-                            "date": timestamps[dip_start_idx][:10],
-                            "label": f"{timestamps[dip_start_idx][5:10]} {timestamps[dip_start_idx][11:16]}–{timestamps[idx - 1][11:16]} (Min {min_val:.3f} Hz)"
-                        })
+                    c495 = sum(1 for val in sub_f if val < 49.50)
+                    is_auto = (duration > 15) or (c495 > 5)
+                    if duration > 15 and c495 > 5:
+                        reason = f"F < 49.9 for {duration}m & F < 49.5 for {c495}m"
+                    elif duration > 15:
+                        reason = f"F < 49.9 for {duration}m (>15 min)"
+                    elif c495 > 5:
+                        reason = f"F < 49.5 for {c495}m (>5 min)"
+                    else:
+                        reason = f"Dip < 49.90 ({duration}m)"
+
+                    all_dips.append({
+                        "id": f"dip-{dip_start_idx}-{idx - 1}",
+                        "start_time": timestamps[dip_start_idx],
+                        "end_time": timestamps[idx - 1],
+                        "time_window": f"{timestamps[dip_start_idx][11:16]} – {timestamps[idx - 1][11:16]}",
+                        "start_idx": dip_start_idx,
+                        "end_idx": idx - 1,
+                        "duration_min": duration,
+                        "min_freq": round(min_val, 3),
+                        "min_time": timestamps[min_at][11:16],
+                        "date": timestamps[dip_start_idx][:10],
+                        "c495_min": c495,
+                        "auto_qualified": is_auto,
+                        "qualification_reason": reason,
+                        "label": f"{timestamps[dip_start_idx][5:10]} {timestamps[dip_start_idx][11:16]}–{timestamps[idx - 1][11:16]} (Min {min_val:.3f} Hz)"
+                    })
     if in_dip:
         duration = len(timestamps) - dip_start_idx
         sub_f = [val for val in freq_clean[dip_start_idx:] if val is not None]
-        if sub_f and (duration >= 4 or min(sub_f) < 49.75):
+        if sub_f:
             min_val = min(sub_f)
-            detected_events.append({
+            min_at = dip_start_idx + sub_f.index(min_val)
+            c495 = sum(1 for val in sub_f if val < 49.50)
+            is_auto = (duration > 15) or (c495 > 5)
+            if duration > 15 and c495 > 5:
+                reason = f"F < 49.9 for {duration}m & F < 49.5 for {c495}m"
+            elif duration > 15:
+                reason = f"F < 49.9 for {duration}m (>15 min)"
+            elif c495 > 5:
+                reason = f"F < 49.5 for {c495}m (>5 min)"
+            else:
+                reason = f"Dip < 49.90 ({duration}m)"
+
+            all_dips.append({
+                "id": f"dip-{dip_start_idx}-{len(timestamps) - 1}",
                 "start_time": timestamps[dip_start_idx],
                 "end_time": timestamps[-1],
+                "time_window": f"{timestamps[dip_start_idx][11:16]} – {timestamps[-1][11:16]}",
                 "start_idx": dip_start_idx,
                 "end_idx": len(timestamps) - 1,
                 "duration_min": duration,
                 "min_freq": round(min_val, 3),
-                "min_time": timestamps[dip_start_idx + sub_f.index(min_val)][11:16],
+                "min_time": timestamps[min_at][11:16],
                 "date": timestamps[dip_start_idx][:10],
+                "c495_min": c495,
+                "auto_qualified": is_auto,
+                "qualification_reason": reason,
                 "label": f"{timestamps[dip_start_idx][5:10]} {timestamps[dip_start_idx][11:16]}–{timestamps[-1][11:16]} (Min {min_val:.3f} Hz)"
             })
+
+    auto_dips = [d for d in all_dips if d['auto_qualified']]
+    detected_events = auto_dips if auto_dips else (all_dips[:4] if all_dips else [])
 
     chronology = []
     if result:
@@ -299,6 +459,8 @@ def build_continuous_drawal_data(session, result=None):
         "frequency": freq_clean,
         "low_freq_intervals": low_freq_intervals,
         "detected_events": detected_events,
+        "candidate_dips": all_dips,
+        "auto_qualified_count": len(auto_dips),
         "unique_dates": unique_dates,
         "states": states_data,
         "total_points": len(timestamps),
@@ -307,21 +469,22 @@ def build_continuous_drawal_data(session, result=None):
     }
 
 
-def html_report(tables, title, warnings, session=None, result=None, event_charts_data=None, od_frequency=None, event_tables=None, continuous_drawal_data=None):
+def html_report(tables, title, warnings, session=None, result=None, event_charts_data=None, od_frequency=None, event_tables=None, continuous_drawal_data=None, frequency_curves=None):
     """
-    Restructured 5-section HTML report following user requirements:
+    Restructured 6-section HTML report following user requirements:
     1. Frequency profile analysis (Dynamic Frequency Event Tables: Table-2A, Table-2B, Table-2C)
-    2. State Scatter (State-wise Overdrawal vs Frequency Analysis plots and statistics tables)
-    3. State Overdrawal plots for each event (interactive curves with CRMS markers & continuous 3-panel viewer)
-    4. Event Chronology & Number of message issue (Category-wise message breakdown + event chronology)
-    5. Rest same (Performance and overall statistics tables)
+    2. Frequency Analysis Curves (Daily Min + Duration, FDC, Diurnal Profile)
+    3. State Scatter (State-wise Overdrawal vs Frequency Analysis plots with embedded tables)
+    4. State Overdrawal plots for each event (continuous 3-panel viewer with inbuilt color scheme & event cards)
+    5. Event Chronology & Number of message issue (Category-wise message breakdown + event chronology)
+    6. Performance and overall statistics tables
     """
     tables_json = json.dumps([{'title': name, 'columns': columns, 'rows': [{key: row.get(key) for key, _ in columns} for row in rows]} for name, columns, rows in tables], ensure_ascii=False).replace('<', '\\u003c')
     
-    # Event charts data for Section 3
+    # Event charts data for Section 4
     event_charts_json = json.dumps(event_charts_data or [], ensure_ascii=False).replace('<', '\\u003c')
 
-    # Continuous drawal data for Section 3
+    # Continuous drawal data for Section 4
     if continuous_drawal_data is None and session:
         try:
             continuous_drawal_data = build_continuous_drawal_data(session, result)
@@ -330,7 +493,7 @@ def html_report(tables, title, warnings, session=None, result=None, event_charts
             continuous_drawal_data = {}
     continuous_drawal_json = json.dumps(continuous_drawal_data or {}, ensure_ascii=False).replace('<', '\\u003c')
     
-    # OD frequency data for Section 2
+    # OD frequency data for Section 3
     summary_info = (result or {}).get('summary') or {}
     fallback_period = 'Uploaded Period'
     if summary_info.get('analysis_start') and summary_info.get('analysis_end'):
@@ -345,6 +508,19 @@ def html_report(tables, title, warnings, session=None, result=None, event_charts
         'plots': plots_base64,
         'stats': state_stats,
         'statistics_base64': stats_base64
+    }, ensure_ascii=False).replace('<', '\\u003c')
+
+    # Frequency analysis curves data for Section 2
+    freq_curves_plots = (frequency_curves or {}).get('plots_base64') or {}
+    freq_curves_period = (frequency_curves or {}).get('period') or period
+    freq_curves_stats = (frequency_curves or {}).get('statistics') or {}
+    freq_curves_zip = (frequency_curves or {}).get('zip_bytes')
+    freq_curves_zip_b64 = base64.b64encode(freq_curves_zip).decode('ascii') if freq_curves_zip else ''
+    frequency_curves_json = json.dumps({
+        'period': freq_curves_period,
+        'plots': freq_curves_plots,
+        'stats': freq_curves_stats,
+        'zip_base64': freq_curves_zip_b64
     }, ensure_ascii=False).replace('<', '\\u003c')
 
     # Category messages table for Section 4
@@ -445,6 +621,50 @@ def html_report(tables, title, warnings, session=None, result=None, event_charts
 
     event_dl_btn = f'<div><button class="action-btn success" id="btn-download-event-tables" onclick="downloadEventTablesExcel()">📥 Download Event Tables (.xlsx)</button></div>' if excel_base64 else ''
 
+    # Deduplicate and format compact warning banner
+    clean_warnings = list(dict.fromkeys(warnings or []))
+    warning_banner_html = ''
+    if clean_warnings:
+        sched_plants = []
+        other_w = []
+        for w in clean_warnings:
+            w_str = str(w).strip()
+            if 'without separate schedule column' in w_str:
+                parts = w_str.split(':')
+                if len(parts) > 1:
+                    sched_plants.extend([p.strip() for p in parts[1].split(',') if p.strip()])
+                else:
+                    sched_plants.append(w_str)
+            elif 'no separate schedule column' in w_str:
+                parts = w_str.split(':')
+                sched_plants.append(parts[0].strip())
+            else:
+                other_w.append(w_str)
+
+        sched_plants = list(dict.fromkeys(sched_plants))
+        summary_desc = f"{len(sched_plants)} stations without separate schedule" if sched_plants else f"{len(clean_warnings)} data notes"
+        list_items = []
+        if sched_plants:
+            chips_html = ''.join(f'<span style="display:inline-block; margin:2px 4px 2px 0; padding:2px 7px; background:#FFFFFF; border:1px solid #FCD34D; border-radius:4px; font-size:10.5px; font-weight:700; color:#92400E;">{escape(p)}</span>' for p in sched_plants)
+            list_items.append(f'<div style="margin-bottom:6px; font-size:11px;"><strong>Generating stations without separate schedule column (OD/UI unavailable, {len(sched_plants)}):</strong><div style="margin-top:4px;">{chips_html}</div></div>')
+        for ow in other_w:
+            list_items.append(f'<div style="margin-top:3px; font-size:11px; color:#92400E;">&bull; {escape(ow)}</div>')
+
+        warning_banner_html = f'''
+    <details class="compact-warning-banner" style="margin-bottom: 14px; border: 1px solid #FCD34D; background: linear-gradient(135deg, #FEFCE8 0%, #FFFBEB 100%); border-radius: 8px; padding: 7px 14px; font-size: 11px; color: #92400E; box-shadow: 0 1px 3px rgba(217, 119, 6, 0.05);">
+      <summary style="cursor: pointer; font-weight: 750; display: flex; align-items: center; justify-content: space-between; user-select: none;">
+        <span style="display: flex; align-items: center; gap: 8px;">
+          <span style="font-size: 13px;">⚠️</span>
+          <span>Data Availability &amp; Entity Notes ({len(clean_warnings)} notice(s))</span>
+          <span style="font-size: 10.5px; color: #B45309; font-weight: normal; margin-left: 6px;">&bull; {summary_desc}</span>
+        </span>
+        <span style="font-size: 10.5px; padding: 2px 8px; background: rgba(251, 191, 36, 0.25); border: 1px solid #FCD34D; border-radius: 4px; font-weight: 750;">View Details ▾</span>
+      </summary>
+      <div style="margin-top: 8px; padding-top: 6px; border-top: 1px solid #FDE68A; max-height: 120px; overflow-y: auto;">
+        {''.join(list_items)}
+      </div>
+    </details>'''
+
     return f'''<!doctype html>
 <html lang="en">
 <head>
@@ -468,55 +688,58 @@ def html_report(tables, title, warnings, session=None, result=None, event_charts
     }}
     * {{ box-sizing: border-box; margin: 0; padding: 0; }}
     body {{
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
       background: var(--bg);
       color: var(--text);
-      line-height: 1.5;
-      font-size: 13px;
+      line-height: 1.45;
+      font-size: 12px;
     }}
     header.top-bar {{
       position: sticky;
       top: 0;
       z-index: 100;
-      background: #17365D;
+      background: linear-gradient(135deg, #0F172A 0%, #17365D 55%, #1E3A8A 100%);
       color: white;
-      padding: 12px 24px;
+      padding: 8px 24px;
       display: flex;
       flex-wrap: wrap;
       justify-content: space-between;
       align-items: center;
-      box-shadow: 0 4px 12px rgba(15, 23, 42, 0.15);
+      box-shadow: 0 2px 10px rgba(15, 23, 42, 0.15);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.12);
     }}
     header.top-bar h1 {{
-      font-size: 18px;
-      font-weight: 800;
-      letter-spacing: -0.01em;
+      font-size: 16px;
+      font-weight: 850;
+      letter-spacing: -0.015em;
     }}
     header.top-bar .meta {{
-      font-size: 11px;
+      font-size: 10.5px;
       color: #93C5FD;
-      margin-top: 2px;
+      margin-top: 1px;
     }}
     .nav-links {{
       display: flex;
-      gap: 8px;
+      gap: 6px;
       flex-wrap: wrap;
-      margin-top: 6px;
+      margin-top: 3px;
+      align-items: center;
     }}
     .nav-btn {{
       background: rgba(255, 255, 255, 0.12);
       color: white;
-      border: 1px solid rgba(255, 255, 255, 0.25);
-      border-radius: 6px;
-      padding: 5px 11px;
-      font-size: 11px;
+      border: 1px solid rgba(255, 255, 255, 0.22);
+      border-radius: 5px;
+      padding: 4px 9px;
+      font-size: 10.5px;
       font-weight: 700;
       cursor: pointer;
       text-decoration: none;
-      transition: background 0.15s;
+      transition: background 0.15s, border-color 0.15s;
     }}
     .nav-btn:hover {{
       background: rgba(255, 255, 255, 0.25);
+      border-color: rgba(255, 255, 255, 0.4);
     }}
     .nav-btn.primary {{
       background: #059669;
@@ -526,39 +749,39 @@ def html_report(tables, title, warnings, session=None, result=None, event_charts
       background: #047857;
     }}
     main {{
-      max-width: 1700px;
-      margin: 20px auto;
-      padding: 0 20px;
+      max-width: 1720px;
+      margin: 14px auto;
+      padding: 0 16px;
     }}
     .report-section {{
       background: var(--card-bg);
       border: 1px solid var(--border);
-      border-radius: 10px;
-      padding: 24px;
-      margin-bottom: 28px;
-      box-shadow: 0 2px 8px rgba(15, 23, 42, 0.04);
+      border-radius: 9px;
+      padding: 16px 20px;
+      margin-bottom: 16px;
+      box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
     }}
     .section-header {{
       display: flex;
       justify-content: space-between;
       align-items: center;
       border-bottom: 2px solid #E2E8F0;
-      padding-bottom: 12px;
-      margin-bottom: 18px;
+      padding-bottom: 8px;
+      margin-bottom: 14px;
       flex-wrap: wrap;
-      gap: 10px;
+      gap: 8px;
     }}
     .section-title {{
-      font-size: 17px;
+      font-size: 15px;
       font-weight: 850;
       color: var(--primary);
       display: flex;
       align-items: center;
-      gap: 10px;
+      gap: 8px;
     }}
     .section-title .badge {{
-      font-size: 11px;
-      padding: 3px 8px;
+      font-size: 10.5px;
+      padding: 2px 7px;
       border-radius: 999px;
       background: #EFF6FF;
       color: #1D4ED8;
@@ -569,17 +792,17 @@ def html_report(tables, title, warnings, session=None, result=None, event_charts
       background: linear-gradient(135deg, #F8FAFC 0%, #EFF6FF 100%);
       border: 1.5px dashed #93C5FD;
       border-radius: 8px;
-      padding: 30px;
+      padding: 24px;
       text-align: center;
       color: #1E3A8A;
     }}
     .placeholder-card h4 {{
-      font-size: 15px;
+      font-size: 14px;
       font-weight: 800;
-      margin-bottom: 6px;
+      margin-bottom: 4px;
     }}
     .placeholder-card p {{
-      font-size: 12px;
+      font-size: 11.5px;
       color: var(--muted);
       max-width: 600px;
       margin: 0 auto;
@@ -587,41 +810,41 @@ def html_report(tables, title, warnings, session=None, result=None, event_charts
     /* State Scatter Grid */
     .scatter-grid {{
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(480px, 1fr));
-      gap: 22px;
-      margin-top: 16px;
+      grid-template-columns: repeat(auto-fit, minmax(460px, 1fr));
+      gap: 16px;
+      margin-top: 12px;
     }}
     .scatter-card {{
       background: #FFFFFF;
       border: 1px solid #CBD5E1;
-      border-radius: 10px;
+      border-radius: 8px;
       overflow: hidden;
-      box-shadow: 0 3px 10px rgba(0,0,0,0.03);
+      box-shadow: 0 1px 4px rgba(0,0,0,0.03);
       display: flex;
       flex-direction: column;
     }}
     .scatter-card-header {{
       background: #17365D;
       color: white;
-      padding: 10px 16px;
+      padding: 7px 12px;
       display: flex;
       justify-content: space-between;
       align-items: center;
     }}
     .scatter-card-header h4 {{
-      font-size: 14px;
+      font-size: 13px;
       font-weight: 800;
     }}
     .scatter-card-header .measure-tag {{
       font-size: 10px;
       background: rgba(255,255,255,0.2);
-      padding: 2px 7px;
+      padding: 2px 6px;
       border-radius: 4px;
       font-weight: 700;
     }}
     .scatter-img-wrap {{
       background: #FFFFFF;
-      padding: 8px;
+      padding: 6px;
       border-bottom: 1px solid #E2E8F0;
       text-align: center;
     }}
@@ -632,26 +855,25 @@ def html_report(tables, title, warnings, session=None, result=None, event_charts
       display: block;
       margin: 0 auto;
     }}
-    .scatter-table-wrap {{
-      padding: 12px 16px;
-    }}
     .styled-table {{
       width: 100%;
       border-collapse: collapse;
-      font-size: 11.5px;
+      font-size: 11px;
     }}
     .styled-table th {{
       background: #17365D;
       color: white;
       font-weight: 700;
-      padding: 7px 9px;
+      padding: 5px 8px;
       text-align: center;
       border: 1px solid #0F233D;
+      font-size: 11px;
     }}
     .styled-table td {{
-      padding: 6px 9px;
+      padding: 4px 8px;
       text-align: center;
-      border: 1px solid #CBD5E1;
+      border: 1px solid #E2E8F0;
+      font-size: 11px;
     }}
     .styled-table tr:nth-child(even) td {{
       background: #F8FAFC;
@@ -662,78 +884,78 @@ def html_report(tables, title, warnings, session=None, result=None, event_charts
     .styled-table td.strong {{
       font-weight: 800;
     }}
-    /* Section 3 Event cards */
+    /* Section 4 Event cards */
     .event-card {{
       background: #FFFFFF;
       border: 1px solid #CBD5E1;
-      border-radius: 10px;
-      margin-bottom: 18px;
+      border-radius: 8px;
+      margin-bottom: 12px;
       overflow: hidden;
-      box-shadow: 0 2px 8px rgba(15,23,42,0.03);
+      box-shadow: 0 1px 4px rgba(15,23,42,0.03);
     }}
     .event-card summary {{
-      padding: 12px 18px;
+      padding: 8px 14px;
       background: #F1F5F9;
       cursor: pointer;
       font-weight: 800;
-      font-size: 13px;
+      font-size: 12px;
       display: flex;
       justify-content: space-between;
       align-items: center;
       border-bottom: 1px solid #E2E8F0;
     }}
     .event-card-body {{
-      padding: 16px;
+      padding: 12px;
     }}
     .event-chart {{
-      height: 480px;
+      height: 420px;
       width: 100%;
     }}
     .event-results {{
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-      gap: 12px;
-      margin-bottom: 14px;
+      grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+      gap: 8px;
+      margin-bottom: 10px;
     }}
     .result-tile {{
       background: #F8FAFC;
       border: 1px solid #E2E8F0;
-      border-radius: 8px;
-      padding: 10px 14px;
+      border-radius: 6px;
+      padding: 6px 10px;
     }}
     .result-tile b {{
       display: block;
       color: var(--muted);
-      font-size: 10px;
+      font-size: 9.5px;
       text-transform: uppercase;
-      letter-spacing: 0.04em;
+      letter-spacing: 0.03em;
     }}
     .result-tile strong {{
-      font-size: 16px;
+      font-size: 14px;
       color: var(--text);
     }}
     .result-tile small {{
       display: block;
-      font-size: 11px;
+      font-size: 10px;
       color: var(--muted);
-      margin-top: 2px;
+      margin-top: 1px;
     }}
     .filter-bar {{
       display: flex;
-      gap: 10px;
+      gap: 8px;
       align-items: center;
       flex-wrap: wrap;
-      margin-bottom: 14px;
-      padding: 10px 14px;
+      margin-bottom: 10px;
+      padding: 8px 12px;
       background: #F8FAFC;
       border: 1px solid #E2E8F0;
-      border-radius: 8px;
+      border-radius: 6px;
     }}
     .filter-bar select, .filter-bar input, .filter-bar button {{
-      padding: 6px 10px;
-      font-size: 12px;
+      padding: 4px 8px;
+      font-size: 11px;
       border: 1px solid var(--border);
-      border-radius: 6px;
+      border-radius: 5px;
       background: white;
       color: var(--text);
     }}
@@ -750,16 +972,17 @@ def html_report(tables, title, warnings, session=None, result=None, event_charts
     .action-btn {{
       display: inline-flex;
       align-items: center;
-      gap: 6px;
-      padding: 6px 12px;
-      font-size: 12px;
+      gap: 5px;
+      padding: 4px 10px;
+      font-size: 11px;
       font-weight: 700;
-      border-radius: 6px;
+      border-radius: 5px;
       border: 1px solid var(--border);
       background: white;
       color: var(--text);
       cursor: pointer;
       text-decoration: none;
+      transition: all 0.15s ease;
     }}
     .action-btn.success {{
       background: #059669;
@@ -781,27 +1004,27 @@ def html_report(tables, title, warnings, session=None, result=None, event_charts
     .continuous-card {{
       background: #FFFFFF;
       border: 1px solid #CBD5E1;
-      border-radius: 10px;
+      border-radius: 8px;
       overflow: hidden;
-      box-shadow: 0 4px 14px rgba(15,23,42,0.05);
-      margin-top: 14px;
-      margin-bottom: 24px;
+      box-shadow: 0 2px 8px rgba(15,23,42,0.04);
+      margin-top: 10px;
+      margin-bottom: 16px;
     }}
     .continuous-card-header {{
       background: #F8FAFC;
       border-bottom: 1px solid #E2E8F0;
-      padding: 12px 18px;
+      padding: 8px 14px;
       display: flex;
       justify-content: space-between;
       align-items: center;
       flex-wrap: wrap;
-      gap: 10px;
+      gap: 8px;
     }}
     .compact-select {{
-      padding: 5px 10px;
+      padding: 4px 8px;
       border: 1px solid #CBD5E1;
-      border-radius: 6px;
-      font-size: 11.5px;
+      border-radius: 5px;
+      font-size: 11px;
       background: #FFFFFF;
       color: #0F172A;
       font-weight: 700;
@@ -810,27 +1033,27 @@ def html_report(tables, title, warnings, session=None, result=None, event_charts
     .event-selection-bar {{
       display: flex;
       align-items: center;
-      gap: 12px;
-      padding: 8px 18px;
+      gap: 10px;
+      padding: 6px 14px;
       background: #F1F5F9;
       border-bottom: 1px solid #E2E8F0;
       overflow-x: auto;
     }}
     .event-chips-wrapper {{
       display: flex;
-      gap: 6px;
+      gap: 5px;
       overflow-x: auto;
       padding: 2px 0;
       scrollbar-width: thin;
     }}
     .event-chip-btn {{
       white-space: nowrap;
-      padding: 3px 9px;
+      padding: 2px 8px;
       border: 1px solid #CBD5E1;
       border-radius: 999px;
       background: #FFFFFF;
       color: #0F172A;
-      font-size: 11px;
+      font-size: 10.5px;
       font-weight: 700;
       cursor: pointer;
       transition: all 0.15s ease;
@@ -846,13 +1069,13 @@ def html_report(tables, title, warnings, session=None, result=None, event_charts
       border-color: #DC2626;
     }}
     .continuous-footnote {{
-      padding: 10px 18px;
+      padding: 6px 14px;
       background: #F8FAFC;
       border-top: 1px solid #E2E8F0;
       display: flex;
       align-items: center;
-      gap: 18px;
-      font-size: 11.5px;
+      gap: 14px;
+      font-size: 11px;
       color: #334155;
       flex-wrap: wrap;
     }}
@@ -924,8 +1147,117 @@ def html_report(tables, title, warnings, session=None, result=None, event_charts
       display: inline-block;
       transition: transform 0.2s ease;
     }}
+    /* Collapsible Sections */
+    .report-section-collapsible summary.section-summary-header {{
+      cursor: pointer;
+      user-select: none;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 12px;
+      border-bottom: 2px solid #E2E8F0;
+      padding-bottom: 12px;
+      margin-bottom: 18px;
+    }}
+    .report-section-collapsible summary.section-summary-header::-webkit-details-marker {{
+      display: none;
+    }}
+    .report-section-collapsible summary.section-summary-header {{
+      list-style: none;
+    }}
+    .report-section-collapsible[open] > summary.section-summary-header .collapsible-icon {{
+      transform: rotate(0deg);
+    }}
+    .report-section-collapsible:not([open]) > summary.section-summary-header .collapsible-icon {{
+      transform: rotate(-90deg);
+    }}
+    .report-section-collapsible:not([open]) > summary.section-summary-header {{
+      border-bottom: none;
+      margin-bottom: 0;
+      padding-bottom: 0;
+    }}
+    .section-summary-left {{
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      flex: 1;
+      min-width: 260px;
+    }}
+    .section-desc {{
+      font-size: 11.5px;
+      color: var(--muted);
+      margin-top: 4px;
+    }}
+    .section-actions {{
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      flex-wrap: wrap;
+    }}
+
+    /* Frequency Curves Grid */
+    .curves-grid {{
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(480px, 1fr));
+      gap: 22px;
+      margin-top: 14px;
+    }}
+    .curve-card {{
+      background: #FFFFFF;
+      border: 1px solid #CBD5E1;
+      border-radius: 10px;
+      overflow: hidden;
+      box-shadow: 0 3px 10px rgba(0,0,0,0.03);
+      display: flex;
+      flex-direction: column;
+    }}
+    .curve-card-header {{
+      background: #17365D;
+      color: white;
+      padding: 10px 16px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }}
+    .curve-card-header h4 {{
+      font-size: 13.5px;
+      font-weight: 800;
+    }}
+    .curve-img-wrap {{
+      background: #FFFFFF;
+      padding: 8px;
+      text-align: center;
+      cursor: zoom-in;
+    }}
+    .curve-img-wrap img {{
+      max-width: 100%;
+      height: auto;
+      border-radius: 4px;
+      display: block;
+      margin: 0 auto;
+    }}
+    .curve-card-footer {{
+      padding: 10px 16px;
+      background: #F8FAFC;
+      border-top: 1px solid #E2E8F0;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+    }}
+    .scatter-card-footer {{
+      padding: 10px 16px;
+      background: #F8FAFC;
+      border-top: 1px solid #E2E8F0;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+    }}
+
     @media (max-width: 768px) {{
-      .scatter-grid {{ grid-template-columns: 1fr; }}
+      .scatter-grid, .curves-grid {{ grid-template-columns: 1fr; }}
       .event-chart {{ height: 380px; }}
     }}
     @media print {{
@@ -943,266 +1275,340 @@ def html_report(tables, title, warnings, session=None, result=None, event_charts
     </div>
     <div class="nav-links">
       <a class="nav-btn" href="#section-profile">1. Frequency Profile</a>
-      <a class="nav-btn" href="#section-scatter">2. State Scatter</a>
-      <a class="nav-btn" href="#section-events">3. Event Overdrawal Plots</a>
-      <a class="nav-btn" href="#section-chronology">4. Chronology & Messages</a>
-      <a class="nav-btn" href="#section-performance">5. Performance Tables</a>
+      <a class="nav-btn" href="#section-curves">2. Frequency Curves</a>
+      <a class="nav-btn" href="#section-scatter">3. State Scatter</a>
+      <a class="nav-btn" href="#section-events">4. Event Overdrawal Plots</a>
+      <a class="nav-btn" href="#section-chronology">5. Chronology & Messages</a>
+      <a class="nav-btn" href="#section-performance">6. Performance Tables</a>
+      <button class="nav-btn" onclick="toggleAllSections(true)">▼ Expand All</button>
+      <button class="nav-btn" onclick="toggleAllSections(false)">▶ Collapse All</button>
       <button class="nav-btn primary" id="btn-print" onclick="window.print()">Print / PDF</button>
       <button class="nav-btn primary" id="btn-save-html" onclick="downloadSelf()">Download HTML</button>
     </div>
   </header>
 
   <main>
+    {warning_banner_html}
     <!-- SECTION 1: Frequency profile analysis -->
-    <section class="report-section" id="section-profile">
-      <div class="section-header">
-        <div>
-          <h2 class="section-title">
-            1. Frequency Profile Analysis — Frequency Event Analysis Tables
-            <span class="badge">ERLDC Standard Format</span>
-          </h2>
-          <p style="font-size: 11.5px; color: var(--muted); margin-top: 4px;">
-            Dynamic frequency event identification for continuous dips below selected operational thresholds (&lt;49.50 Hz, &lt;49.70 Hz, &lt;49.90 Hz) with constituent Maximum Overdrawal (Max OD &gt; 0 MW) and Average Deviation (Avg Dev, signed MW).
-          </p>
+    <details class="report-section report-section-collapsible" open id="section-profile">
+      <summary class="section-summary-header">
+        <div class="section-summary-left">
+          <span class="collapsible-icon">▼</span>
+          <div>
+            <h2 class="section-title">
+              1. Frequency Profile Analysis — Frequency Event Analysis Tables
+              <span class="badge">ERLDC Standard Format</span>
+            </h2>
+            <p class="section-desc">
+              Dynamic frequency event identification for continuous dips below selected operational thresholds (&lt;49.50 Hz, &lt;49.70 Hz, &lt;49.90 Hz) with constituent Maximum Overdrawal (Max OD &gt; 0 MW) and Average Deviation (Avg Dev, signed MW).
+            </p>
+          </div>
         </div>
-        {event_dl_btn}
+        <div class="section-actions" onclick="event.stopPropagation()">
+          {event_dl_btn}
+        </div>
+      </summary>
+      <div class="section-content-body">
+        {event_section_content}
       </div>
-      {event_section_content}
-    </section>
+    </details>
 
-    <!-- SECTION 2: State Scatter -->
-    <section class="report-section" id="section-scatter">
-      <div class="section-header">
-        <div>
-          <h2 class="section-title">
-            2. State-wise Overdrawal vs Frequency Analysis
-            <span class="badge">{escape(period)}</span>
-          </h2>
-          <p style="font-size: 11.5px; color: var(--muted); margin-top: 4px;">
-            Scatter analysis of positive Actual - Schedule deviations (&gt;0 MW; Overdrawal for states, Under-injection for DVC) versus Frequency (Hz).
-            Frequency bands: &lt;49.50 Hz (<span style="color:#D7191C;font-weight:bold">Red</span>), 49.50–&lt;49.70 Hz (<span style="color:#F07800;font-weight:bold">Orange</span>), 49.70–&lt;49.90 Hz (<span style="color:#7B2CBF;font-weight:bold">Purple</span>), ≥49.90 Hz (<span style="color:#159447;font-weight:bold">Green</span>). Dashed vertical lines mark cumulative thresholds at 49.50, 49.70, and 49.90 Hz.
-          </p>
+    <!-- SECTION 2: Frequency Analysis Curves (Publication Quality) -->
+    <details class="report-section report-section-collapsible" open id="section-curves">
+      <summary class="section-summary-header">
+        <div class="section-summary-left">
+          <span class="collapsible-icon">▼</span>
+          <div>
+            <h2 class="section-title">
+              2. Frequency Analysis Curves
+              <span class="badge">{escape(freq_curves_period)}</span>
+            </h2>
+            <p class="section-desc">
+              Publication-quality frequency analysis graphs based on continuous 1-minute SCADA measurements: Daily Minimum &amp; Low-Frequency Duration, Frequency Duration Curve (FDC), and Average Daily 24-Hour Diurnal Profile with middle 80% range (10th–90th percentile).
+            </p>
+          </div>
         </div>
-        <div>
+        <div class="section-actions" onclick="event.stopPropagation()">
+          <button class="action-btn success" id="btn-download-curves-zip" onclick="downloadFrequencyCurvesZip()">
+            📥 Download All Curves (.zip)
+          </button>
+        </div>
+      </summary>
+      <div class="section-content-body">
+        <div class="curves-grid" id="curves-container">
+          <!-- Rendered dynamically by script for the 3 curves -->
+        </div>
+      </div>
+    </details>
+
+    <!-- SECTION 3: State Scatter -->
+    <details class="report-section report-section-collapsible" open id="section-scatter">
+      <summary class="section-summary-header">
+        <div class="section-summary-left">
+          <span class="collapsible-icon">▼</span>
+          <div>
+            <h2 class="section-title">
+              3. State-wise Overdrawal vs Frequency Analysis
+              <span class="badge">{escape(period)}</span>
+            </h2>
+            <p class="section-desc">
+              Scatter analysis of positive Actual - Schedule deviations (&gt;0 MW; Overdrawal for states, Under-injection for DVC) versus Frequency (Hz).
+              Frequency bands: &lt;49.50 Hz (<span style="color:#D7191C;font-weight:bold">Red</span>), 49.50–&lt;49.70 Hz (<span style="color:#F07800;font-weight:bold">Orange</span>), 49.70–&lt;49.90 Hz (<span style="color:#7B2CBF;font-weight:bold">Purple</span>), ≥49.90 Hz (<span style="color:#159447;font-weight:bold">Green</span>). Dashed vertical lines mark cumulative thresholds at 49.50, 49.70, and 49.90 Hz. Full statistics table embedded directly in each plot.
+            </p>
+          </div>
+        </div>
+        <div class="section-actions" onclick="event.stopPropagation()">
           <button class="action-btn success" id="btn-download-stats" onclick="downloadStatsExcel()">
             📥 Download Consolidated Statistics (.xlsx)
           </button>
         </div>
-      </div>
-
-      <div class="scatter-grid" id="scatter-container">
-        <!-- Rendered dynamically by script for each of the 6 states -->
-      </div>
-    </section>
-
-    <!-- SECTION 3: State Overdrawal plots for each event -->
-    <section class="report-section" id="section-events">
-      <div class="section-header">
-        <div>
-          <h2 class="section-title">
-            3. State Overdrawal Plots for Each Event
-            <span class="badge">Continuous &amp; Event Analysis</span>
-          </h2>
-          <p style="font-size: 11.5px; color: var(--muted); margin-top: 4px;">
-            Continuous end-to-end Drawal (Schedule vs Actual), Deviation with CRMS violation messages and Physical Regulatory actions, and Frequency curve. 2-day default window, scrollable and exportable.
-          </p>
+      </summary>
+      <div class="section-content-body">
+        <div class="scatter-grid" id="scatter-container">
+          <!-- Rendered dynamically by script for each of the 6 states -->
         </div>
       </div>
+    </details>
 
-      <!-- Continuous 3-Panel Visualizer Card -->
-      <div class="continuous-card" id="continuous-drawal-container">
-        <div class="continuous-card-header">
+    <!-- SECTION 4: State Overdrawal plots for each event -->
+    <details class="report-section report-section-collapsible" open id="section-events">
+      <summary class="section-summary-header">
+        <div class="section-summary-left">
+          <span class="collapsible-icon">▼</span>
           <div>
-            <h3 id="continuous-chart-title" style="margin: 0; font-size: 15px; font-weight: 800; color: #17365D;">
-              West Bengal: schedule, actual drawal and over drawal vs frequency
-            </h3>
-            <span style="font-size: 11px; color: #64748B;">
-              Continuous 1-minute SCADA data &bull; 2-day scrollable window by default &bull; Shaded zones: f ≤ 49.90 Hz
+            <h2 class="section-title">
+              4. State Overdrawal Plots for Each Event
+              <span class="badge">Continuous &amp; Event Analysis</span>
+            </h2>
+            <p class="section-desc">
+              Continuous end-to-end Drawal (Schedule vs Actual), Deviation with CRMS violation messages and Physical Regulatory actions, and Frequency curve. Inbuilt system color scheme &bull; 2-day default window, scrollable and exportable.
+            </p>
+          </div>
+        </div>
+      </summary>
+      <div class="section-content-body">
+        <!-- Continuous 3-Panel Visualizer Card -->
+        <div class="continuous-card" id="continuous-drawal-container">
+          <div class="continuous-card-header">
+            <div>
+              <h3 id="continuous-chart-title" style="margin: 0; font-size: 15px; font-weight: 800; color: #17365D;">
+                West Bengal: schedule, actual drawal and over drawal vs frequency
+              </h3>
+              <span style="font-size: 11px; color: #64748B;">
+                Continuous 1-minute SCADA data &bull; 2-day scrollable window by default &bull; Shaded zones: f ≤ 49.90 Hz
+              </span>
+            </div>
+            <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+              <label style="font-size: 11px; font-weight: 800; color: #17365D;">State:</label>
+              <select id="continuous-state-select" onchange="onContinuousStateChange()" class="compact-select">
+                <!-- Populated by JS -->
+              </select>
+              <label style="font-size: 11px; font-weight: 800; color: #17365D; margin-left: 6px;">Jump to Date:</label>
+              <select id="continuous-date-select" onchange="onContinuousDateChange()" class="compact-select">
+                <!-- Populated with unique dates -->
+              </select>
+              <button class="action-btn" onclick="resetContinuousZoom()" title="Reset to initial 2-day view">
+                ↺ 2-Day View
+              </button>
+              <button class="action-btn primary" onclick="downloadContinuousVisibleWindow()" title="Download visible window as high-res PNG">
+                📸 Download Visible Window (PNG)
+              </button>
+            </div>
+          </div>
+
+          <!-- Frequency Overview & Event Selection Chips Bar -->
+          <div class="event-selection-bar" id="continuous-event-selection-bar">
+            <span style="font-size: 11px; font-weight: 800; color: #17365D; white-space: nowrap; display: flex; align-items: center; gap: 4px;">
+              ⚡ Frequency overview &amp; event selection:
             </span>
+            <div class="event-chips-wrapper" id="continuous-event-chips">
+              <!-- Chips populated dynamically by JS -->
+            </div>
           </div>
-          <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
-            <label style="font-size: 11px; font-weight: 800; color: #17365D;">State:</label>
-            <select id="continuous-state-select" onchange="onContinuousStateChange()" class="compact-select">
-              <!-- Populated by JS -->
-            </select>
-            <label style="font-size: 11px; font-weight: 800; color: #17365D; margin-left: 6px;">Jump to Date:</label>
-            <select id="continuous-date-select" onchange="onContinuousDateChange()" class="compact-select">
-              <!-- Populated with unique dates -->
-            </select>
-            <button class="action-btn" onclick="resetContinuousZoom()" title="Reset to initial 2-day view">
-              ↺ 2-Day View
+
+          <!-- ECharts 3-Panel Container -->
+          <div id="continuous-drawal-chart" style="width: 100%; height: 560px; background: #FFFFFF;"></div>
+
+          <!-- Dynamic Statistical Footnote -->
+          <div class="continuous-footnote" id="continuous-chart-footnote">
+            <span><strong style="color: #DC2626;">Shaded</strong> = f ≤ 49.90 Hz.</span>
+            <span><strong>Over drawing at f ≤ 49.90 Hz:</strong> <span id="stat-od-min" style="font-weight: 800; color: #0F172A;">—</span> of <span id="stat-low-min" style="font-weight: 800; color: #0F172A;">—</span> min;</span>
+            <span><strong>max over drawal at f ≤ 49.90 Hz:</strong> <span id="stat-max-od" style="font-weight: 800; color: #DC2626;">—</span> MW</span>
+            <span id="stat-visible-range" style="margin-left: auto; color: #64748B; font-size: 11px;"></span>
+          </div>
+        </div>
+
+        <!-- Event Slotting Controls Bar for Standalone HTML -->
+        <div style="margin-top: 14px; background: #F8FAFC; border: 1px solid #CBD5E1; border-radius: 8px; padding: 8px 12px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
+          <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+            <span style="font-size: 12px; font-weight: 800; color: #1E293B;">Event Slotting:</span>
+            <button class="action-btn" id="btn-html-slot-auto" onclick="selectAutoModeHtml()" style="background: #059669; color: white; border-color: #047857; font-weight: 700; cursor: pointer;">
+              ⚡ Auto Detect
             </button>
-            <button class="action-btn primary" onclick="downloadContinuousVisibleWindow()" title="Download visible window as high-res PNG">
-              📸 Download Visible Window (PNG)
+            <button class="action-btn" id="btn-html-slot-select" onclick="openSelectDipsModalHtml()" style="font-weight: 700; cursor: pointer;">
+              📋 Select from Frequency Dips
+            </button>
+            <button class="action-btn" id="btn-html-slot-manual" onclick="openManualSlotsModalHtml()" style="font-weight: 700; cursor: pointer;">
+              ➕ Slot Manually
             </button>
           </div>
-        </div>
-
-        <!-- Frequency Overview & Event Selection Chips Bar -->
-        <div class="event-selection-bar" id="continuous-event-selection-bar">
-          <span style="font-size: 11px; font-weight: 800; color: #17365D; white-space: nowrap; display: flex; align-items: center; gap: 4px;">
-            ⚡ Frequency overview &amp; event selection:
-          </span>
-          <div class="event-chips-wrapper" id="continuous-event-chips">
-            <!-- Chips populated dynamically by JS -->
+          <div id="html-slotting-mode-badge" style="font-size: 11px; font-weight: 800; padding: 4px 10px; border-radius: 999px; background: #ECFDF5; color: #065F46; border: 1px solid #A7F3D0;">
+            ⚡ Auto Detect Active (F &lt; 49.9 &gt; 15m or &lt; 49.5 &gt; 5m)
           </div>
         </div>
 
-        <!-- ECharts 3-Panel Container -->
-        <div id="continuous-drawal-chart" style="width: 100%; height: 640px; background: #FFFFFF;"></div>
+        <!-- Collapsible Detailed Event Cards -->
+        <div style="margin-top: 14px; margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+          <div>
+            <h3 style="font-size: 14px; font-weight: 800; color: var(--primary); margin: 0;">
+              4.2 Discrete Event Detail Plots &amp; Regulatory Breakup
+            </h3>
+            <p style="font-size: 11px; color: var(--muted); margin: 2px 0 0 0;">
+              Includes plotted CRMS violation messages and Physical Regulatory transmission line operations.
+            </p>
+          </div>
+          <div class="filter-bar" style="margin-bottom: 0; padding: 4px 10px;">
+            <label for="event-state-filter" style="font-size: 11px; font-weight: 700;">Filter State:</label>
+            <select id="event-state-filter" onchange="filterEventCharts()" class="compact-select">
+              <option value="ALL">All States</option>
+            </select>
+            <label for="event-slot-filter" style="font-size: 11px; font-weight: 700; margin-left: 8px;">Filter Event:</label>
+            <select id="event-slot-filter" onchange="filterEventCharts()" class="compact-select">
+              <option value="ALL">All Events</option>
+            </select>
+            <span id="event-filter-count" style="margin-left: 8px; font-size: 11px; color: var(--muted); font-weight: 700;"></span>
+          </div>
+        </div>
 
-        <!-- Dynamic Statistical Footnote -->
-        <div class="continuous-footnote" id="continuous-chart-footnote">
-          <span><strong style="color: #DC2626;">Shaded</strong> = f ≤ 49.90 Hz.</span>
-          <span><strong>Over drawing at f ≤ 49.90 Hz:</strong> <span id="stat-od-min" style="font-weight: 800; color: #0F172A;">—</span> of <span id="stat-low-min" style="font-weight: 800; color: #0F172A;">—</span> min;</span>
-          <span><strong>max over drawal at f ≤ 49.90 Hz:</strong> <span id="stat-max-od" style="font-weight: 800; color: #DC2626;">—</span> MW</span>
-          <span id="stat-visible-range" style="margin-left: auto; color: #64748B; font-size: 11px;"></span>
+        <div id="event-cards-container">
+          <!-- Event cards rendered dynamically with CRMS and Physical Regulation markers -->
         </div>
       </div>
+    </details>
 
-      <!-- Collapsible Detailed Event Cards -->
-      <div style="margin-top: 24px; margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
-        <div>
-          <h3 style="font-size: 14px; font-weight: 800; color: var(--primary); margin: 0;">
-            3.2 Discrete Event Detail Plots &amp; Regulatory Breakup
-          </h3>
-          <p style="font-size: 11px; color: var(--muted); margin: 2px 0 0 0;">
-            Includes plotted CRMS violation messages and Physical Regulatory transmission line operations.
-          </p>
+    <!-- SECTION 5: Event Chronology & Number of message issue -->
+    <details class="report-section report-section-collapsible" open id="section-chronology">
+      <summary class="section-summary-header">
+        <div class="section-summary-left">
+          <span class="collapsible-icon">▼</span>
+          <div>
+            <h2 class="section-title">
+              5. Event Chronology &amp; Message Summary
+              <span class="badge">CRMS &amp; Physical Regulation</span>
+            </h2>
+            <p class="section-desc">
+              Summary of CRMS violation messages issued across recipient groups and chronology of regulatory actions.
+            </p>
+          </div>
         </div>
-        <div class="filter-bar" style="margin-bottom: 0; padding: 4px 10px;">
-          <label for="event-state-filter" style="font-size: 11px; font-weight: 700;">Filter State:</label>
-          <select id="event-state-filter" onchange="filterEventCharts()" class="compact-select">
-            <option value="ALL">All States</option>
+      </summary>
+      <div class="section-content-body">
+        <h3 style="font-size: 14px; font-weight: 800; color: var(--primary); margin-bottom: 10px;">5.1 Category-wise Messages Issued</h3>
+        <div style="overflow-x: auto; margin-bottom: 24px;">
+          <table class="styled-table" id="table-category-summary">
+            <thead>
+              <tr>
+                <th>Recipient Group</th>
+                <th>Recipient</th>
+                <th>Category</th>
+                <th>Messages Issued</th>
+              </tr>
+            </thead>
+            <tbody>
+              {''.join(f'<tr><td>{escape(str(r.get("group", "-")))}</td><td class="strong">{escape(str(r.get("entity", "-")))}</td><td>{escape(str(r.get("category", "-")))}</td><td class="strong">{escape(str(r.get("message_count", "0")))}</td></tr>' for r in category_rows) if category_rows else '<tr><td colspan="4">No mapped message records available.</td></tr>'}
+            </tbody>
+          </table>
+        </div>
+
+        <h3 style="font-size: 14px; font-weight: 800; color: var(--primary); margin-bottom: 10px;">5.2 Daily Event Chronology</h3>
+        <div class="filter-bar">
+          <label for="chronology-state"><strong>Filter State:</strong></label>
+          <select id="chronology-state" onchange="renderChronologyTable()">
+            <option value="ALL">All States / Entities</option>
           </select>
-          <label for="event-slot-filter" style="font-size: 11px; font-weight: 700; margin-left: 8px;">Filter Event:</label>
-          <select id="event-slot-filter" onchange="filterEventCharts()" class="compact-select">
-            <option value="ALL">All Events</option>
-          </select>
-          <span id="event-filter-count" style="margin-left: 8px; font-size: 11px; color: var(--muted); font-weight: 700;"></span>
+          <label for="chronology-date" style="margin-left: 12px;"><strong>Filter Date:</strong></label>
+          <input type="date" id="chronology-date" onchange="renderChronologyTable()">
+          <label for="chronology-search" style="margin-left: 12px;"><strong>Search:</strong></label>
+          <input type="text" id="chronology-search" placeholder="Filter entity, details..." oninput="renderChronologyTable()">
+          <button onclick="document.getElementById('chronology-state').value='ALL';document.getElementById('chronology-date').value='';document.getElementById('chronology-search').value='';renderChronologyTable()">Clear</button>
+          <span id="chronology-count" style="margin-left: auto; font-size: 11.5px; color: var(--muted); font-weight: 700;"></span>
+        </div>
+
+        <div class="scroll-table">
+          <table class="styled-table" id="table-chronology">
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Event</th>
+                <th>Timestamp (IST)</th>
+                <th>Entity</th>
+                <th>Frequency (Hz)</th>
+                <th>OD/UI (MW)</th>
+                <th>Type</th>
+                <th>Message No.</th>
+                <th>Details</th>
+              </tr>
+            </thead>
+            <tbody id="chronology-body">
+              <!-- Dynamically populated -->
+            </tbody>
+          </table>
+        </div>
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 10px;">
+          <button class="action-btn" id="chrono-prev" onclick="changeChronoPage(-1)">Previous</button>
+          <span id="chrono-page-indicator" style="font-size: 11.5px; color: var(--muted); font-weight: 700;">Page 1</span>
+          <button class="action-btn" id="chrono-next" onclick="changeChronoPage(1)">Next</button>
         </div>
       </div>
+    </details>
 
-      <div id="event-cards-container">
-        <!-- Event cards rendered dynamically with CRMS and Physical Regulation markers -->
-      </div>
-    </section>
-
-    <!-- SECTION 4: Event Chronology & Number of message issue -->
-    <section class="report-section" id="section-chronology">
-      <div class="section-header">
-        <div>
-          <h2 class="section-title">
-            4. Event Chronology & Message Summary
-            <span class="badge">CRMS & Physical Regulation</span>
-          </h2>
-          <p style="font-size: 11.5px; color: var(--muted); margin-top: 4px;">
-            Summary of CRMS violation messages issued across recipient groups and chronology of regulatory actions.
-          </p>
+    <!-- SECTION 6: Performance and Overall Statistics -->
+    <details class="report-section report-section-collapsible" open id="section-performance">
+      <summary class="section-summary-header">
+        <div class="section-summary-left">
+          <span class="collapsible-icon">▼</span>
+          <div>
+            <h2 class="section-title">
+              6. Performance &amp; Overall Statistics
+              <span class="badge">Tables &amp; Indicators</span>
+            </h2>
+            <p class="section-desc">
+              Comprehensive statistical and performance indicators across thresholds, entities, and selected periods.
+            </p>
+          </div>
         </div>
-      </div>
-
-      <h3 style="font-size: 14px; font-weight: 800; color: var(--primary); margin-bottom: 10px;">4.1 Category-wise Messages Issued</h3>
-      <div style="overflow-x: auto; margin-bottom: 24px;">
-        <table class="styled-table" id="table-category-summary">
-          <thead>
-            <tr>
-              <th>Recipient Group</th>
-              <th>Recipient</th>
-              <th>Category</th>
-              <th>Messages Issued</th>
-            </tr>
-          </thead>
-          <tbody>
-            {''.join(f'<tr><td>{escape(str(r.get("group", "-")))}</td><td class="strong">{escape(str(r.get("entity", "-")))}</td><td>{escape(str(r.get("category", "-")))}</td><td class="strong">{escape(str(r.get("message_count", "0")))}</td></tr>' for r in category_rows) if category_rows else '<tr><td colspan="4">No mapped message records available.</td></tr>'}
-          </tbody>
-        </table>
-      </div>
-
-      <h3 style="font-size: 14px; font-weight: 800; color: var(--primary); margin-bottom: 10px;">4.2 Daily Event Chronology</h3>
-      <div class="filter-bar">
-        <label for="chronology-state"><strong>Filter State:</strong></label>
-        <select id="chronology-state" onchange="renderChronologyTable()">
-          <option value="ALL">All States / Entities</option>
-        </select>
-        <label for="chronology-date" style="margin-left: 12px;"><strong>Filter Date:</strong></label>
-        <input type="date" id="chronology-date" onchange="renderChronologyTable()">
-        <label for="chronology-search" style="margin-left: 12px;"><strong>Search:</strong></label>
-        <input type="text" id="chronology-search" placeholder="Filter entity, details..." oninput="renderChronologyTable()">
-        <button onclick="document.getElementById('chronology-state').value='ALL';document.getElementById('chronology-date').value='';document.getElementById('chronology-search').value='';renderChronologyTable()">Clear</button>
-        <span id="chronology-count" style="margin-left: auto; font-size: 11.5px; color: var(--muted); font-weight: 700;"></span>
-      </div>
-
-      <div class="scroll-table">
-        <table class="styled-table" id="table-chronology">
-          <thead>
-            <tr>
-              <th>Date</th>
-              <th>Event</th>
-              <th>Timestamp (IST)</th>
-              <th>Entity</th>
-              <th>Frequency (Hz)</th>
-              <th>OD/UI (MW)</th>
-              <th>Type</th>
-              <th>Message No.</th>
-              <th>Details</th>
-            </tr>
-          </thead>
-          <tbody id="chronology-body">
-            <!-- Dynamically populated -->
-          </tbody>
-        </table>
-      </div>
-      <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 10px;">
-        <button class="action-btn" id="chrono-prev" onclick="changeChronoPage(-1)">Previous</button>
-        <span id="chrono-page-indicator" style="font-size: 11.5px; color: var(--muted); font-weight: 700;">Page 1</span>
-        <button class="action-btn" id="chrono-next" onclick="changeChronoPage(1)">Next</button>
-      </div>
-    </section>
-
-    <!-- SECTION 5: Performance and Overall Statistics (Rest same) -->
-    <section class="report-section" id="section-performance">
-      <div class="section-header">
-        <div>
-          <h2 class="section-title">
-            5. Performance & Overall Statistics
-            <span class="badge">Tables & Indicators</span>
-          </h2>
-          <p style="font-size: 11.5px; color: var(--muted); margin-top: 4px;">
-            Comprehensive statistical and performance indicators across thresholds, entities, and selected periods.
-          </p>
-        </div>
-        <div style="display: flex; gap: 8px;">
+        <div class="section-actions" onclick="event.stopPropagation()">
           <button class="action-btn" onclick="downloadCurrentTableCsv()">📥 Download Table (CSV)</button>
         </div>
-      </div>
+      </summary>
+      <div class="section-content-body">
+        <div class="filter-bar">
+          <label for="perf-table-select"><strong>Select Table:</strong></label>
+          <select id="perf-table-select" onchange="renderPerfTable()">
+            <!-- Populated from tables -->
+          </select>
+          <span id="perf-table-count" style="margin-left: auto; font-size: 11.5px; color: var(--muted); font-weight: 700;"></span>
+        </div>
 
-      <div class="filter-bar">
-        <label for="perf-table-select"><strong>Select Table:</strong></label>
-        <select id="perf-table-select" onchange="renderPerfTable()">
-          <!-- Populated from tables -->
-        </select>
-        <span id="perf-table-count" style="margin-left: auto; font-size: 11.5px; color: var(--muted); font-weight: 700;"></span>
+        <div class="scroll-table">
+          <table class="styled-table" id="table-perf">
+            <thead id="perf-table-head"></thead>
+            <tbody id="perf-table-body"></tbody>
+          </table>
+        </div>
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 10px;">
+          <button class="action-btn" id="perf-prev" onclick="changePerfPage(-1)">Previous</button>
+          <span id="perf-page-indicator" style="font-size: 11.5px; color: var(--muted); font-weight: 700;">Page 1</span>
+          <button class="action-btn" id="perf-next" onclick="changePerfPage(1)">Next</button>
+        </div>
       </div>
+    </details>
 
-      <div class="scroll-table">
-        <table class="styled-table" id="table-perf">
-          <thead id="perf-table-head"></thead>
-          <tbody id="perf-table-body"></tbody>
-        </table>
-      </div>
-      <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 10px;">
-        <button class="action-btn" id="perf-prev" onclick="changePerfPage(-1)">Previous</button>
-        <span id="perf-page-indicator" style="font-size: 11.5px; color: var(--muted); font-weight: 700;">Page 1</span>
-        <button class="action-btn" id="perf-next" onclick="changePerfPage(1)">Next</button>
-      </div>
-    </section>
-
-    <!-- Modal for Enlarged State Scatter Plot -->
+    <!-- Modal for Enlarged State Scatter Plot or Frequency Curve -->
     <div id="modal-enlarge-scatter" class="modal-overlay" style="display:none;" onclick="closeScatterModal()">
       <div class="modal-content" onclick="event.stopPropagation()">
         <div class="modal-header">
-          <h3 id="modal-scatter-title">Enlarged State Plot</h3>
+          <h3 id="modal-scatter-title">Enlarged View</h3>
           <button class="action-btn" onclick="closeScatterModal()" style="color: #0F172A; padding: 3px 10px;">✕ Close</button>
         </div>
         <div style="text-align: center; padding: 16px; overflow: auto; background: #FFFFFF; max-height: calc(95vh - 60px);">
@@ -1210,16 +1616,125 @@ def html_report(tables, title, warnings, session=None, result=None, event_charts
         </div>
       </div>
     </div>
+
+    <!-- Modal for Selecting Frequency Dips in HTML Report -->
+    <div id="modal-select-dips" class="modal-overlay" style="display:none;" onclick="closeSelectDipsModalHtml()">
+      <div class="modal-content" onclick="event.stopPropagation()" style="max-width: 920px; width: 95%;">
+        <div class="modal-header">
+          <h3>📋 Select Frequency Events from Uploaded SCADA Data</h3>
+          <button class="action-btn" onclick="closeSelectDipsModalHtml()" style="color: #0F172A; padding: 3px 10px;">✕ Close</button>
+        </div>
+        <div style="padding: 16px; overflow-y: auto; max-height: calc(85vh - 110px);">
+          <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; background: #F1F5F9; padding: 8px 12px; border-radius: 6px;">
+            <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+              <button class="action-btn" onclick="selectAllAutoDipsHtml()" style="background: #059669; color: white; border-color: #047857; font-weight: 700;">Select Auto-Qualified</button>
+              <button class="action-btn" onclick="selectAllDipsHtml()">Select All</button>
+              <button class="action-btn" onclick="clearAllDipsHtml()">Clear All</button>
+            </div>
+            <span id="html-dips-selected-count" style="font-weight: 800; font-size: 11.5px; color: #1E293B;"></span>
+          </div>
+          <div style="overflow-x: auto; max-height: 380px;">
+            <table class="styled-table" id="html-table-candidate-dips">
+              <thead>
+                <tr>
+                  <th style="width: 40px;">Select</th>
+                  <th>#</th>
+                  <th>Date</th>
+                  <th>Time Window</th>
+                  <th>Duration</th>
+                  <th>Lowest Frequency</th>
+                  <th>Time &lt; 49.50 Hz</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody id="html-tbody-candidate-dips"></tbody>
+            </table>
+          </div>
+        </div>
+        <div style="padding: 12px 16px; background: #F8FAFC; border-top: 1px solid #E2E8F0; display: flex; justify-content: flex-end; gap: 10px;">
+          <button class="action-btn" onclick="closeSelectDipsModalHtml()">Cancel</button>
+          <button class="action-btn primary" onclick="applyDipsSelectionHtml()">Apply Selection</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Modal for Manual Slotting in HTML Report -->
+    <div id="modal-manual-slots" class="modal-overlay" style="display:none;" onclick="closeManualSlotsModalHtml()">
+      <div class="modal-content" onclick="event.stopPropagation()" style="max-width: 650px; width: 95%;">
+        <div class="modal-header">
+          <h3>➕ Manual Event Slotting</h3>
+          <button class="action-btn" onclick="closeManualSlotsModalHtml()" style="color: #0F172A; padding: 3px 10px;">✕ Close</button>
+        </div>
+        <div style="padding: 16px; overflow-y: auto; max-height: calc(85vh - 110px);">
+          <div style="background: #FAF5FF; border: 1px solid #E9D5FF; border-radius: 8px; padding: 14px; margin-bottom: 16px;">
+            <div style="font-weight: 800; font-size: 12.5px; color: #5B21B6; margin-bottom: 10px;">Add New Custom Event Slot</div>
+            <div style="display: flex; gap: 10px; margin-bottom: 10px; flex-wrap: wrap;">
+              <div style="flex: 1; min-width: 140px;">
+                <label style="font-size: 11px; font-weight: 700; display: block; margin-bottom: 3px;">Date:</label>
+                <select id="html-manual-date" class="compact-select" style="width: 100%;"></select>
+              </div>
+              <div>
+                <label style="font-size: 11px; font-weight: 700; display: block; margin-bottom: 3px;">Start Time:</label>
+                <input type="time" id="html-manual-start" value="17:00" step="60" style="padding: 4px 8px; border: 1px solid #CBD5E1; border-radius: 4px; font-size: 12px;" />
+              </div>
+              <div>
+                <label style="font-size: 11px; font-weight: 700; display: block; margin-bottom: 3px;">End Time:</label>
+                <input type="time" id="html-manual-end" value="18:00" step="60" style="padding: 4px 8px; border: 1px solid #CBD5E1; border-radius: 4px; font-size: 12px;" />
+              </div>
+            </div>
+            <div style="display: flex; gap: 10px; align-items: flex-end;">
+              <div style="flex: 1;">
+                <label style="font-size: 11px; font-weight: 700; display: block; margin-bottom: 3px;">Label / Description:</label>
+                <input type="text" id="html-manual-label" placeholder="e.g. Evening Peak Overdrawal" style="width: 100%; padding: 5px 8px; border: 1px solid #CBD5E1; border-radius: 4px; font-size: 12px;" />
+              </div>
+              <button class="action-btn" onclick="addManualSlotHtml()" style="background: #7C3AED; color: white; border-color: #6D28D9; font-weight: 700; white-space: nowrap;">+ Add Slot</button>
+            </div>
+            <div id="html-manual-error" style="color: #DC2626; font-size: 11.5px; margin-top: 6px; display: none;"></div>
+          </div>
+          <div style="font-weight: 800; font-size: 12.5px; color: #17365D; margin-bottom: 8px;">Configured Manual Slots:</div>
+          <div style="overflow-x: auto; max-height: 200px;">
+            <table class="styled-table" id="html-table-manual-slots">
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Date</th>
+                  <th>Time Window</th>
+                  <th>Label</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody id="html-tbody-manual-slots">
+                <tr><td colspan="5" style="text-align: center; color: var(--muted);">No manual slots added yet.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <div style="padding: 12px 16px; background: #F8FAFC; border-top: 1px solid #E2E8F0; display: flex; justify-content: flex-end; gap: 10px;">
+          <button class="action-btn" onclick="closeManualSlotsModalHtml()">Cancel</button>
+          <button class="action-btn primary" onclick="applyManualSlotsHtml()">Apply Manual Slots</button>
+        </div>
+      </div>
+    </div>
   </main>
 
   <script>
     const TABLES = {tables_json};
-    const EVENT_CHARTS = {event_charts_json};
+    let EVENT_CHARTS = {event_charts_json};
     const OD_DATA = {od_frequency_json};
     const CONTINUOUS_DATA = {continuous_drawal_json};
+    const FREQ_CURVES_DATA = {frequency_curves_json};
 
     const esc = (v) => String(v ?? '-').replace(/[&<>"']/g, c => ({{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}}[c]));
     const num = (v, digits=1) => v == null || !Number.isFinite(Number(v)) ? '—' : Number(v).toFixed(digits);
+
+    // ==========================================
+    // GLOBAL SECTION CONTROLS
+    // ==========================================
+    function toggleAllSections(open) {{
+      document.querySelectorAll('.report-section-collapsible').forEach(s => {{
+        s.open = open;
+      }});
+    }}
 
     // ==========================================
     // SECTION 1: COLLAPSIBLE EVENT TABLES HANDLERS
@@ -1242,7 +1757,84 @@ def html_report(tables, title, warnings, session=None, result=None, event_charts
     }}
 
     // ==========================================
-    // SECTION 2: RENDER STATE SCATTER PLOTS & STATS
+    // SECTION 2: FREQUENCY ANALYSIS CURVES (PUBLICATION QUALITY)
+    // ==========================================
+    const CURVE_TITLES = {{
+      'daily_min_duration': 'Graph 1: Daily Minimum Frequency & Low-Frequency Duration',
+      'duration_curve': 'Graph 2: Frequency Duration Curve (FDC)',
+      'daily_profile': 'Graph 3: Average Daily 24-Hour Diurnal Profile'
+    }};
+
+    function openCurveModal(key) {{
+      const imgUri = FREQ_CURVES_DATA.plots && FREQ_CURVES_DATA.plots[key];
+      if (!imgUri) return;
+      const title = CURVE_TITLES[key] || 'Frequency Analysis Curve';
+      document.getElementById('modal-scatter-title').textContent = `${{title}} (High Resolution)`;
+      document.getElementById('modal-scatter-img').src = imgUri;
+      document.getElementById('modal-enlarge-scatter').style.display = 'flex';
+    }}
+
+    function initCurvesSection() {{
+      const container = document.getElementById('curves-container');
+      if (!container) return;
+      const plots = FREQ_CURVES_DATA.plots || {{}};
+      const keys = ['daily_min_duration', 'duration_curve', 'daily_profile'];
+      const availableKeys = keys.filter(k => plots[k]);
+      
+      if (!availableKeys.length) {{
+        container.innerHTML = '<div style="grid-column: 1/-1; padding: 24px; text-align: center; color: var(--muted);">No frequency analysis curves generated. Ensure 1-minute frequency data is available.</div>';
+        return;
+      }}
+
+      availableKeys.forEach(key => {{
+        const title = CURVE_TITLES[key] || key;
+        const imgUri = plots[key];
+        const card = document.createElement('div');
+        card.className = 'curve-card';
+        card.innerHTML = `
+          <div class="curve-card-header">
+            <h4>${{esc(title)}}</h4>
+            <button class="action-btn" style="padding: 2px 8px; font-size: 11px; color: #17365D;" onclick="openCurveModal('${{key}}')">🔍 Enlarge</button>
+          </div>
+          <div class="curve-img-wrap" onclick="openCurveModal('${{key}}')" title="Click to enlarge graph">
+            <img src="${{imgUri}}" alt="${{esc(title)}}" loading="lazy" />
+          </div>
+          <div class="curve-card-footer">
+            <span style="font-size: 11px; color: var(--muted); font-weight: 600;">High-resolution publication curve</span>
+            <div style="display: flex; gap: 8px;">
+              <button class="action-btn" onclick="openCurveModal('${{key}}')">🔍 Enlarge</button>
+              <a class="action-btn" href="${{imgUri}}" download="${{key}}.png">💾 Download PNG</a>
+            </div>
+          </div>
+        `;
+        container.appendChild(card);
+      }});
+    }}
+
+    function downloadFrequencyCurvesZip() {{
+      const b64 = FREQ_CURVES_DATA.zip_base64;
+      if (!b64) {{
+        alert("Frequency curves ZIP is not available for this session.");
+        return;
+      }}
+      const binary = atob(b64);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) {{
+        bytes[i] = binary.charCodeAt(i);
+      }}
+      const blob = new Blob([bytes], {{ type: "application/zip" }});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "Frequency_Analysis_Curves.zip";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 10000);
+    }}
+
+    // ==========================================
+    // SECTION 3: RENDER STATE SCATTER PLOTS & STATS
     // ==========================================
     function openScatterModal(state) {{
       const imgUri = OD_DATA.plots && OD_DATA.plots[state];
@@ -1255,6 +1847,7 @@ def html_report(tables, title, warnings, session=None, result=None, event_charts
     function closeScatterModal() {{
       document.getElementById('modal-enlarge-scatter').style.display = 'none';
     }}
+
     function initScatterSection() {{
       const container = document.getElementById('scatter-container');
       const states = Object.keys(OD_DATA.plots || {{}});
@@ -1266,21 +1859,6 @@ def html_report(tables, title, warnings, session=None, result=None, event_charts
         const isDVC = state === 'DVC';
         const measure = isDVC ? 'Under-injection' : 'Overdrawal';
         const imgUri = OD_DATA.plots[state];
-        const statsList = (OD_DATA.stats && OD_DATA.stats[state]) || [];
-        
-        let tableRowsHtml = '';
-        if (statsList.length) {{
-          statsList.forEach(row => {{
-            tableRowsHtml += `<tr>
-              <td class="strong">${{esc(row.threshold)}}</td>
-              <td>${{Number(row.total_blocks).toLocaleString()}}</td>
-              <td>${{Number(row.positive_blocks).toLocaleString()}} (${{num(row.percentage, 1)}}%)</td>
-              <td class="strong">${{num(row.maximum_mw, 1)}} MW</td>
-            </tr>`;
-          }});
-        }} else {{
-          tableRowsHtml = '<tr><td colspan="4">Statistics table embedded directly in image below.</td></tr>';
-        }}
 
         const card = document.createElement('div');
         card.className = 'scatter-card';
@@ -1295,27 +1873,14 @@ def html_report(tables, title, warnings, session=None, result=None, event_charts
           <div class="scatter-img-wrap" style="cursor: zoom-in;" onclick="openScatterModal('${{esc(state)}}')" title="Click to enlarge plot">
             <img src="${{imgUri}}" alt="${{esc(state)}} OD vs Frequency" loading="lazy" />
           </div>
-          <div class="scatter-table-wrap">
-            <h5 style="font-size: 11px; color: var(--muted); margin-bottom: 6px; text-transform: uppercase;">Cumulative Threshold Statistics</h5>
-            <table class="styled-table">
-              <thead>
-                <tr>
-                  <th>Frequency Threshold</th>
-                  <th>Total 1-min Blocks</th>
-                  <th>OD/UI Blocks (No. & %)</th>
-                  <th>Maximum OD/UI</th>
-                </tr>
-              </thead>
-              <tbody>
-                ${{tableRowsHtml}}
-              </tbody>
-            </table>
-            <div style="margin-top: 10px; display: flex; justify-content: flex-end; gap: 8px;">
+          <div class="scatter-card-footer">
+            <span style="font-size: 11px; color: var(--muted); font-weight: 600;">Full threshold statistics embedded in plot above</span>
+            <div style="display: flex; gap: 8px;">
               <button class="action-btn" onclick="openScatterModal('${{esc(state)}}')">
                 🔍 Enlarge Plot
               </button>
               <a class="action-btn" href="${{imgUri}}" download="${{state.replace(/[^A-Za-z0-9_-]+/g, '_')}}_OD_Frequency.png">
-                💾 Download Plot PNG
+                💾 Download PNG
               </a>
             </div>
           </div>
@@ -1615,13 +2180,19 @@ def html_report(tables, title, warnings, session=None, result=None, event_charts
           {{
             top: 28,
             left: 75,
-            data: ['Schedule (MW)', 'Actual drawal (MW)'],
+            data: [
+              {{ name: 'Schedule (MW)', itemStyle: {{ color: '#4F46E5' }} }},
+              {{ name: 'Actual drawal (MW)', itemStyle: {{ color: '#059669' }} }}
+            ],
             textStyle: {{ fontSize: 11, fontWeight: 700, color: '#334155' }}
           }},
           {{
             top: '35.5%',
             left: 75,
-            data: ['Over drawal', 'Under drawal'],
+            data: [
+              {{ name: 'Over drawal', itemStyle: {{ color: '#D97706' }} }},
+              {{ name: 'Under drawal', itemStyle: {{ color: '#0284C7' }} }}
+            ],
             textStyle: {{ fontSize: 11, fontWeight: 700, color: '#334155' }}
           }}
         ],
@@ -1687,11 +2258,11 @@ def html_report(tables, title, warnings, session=None, result=None, event_charts
             type: 'value',
             gridIndex: 2,
             name: 'Frequency (Hz)',
-            nameTextStyle: {{ fontWeight: 800, color: '#0F172A', fontSize: 11 }},
+            nameTextStyle: {{ fontWeight: 800, color: '#7C3AED', fontSize: 11 }},
             scale: true,
             min: 49.40,
             max: 50.35,
-            axisLabel: {{ fontSize: 10, formatter: v => v.toFixed(2) }},
+            axisLabel: {{ fontSize: 10, color: '#7C3AED', formatter: v => v.toFixed(2) }},
             splitLine: {{ lineStyle: {{ color: '#E2E8F0', type: 'dashed' }} }}
           }}
         ],
@@ -1720,8 +2291,8 @@ def html_report(tables, title, warnings, session=None, result=None, event_charts
             data: schedule,
             step: 'end',
             showSymbol: false,
-            lineStyle: {{ width: 2, color: '#0F172A' }},
-            itemStyle: {{ color: '#0F172A' }},
+            lineStyle: {{ width: 2.2, color: '#4F46E5' }},
+            itemStyle: {{ color: '#4F46E5' }},
             markArea: {{
               silent: true,
               data: markAreaData
@@ -1734,8 +2305,8 @@ def html_report(tables, title, warnings, session=None, result=None, event_charts
             yAxisIndex: 0,
             data: actual,
             showSymbol: false,
-            lineStyle: {{ width: 2, color: '#DC2626' }},
-            itemStyle: {{ color: '#DC2626' }}
+            lineStyle: {{ width: 2.2, color: '#059669' }},
+            itemStyle: {{ color: '#059669' }}
           }},
           {{
             name: 'Over drawal',
@@ -1745,8 +2316,8 @@ def html_report(tables, title, warnings, session=None, result=None, event_charts
             data: overDrawal,
             showSymbol: false,
             lineStyle: {{ width: 0 }},
-            itemStyle: {{ color: '#EF4444' }},
-            areaStyle: {{ color: 'rgba(239, 68, 68, 0.45)', origin: 0 }},
+            itemStyle: {{ color: '#D97706' }},
+            areaStyle: {{ color: 'rgba(234, 179, 8, 0.38)', origin: 0 }},
             markArea: {{
               silent: true,
               data: markAreaData
@@ -1760,8 +2331,8 @@ def html_report(tables, title, warnings, session=None, result=None, event_charts
             data: underDrawal,
             showSymbol: false,
             lineStyle: {{ width: 0 }},
-            itemStyle: {{ color: '#3B82F6' }},
-            areaStyle: {{ color: 'rgba(59, 130, 246, 0.38)', origin: 0 }}
+            itemStyle: {{ color: '#0284C7' }},
+            areaStyle: {{ color: 'rgba(6, 182, 212, 0.35)', origin: 0 }}
           }},
           {{
             name: 'Deviation (MW)',
@@ -1770,13 +2341,13 @@ def html_report(tables, title, warnings, session=None, result=None, event_charts
             yAxisIndex: 1,
             data: deviation,
             showSymbol: false,
-            lineStyle: {{ width: 1.4, color: '#334155' }},
-            itemStyle: {{ color: '#334155' }},
+            lineStyle: {{ width: 1.6, color: '#059669' }},
+            itemStyle: {{ color: '#059669' }},
             markLine: {{
               silent: true,
               symbol: 'none',
               data: [{{ yAxis: 0 }}],
-              lineStyle: {{ color: '#0F172A', width: 1.5 }}
+              lineStyle: {{ color: '#17365D', width: 1.5 }}
             }}
           }},
           {{
@@ -1821,15 +2392,16 @@ def html_report(tables, title, warnings, session=None, result=None, event_charts
             yAxisIndex: 2,
             data: frequency,
             showSymbol: false,
-            lineStyle: {{ width: 1.8, color: '#2563EB' }},
-            itemStyle: {{ color: '#2563EB' }},
+            lineStyle: {{ width: 1.8, color: '#7C3AED' }},
+            itemStyle: {{ color: '#7C3AED' }},
             markLine: {{
               silent: true,
               symbol: 'none',
               data: [
-                {{ yAxis: 50.05, lineStyle: {{ color: '#64748B', type: 'dotted', width: 1 }}, label: {{ formatter: '50.05', position: 'insideStartTop' }} }},
-                {{ yAxis: 49.90, lineStyle: {{ color: '#0F172A', type: 'dashed', width: 1.5 }}, label: {{ formatter: '49.90', position: 'insideStartTop' }} }},
-                {{ yAxis: 49.50, lineStyle: {{ color: '#DC2626', type: 'dashed', width: 1.5 }}, label: {{ formatter: '49.50', position: 'insideStartTop' }} }}
+                {{ yAxis: 50.05, lineStyle: {{ color: '#D97706', type: 'dotted', width: 1.2 }}, label: {{ formatter: '50.05 Hz', position: 'insideStartTop' }} }},
+                {{ yAxis: 50.00, lineStyle: {{ color: '#94A3B8', type: 'dotted', width: 1 }}, label: {{ formatter: '50.00 Hz', position: 'insideStartTop' }} }},
+                {{ yAxis: 49.90, lineStyle: {{ color: '#DC2626', type: 'dashed', width: 1.5 }}, label: {{ formatter: '49.90 Hz', position: 'insideStartTop' }} }},
+                {{ yAxis: 49.50, lineStyle: {{ color: '#991B1B', type: 'dashed', width: 1.5 }}, label: {{ formatter: '49.50 Hz', position: 'insideStartTop' }} }}
               ]
             }},
             markArea: {{
@@ -1897,13 +2469,105 @@ def html_report(tables, title, warnings, session=None, result=None, event_charts
     }}
 
     // ==========================================
-    // SECTION 3.2: RENDER DISCRETE EVENT CHARTS
+    // SECTION 4.2: DISCRETE EVENT CHARTS & SLOTTING
     // ==========================================
     let eventChartInstances = [];
+    let htmlCandidateDips = (CONTINUOUS_DATA && CONTINUOUS_DATA.candidate_dips) || [];
+    let htmlSelectedDipIds = new Set(htmlCandidateDips.filter(d => d.auto_qualified).map(d => d.id));
+    let htmlManualSlots = [];
+    let htmlSlotMode = 'auto';
 
-    function initEventCharts() {{
+    function updateSlottingModeBadgeHtml(modeText) {{
+      const b = document.getElementById('html-slotting-mode-badge');
+      if (b) b.textContent = modeText;
+    }}
+
+    function buildEventChartsFromSlotsHtml(slots) {{
+      if (!CONTINUOUS_DATA || !CONTINUOUS_DATA.timestamps || !slots || !slots.length) return [];
+      const timestamps = CONTINUOUS_DATA.timestamps;
+      const total = timestamps.length;
+      const states = Object.keys(CONTINUOUS_DATA.states || {{}});
+      const charts = [];
+
+      slots.forEach((slot, slotIdx) => {{
+        const eventIndex = slotIdx + 1;
+        let sIdx = slot.start_idx != null ? slot.start_idx : timestamps.indexOf(slot.start_time);
+        let eIdx = slot.end_idx != null ? slot.end_idx : timestamps.indexOf(slot.end_time);
+
+        if (sIdx < 0 && slot.date && slot.start_time) {{
+          const combinedStart = `${{slot.date}} ${{slot.start_time.slice(0, 5)}}`;
+          sIdx = timestamps.findIndex(t => t.startsWith(combinedStart));
+        }}
+        if (eIdx < 0 && slot.date && slot.end_time) {{
+          const combinedEnd = `${{slot.date}} ${{slot.end_time.slice(0, 5)}}`;
+          eIdx = timestamps.findIndex(t => t.startsWith(combinedEnd));
+        }}
+
+        if (sIdx < 0) sIdx = 0;
+        if (eIdx < 0 || eIdx < sIdx) eIdx = Math.min(sIdx + 60, total - 1);
+
+        const padStart = Math.max(0, sIdx - 15);
+        const padEnd = Math.min(total - 1, eIdx + 15);
+
+        const sliceTs = timestamps.slice(padStart, padEnd + 1);
+        const sliceFreq = (CONTINUOUS_DATA.frequency || []).slice(padStart, padEnd + 1);
+
+        const startTimeStr = timestamps[sIdx] || slot.start_time || "";
+        const endTimeStr = timestamps[eIdx] || slot.end_time || "";
+        const label = slot.label || `Event ${{eventIndex}} | ${{startTimeStr.slice(0, 10)}} | ${{startTimeStr.slice(11, 16)}} - ${{endTimeStr.slice(11, 16)}}`;
+
+        states.forEach(stName => {{
+          const stData = (CONTINUOUS_DATA.states && CONTINUOUS_DATA.states[stName]) || {{}};
+          const sliceDev = (stData.deviation || []).slice(padStart, padEnd + 1);
+          const sliceSch = (stData.schedule || []).slice(padStart, padEnd + 1);
+          const sliceAct = (stData.actual || []).slice(padStart, padEnd + 1);
+
+          const padStartTs = timestamps[padStart];
+          const padEndTs = timestamps[padEnd];
+
+          const relCrms = (stData.crms_messages || []).filter(m => {{
+            const mTs = (m.timestamp || m.message_date || "").slice(0, 16);
+            return mTs >= padStartTs && mTs <= padEndTs;
+          }});
+
+          const relTrans = (stData.transmission_line_events || []).filter(ev => {{
+            const evTs = (ev.timestamp || ev.outage_date_time || "").slice(0, 16);
+            return evTs >= padStartTs && evTs <= padEndTs;
+          }});
+
+          charts.push({{
+            event_id: `${{stName}}:${{eventIndex}}`,
+            event_index: eventIndex,
+            event_name: label,
+            event_type: "low",
+            state: stName,
+            start_time: startTimeStr,
+            end_time: endTimeStr,
+            series: {{
+              timestamps: sliceTs,
+              frequency: sliceFreq,
+              deviation: sliceDev,
+              schedule: sliceSch,
+              actual: sliceAct,
+            }},
+            transmission_line_events: relTrans,
+            crms_messages: relCrms,
+          }});
+        }});
+      }});
+
+      return charts;
+    }}
+
+    function rebindEventFilters() {{
       const stateSelect = document.getElementById('event-state-filter');
       const slotSelect = document.getElementById('event-slot-filter');
+      const curState = stateSelect.value;
+      const curSlot = slotSelect.value;
+
+      stateSelect.innerHTML = '<option value="ALL">All States</option>';
+      slotSelect.innerHTML = '<option value="ALL">All Events</option>';
+
       const states = [...new Set(EVENT_CHARTS.map(e => e.state))].sort();
       const slots = [...new Set(EVENT_CHARTS.map(e => e.event_index))].sort((a,b) => a-b);
 
@@ -1911,6 +2575,7 @@ def html_report(tables, title, warnings, session=None, result=None, event_charts
         const opt = document.createElement('option');
         opt.value = s;
         opt.textContent = s;
+        if (s === curState) opt.selected = true;
         stateSelect.appendChild(opt);
       }});
 
@@ -1926,9 +2591,206 @@ def html_report(tables, title, warnings, session=None, result=None, event_charts
         const opt = document.createElement('option');
         opt.value = s;
         opt.textContent = label;
+        if (String(s) === curSlot) opt.selected = true;
         slotSelect.appendChild(opt);
       }});
+    }}
 
+    function selectAutoModeHtml() {{
+      htmlSlotMode = 'auto';
+      const autoDips = htmlCandidateDips.filter(d => d.auto_qualified);
+      const chosen = autoDips.length ? autoDips : htmlCandidateDips.slice(0, 3);
+      if (chosen.length) {{
+        EVENT_CHARTS = buildEventChartsFromSlotsHtml(chosen);
+        rebindEventFilters();
+        renderEventCards();
+      }}
+      updateSlottingModeBadgeHtml(`⚡ Auto Detect Active (${{chosen.length}} Events: F < 49.9 > 15m or < 49.5 > 5m)`);
+      document.getElementById('btn-html-slot-auto').style.background = '#059669';
+      document.getElementById('btn-html-slot-auto').style.color = '#FFFFFF';
+      document.getElementById('btn-html-slot-select').style.background = '';
+      document.getElementById('btn-html-slot-select').style.color = '';
+      document.getElementById('btn-html-slot-manual').style.background = '';
+      document.getElementById('btn-html-slot-manual').style.color = '';
+    }}
+
+    function openSelectDipsModalHtml() {{
+      const tbody = document.getElementById('html-tbody-candidate-dips');
+      tbody.innerHTML = '';
+      if (!htmlCandidateDips.length) {{
+        tbody.innerHTML = '<tr><td colspan="8" style="text-align: center; color: var(--muted); padding: 20px;">No detected frequency dips in dataset.</td></tr>';
+      }} else {{
+        htmlCandidateDips.forEach((dip, idx) => {{
+          const isChecked = htmlSelectedDipIds.has(dip.id);
+          const tr = document.createElement('tr');
+          tr.style.cursor = 'pointer';
+          tr.onclick = (e) => {{
+            if (e.target.tagName !== 'INPUT') {{
+              const cb = tr.querySelector('input[type="checkbox"]');
+              if (cb) {{ cb.checked = !cb.checked; toggleDipHtml(dip.id, cb.checked); }}
+            }}
+          }};
+          tr.innerHTML = `
+            <td style="text-align: center;"><input type="checkbox" ${{isChecked ? 'checked' : ''}} onchange="toggleDipHtml('${{dip.id}}', this.checked)"></td>
+            <td style="font-weight: 700;">${{idx + 1}}</td>
+            <td>${{esc(dip.date)}}</td>
+            <td style="font-weight: 800; color: #17365D;">${{esc(dip.time_window || (dip.start_time.slice(11,16) + ' – ' + dip.end_time.slice(11,16)))}}</td>
+            <td>${{dip.duration_min}} min</td>
+            <td style="font-weight: 800; color: ${{dip.min_freq < 49.5 ? '#DC2626' : (dip.min_freq < 49.7 ? '#EA580C' : '#7C3AED')}};">${{num(dip.min_freq, 3)}} Hz</td>
+            <td style="color: ${{dip.c495_min > 0 ? '#DC2626' : 'var(--muted)'}}; font-weight: 700;">${{dip.c495_min > 0 ? dip.c495_min + ' min' : '—'}}</td>
+            <td>${{dip.auto_qualified ? '<span style=\"background:#ECFDF5; color:#065F46; border:1px solid #A7F3D0; padding:2px 8px; border-radius:4px; font-weight:800; font-size:10px;\">✓ Auto-Qualified</span>' : '<span style=\"background:#F1F5F9; color:#475569; border:1px solid #CBD5E1; padding:2px 8px; border-radius:4px; font-size:10px;\">Dip &lt; 49.90</span>'}}</td>
+          `;
+          tbody.appendChild(tr);
+        }});
+      }}
+      updateDipsSelectedCountHtml();
+      document.getElementById('modal-select-dips').style.display = 'flex';
+    }}
+
+    function closeSelectDipsModalHtml() {{
+      document.getElementById('modal-select-dips').style.display = 'none';
+    }}
+
+    function toggleDipHtml(id, isChecked) {{
+      if (isChecked) htmlSelectedDipIds.add(id);
+      else htmlSelectedDipIds.delete(id);
+      updateDipsSelectedCountHtml();
+    }}
+
+    function updateDipsSelectedCountHtml() {{
+      document.getElementById('html-dips-selected-count').textContent = `${{htmlSelectedDipIds.size}} of ${{htmlCandidateDips.length}} selected`;
+    }}
+
+    function selectAllAutoDipsHtml() {{
+      htmlSelectedDipIds = new Set(htmlCandidateDips.filter(d => d.auto_qualified).map(d => d.id));
+      document.querySelectorAll('#html-tbody-candidate-dips input[type="checkbox"]').forEach((cb, idx) => {{
+        cb.checked = htmlCandidateDips[idx] && htmlCandidateDips[idx].auto_qualified;
+      }});
+      updateDipsSelectedCountHtml();
+    }}
+
+    function selectAllDipsHtml() {{
+      htmlSelectedDipIds = new Set(htmlCandidateDips.map(d => d.id));
+      document.querySelectorAll('#html-tbody-candidate-dips input[type="checkbox"]').forEach(cb => cb.checked = true);
+      updateDipsSelectedCountHtml();
+    }}
+
+    function clearAllDipsHtml() {{
+      htmlSelectedDipIds.clear();
+      document.querySelectorAll('#html-tbody-candidate-dips input[type="checkbox"]').forEach(cb => cb.checked = false);
+      updateDipsSelectedCountHtml();
+    }}
+
+    function applyDipsSelectionHtml() {{
+      const chosen = htmlCandidateDips.filter(d => htmlSelectedDipIds.has(d.id));
+      if (!chosen.length) {{
+        alert('Please select at least one frequency event dip.');
+        return;
+      }}
+      htmlSlotMode = 'select';
+      EVENT_CHARTS = buildEventChartsFromSlotsHtml(chosen);
+      rebindEventFilters();
+      renderEventCards();
+      updateSlottingModeBadgeHtml(`📋 Custom Selection: ${{chosen.length}} Dips Plotted`);
+      document.getElementById('btn-html-slot-select').style.background = '#2563EB';
+      document.getElementById('btn-html-slot-select').style.color = '#FFFFFF';
+      document.getElementById('btn-html-slot-auto').style.background = '';
+      document.getElementById('btn-html-slot-auto').style.color = '';
+      document.getElementById('btn-html-slot-manual').style.background = '';
+      document.getElementById('btn-html-slot-manual').style.color = '';
+      closeSelectDipsModalHtml();
+    }}
+
+    function openManualSlotsModalHtml() {{
+      const dateSelect = document.getElementById('html-manual-date');
+      dateSelect.innerHTML = '';
+      const dates = (CONTINUOUS_DATA && CONTINUOUS_DATA.unique_dates) || [];
+      dates.forEach(d => {{
+        const opt = document.createElement('option');
+        opt.value = d;
+        opt.textContent = d;
+        dateSelect.appendChild(opt);
+      }});
+      document.getElementById('html-manual-error').style.display = 'none';
+      renderManualSlotsTableHtml();
+      document.getElementById('modal-manual-slots').style.display = 'flex';
+    }}
+
+    function closeManualSlotsModalHtml() {{
+      document.getElementById('modal-manual-slots').style.display = 'none';
+    }}
+
+    function addManualSlotHtml() {{
+      const dt = document.getElementById('html-manual-date').value;
+      const s = document.getElementById('html-manual-start').value;
+      const e = document.getElementById('html-manual-end').value;
+      const lbl = document.getElementById('html-manual-label').value.trim();
+      const errEl = document.getElementById('html-manual-error');
+      errEl.style.display = 'none';
+
+      if (!dt) {{ errEl.textContent = 'Please select a date.'; errEl.style.display = 'block'; return; }}
+      if (!s || !e) {{ errEl.textContent = 'Please enter start and end time.'; errEl.style.display = 'block'; return; }}
+      if (s >= e) {{ errEl.textContent = 'Start time must be before end time.'; errEl.style.display = 'block'; return; }}
+
+      htmlManualSlots.push({{
+        id: 'man-' + Date.now() + '-' + (htmlManualSlots.length + 1),
+        date: dt,
+        start_time: `${{dt}} ${{s}}`,
+        end_time: `${{dt}} ${{e}}`,
+        label: lbl || `Manual Event #${{htmlManualSlots.length + 1}} (${{dt.slice(5)}} ${{s}}–${{e}})`
+      }});
+      document.getElementById('html-manual-label').value = '';
+      renderManualSlotsTableHtml();
+    }}
+
+    function deleteManualSlotHtml(idx) {{
+      htmlManualSlots.splice(idx, 1);
+      renderManualSlotsTableHtml();
+    }}
+
+    function renderManualSlotsTableHtml() {{
+      const tbody = document.getElementById('html-tbody-manual-slots');
+      tbody.innerHTML = '';
+      if (!htmlManualSlots.length) {{
+        tbody.innerHTML = '<tr><td colspan="5" style="text-align: center; color: var(--muted); padding: 12px;">No manual slots added yet.</td></tr>';
+      }} else {{
+        htmlManualSlots.forEach((slot, idx) => {{
+          const tr = document.createElement('tr');
+          tr.innerHTML = `
+            <td style="font-weight:700;">${{idx + 1}}</td>
+            <td>${{esc(slot.date)}}</td>
+            <td style="font-weight:800; color:#17365D;">${{esc(slot.start_time.slice(11,16))}} – ${{esc(slot.end_time.slice(11,16))}}</td>
+            <td>${{esc(slot.label)}}</td>
+            <td><button class="action-btn" onclick="deleteManualSlotHtml(${{idx}})" style="color:#DC2626; border-color:#FCA5A5; padding:2px 6px;">✕</button></td>
+          `;
+          tbody.appendChild(tr);
+        }});
+      }}
+    }}
+
+    function applyManualSlotsHtml() {{
+      if (!htmlManualSlots.length) {{
+        const errEl = document.getElementById('html-manual-error');
+        errEl.textContent = 'Please add at least one manual slot before applying.';
+        errEl.style.display = 'block';
+        return;
+      }}
+      htmlSlotMode = 'manual';
+      EVENT_CHARTS = buildEventChartsFromSlotsHtml(htmlManualSlots);
+      rebindEventFilters();
+      renderEventCards();
+      updateSlottingModeBadgeHtml(`➕ Manual Slots: ${{htmlManualSlots.length}} Plotted`);
+      document.getElementById('btn-html-slot-manual').style.background = '#7C3AED';
+      document.getElementById('btn-html-slot-manual').style.color = '#FFFFFF';
+      document.getElementById('btn-html-slot-auto').style.background = '';
+      document.getElementById('btn-html-slot-auto').style.color = '';
+      document.getElementById('btn-html-slot-select').style.background = '';
+      document.getElementById('btn-html-slot-select').style.color = '';
+      closeManualSlotsModalHtml();
+    }}
+
+    function initEventCharts() {{
+      rebindEventFilters();
       renderEventCards();
     }}
 
@@ -2405,6 +3267,7 @@ def html_report(tables, title, warnings, session=None, result=None, event_charts
     }});
 
     // Initialize all sections
+    initCurvesSection();
     initScatterSection();
     initContinuousDrawalSection();
     initEventCharts();
@@ -2496,6 +3359,21 @@ def export_compact(payload, user):
         except Exception as exc:
             print(f"Compact HTML event tables generation note: {exc}")
 
+        # Retrieve or generate publication Frequency Analysis Curves
+        frequency_curves_data = session.get('frequency_curves')
+        if not frequency_curves_data and raw_source is not None:
+            try:
+                from services.frequency_curves_service import generate_all_frequency_curves
+                frequency_curves_data = generate_all_frequency_curves(
+                    source=raw_source,
+                    start_date=start_date,
+                    end_date=end_date,
+                    dpi=300
+                )
+                session['frequency_curves'] = frequency_curves_data
+            except Exception as exc:
+                print(f"Compact HTML frequency curves generation note: {exc}")
+
         html_doc = html_report(
             tables,
             title,
@@ -2504,7 +3382,8 @@ def export_compact(payload, user):
             result=result,
             event_charts_data=event_charts_data,
             od_frequency=od_frequency,
-            event_tables=event_tables_data
+            event_tables=event_tables_data,
+            frequency_curves=frequency_curves_data,
         )
         return {'success': True, 'html_document': html_doc}
 

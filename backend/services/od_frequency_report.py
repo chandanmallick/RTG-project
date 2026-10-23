@@ -340,18 +340,25 @@ def generate_od_frequency_plots(
                 "State": state,
                 "Measure": measure,
                 "Frequency threshold": f"<{threshold:.2f} Hz",
+                "Total Duration (Minutes)": total,
                 "Total valid 1-min blocks below threshold": total,
+                "Positive deviation minutes": positive_count,
                 "Positive deviation blocks": positive_count,
+                "Positive deviation minutes (%)": percentage,
                 "Positive deviation blocks (%)": percentage,
                 "Maximum positive deviation (MW)": maximum,
+                f"{measure} minutes": positive_count,
                 f"{measure} blocks": positive_count,
+                f"{measure} minutes (%)": percentage,
                 f"{measure} blocks (%)": percentage,
                 f"Maximum {measure} (MW)": maximum,
             }
             stats_rows.append(stat_record)
             state_threshold_list.append({
                 "threshold": f"<{threshold:.2f} Hz",
+                "total_minutes": total,
                 "total_blocks": total,
+                "positive_minutes": positive_count,
                 "positive_blocks": positive_count,
                 "percentage": percentage,
                 "maximum_mw": maximum,
@@ -365,12 +372,12 @@ def generate_od_frequency_plots(
             cellText=table_rows,
             colLabels=[
                 "Frequency Threshold",
-                "Total No. of 1-min Blocks",
-                f"{measure} Time Blocks\n(No. and %)",
+                "Total Duration (Minutes)",
+                f"{measure} Time\n(Minutes and %)",
                 f"Maximum {measure} (MW)",
             ],
             cellLoc="center", colLoc="center", bbox=[0, 0, 1, 1],
-            colWidths=[0.19, 0.22, 0.28, 0.31],
+            colWidths=[0.20, 0.24, 0.28, 0.28],
         )
         table.auto_set_font_size(False)
         table.set_fontsize(13)

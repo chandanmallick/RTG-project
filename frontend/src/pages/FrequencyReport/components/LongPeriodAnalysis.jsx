@@ -4,6 +4,7 @@ import { Plus, Trash2 } from "lucide-react";
 import CalendarInput from "../../../components/ui/CalendarInput";
 import API from "../../../services/api";
 import FrequencyAnalysisResults from "./FrequencyAnalysisResults";
+import OptimizedWarnings from "./OptimizedWarnings";
 import { createSelectionId } from "./frequencyIntervals";
 
 export default function LongPeriodAnalysis({ saveBlob, onHtmlReport, automatic = false, onSourceReady, preparationOnly = false, preparationDates, disabled = false, onBusyChange }) {
@@ -68,7 +69,7 @@ export default function LongPeriodAnalysis({ saveBlob, onHtmlReport, automatic =
       {!!status && <Typography sx={{ fontSize: 12, color: "#03624C", mt: 1 }}>{status}</Typography>}
       {source?.source_status && <Typography sx={{fontSize:12,mt:1,color:"#64748B"}}>{source.source_status.filter(row=>row.available).length} source/entity/day fetches available; {source.source_status.filter(row=>!row.available).length} unavailable or unmapped. Existing uploaded/fetched readings are retained when a fetch has no valid replacement.</Typography>}
       {error && <Alert severity="error" sx={{ mt: 1 }}>{error}</Alert>}
-      {(source?.warnings || []).map((warning,index) => <Alert key={index} severity="warning" sx={{mt:1}}>{warning}</Alert>)}
+      {!result && <OptimizedWarnings warnings={source?.warnings} />}
       {source && !preparationOnly && <>
         <Stack direction="row" spacing={1} sx={{ mt: 2 }}><CalendarInput value={startDate} onChange={value => { setStartDate(value); setResult(null); }} placeholder="Analysis start date" disabled={busy || disabled} /><CalendarInput value={endDate} onChange={value => { setEndDate(value); setResult(null); }} placeholder="Analysis end date" disabled={busy || disabled} /></Stack>
         <Typography sx={{ fontSize: 13, fontWeight: 800, mt: 2, mb: 1 }}>Daily slots (IST)</Typography>

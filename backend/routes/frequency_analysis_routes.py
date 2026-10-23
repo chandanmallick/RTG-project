@@ -384,6 +384,7 @@ async def download_frequency_curves_zip(payload: FrequencyCurvesPayload, user=De
 class ContinuousDrawalPayload(BaseModel):
     session_token: str
     result_token: Optional[str] = None
+    event_slots: Optional[List[Dict[str, Any]]] = None
 
 
 @router.post('/continuous-drawal')
@@ -398,7 +399,7 @@ async def get_continuous_drawal(payload: ContinuousDrawalPayload, user=Depends(g
                 pass
         from services.frequency_compact_reports import build_continuous_drawal_data, build_event_charts_data
         continuous_data = build_continuous_drawal_data(session, result)
-        event_charts = build_event_charts_data(session, result) if result else []
+        event_charts = build_event_charts_data(session, result, custom_event_windows=payload.event_slots)
         return {
             'success': True,
             'continuous_data': continuous_data,

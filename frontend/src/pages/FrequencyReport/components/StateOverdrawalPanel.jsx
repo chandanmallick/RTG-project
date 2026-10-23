@@ -4,14 +4,26 @@ import {
   Alert,
   Box,
   Button,
+  Checkbox,
   Chip,
   CircularProgress,
   Collapse,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
   IconButton,
   MenuItem,
   Paper,
   Stack,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
   TextField,
+  Tooltip,
   Typography,
 } from "@mui/material";
 import {
@@ -22,6 +34,13 @@ import {
   ChevronDown,
   ChevronRight,
   Filter,
+  Check,
+  Plus,
+  Trash2,
+  ListFilter,
+  Sliders,
+  Clock,
+  Sparkles,
 } from "lucide-react";
 import API from "../../../services/api";
 
@@ -74,6 +93,228 @@ function formatTransmissionTooltip(ev) {
   return html + "</div>";
 }
 
+/**
+ * Detect all frequency dips below 49.90 Hz and qualify using user criteria:
+ * F < 49.90 Hz for > 15 min OR F < 49.50 Hz for > 5 min.
+ */
+function detectAllFrequencyDips(timestamps, frequency) {
+  if (!timestamps || !frequency || !timestamps.length) return [];
+  const dips = [];
+  let inDip = false;
+  let startIdx = 0;
+  const n = Math.min(timestamps.length, frequency.length);
+
+  for (let i = 0; i < n; i++) {
+    const f = frequency[i];
+    if (f != null && f < 49.9) {
+      if (!inDip) {
+        inDip = true;
+        startIdx = i;
+      }
+    } else {
+      if (inDip) {
+        inDip = false;
+        const duration = i - startIdx;
+        let minVal = 50.0;
+        let minIdx = startIdx;
+        let c495 = 0;
+        for (let k = startIdx; k < i; k++) {
+          const val = frequency[k];
+          if (val != null) {
+            if (val < minVal) {
+              minVal = val;
+              minIdx = k;
+            }
+            if (val < 49.5) {
+              c495++;
+            }
+          }
+        }
+        const isAuto = duration > 15 || c495 > 5;
+        let reason = "";
+        if (duration > 15 && c495 > 5) {
+          reason = `F < 49.9 for ${duration}m & F < 49.5 for ${c495}m`;
+        } else if (duration > 15) {
+          reason = `F < 49.9 for ${duration}m (>15 min)`;
+        } else if (c495 > 5) {
+          reason = `F < 49.5 for ${c495}m (>5 min)`;
+        } else {
+          reason = `Dip < 49.90 (${duration}m)`;
+        }
+
+        dips.push({
+          id: `dip-${startIdx}-${i - 1}`,
+          start_idx: startIdx,
+          end_idx: i - 1,
+          start_time: timestamps[startIdx],
+          end_time: timestamps[i - 1],
+          date: timestamps[startIdx].slice(0, 10),
+          time_window: `${timestamps[startIdx].slice(11, 16)} – ${timestamps[i - 1].slice(11, 16)}`,
+          duration_min: duration,
+          min_freq: Number(minVal.toFixed(3)),
+          min_time: timestamps[minIdx]?.slice(11, 16) || "",
+          c495_min: c495,
+          auto_qualified: isAuto,
+          qualification_reason: reason,
+          label: `Dip #${dips.length + 1} (${timestamps[startIdx].slice(5, 10)} ${timestamps[startIdx].slice(
+            11,
+            16
+          )}–${timestamps[i - 1].slice(11, 16)} | Min ${minVal.toFixed(3)} Hz)`,
+        });
+      }
+    }
+  }
+
+  if (inDip) {
+    const i = n;
+    const duration = i - startIdx;
+    let minVal = 50.0;
+    let minIdx = startIdx;
+    let c495 = 0;
+    for (let k = startIdx; k < i; k++) {
+      const val = frequency[k];
+      if (val != null) {
+        if (val < minVal) {
+          minVal = val;
+          minIdx = k;
+        }
+        if (val < 49.5) {
+          c495++;
+        }
+      }
+    }
+    const isAuto = duration > 15 || c495 > 5;
+    let reason = "";
+    if (duration > 15 && c495 > 5) {
+      reason = `F < 49.9 for ${duration}m & F < 49.5 for ${c495}m`;
+    } else if (duration > 15) {
+      reason = `F < 49.9 for ${duration}m (>15 min)`;
+    } else if (c495 > 5) {
+      reason = `F < 49.5 for ${c495}m (>5 min)`;
+    } else {
+      reason = `Dip < 49.90 (${duration}m)`;
+    }
+
+    dips.push({
+      id: `dip-${startIdx}-${i - 1}`,
+      start_idx: startIdx,
+      end_idx: i - 1,
+      start_time: timestamps[startIdx],
+      end_time: timestamps[i - 1],
+      date: timestamps[startIdx].slice(0, 10),
+      time_window: `${timestamps[startIdx].slice(11, 16)} – ${timestamps[i - 1].slice(11, 16)}`,
+      duration_min: duration,
+      min_freq: Number(minVal.toFixed(3)),
+      min_time: timestamps[minIdx]?.slice(11, 16) || "",
+      c495_min: c495,
+      auto_qualified: isAuto,
+      qualification_reason: reason,
+      label: `Dip #${dips.length + 1} (${timestamps[startIdx].slice(5, 10)} ${timestamps[startIdx].slice(
+        11,
+        16
+      )}–${timestamps[i - 1].slice(11, 16)} | Min ${minVal.toFixed(3)} Hz)`,
+    });
+  }
+
+  return dips;
+}
+
+/**
+ * Generate discrete dual-axis event curves for each constituent state given specific event windows.
+ */
+function buildEventChartsFromSlots(slots, continuousData) {
+  if (!continuousData || !slots || !slots.length) return [];
+  const timestamps = continuousData.timestamps || [];
+  const totalPoints = timestamps.length;
+  if (!totalPoints) return [];
+  const states = Object.keys(continuousData.states || {});
+  const charts = [];
+
+  slots.forEach((slot, slotIdx) => {
+    const eventIndex = slotIdx + 1;
+    let sIdx = -1;
+    let eIdx = -1;
+
+    if (slot.start_idx != null && slot.end_idx != null) {
+      sIdx = slot.start_idx;
+      eIdx = slot.end_idx;
+    } else {
+      const sTarget = (slot.start_time || "").slice(0, 16);
+      const eTarget = (slot.end_time || "").slice(0, 16);
+      sIdx = timestamps.findIndex((t) => t.startsWith(sTarget) || sTarget.startsWith(t));
+      eIdx = timestamps.findIndex((t) => t.startsWith(eTarget) || eTarget.startsWith(t));
+      if (sIdx < 0 && slot.date && slot.start_time) {
+        const combinedStart = `${slot.date} ${slot.start_time.slice(0, 5)}`;
+        sIdx = timestamps.findIndex((t) => t.startsWith(combinedStart));
+      }
+      if (eIdx < 0 && slot.date && slot.end_time) {
+        const combinedEnd = `${slot.date} ${slot.end_time.slice(0, 5)}`;
+        eIdx = timestamps.findIndex((t) => t.startsWith(combinedEnd));
+      }
+    }
+
+    if (sIdx < 0) sIdx = 0;
+    if (eIdx < 0 || eIdx < sIdx) eIdx = Math.min(sIdx + 60, totalPoints - 1);
+
+    // Provide 15 min padding before and after so context is clear
+    const padStart = Math.max(0, sIdx - 15);
+    const padEnd = Math.min(totalPoints - 1, eIdx + 15);
+
+    const sliceTs = timestamps.slice(padStart, padEnd + 1);
+    const sliceFreq = (continuousData.frequency || []).slice(padStart, padEnd + 1);
+
+    const startTimeStr = timestamps[sIdx] || slot.start_time || "";
+    const endTimeStr = timestamps[eIdx] || slot.end_time || "";
+    const eventName =
+      slot.label ||
+      `Event ${eventIndex} | ${startTimeStr.slice(0, 10)} | ${startTimeStr.slice(11, 16)} - ${endTimeStr.slice(
+        11,
+        16
+      )}`;
+
+    states.forEach((stateName) => {
+      const stData = continuousData.states[stateName] || {};
+      const sliceDev = (stData.deviation || []).slice(padStart, padEnd + 1);
+      const sliceSch = (stData.schedule || []).slice(padStart, padEnd + 1);
+      const sliceAct = (stData.actual || []).slice(padStart, padEnd + 1);
+
+      const padStartTs = timestamps[padStart];
+      const padEndTs = timestamps[padEnd];
+
+      const relevantCrms = (stData.crms_messages || []).filter((m) => {
+        const mTs = (m.timestamp || m.message_date || "").slice(0, 16);
+        return mTs >= padStartTs && mTs <= padEndTs;
+      });
+
+      const relevantTrans = (stData.transmission_line_events || []).filter((ev) => {
+        const evTs = (ev.timestamp || ev.outage_date_time || "").slice(0, 16);
+        return evTs >= padStartTs && evTs <= padEndTs;
+      });
+
+      charts.push({
+        event_id: `${stateName}:${eventIndex}`,
+        event_index: eventIndex,
+        event_name: eventName,
+        event_type: "low",
+        state: stateName,
+        start_time: startTimeStr,
+        end_time: endTimeStr,
+        series: {
+          timestamps: sliceTs,
+          frequency: sliceFreq,
+          deviation: sliceDev,
+          schedule: sliceSch,
+          actual: sliceAct,
+        },
+        transmission_line_events: relevantTrans,
+        crms_messages: relevantCrms,
+      });
+    });
+  });
+
+  return charts;
+}
+
 export default function StateOverdrawalPanel({ result, sessionToken, saveBlob }) {
   const session = sessionToken || result?.session_token;
   const token = result?.result_token;
@@ -82,6 +323,27 @@ export default function StateOverdrawalPanel({ result, sessionToken, saveBlob })
   const [error, setError] = useState("");
   const [data, setData] = useState(null);
   const [eventCharts, setEventCharts] = useState([]);
+
+  // Slotting Modes: "auto" | "select" | "manual"
+  const [slotMode, setSlotMode] = useState("auto");
+  const [candidateDips, setCandidateDips] = useState([]);
+  const [selectedDipIds, setSelectedDipIds] = useState(new Set());
+  const [manualSlots, setManualSlots] = useState([]);
+  const [activeSlots, setActiveSlots] = useState([]);
+
+  // Modals
+  const [selectModalOpen, setSelectModalOpen] = useState(false);
+  const [manualModalOpen, setManualModalOpen] = useState(false);
+
+  // Manual Form States
+  const [manualDate, setManualDate] = useState("");
+  const [manualStartTime, setManualStartTime] = useState("17:00");
+  const [manualEndTime, setManualEndTime] = useState("18:00");
+  const [manualLabel, setManualLabel] = useState("");
+  const [manualError, setManualError] = useState("");
+
+  // Dips modal search
+  const [dipsSearchTerm, setDipsSearchTerm] = useState("");
 
   const [selectedState, setSelectedState] = useState("West Bengal");
   const [selectedDate, setSelectedDate] = useState("");
@@ -113,11 +375,33 @@ export default function StateOverdrawalPanel({ result, sessionToken, saveBlob })
         if (!active) return;
         if (res.success && res.continuous_data) {
           setData(res.continuous_data);
-          setEventCharts(res.event_charts || []);
+
+          // Detect candidate dips
+          const dips =
+            res.continuous_data.candidate_dips ||
+            detectAllFrequencyDips(res.continuous_data.timestamps, res.continuous_data.frequency);
+          setCandidateDips(dips);
+
+          // Auto-qualified dips (F < 49.9 for >15m or < 49.5 for >5m)
+          const autoDips = dips.filter((d) => d.auto_qualified);
+          const initialSlots = autoDips.length ? autoDips : dips.length ? dips.slice(0, 3) : [];
+          setActiveSlots(initialSlots);
+          setSelectedDipIds(new Set(autoDips.map((d) => d.id)));
+          setSlotMode("auto");
+
+          if (initialSlots.length > 0) {
+            setEventCharts(buildEventChartsFromSlots(initialSlots, res.continuous_data));
+          } else if (res.event_charts?.length) {
+            setEventCharts(res.event_charts);
+          }
+
           const states = Object.keys(res.continuous_data.states || {});
           if (states.length) {
             const hasWb = states.find((s) => s.toLowerCase().includes("west bengal"));
             setSelectedState(hasWb || states[0]);
+          }
+          if (res.continuous_data.unique_dates?.length) {
+            setManualDate(res.continuous_data.unique_dates[0]);
           }
         } else {
           setError("Failed to retrieve continuous drawal data.");
@@ -303,7 +587,7 @@ export default function StateOverdrawalPanel({ result, sessionToken, saveBlob })
         {
           top: "35.5%",
           left: 75,
-          data: ["Over drawal", "Under drawal"],
+          data: ["Over drawal (Adverse)", "Under drawal (Helping Grid)"],
           textStyle: { fontSize: 11, fontWeight: 700, color: "#334155" },
         },
       ],
@@ -366,11 +650,11 @@ export default function StateOverdrawalPanel({ result, sessionToken, saveBlob })
           type: "value",
           gridIndex: 2,
           name: "Frequency (Hz)",
-          nameTextStyle: { fontWeight: 800, color: "#0F172A", fontSize: 11 },
+          nameTextStyle: { fontWeight: 800, color: "#7C3AED", fontSize: 11 },
           scale: true,
           min: 49.4,
           max: 50.35,
-          axisLabel: { fontSize: 10, formatter: (v) => v.toFixed(2) },
+          axisLabel: { fontSize: 10, color: "#7C3AED", formatter: (v) => v.toFixed(2) },
           splitLine: { lineStyle: { color: "#E2E8F0", type: "dashed" } },
         },
       ],
@@ -400,8 +684,8 @@ export default function StateOverdrawalPanel({ result, sessionToken, saveBlob })
           data: schedule,
           step: "end",
           showSymbol: false,
-          lineStyle: { width: 2, color: "#0F172A" },
-          itemStyle: { color: "#0F172A" },
+          lineStyle: { width: 2.2, color: "#4F46E5" },
+          itemStyle: { color: "#4F46E5" },
           markArea: { silent: true, data: markAreaData },
         },
         {
@@ -411,33 +695,33 @@ export default function StateOverdrawalPanel({ result, sessionToken, saveBlob })
           yAxisIndex: 0,
           data: actual,
           showSymbol: false,
-          lineStyle: { width: 2, color: "#DC2626" },
-          itemStyle: { color: "#DC2626" },
+          lineStyle: { width: 2.2, color: "#059669" },
+          itemStyle: { color: "#059669" },
         },
 
         // PANEL 2: Deviation (MW)
         {
-          name: "Over drawal",
+          name: "Over drawal (Adverse)",
           type: "line",
           xAxisIndex: 1,
           yAxisIndex: 1,
           data: overDrawal,
           showSymbol: false,
           lineStyle: { width: 0 },
-          itemStyle: { color: "#EF4444" },
-          areaStyle: { color: "rgba(239, 68, 68, 0.45)", origin: 0 },
+          itemStyle: { color: "#D97706" },
+          areaStyle: { color: "rgba(234, 179, 8, 0.38)", origin: 0 },
           markArea: { silent: true, data: markAreaData },
         },
         {
-          name: "Under drawal",
+          name: "Under drawal (Helping Grid)",
           type: "line",
           xAxisIndex: 1,
           yAxisIndex: 1,
           data: underDrawal,
           showSymbol: false,
           lineStyle: { width: 0 },
-          itemStyle: { color: "#3B82F6" },
-          areaStyle: { color: "rgba(59, 130, 246, 0.38)", origin: 0 },
+          itemStyle: { color: "#0284C7" },
+          areaStyle: { color: "rgba(6, 182, 212, 0.35)", origin: 0 },
         },
         {
           name: "Deviation (MW)",
@@ -446,13 +730,13 @@ export default function StateOverdrawalPanel({ result, sessionToken, saveBlob })
           yAxisIndex: 1,
           data: deviation,
           showSymbol: false,
-          lineStyle: { width: 1.4, color: "#334155" },
-          itemStyle: { color: "#334155" },
+          lineStyle: { width: 1.6, color: "#059669" },
+          itemStyle: { color: "#059669" },
           markLine: {
             silent: true,
             symbol: "none",
             data: [{ yAxis: 0 }],
-            lineStyle: { color: "#0F172A", width: 1.5 },
+            lineStyle: { color: "#17365D", width: 1.5 },
           },
         },
         {
@@ -499,25 +783,25 @@ export default function StateOverdrawalPanel({ result, sessionToken, saveBlob })
           yAxisIndex: 2,
           data: frequency,
           showSymbol: false,
-          lineStyle: { width: 1.8, color: "#2563EB" },
-          itemStyle: { color: "#2563EB" },
+          lineStyle: { width: 1.8, color: "#7C3AED" },
+          itemStyle: { color: "#7C3AED" },
           markLine: {
             silent: true,
             symbol: "none",
             data: [
               {
                 yAxis: 50.05,
-                lineStyle: { color: "#64748B", type: "dotted", width: 1 },
+                lineStyle: { color: "#D97706", type: "dotted", width: 1 },
                 label: { formatter: "50.05", position: "insideStartTop" },
               },
               {
                 yAxis: 49.9,
-                lineStyle: { color: "#0F172A", type: "dashed", width: 1.5 },
+                lineStyle: { color: "#DC2626", type: "dashed", width: 1.5 },
                 label: { formatter: "49.90", position: "insideStartTop" },
               },
               {
                 yAxis: 49.5,
-                lineStyle: { color: "#DC2626", type: "dashed", width: 1.5 },
+                lineStyle: { color: "#991B1B", type: "dashed", width: 1.5 },
                 label: { formatter: "49.50", position: "insideStartTop" },
               },
             ],
@@ -624,6 +908,110 @@ export default function StateOverdrawalPanel({ result, sessionToken, saveBlob })
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
+  };
+
+  // Slotting Action Handlers
+  const handleSetAutoMode = () => {
+    setSlotMode("auto");
+    const autoDips = candidateDips.filter((d) => d.auto_qualified);
+    const chosen = autoDips.length ? autoDips : candidateDips.slice(0, 3);
+    setActiveSlots(chosen);
+    setSelectedDipIds(new Set(autoDips.map((d) => d.id)));
+    if (data) {
+      setEventCharts(buildEventChartsFromSlots(chosen, data));
+    }
+  };
+
+  const handleOpenSelectModal = () => {
+    setSelectModalOpen(true);
+  };
+
+  const handleToggleDipSelect = (id) => {
+    setSelectedDipIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const handleSelectAllAuto = () => {
+    const autoIds = candidateDips.filter((d) => d.auto_qualified).map((d) => d.id);
+    setSelectedDipIds(new Set(autoIds));
+  };
+
+  const handleSelectAllDips = () => {
+    setSelectedDipIds(new Set(candidateDips.map((d) => d.id)));
+  };
+
+  const handleClearDipSelections = () => {
+    setSelectedDipIds(new Set());
+  };
+
+  const handleApplyDipsSelection = () => {
+    const chosen = candidateDips.filter((d) => selectedDipIds.has(d.id));
+    if (!chosen.length) {
+      alert("Please select at least one frequency dip.");
+      return;
+    }
+    setSlotMode("select");
+    setActiveSlots(chosen);
+    if (data) {
+      setEventCharts(buildEventChartsFromSlots(chosen, data));
+    }
+    setSelectModalOpen(false);
+  };
+
+  const handleOpenManualModal = () => {
+    if (!manualDate && uniqueDates.length) {
+      setManualDate(uniqueDates[0]);
+    }
+    setManualError("");
+    setManualModalOpen(true);
+  };
+
+  const handleAddManualSlot = () => {
+    setManualError("");
+    if (!manualDate) {
+      setManualError("Please select a date.");
+      return;
+    }
+    if (!manualStartTime || !manualEndTime) {
+      setManualError("Please enter both start and end time.");
+      return;
+    }
+    if (manualStartTime >= manualEndTime) {
+      setManualError("Start time must be before end time.");
+      return;
+    }
+    const newSlot = {
+      id: `manual-${Date.now()}-${manualSlots.length + 1}`,
+      date: manualDate,
+      start_time: `${manualDate} ${manualStartTime}`,
+      end_time: `${manualDate} ${manualEndTime}`,
+      label:
+        manualLabel.trim() ||
+        `Manual Event #${manualSlots.length + 1} (${manualDate.slice(5)} ${manualStartTime}–${manualEndTime})`,
+    };
+    setManualSlots((prev) => [...prev, newSlot]);
+    setManualLabel("");
+  };
+
+  const handleDeleteManualSlot = (id) => {
+    setManualSlots((prev) => prev.filter((s) => s.id !== id));
+  };
+
+  const handleApplyManualSlots = () => {
+    if (!manualSlots.length) {
+      setManualError("Please add at least one manual slot before applying.");
+      return;
+    }
+    setSlotMode("manual");
+    setActiveSlots(manualSlots);
+    if (data) {
+      setEventCharts(buildEventChartsFromSlots(manualSlots, data));
+    }
+    setManualModalOpen(false);
   };
 
   // Filter discrete event charts
@@ -852,50 +1240,191 @@ export default function StateOverdrawalPanel({ result, sessionToken, saveBlob })
 
       {/* 3.2 Discrete Event Detail Plots */}
       <Box sx={{ mb: 2 }}>
-        <Stack direction="row" justifyContent="space-between" alignItems="center" flexWrap="wrap" useFlexGap sx={{ mb: 2 }}>
-          <Box>
-            <Typography sx={{ fontSize: 16, fontWeight: 900, color: "#17365D" }}>
-              3.2 Discrete Event Detail Plots &amp; Regulatory Breakup
-            </Typography>
-            <Typography sx={{ fontSize: 11.5, color: "#64748B" }}>
-              Interactive dual-axis event curves with plotted CRMS violation messages and Physical Regulatory transmission line operations.
-            </Typography>
-          </Box>
+        {/* Title and Controls Header */}
+        <Box sx={{ mb: 2 }}>
+          <Stack
+            direction="row"
+            justifyContent="space-between"
+            alignItems="center"
+            flexWrap="wrap"
+            useFlexGap
+            spacing={2}
+            sx={{ mb: 1.5 }}
+          >
+            <Box>
+              <Typography sx={{ fontSize: 16, fontWeight: 900, color: "#17365D" }}>
+                3.2 Discrete Event Detail Plots &amp; Regulatory Breakup
+              </Typography>
+              <Typography sx={{ fontSize: 11.5, color: "#64748B" }}>
+                Interactive dual-axis event curves with plotted CRMS violation messages and Physical Regulatory transmission line operations.
+              </Typography>
+            </Box>
 
-          <Stack direction="row" spacing={1} alignItems="center">
-            <TextField
-              select
-              size="small"
-              label="Filter State"
-              value={discreteStateFilter}
-              onChange={(e) => setDiscreteStateFilter(e.target.value)}
-              sx={{ minWidth: 150, bgcolor: "white" }}
-            >
-              <MenuItem value="ALL">All States</MenuItem>
-              {statesList.map((st) => (
-                <MenuItem key={st} value={st}>
-                  {st}
-                </MenuItem>
-              ))}
-            </TextField>
+            {/* Filter controls */}
+            <Stack direction="row" spacing={1} alignItems="center">
+              <TextField
+                select
+                size="small"
+                label="Filter State"
+                value={discreteStateFilter}
+                onChange={(e) => setDiscreteStateFilter(e.target.value)}
+                sx={{ minWidth: 150, bgcolor: "white" }}
+              >
+                <MenuItem value="ALL">All States</MenuItem>
+                {statesList.map((st) => (
+                  <MenuItem key={st} value={st}>
+                    {st}
+                  </MenuItem>
+                ))}
+              </TextField>
 
-            <TextField
-              select
-              size="small"
-              label="Filter Event"
-              value={discreteEventFilter}
-              onChange={(e) => setDiscreteEventFilter(e.target.value)}
-              sx={{ minWidth: 140, bgcolor: "white" }}
-            >
-              <MenuItem value="ALL">All Events</MenuItem>
-              {discreteSlots.map((s) => (
-                <MenuItem key={s} value={String(s)}>
-                  Event {s}
-                </MenuItem>
-              ))}
-            </TextField>
+              <TextField
+                select
+                size="small"
+                label="Filter Event"
+                value={discreteEventFilter}
+                onChange={(e) => setDiscreteEventFilter(e.target.value)}
+                sx={{ minWidth: 140, bgcolor: "white" }}
+              >
+                <MenuItem value="ALL">All Events</MenuItem>
+                {discreteSlots.map((s) => (
+                  <MenuItem key={s} value={String(s)}>
+                    Event {s}
+                  </MenuItem>
+                ))}
+              </TextField>
+            </Stack>
           </Stack>
-        </Stack>
+
+          {/* Event Selection & Slotting Modes Toolbar */}
+          <Paper
+            variant="outlined"
+            sx={{
+              p: 1.5,
+              bgcolor: "#F8FAFC",
+              borderRadius: 2,
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              flexWrap: "wrap",
+              gap: 1.5,
+              border: "1px solid #CBD5E1",
+            }}
+          >
+            <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
+              <Typography sx={{ fontSize: 12, fontWeight: 800, color: "#1E293B", mr: 0.5 }}>
+                Event Slotting:
+              </Typography>
+
+              {/* 1. Auto Detect Button */}
+              <Tooltip title="Auto detects frequency events: F < 49.90 Hz for > 15 min OR F < 49.50 Hz for > 5 min" arrow>
+                <Button
+                  size="small"
+                  variant={slotMode === "auto" ? "contained" : "outlined"}
+                  onClick={handleSetAutoMode}
+                  startIcon={<Sparkles size={14} />}
+                  sx={{
+                    textTransform: "none",
+                    fontWeight: 700,
+                    fontSize: 12,
+                    bgcolor: slotMode === "auto" ? "#059669" : "white",
+                    borderColor: slotMode === "auto" ? "#047857" : "#CBD5E1",
+                    color: slotMode === "auto" ? "white" : "#059669",
+                    "&:hover": {
+                      bgcolor: slotMode === "auto" ? "#047857" : "#ECFDF5",
+                      borderColor: "#059669",
+                    },
+                  }}
+                >
+                  ⚡ Auto Detect ({candidateDips.filter((d) => d.auto_qualified).length})
+                </Button>
+              </Tooltip>
+
+              {/* 2. Select from Frequency Dips Button */}
+              <Tooltip title="View all detected frequency dips and check the events you want to plot" arrow>
+                <Button
+                  size="small"
+                  variant={slotMode === "select" ? "contained" : "outlined"}
+                  onClick={handleOpenSelectModal}
+                  startIcon={<ListFilter size={14} />}
+                  sx={{
+                    textTransform: "none",
+                    fontWeight: 700,
+                    fontSize: 12,
+                    bgcolor: slotMode === "select" ? "#2563EB" : "white",
+                    borderColor: slotMode === "select" ? "#1D4ED8" : "#CBD5E1",
+                    color: slotMode === "select" ? "white" : "#2563EB",
+                    "&:hover": {
+                      bgcolor: slotMode === "select" ? "#1D4ED8" : "#EFF6FF",
+                      borderColor: "#2563EB",
+                    },
+                  }}
+                >
+                  📋 Select from Frequency Dips ({candidateDips.length})
+                </Button>
+              </Tooltip>
+
+              {/* 3. Slot Manually Button */}
+              <Tooltip title="Specify custom time slots (Date, Start Time, End Time, Label)" arrow>
+                <Button
+                  size="small"
+                  variant={slotMode === "manual" ? "contained" : "outlined"}
+                  onClick={handleOpenManualModal}
+                  startIcon={<Plus size={14} />}
+                  sx={{
+                    textTransform: "none",
+                    fontWeight: 700,
+                    fontSize: 12,
+                    bgcolor: slotMode === "manual" ? "#7C3AED" : "white",
+                    borderColor: slotMode === "manual" ? "#6D28D9" : "#CBD5E1",
+                    color: slotMode === "manual" ? "white" : "#7C3AED",
+                    "&:hover": {
+                      bgcolor: slotMode === "manual" ? "#6D28D9" : "#F5F3FF",
+                      borderColor: "#7C3AED",
+                    },
+                  }}
+                >
+                  ➕ Slot Manually {manualSlots.length > 0 && `(${manualSlots.length})`}
+                </Button>
+              </Tooltip>
+            </Stack>
+
+            {/* Current Active Mode Status Pill */}
+            <Chip
+              size="small"
+              label={
+                slotMode === "auto"
+                  ? `⚡ Auto Detect: ${activeSlots.length} Qualified (F<49.9 >15m or <49.5 >5m)`
+                  : slotMode === "select"
+                  ? `📋 Selected: ${activeSlots.length} of ${candidateDips.length} Dips`
+                  : `➕ Manual Slots: ${activeSlots.length} Configured`
+              }
+              sx={{
+                fontWeight: 800,
+                fontSize: 11,
+                bgcolor:
+                  slotMode === "auto"
+                    ? "#ECFDF5"
+                    : slotMode === "select"
+                    ? "#EFF6FF"
+                    : "#F5F3FF",
+                color:
+                  slotMode === "auto"
+                    ? "#065F46"
+                    : slotMode === "select"
+                    ? "#1E40AF"
+                    : "#5B21B6",
+                border: "1px solid",
+                borderColor:
+                  slotMode === "auto"
+                    ? "#A7F3D0"
+                    : slotMode === "select"
+                    ? "#BFDBFE"
+                    : "#DDD6FE",
+              }}
+            />
+          </Paper>
+        </Box>
 
         {filteredEventCharts.length === 0 ? (
           <Paper variant="outlined" sx={{ p: 4, textAlign: "center", borderRadius: 2 }}>
@@ -1226,6 +1755,371 @@ export default function StateOverdrawalPanel({ result, sessionToken, saveBlob })
           </Stack>
         )}
       </Box>
+
+      {/* DIALOG 1: Select Frequency Events from Uploaded Dataset */}
+      <Dialog
+        open={selectModalOpen}
+        onClose={() => setSelectModalOpen(false)}
+        maxWidth="md"
+        fullWidth
+        PaperProps={{ sx: { borderRadius: 2.5 } }}
+      >
+        <DialogTitle sx={{ pb: 1, bgcolor: "#F8FAFC", borderBottom: "1px solid #E2E8F0" }}>
+          <Typography sx={{ fontSize: 17, fontWeight: 900, color: "#17365D", display: "flex", alignItems: "center", gap: 1 }}>
+            <ListFilter size={20} color="#2563EB" /> Select Frequency Events from Uploaded SCADA Data
+          </Typography>
+          <Typography sx={{ fontSize: 12, color: "#64748B", mt: 0.5 }}>
+            Check the frequency events you want to generate in Section 3.2. Auto-detection rule marks dips with F &lt; 49.90 Hz for &gt; 15 min OR F &lt; 49.50 Hz for &gt; 5 min.
+          </Typography>
+        </DialogTitle>
+
+        <DialogContent sx={{ p: 2 }}>
+          {/* Quick Action Toolbar */}
+          <Box
+            sx={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              flexWrap: "wrap",
+              gap: 1.5,
+              my: 1.5,
+              p: 1.2,
+              bgcolor: "#F1F5F9",
+              borderRadius: 1.5,
+            }}
+          >
+            <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
+              <Button
+                size="small"
+                variant="contained"
+                onClick={handleSelectAllAuto}
+                startIcon={<Sparkles size={14} />}
+                sx={{
+                  bgcolor: "#059669",
+                  "&:hover": { bgcolor: "#047857" },
+                  textTransform: "none",
+                  fontWeight: 700,
+                  fontSize: 11.5,
+                }}
+              >
+                Select Auto-Qualified ({candidateDips.filter((d) => d.auto_qualified).length})
+              </Button>
+
+              <Button
+                size="small"
+                variant="outlined"
+                onClick={handleSelectAllDips}
+                sx={{ textTransform: "none", fontWeight: 700, fontSize: 11.5 }}
+              >
+                Select All ({candidateDips.length})
+              </Button>
+
+              <Button
+                size="small"
+                variant="outlined"
+                color="inherit"
+                onClick={handleClearDipSelections}
+                sx={{ textTransform: "none", fontWeight: 700, fontSize: 11.5 }}
+              >
+                Clear All
+              </Button>
+            </Stack>
+
+            <Chip
+              size="small"
+              label={`${selectedDipIds.size} of ${candidateDips.length} events selected`}
+              color={selectedDipIds.size > 0 ? "primary" : "default"}
+              sx={{ fontWeight: 800, fontSize: 11 }}
+            />
+          </Box>
+
+          {/* Dips Table */}
+          <TableContainer component={Paper} variant="outlined" sx={{ maxHeight: 420, borderRadius: 1.5 }}>
+            <Table size="small" stickyHeader>
+              <TableHead>
+                <TableRow>
+                  <TableCell padding="checkbox" sx={{ bgcolor: "#F8FAFC", fontWeight: 800 }}></TableCell>
+                  <TableCell sx={{ bgcolor: "#F8FAFC", fontWeight: 800, fontSize: 11.5 }}>#</TableCell>
+                  <TableCell sx={{ bgcolor: "#F8FAFC", fontWeight: 800, fontSize: 11.5 }}>Date</TableCell>
+                  <TableCell sx={{ bgcolor: "#F8FAFC", fontWeight: 800, fontSize: 11.5 }}>Time Window (IST)</TableCell>
+                  <TableCell sx={{ bgcolor: "#F8FAFC", fontWeight: 800, fontSize: 11.5 }}>Duration</TableCell>
+                  <TableCell sx={{ bgcolor: "#F8FAFC", fontWeight: 800, fontSize: 11.5 }}>Lowest Freq</TableCell>
+                  <TableCell sx={{ bgcolor: "#F8FAFC", fontWeight: 800, fontSize: 11.5 }}>Time &lt; 49.50 Hz</TableCell>
+                  <TableCell sx={{ bgcolor: "#F8FAFC", fontWeight: 800, fontSize: 11.5 }}>Qualification Status</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {candidateDips.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={8} align="center" sx={{ py: 4, color: "#64748B" }}>
+                      No frequency dips below 49.90 Hz detected in the current dataset.
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  candidateDips.map((dip, idx) => {
+                    const isSelected = selectedDipIds.has(dip.id);
+                    return (
+                      <TableRow
+                        key={dip.id}
+                        hover
+                        onClick={() => handleToggleDipSelect(dip.id)}
+                        sx={{
+                          cursor: "pointer",
+                          bgcolor: isSelected
+                            ? "rgba(37, 99, 235, 0.05)"
+                            : dip.auto_qualified
+                            ? "rgba(5, 150, 105, 0.03)"
+                            : "inherit",
+                        }}
+                      >
+                        <TableCell padding="checkbox">
+                          <Checkbox
+                            checked={isSelected}
+                            size="small"
+                            onChange={() => handleToggleDipSelect(dip.id)}
+                            onClick={(e) => e.stopPropagation()}
+                          />
+                        </TableCell>
+                        <TableCell sx={{ fontSize: 11.5, fontWeight: 700 }}>{idx + 1}</TableCell>
+                        <TableCell sx={{ fontSize: 11.5, fontWeight: 700 }}>{dip.date}</TableCell>
+                        <TableCell sx={{ fontSize: 11.5, fontWeight: 800, color: "#17365D" }}>
+                          {dip.time_window}
+                        </TableCell>
+                        <TableCell sx={{ fontSize: 11.5, fontWeight: 700 }}>{dip.duration_min} min</TableCell>
+                        <TableCell sx={{ fontSize: 11.5 }}>
+                          <span
+                            style={{
+                              fontWeight: 900,
+                              color: dip.min_freq < 49.5 ? "#DC2626" : dip.min_freq < 49.7 ? "#EA580C" : "#7C3AED",
+                            }}
+                          >
+                            {dip.min_freq.toFixed(3)} Hz
+                          </span>
+                        </TableCell>
+                        <TableCell sx={{ fontSize: 11.5, fontWeight: 700, color: dip.c495_min > 0 ? "#DC2626" : "#64748B" }}>
+                          {dip.c495_min > 0 ? `${dip.c495_min} min` : "—"}
+                        </TableCell>
+                        <TableCell sx={{ fontSize: 11 }}>
+                          {dip.auto_qualified ? (
+                            <Chip
+                              size="small"
+                              label={dip.qualification_reason || "✓ Auto-Qualified"}
+                              sx={{
+                                bgcolor: "#ECFDF5",
+                                color: "#065F46",
+                                fontWeight: 800,
+                                fontSize: 10.5,
+                                border: "1px solid #A7F3D0",
+                              }}
+                            />
+                          ) : (
+                            <Chip
+                              size="small"
+                              label={`Dip < 49.90 (${dip.duration_min}m)`}
+                              sx={{
+                                bgcolor: "#F1F5F9",
+                                color: "#475569",
+                                fontWeight: 600,
+                                fontSize: 10.5,
+                                border: "1px solid #CBD5E1",
+                              }}
+                            />
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })
+                )}
+              </TableBody>
+            </Table>
+          </TableContainer>
+        </DialogContent>
+
+        <DialogActions sx={{ p: 2, bgcolor: "#F8FAFC", borderTop: "1px solid #E2E8F0" }}>
+          <Button onClick={() => setSelectModalOpen(false)} sx={{ textTransform: "none", fontWeight: 700 }}>
+            Cancel
+          </Button>
+          <Button
+            variant="contained"
+            onClick={handleApplyDipsSelection}
+            disabled={selectedDipIds.size === 0}
+            sx={{
+              bgcolor: "#2563EB",
+              "&:hover": { bgcolor: "#1D4ED8" },
+              textTransform: "none",
+              fontWeight: 800,
+              px: 2.5,
+            }}
+          >
+            Apply Selection ({selectedDipIds.size} Events)
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* DIALOG 2: Manual Event Slotting */}
+      <Dialog
+        open={manualModalOpen}
+        onClose={() => setManualModalOpen(false)}
+        maxWidth="sm"
+        fullWidth
+        PaperProps={{ sx: { borderRadius: 2.5 } }}
+      >
+        <DialogTitle sx={{ pb: 1, bgcolor: "#F8FAFC", borderBottom: "1px solid #E2E8F0" }}>
+          <Typography sx={{ fontSize: 17, fontWeight: 900, color: "#17365D", display: "flex", alignItems: "center", gap: 1 }}>
+            <Plus size={20} color="#7C3AED" /> Manual Event Slotting
+          </Typography>
+          <Typography sx={{ fontSize: 12, color: "#64748B", mt: 0.5 }}>
+            Specify custom event time slots to plot state overdrawal vs frequency curves, mapped CRMS messages, and transmission line regulatory actions.
+          </Typography>
+        </DialogTitle>
+
+        <DialogContent sx={{ p: 2 }}>
+          {manualError && (
+            <Alert severity="error" sx={{ mb: 2, fontSize: 12 }}>
+              {manualError}
+            </Alert>
+          )}
+
+          {/* Form to add a slot */}
+          <Paper variant="outlined" sx={{ p: 2, bgcolor: "#FAF5FF", borderRadius: 2, border: "1px solid #E9D5FF", mb: 2 }}>
+            <Typography sx={{ fontSize: 12.5, fontWeight: 800, color: "#5B21B6", mb: 1.5 }}>
+              Add New Custom Slot
+            </Typography>
+
+            <Stack spacing={1.5}>
+              <Stack direction="row" spacing={1.5} alignItems="center">
+                <TextField
+                  select
+                  size="small"
+                  label="Date"
+                  value={manualDate}
+                  onChange={(e) => setManualDate(e.target.value)}
+                  sx={{ flex: 1, bgcolor: "white" }}
+                >
+                  {uniqueDates.map((d) => (
+                    <MenuItem key={d} value={d}>
+                      {d}
+                    </MenuItem>
+                  ))}
+                </TextField>
+
+                <TextField
+                  size="small"
+                  label="Start Time"
+                  type="time"
+                  value={manualStartTime}
+                  onChange={(e) => setManualStartTime(e.target.value)}
+                  InputLabelProps={{ shrink: true }}
+                  inputProps={{ step: 60 }}
+                  sx={{ width: 130, bgcolor: "white" }}
+                />
+
+                <TextField
+                  size="small"
+                  label="End Time"
+                  type="time"
+                  value={manualEndTime}
+                  onChange={(e) => setManualEndTime(e.target.value)}
+                  InputLabelProps={{ shrink: true }}
+                  inputProps={{ step: 60 }}
+                  sx={{ width: 130, bgcolor: "white" }}
+                />
+              </Stack>
+
+              <Stack direction="row" spacing={1.5} alignItems="center">
+                <TextField
+                  size="small"
+                  label="Event Label / Description (Optional)"
+                  placeholder="e.g. Evening Peak Overdrawal or Line Trip"
+                  value={manualLabel}
+                  onChange={(e) => setManualLabel(e.target.value)}
+                  sx={{ flex: 1, bgcolor: "white" }}
+                />
+
+                <Button
+                  variant="contained"
+                  onClick={handleAddManualSlot}
+                  startIcon={<Plus size={15} />}
+                  sx={{
+                    bgcolor: "#7C3AED",
+                    "&:hover": { bgcolor: "#6D28D9" },
+                    textTransform: "none",
+                    fontWeight: 800,
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  Add Slot
+                </Button>
+              </Stack>
+            </Stack>
+          </Paper>
+
+          {/* Configured Slots List */}
+          <Typography sx={{ fontSize: 13, fontWeight: 800, color: "#17365D", mb: 1 }}>
+            Configured Manual Slots ({manualSlots.length})
+          </Typography>
+
+          {manualSlots.length === 0 ? (
+            <Paper variant="outlined" sx={{ p: 3, textAlign: "center", borderRadius: 1.5, color: "#64748B" }}>
+              <Typography sx={{ fontSize: 12 }}>
+                No manual slots added yet. Fill out the date and times above and click <strong>&quot;Add Slot&quot;</strong>.
+              </Typography>
+            </Paper>
+          ) : (
+            <TableContainer component={Paper} variant="outlined" sx={{ maxHeight: 220, borderRadius: 1.5 }}>
+              <Table size="small">
+                <TableHead>
+                  <TableRow sx={{ bgcolor: "#F8FAFC" }}>
+                    <TableCell sx={{ fontWeight: 800, fontSize: 11 }}>#</TableCell>
+                    <TableCell sx={{ fontWeight: 800, fontSize: 11 }}>Date</TableCell>
+                    <TableCell sx={{ fontWeight: 800, fontSize: 11 }}>Time Window</TableCell>
+                    <TableCell sx={{ fontWeight: 800, fontSize: 11 }}>Label</TableCell>
+                    <TableCell align="right" sx={{ fontWeight: 800, fontSize: 11 }}>Action</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {manualSlots.map((s, idx) => (
+                    <TableRow key={s.id}>
+                      <TableCell sx={{ fontSize: 11.5, fontWeight: 700 }}>{idx + 1}</TableCell>
+                      <TableCell sx={{ fontSize: 11.5, fontWeight: 700 }}>{s.date}</TableCell>
+                      <TableCell sx={{ fontSize: 11.5, fontWeight: 800, color: "#17365D" }}>
+                        {s.start_time.slice(11, 16)} – {s.end_time.slice(11, 16)}
+                      </TableCell>
+                      <TableCell sx={{ fontSize: 11.5 }}>{s.label}</TableCell>
+                      <TableCell align="right">
+                        <IconButton size="small" color="error" onClick={() => handleDeleteManualSlot(s.id)}>
+                          <Trash2 size={15} />
+                        </IconButton>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </TableContainer>
+          )}
+        </DialogContent>
+
+        <DialogActions sx={{ p: 2, bgcolor: "#F8FAFC", borderTop: "1px solid #E2E8F0" }}>
+          <Button onClick={() => setManualModalOpen(false)} sx={{ textTransform: "none", fontWeight: 700 }}>
+            Cancel
+          </Button>
+          <Button
+            variant="contained"
+            onClick={handleApplyManualSlots}
+            disabled={manualSlots.length === 0}
+            sx={{
+              bgcolor: "#7C3AED",
+              "&:hover": { bgcolor: "#6D28D9" },
+              textTransform: "none",
+              fontWeight: 800,
+              px: 2.5,
+            }}
+          >
+            Apply Manual Slots ({manualSlots.length} Slots)
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 }
+
