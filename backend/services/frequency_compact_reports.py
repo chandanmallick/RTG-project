@@ -108,6 +108,31 @@ def build_event_charts_data(session, result):
             chart = sessions.chart_points(session['dataset'], [(start, end)], entity['entity_id'], limit=1200)
             points = chart.get('points', [])
             messages = [row for row in chronology if row.get('entity_id') == entity['entity_id'] and start <= row['timestamp'] < end]
+            trans_events = []
+            crms_msgs = []
+            for r in messages:
+                if r.get('record_kind') == 'physical':
+                    act = r.get('action') or {}
+                    trans_events.append({
+                        'timestamp': r.get('timestamp') or act.get('timestamp') or act.get('outage_date_time') or '',
+                        'outage_date_time': act.get('outage_date_time') or r.get('timestamp') or '',
+                        'line_name': act.get('line_name') or r.get('message_details', ''),
+                        'reason': act.get('reason', ''),
+                        'owners': act.get('owners') or ([act.get('owner')] if act.get('owner') else []),
+                        'agency_name': act.get('agency_name', ''),
+                        'remarks': act.get('remarks') or r.get('message_details', '')
+                    })
+                else:
+                    crms_msgs.append({
+                        'timestamp': r.get('timestamp') or '',
+                        'message_date': r.get('timestamp') or '',
+                        'message_no': r.get('message_no', ''),
+                        'remarks': r.get('message_details', ''),
+                        'category': r.get('message_categories') or [r.get('message_type', 'CRMS Message')],
+                        'violation_type': r.get('message_type', 'CRMS Message'),
+                        'issued_to': [entity['display_name']],
+                        'issued_by': r.get('issued_by', 'ERLDC')
+                    })
             events.append({
                 'event_id': f"{entity['entity_id']}:{index}",
                 'event_index': index,
@@ -119,25 +144,175 @@ def build_event_charts_data(session, result):
                 'series': {
                     'timestamps': [p['timestamp'] for p in points],
                     'frequency': [p['frequency'] for p in points],
-                    'deviation': [p['deviation_mw'] for p in points]
+                    'deviation': [p['deviation_mw'] for p in points],
+                    'schedule': [p.get('schedule') for p in points],
+                    'actual': [p.get('actual') for p in points],
                 },
-                'transmission_line_events': [r['action'] for r in messages if r.get('record_kind') == 'physical'],
-                'crms_messages': [{
-                    'timestamp': r['timestamp'],
-                    'message_no': r.get('message_no', ''),
-                    'remarks': r.get('message_details', ''),
-                    'category': r.get('message_categories') or [r.get('message_type', 'CRMS Message')]
-                } for r in messages if r.get('record_kind') != 'physical']
+                'transmission_line_events': trans_events,
+                'crms_messages': crms_msgs
             })
     return events
 
 
-def html_report(tables, title, warnings, session=None, result=None, event_charts_data=None, od_frequency=None, event_tables=None):
+def build_continuous_drawal_data(session, result=None):
+    """
+    Build continuous end-to-end frequency vs deviation vs schedule/actual data for Section 3.
+    Extracts 1-minute resolution data across the full timeline for constituent States:
+      - West Bengal, Bihar, DVC, Jharkhand, Odisha, Sikkim
+      - Automatically detects low-frequency dip events (below 49.90 Hz / 49.50 Hz)
+      - Matches CRMS violation notices and Physical Regulation actions
+    """
+    dataset = session.get('dataset', {})
+    times = dataset.get('times', [])
+    if times is None or len(times) == 0:
+        return {}
+
+    from services.frequency_threshold_analysis import iso
+    import numpy as np
+
+    timestamps = [iso(t)[:16].replace('T', ' ') for t in times]
+    freq_arr = dataset.get('frequency', [])
+    freq_clean = [round(float(f), 3) if np.isfinite(f) else None for f in freq_arr]
+
+    low_freq_intervals = []
+    in_low = False
+    start_ts = ""
+    for ts, f in zip(timestamps, freq_clean):
+        if f is not None and f <= 49.90:
+            if not in_low:
+                in_low = True
+                start_ts = ts
+        else:
+            if in_low:
+                in_low = False
+                low_freq_intervals.append([{"xAxis": start_ts}, {"xAxis": ts}])
+    if in_low:
+        low_freq_intervals.append([{"xAxis": start_ts}, {"xAxis": timestamps[-1]}])
+
+    detected_events = []
+    in_dip = False
+    dip_start_idx = 0
+    for idx, (ts, f) in enumerate(zip(timestamps, freq_clean)):
+        if f is not None and f < 49.90:
+            if not in_dip:
+                in_dip = True
+                dip_start_idx = idx
+        else:
+            if in_dip:
+                in_dip = False
+                duration = idx - dip_start_idx
+                sub_f = [val for val in freq_clean[dip_start_idx:idx] if val is not None]
+                if sub_f:
+                    min_val = min(sub_f)
+                    min_at = dip_start_idx + sub_f.index(min_val)
+                    if duration >= 4 or min_val < 49.75:
+                        detected_events.append({
+                            "start_time": timestamps[dip_start_idx],
+                            "end_time": timestamps[idx - 1],
+                            "start_idx": dip_start_idx,
+                            "end_idx": idx - 1,
+                            "duration_min": duration,
+                            "min_freq": round(min_val, 3),
+                            "min_time": timestamps[min_at][11:16],
+                            "date": timestamps[dip_start_idx][:10],
+                            "label": f"{timestamps[dip_start_idx][5:10]} {timestamps[dip_start_idx][11:16]}–{timestamps[idx - 1][11:16]} (Min {min_val:.3f} Hz)"
+                        })
+    if in_dip:
+        duration = len(timestamps) - dip_start_idx
+        sub_f = [val for val in freq_clean[dip_start_idx:] if val is not None]
+        if sub_f and (duration >= 4 or min(sub_f) < 49.75):
+            min_val = min(sub_f)
+            detected_events.append({
+                "start_time": timestamps[dip_start_idx],
+                "end_time": timestamps[-1],
+                "start_idx": dip_start_idx,
+                "end_idx": len(timestamps) - 1,
+                "duration_min": duration,
+                "min_freq": round(min_val, 3),
+                "min_time": timestamps[dip_start_idx + sub_f.index(min_val)][11:16],
+                "date": timestamps[dip_start_idx][:10],
+                "label": f"{timestamps[dip_start_idx][5:10]} {timestamps[dip_start_idx][11:16]}–{timestamps[-1][11:16]} (Min {min_val:.3f} Hz)"
+            })
+
+    chronology = []
+    if result:
+        try:
+            chronology, _ = sessions.report_chronology(session, result)
+        except Exception:
+            chronology = result.get('chronology', [])
+
+    states_data = {}
+    for entity in dataset.get('entities', []):
+        if entity.get('group') != 'State':
+            continue
+        state_name = entity.get('display_name', '')
+        ent_id = entity.get('entity_id', '')
+
+        sch = entity.get('schedule', [])
+        act = entity.get('actual', [])
+        dev = entity.get('deviation', [])
+
+        sch_clean = [round(float(s), 1) if np.isfinite(s) else None for s in sch]
+        act_clean = [round(float(a), 1) if np.isfinite(a) else None for a in act]
+        dev_clean = [round(float(d), 1) if np.isfinite(d) else None for d in dev]
+
+        crms_list = []
+        trans_list = []
+        for r in chronology:
+            if r.get('entity_id') == ent_id or r.get('state') == state_name or r.get('entity') == state_name:
+                r_ts = str(r.get('timestamp') or '').replace('T', ' ')[:16]
+                if r.get('record_kind') == 'physical':
+                    act_item = r.get('action') or {}
+                    trans_list.append({
+                        "timestamp": r_ts,
+                        "outage_date_time": act_item.get('outage_date_time') or r_ts,
+                        "line_name": act_item.get('line_name') or r.get('message_details', ''),
+                        "reason": act_item.get('reason') or '',
+                        "owners": act_item.get('owners') or ([act_item.get('owner')] if act_item.get('owner') else []),
+                        "agency_name": act_item.get('agency_name') or '',
+                        "remarks": act_item.get('remarks') or r.get('message_details', '')
+                    })
+                else:
+                    crms_list.append({
+                        "timestamp": r_ts,
+                        "message_date": r_ts,
+                        "message_no": r.get('message_no', ''),
+                        "remarks": r.get('message_details', ''),
+                        "category": r.get('message_categories') or [r.get('message_type', 'CRMS Message')],
+                        "violation_type": r.get('message_type', 'CRMS Message'),
+                        "issued_to": [state_name],
+                        "issued_by": r.get('issued_by', 'ERLDC')
+                    })
+
+        states_data[state_name] = {
+            "schedule": sch_clean,
+            "actual": act_clean,
+            "deviation": dev_clean,
+            "crms_messages": crms_list,
+            "transmission_line_events": trans_list,
+        }
+
+    unique_dates = sorted(list(set(ts[:10] for ts in timestamps)))
+
+    return {
+        "timestamps": timestamps,
+        "frequency": freq_clean,
+        "low_freq_intervals": low_freq_intervals,
+        "detected_events": detected_events,
+        "unique_dates": unique_dates,
+        "states": states_data,
+        "total_points": len(timestamps),
+        "start_date": timestamps[0][:10] if timestamps else "",
+        "end_date": timestamps[-1][:10] if timestamps else "",
+    }
+
+
+def html_report(tables, title, warnings, session=None, result=None, event_charts_data=None, od_frequency=None, event_tables=None, continuous_drawal_data=None):
     """
     Restructured 5-section HTML report following user requirements:
     1. Frequency profile analysis (Dynamic Frequency Event Tables: Table-2A, Table-2B, Table-2C)
     2. State Scatter (State-wise Overdrawal vs Frequency Analysis plots and statistics tables)
-    3. State Overdrawal plots for each events (interactive curves with CRMS markers)
+    3. State Overdrawal plots for each event (interactive curves with CRMS markers & continuous 3-panel viewer)
     4. Event Chronology & Number of message issue (Category-wise message breakdown + event chronology)
     5. Rest same (Performance and overall statistics tables)
     """
@@ -145,9 +320,23 @@ def html_report(tables, title, warnings, session=None, result=None, event_charts
     
     # Event charts data for Section 3
     event_charts_json = json.dumps(event_charts_data or [], ensure_ascii=False).replace('<', '\\u003c')
+
+    # Continuous drawal data for Section 3
+    if continuous_drawal_data is None and session:
+        try:
+            continuous_drawal_data = build_continuous_drawal_data(session, result)
+        except Exception as exc:
+            print(f"Notice: continuous drawal generation note: {exc}")
+            continuous_drawal_data = {}
+    continuous_drawal_json = json.dumps(continuous_drawal_data or {}, ensure_ascii=False).replace('<', '\\u003c')
     
     # OD frequency data for Section 2
-    period = (od_frequency or {}).get('period') or 'September–October 2026'
+    summary_info = (result or {}).get('summary') or {}
+    fallback_period = 'Uploaded Period'
+    if summary_info.get('analysis_start') and summary_info.get('analysis_end'):
+        from services.od_frequency_report import format_period_label
+        fallback_period = format_period_label(summary_info['analysis_start'], summary_info['analysis_end'])
+    period = (od_frequency or {}).get('period') or fallback_period
     plots_base64 = (od_frequency or {}).get('plots_base64') or {}
     state_stats = (od_frequency or {}).get('state_stats') or {}
     stats_base64 = (od_frequency or {}).get('statistics_base64') or ''
@@ -202,14 +391,18 @@ def html_report(tables, title, warnings, session=None, result=None, event_charts
             const_head_sub = ''.join('<th style="padding: 5px 8px; border: 1px solid #3d72b0; text-align: right; width: 65px;">Max OD</th><th style="padding: 5px 8px; border: 1px solid #3d72b0; text-align: right; width: 65px;">Avg Dev</th>' for _ in tbl['constituents'])
             
             event_cards.append(f'''
-            <div class="event-table-card" style="margin-bottom: 28px; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: white; box-shadow: 0 2px 6px rgba(0,0,0,0.03);">
-              <div style="background: #17365D; color: white; padding: 12px 18px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
-                <div style="font-weight: 800; font-size: 13px; line-height: 1.4;">{escape(tbl["title"])}</div>
-                <div>
-                  <span class="badge" style="background: rgba(255,255,255,0.2); color: white; font-size: 11px; padding: 3px 8px; border-radius: 4px;">{tbl["total_events"]} Events ({tbl["total_minutes"]} min)</span>
+            <details class="event-table-card" id="details-{tbl["table_id"]}" data-thresh="{tbl["threshold"]}" style="margin-bottom: 24px; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: white; box-shadow: 0 2px 6px rgba(0,0,0,0.03);" open>
+              <summary style="background: #17365D; color: white; padding: 12px 18px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; cursor: pointer; user-select: none;">
+                <div style="font-weight: 800; font-size: 13px; line-height: 1.4; display: flex; align-items: center; gap: 8px;">
+                  <span class="collapsible-icon" style="font-size: 11px;">▼</span>
+                  <span>{escape(tbl["title"])}</span>
                 </div>
-              </div>
-              <div style="overflow-x: auto;">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                  <span class="badge" style="background: rgba(255,255,255,0.2); color: white; font-size: 11px; padding: 3px 8px; border-radius: 4px;">{tbl["total_events"]} Events ({tbl["total_minutes"]} min)</span>
+                  <span style="font-size: 11px; opacity: 0.85;">(Click to collapse/expand)</span>
+                </div>
+              </summary>
+              <div style="overflow-x: auto; max-height: 560px;">
                 <table class="styled-table" style="width: 100%; border-collapse: collapse; font-size: 12px; margin: 0;">
                   <thead>
                     <tr style="background: #204B7D; color: white;">
@@ -230,8 +423,19 @@ def html_report(tables, title, warnings, session=None, result=None, event_charts
                   </tbody>
                 </table>
               </div>
-            </div>''')
-        event_section_content = ''.join(event_cards)
+            </details>''')
+        event_toolbar = '''
+        <div class="filter-bar" style="margin-bottom: 16px;">
+          <span style="font-size: 12px; font-weight: 700; color: var(--primary);">View Options:</span>
+          <button class="action-btn" onclick="toggleAllEventTables(true)">Expand All</button>
+          <button class="action-btn" onclick="toggleAllEventTables(false)">Collapse All</button>
+          <span style="margin-left: 14px; font-size: 12px; font-weight: 700; color: var(--primary);">Threshold Filter:</span>
+          <button class="action-btn" onclick="filterEventTableThreshold('ALL')">All Tables</button>
+          <button class="action-btn" onclick="filterEventTableThreshold('49.5')">&lt;49.50 Hz</button>
+          <button class="action-btn" onclick="filterEventTableThreshold('49.7')">&lt;49.70 Hz</button>
+          <button class="action-btn" onclick="filterEventTableThreshold('49.9')">&lt;49.90 Hz</button>
+        </div>'''
+        event_section_content = event_toolbar + ''.join(event_cards)
     else:
         event_section_content = '''
         <div class="placeholder-card">
@@ -565,6 +769,93 @@ def html_report(tables, title, warnings, session=None, result=None, event_charts
     .action-btn.success:hover {{
       background: #047857;
     }}
+    .action-btn.primary {{
+      background: #17365D;
+      color: white;
+      border-color: #0F233D;
+    }}
+    .action-btn.primary:hover {{
+      background: #204B7D;
+    }}
+    /* Continuous 3-Panel Visualizer Styles */
+    .continuous-card {{
+      background: #FFFFFF;
+      border: 1px solid #CBD5E1;
+      border-radius: 10px;
+      overflow: hidden;
+      box-shadow: 0 4px 14px rgba(15,23,42,0.05);
+      margin-top: 14px;
+      margin-bottom: 24px;
+    }}
+    .continuous-card-header {{
+      background: #F8FAFC;
+      border-bottom: 1px solid #E2E8F0;
+      padding: 12px 18px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 10px;
+    }}
+    .compact-select {{
+      padding: 5px 10px;
+      border: 1px solid #CBD5E1;
+      border-radius: 6px;
+      font-size: 11.5px;
+      background: #FFFFFF;
+      color: #0F172A;
+      font-weight: 700;
+      cursor: pointer;
+    }}
+    .event-selection-bar {{
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 8px 18px;
+      background: #F1F5F9;
+      border-bottom: 1px solid #E2E8F0;
+      overflow-x: auto;
+    }}
+    .event-chips-wrapper {{
+      display: flex;
+      gap: 6px;
+      overflow-x: auto;
+      padding: 2px 0;
+      scrollbar-width: thin;
+    }}
+    .event-chip-btn {{
+      white-space: nowrap;
+      padding: 3px 9px;
+      border: 1px solid #CBD5E1;
+      border-radius: 999px;
+      background: #FFFFFF;
+      color: #0F172A;
+      font-size: 11px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }}
+    .event-chip-btn:hover {{
+      background: #17365D;
+      color: #FFFFFF;
+      border-color: #17365D;
+    }}
+    .event-chip-btn.active {{
+      background: #DC2626;
+      color: #FFFFFF;
+      border-color: #DC2626;
+    }}
+    .continuous-footnote {{
+      padding: 10px 18px;
+      background: #F8FAFC;
+      border-top: 1px solid #E2E8F0;
+      display: flex;
+      align-items: center;
+      gap: 18px;
+      font-size: 11.5px;
+      color: #334155;
+      flex-wrap: wrap;
+    }}
     .scroll-table {{
       overflow: auto;
       max-height: 65vh;
@@ -583,6 +874,56 @@ def html_report(tables, title, warnings, session=None, result=None, event_charts
     .tag.emergency {{ background: #FFEDD5; color: #9A3412; }}
     .tag.extreme {{ background: #FEE2E2; color: #991B1B; }}
     .tag.non-compliance {{ background: #F1F5F9; color: #0F172A; }}
+    .modal-overlay {{
+      position: fixed;
+      top: 0; left: 0; width: 100vw; height: 100vh;
+      background: rgba(15, 23, 42, 0.75);
+      backdrop-filter: blur(4px);
+      z-index: 9999;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }}
+    .modal-content {{
+      background: #FFFFFF;
+      border-radius: 12px;
+      max-width: 95vw;
+      max-height: 95vh;
+      display: flex;
+      flex-direction: column;
+      box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.3), 0 10px 10px -5px rgba(0, 0, 0, 0.2);
+      overflow: hidden;
+    }}
+    .modal-header {{
+      background: #17365D;
+      color: white;
+      padding: 12px 20px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }}
+    .modal-header h3 {{
+      font-size: 15px;
+      font-weight: 800;
+      margin: 0;
+    }}
+    details summary::-webkit-details-marker {{
+      display: none;
+    }}
+    details summary {{
+      list-style: none;
+    }}
+    details[open] summary .collapsible-icon {{
+      transform: rotate(0deg);
+    }}
+    details:not([open]) summary .collapsible-icon {{
+      transform: rotate(-90deg);
+    }}
+    .collapsible-icon {{
+      display: inline-block;
+      transition: transform 0.2s ease;
+    }}
     @media (max-width: 768px) {{
       .scatter-grid {{ grid-template-columns: 1fr; }}
       .event-chart {{ height: 380px; }}
@@ -654,34 +995,96 @@ def html_report(tables, title, warnings, session=None, result=None, event_charts
       </div>
     </section>
 
-    <!-- SECTION 3: State Overdrawal plots for each events -->
+    <!-- SECTION 3: State Overdrawal plots for each event -->
     <section class="report-section" id="section-events">
       <div class="section-header">
         <div>
           <h2 class="section-title">
             3. State Overdrawal Plots for Each Event
-            <span class="badge">Interactive Curves</span>
+            <span class="badge">Continuous &amp; Event Analysis</span>
           </h2>
           <p style="font-size: 11.5px; color: var(--muted); margin-top: 4px;">
-            Dual-axis interactive event curves showing Frequency (Hz) vs State Deviation/Overdrawal (MW) with CRMS violation messages and transmission line physical regulations.
+            Continuous end-to-end Drawal (Schedule vs Actual), Deviation with CRMS violation messages and Physical Regulatory actions, and Frequency curve. 2-day default window, scrollable and exportable.
           </p>
         </div>
       </div>
 
-      <div class="filter-bar">
-        <label for="event-state-filter"><strong>Filter State:</strong></label>
-        <select id="event-state-filter" onchange="filterEventCharts()">
-          <option value="ALL">All States</option>
-        </select>
-        <label for="event-slot-filter" style="margin-left: 12px;"><strong>Filter Event:</strong></label>
-        <select id="event-slot-filter" onchange="filterEventCharts()">
-          <option value="ALL">All Events</option>
-        </select>
-        <span id="event-filter-count" style="margin-left: auto; font-size: 11.5px; color: var(--muted); font-weight: 700;"></span>
+      <!-- Continuous 3-Panel Visualizer Card -->
+      <div class="continuous-card" id="continuous-drawal-container">
+        <div class="continuous-card-header">
+          <div>
+            <h3 id="continuous-chart-title" style="margin: 0; font-size: 15px; font-weight: 800; color: #17365D;">
+              West Bengal: schedule, actual drawal and over drawal vs frequency
+            </h3>
+            <span style="font-size: 11px; color: #64748B;">
+              Continuous 1-minute SCADA data &bull; 2-day scrollable window by default &bull; Shaded zones: f ≤ 49.90 Hz
+            </span>
+          </div>
+          <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+            <label style="font-size: 11px; font-weight: 800; color: #17365D;">State:</label>
+            <select id="continuous-state-select" onchange="onContinuousStateChange()" class="compact-select">
+              <!-- Populated by JS -->
+            </select>
+            <label style="font-size: 11px; font-weight: 800; color: #17365D; margin-left: 6px;">Jump to Date:</label>
+            <select id="continuous-date-select" onchange="onContinuousDateChange()" class="compact-select">
+              <!-- Populated with unique dates -->
+            </select>
+            <button class="action-btn" onclick="resetContinuousZoom()" title="Reset to initial 2-day view">
+              ↺ 2-Day View
+            </button>
+            <button class="action-btn primary" onclick="downloadContinuousVisibleWindow()" title="Download visible window as high-res PNG">
+              📸 Download Visible Window (PNG)
+            </button>
+          </div>
+        </div>
+
+        <!-- Frequency Overview & Event Selection Chips Bar -->
+        <div class="event-selection-bar" id="continuous-event-selection-bar">
+          <span style="font-size: 11px; font-weight: 800; color: #17365D; white-space: nowrap; display: flex; align-items: center; gap: 4px;">
+            ⚡ Frequency overview &amp; event selection:
+          </span>
+          <div class="event-chips-wrapper" id="continuous-event-chips">
+            <!-- Chips populated dynamically by JS -->
+          </div>
+        </div>
+
+        <!-- ECharts 3-Panel Container -->
+        <div id="continuous-drawal-chart" style="width: 100%; height: 640px; background: #FFFFFF;"></div>
+
+        <!-- Dynamic Statistical Footnote -->
+        <div class="continuous-footnote" id="continuous-chart-footnote">
+          <span><strong style="color: #DC2626;">Shaded</strong> = f ≤ 49.90 Hz.</span>
+          <span><strong>Over drawing at f ≤ 49.90 Hz:</strong> <span id="stat-od-min" style="font-weight: 800; color: #0F172A;">—</span> of <span id="stat-low-min" style="font-weight: 800; color: #0F172A;">—</span> min;</span>
+          <span><strong>max over drawal at f ≤ 49.90 Hz:</strong> <span id="stat-max-od" style="font-weight: 800; color: #DC2626;">—</span> MW</span>
+          <span id="stat-visible-range" style="margin-left: auto; color: #64748B; font-size: 11px;"></span>
+        </div>
+      </div>
+
+      <!-- Collapsible Detailed Event Cards -->
+      <div style="margin-top: 24px; margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+        <div>
+          <h3 style="font-size: 14px; font-weight: 800; color: var(--primary); margin: 0;">
+            3.2 Discrete Event Detail Plots &amp; Regulatory Breakup
+          </h3>
+          <p style="font-size: 11px; color: var(--muted); margin: 2px 0 0 0;">
+            Includes plotted CRMS violation messages and Physical Regulatory transmission line operations.
+          </p>
+        </div>
+        <div class="filter-bar" style="margin-bottom: 0; padding: 4px 10px;">
+          <label for="event-state-filter" style="font-size: 11px; font-weight: 700;">Filter State:</label>
+          <select id="event-state-filter" onchange="filterEventCharts()" class="compact-select">
+            <option value="ALL">All States</option>
+          </select>
+          <label for="event-slot-filter" style="font-size: 11px; font-weight: 700; margin-left: 8px;">Filter Event:</label>
+          <select id="event-slot-filter" onchange="filterEventCharts()" class="compact-select">
+            <option value="ALL">All Events</option>
+          </select>
+          <span id="event-filter-count" style="margin-left: 8px; font-size: 11px; color: var(--muted); font-weight: 700;"></span>
+        </div>
       </div>
 
       <div id="event-cards-container">
-        <!-- Event cards rendered dynamically -->
+        <!-- Event cards rendered dynamically with CRMS and Physical Regulation markers -->
       </div>
     </section>
 
@@ -718,11 +1121,15 @@ def html_report(tables, title, warnings, session=None, result=None, event_charts
 
       <h3 style="font-size: 14px; font-weight: 800; color: var(--primary); margin-bottom: 10px;">4.2 Daily Event Chronology</h3>
       <div class="filter-bar">
-        <label for="chronology-date"><strong>Filter Date:</strong></label>
+        <label for="chronology-state"><strong>Filter State:</strong></label>
+        <select id="chronology-state" onchange="renderChronologyTable()">
+          <option value="ALL">All States / Entities</option>
+        </select>
+        <label for="chronology-date" style="margin-left: 12px;"><strong>Filter Date:</strong></label>
         <input type="date" id="chronology-date" onchange="renderChronologyTable()">
         <label for="chronology-search" style="margin-left: 12px;"><strong>Search:</strong></label>
         <input type="text" id="chronology-search" placeholder="Filter entity, details..." oninput="renderChronologyTable()">
-        <button onclick="document.getElementById('chronology-date').value='';document.getElementById('chronology-search').value='';renderChronologyTable()">Clear</button>
+        <button onclick="document.getElementById('chronology-state').value='ALL';document.getElementById('chronology-date').value='';document.getElementById('chronology-search').value='';renderChronologyTable()">Clear</button>
         <span id="chronology-count" style="margin-left: auto; font-size: 11.5px; color: var(--muted); font-weight: 700;"></span>
       </div>
 
@@ -790,19 +1197,64 @@ def html_report(tables, title, warnings, session=None, result=None, event_charts
         <button class="action-btn" id="perf-next" onclick="changePerfPage(1)">Next</button>
       </div>
     </section>
+
+    <!-- Modal for Enlarged State Scatter Plot -->
+    <div id="modal-enlarge-scatter" class="modal-overlay" style="display:none;" onclick="closeScatterModal()">
+      <div class="modal-content" onclick="event.stopPropagation()">
+        <div class="modal-header">
+          <h3 id="modal-scatter-title">Enlarged State Plot</h3>
+          <button class="action-btn" onclick="closeScatterModal()" style="color: #0F172A; padding: 3px 10px;">✕ Close</button>
+        </div>
+        <div style="text-align: center; padding: 16px; overflow: auto; background: #FFFFFF; max-height: calc(95vh - 60px);">
+          <img id="modal-scatter-img" src="" style="max-width: 100%; max-height: 82vh; object-fit: contain; border-radius: 6px; box-shadow: 0 4px 14px rgba(0,0,0,0.12);" />
+        </div>
+      </div>
+    </div>
   </main>
 
   <script>
     const TABLES = {tables_json};
     const EVENT_CHARTS = {event_charts_json};
     const OD_DATA = {od_frequency_json};
+    const CONTINUOUS_DATA = {continuous_drawal_json};
 
     const esc = (v) => String(v ?? '-').replace(/[&<>"']/g, c => ({{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}}[c]));
     const num = (v, digits=1) => v == null || !Number.isFinite(Number(v)) ? '—' : Number(v).toFixed(digits);
 
     // ==========================================
+    // SECTION 1: COLLAPSIBLE EVENT TABLES HANDLERS
+    // ==========================================
+    function toggleAllEventTables(open) {{
+      document.querySelectorAll('.event-table-card').forEach(d => {{
+        d.open = open;
+      }});
+    }}
+
+    function filterEventTableThreshold(thresh) {{
+      document.querySelectorAll('.event-table-card').forEach(d => {{
+        const t = d.getAttribute('data-thresh');
+        if (thresh === 'ALL' || t === thresh) {{
+          d.style.display = '';
+        }} else {{
+          d.style.display = 'none';
+        }}
+      }});
+    }}
+
+    // ==========================================
     // SECTION 2: RENDER STATE SCATTER PLOTS & STATS
     // ==========================================
+    function openScatterModal(state) {{
+      const imgUri = OD_DATA.plots && OD_DATA.plots[state];
+      if (!imgUri) return;
+      document.getElementById('modal-scatter-title').textContent = `${{state}} — Overdrawal vs Frequency Analysis (High Resolution)`;
+      document.getElementById('modal-scatter-img').src = imgUri;
+      document.getElementById('modal-enlarge-scatter').style.display = 'flex';
+    }}
+
+    function closeScatterModal() {{
+      document.getElementById('modal-enlarge-scatter').style.display = 'none';
+    }}
     function initScatterSection() {{
       const container = document.getElementById('scatter-container');
       const states = Object.keys(OD_DATA.plots || {{}});
@@ -835,9 +1287,12 @@ def html_report(tables, title, warnings, session=None, result=None, event_charts
         card.innerHTML = `
           <div class="scatter-card-header">
             <h4>${{esc(state)}}</h4>
-            <span class="measure-tag">${{measure}}</span>
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <span class="measure-tag">${{measure}}</span>
+              <button class="action-btn" style="padding: 2px 8px; font-size: 11px; color: #17365D;" onclick="openScatterModal('${{esc(state)}}')">🔍 Enlarge</button>
+            </div>
           </div>
-          <div class="scatter-img-wrap">
+          <div class="scatter-img-wrap" style="cursor: zoom-in;" onclick="openScatterModal('${{esc(state)}}')" title="Click to enlarge plot">
             <img src="${{imgUri}}" alt="${{esc(state)}} OD vs Frequency" loading="lazy" />
           </div>
           <div class="scatter-table-wrap">
@@ -855,7 +1310,10 @@ def html_report(tables, title, warnings, session=None, result=None, event_charts
                 ${{tableRowsHtml}}
               </tbody>
             </table>
-            <div style="margin-top: 10px; display: flex; justify-content: flex-end;">
+            <div style="margin-top: 10px; display: flex; justify-content: flex-end; gap: 8px;">
+              <button class="action-btn" onclick="openScatterModal('${{esc(state)}}')">
+                🔍 Enlarge Plot
+              </button>
               <a class="action-btn" href="${{imgUri}}" download="${{state.replace(/[^A-Za-z0-9_-]+/g, '_')}}_OD_Frequency.png">
                 💾 Download Plot PNG
               </a>
@@ -878,7 +1336,568 @@ def html_report(tables, title, warnings, session=None, result=None, event_charts
     }}
 
     // ==========================================
-    // SECTION 3: RENDER EVENT DUAL-AXIS CHARTS
+    // SECTION 3: CONTINUOUS DRAWAL & EVENT OVERDRAWAL PLOTS
+    // ==========================================
+    const crmsColors = {{
+      'alert': '#FACC15',
+      'emergency': '#F97316',
+      'extreme emergency': '#DC2626',
+      'non-compliance': '#111827',
+      'noncompliance': '#111827'
+    }};
+    const crmsOrder = ['Alert', 'Emergency', 'Extreme Emergency', 'Non-compliance'];
+    const crmsCategory = (m) => {{
+      const raw = Array.isArray(m.category) ? m.category[0] : m.category;
+      return String(raw || m.violation_type || 'CRMS Message').trim();
+    }};
+    const crmsColor = (m) => crmsColors[crmsCategory(m).toLowerCase()] || '#2563EB';
+    const crmsSymbol = 'path://M4 4h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H9l-5 4v-4H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z';
+    const towerSymbol = 'path://M11 1h2l1.4 5H18v2h-3l1 4H20v2h-3.4L19 23h-3l-.8-3H8.8L8 23H5l2.4-9H4v-2h4l1-4H6V6h3.6L11 1zm-.4 7-1 4h4.8l-1-4h-2.8zm-1.5 6-1 4h5.8l-1-4H9.1z';
+
+    function crmsTooltip(m) {{
+      let html = `<div style="min-width:240px;font-size:12px;line-height:1.45"><div style="font-weight:900;color:${{crmsColor(m)}};margin-bottom:5px">CRMS Violation: ${{esc(crmsCategory(m))}}</div>`;
+      const issued = m.timestamp || m.message_date || '';
+      if (issued) html += `<div><span style="color:#64748B">Issue time:</span> <strong>${{esc(issued)}}</strong></div>`;
+      if (m.message_no) html += `<div><span style="color:#64748B">Message no:</span> <strong>${{esc(m.message_no)}}</strong></div>`;
+      if (Array.isArray(m.issued_to) && m.issued_to.length) html += `<div><span style="color:#64748B">Issued to:</span> <strong>${{esc(m.issued_to.join(', '))}}</strong></div>`;
+      if (m.issued_by) html += `<div><span style="color:#64748B">Issued by:</span> ${{esc(m.issued_by)}}</div>`;
+      if (m.remarks) html += `<div style="margin-top:5px;font-weight:700;color:#334155">${{esc(m.remarks)}}</div>`;
+      return html + '</div>';
+    }}
+
+    function transmissionTooltip(ev) {{
+      let html = `<div style="min-width:260px;font-size:12px;line-height:1.45"><div style="font-weight:900;color:#0F172A;margin-bottom:5px">⚡ Physical Regulation — Transmission Line</div>`;
+      html += `<div style="font-weight:900;color:#1E293B">${{esc(ev.line_name || 'Transmission line')}}</div>`;
+      html += `<div><span style="color:#64748B">Time:</span> <strong>${{esc(ev.timestamp || ev.outage_date_time || '-')}}</strong></div>`;
+      if (Array.isArray(ev.owners) && ev.owners.length) html += `<div><span style="color:#64748B">Owner(s):</span> <strong>${{esc(ev.owners.join(', '))}}</strong></div>`;
+      if (ev.agency_name) html += `<div><span style="color:#64748B">Agency:</span> ${{esc(ev.agency_name)}}</div>`;
+      if (ev.reason || ev.remarks) html += `<div style="margin-top:5px;font-weight:700;color:#334155">${{esc(ev.reason || ev.remarks)}}</div>`;
+      return html + '</div>';
+    }}
+
+    let continuousChart = null;
+    let currentContinuousState = 'West Bengal';
+
+    function initContinuousDrawalSection() {{
+      const stateSelect = document.getElementById('continuous-state-select');
+      const dateSelect = document.getElementById('continuous-date-select');
+      const chipsContainer = document.getElementById('continuous-event-chips');
+      if (!stateSelect || !CONTINUOUS_DATA.states) return;
+
+      const availableStates = Object.keys(CONTINUOUS_DATA.states || {{}});
+      if (!availableStates.length) {{
+        document.getElementById('continuous-drawal-container').innerHTML = 
+          '<div style="padding: 30px; text-align: center; color: var(--muted); font-size: 13px;">No continuous time-series data available in this session.</div>';
+        return;
+      }}
+
+      stateSelect.innerHTML = '';
+      availableStates.forEach(st => {{
+        const opt = document.createElement('option');
+        opt.value = st;
+        opt.textContent = st;
+        if (st.toLowerCase().includes('west bengal')) opt.selected = true;
+        stateSelect.appendChild(opt);
+      }});
+      currentContinuousState = stateSelect.value || availableStates[0];
+
+      dateSelect.innerHTML = '<option value="">Select Date...</option>';
+      (CONTINUOUS_DATA.unique_dates || []).forEach(dt => {{
+        const opt = document.createElement('option');
+        opt.value = dt;
+        opt.textContent = dt;
+        dateSelect.appendChild(opt);
+      }});
+
+      chipsContainer.innerHTML = '';
+      const detected = CONTINUOUS_DATA.detected_events || [];
+      if (!detected.length) {{
+        chipsContainer.innerHTML = '<span style="font-size: 11px; color: #64748B; font-style: italic;">No critical frequency dips (<49.75 Hz or ≥4 min <49.90 Hz) detected.</span>';
+      }} else {{
+        detected.forEach((ev, evIdx) => {{
+          const chip = document.createElement('button');
+          chip.type = 'button';
+          chip.className = 'event-chip-btn';
+          chip.textContent = ev.label || `Dip #${{evIdx + 1}}: ${{ev.start_time.slice(5, 16)}} (Min ${{ev.min_freq}} Hz)`;
+          chip.title = `Jump to low-frequency dip from ${{ev.start_time}} to ${{ev.end_time}} (Min: ${{ev.min_freq}} Hz at ${{ev.min_time}})`;
+          chip.onclick = () => zoomToEvent(ev, chip);
+          chipsContainer.appendChild(chip);
+        }});
+      }}
+
+      renderContinuousDrawalChart();
+    }}
+
+    function onContinuousStateChange() {{
+      const stateSelect = document.getElementById('continuous-state-select');
+      currentContinuousState = stateSelect.value;
+      renderContinuousDrawalChart();
+    }}
+
+    function onContinuousDateChange() {{
+      const dateSelect = document.getElementById('continuous-date-select');
+      const val = dateSelect.value;
+      if (!val || !continuousChart) return;
+      const timestamps = CONTINUOUS_DATA.timestamps || [];
+      const idx = timestamps.findIndex(t => t.startsWith(val));
+      if (idx >= 0) {{
+        const pointsIn2Days = Math.min(2880, timestamps.length - idx);
+        continuousChart.dispatchAction({{
+          type: 'dataZoom',
+          startValue: idx,
+          endValue: idx + pointsIn2Days - 1
+        }});
+      }}
+    }}
+
+    function zoomToEvent(ev, clickedChip) {{
+      if (!continuousChart) return;
+      document.querySelectorAll('.event-chip-btn').forEach(b => b.classList.remove('active'));
+      if (clickedChip) clickedChip.classList.add('active');
+
+      const timestamps = CONTINUOUS_DATA.timestamps || [];
+      const total = timestamps.length;
+      const sIdx = Math.max(0, (ev.start_idx != null ? ev.start_idx : timestamps.indexOf(ev.start_time)) - 120);
+      const eIdx = Math.min(total - 1, (ev.end_idx != null ? ev.end_idx : timestamps.indexOf(ev.end_time)) + 120);
+      continuousChart.dispatchAction({{
+        type: 'dataZoom',
+        startValue: sIdx,
+        endValue: eIdx
+      }});
+    }}
+
+    function resetContinuousZoom() {{
+      if (!continuousChart) return;
+      document.querySelectorAll('.event-chip-btn').forEach(b => b.classList.remove('active'));
+      const timestamps = CONTINUOUS_DATA.timestamps || [];
+      const twoDays = Math.min(2880, timestamps.length);
+      continuousChart.dispatchAction({{
+        type: 'dataZoom',
+        startValue: 0,
+        endValue: twoDays - 1
+      }});
+    }}
+
+    function downloadContinuousVisibleWindow() {{
+      if (!continuousChart) return;
+      const opt = continuousChart.getOption();
+      const dz = opt.dataZoom && opt.dataZoom[0];
+      const timestamps = CONTINUOUS_DATA.timestamps || [];
+      let startTs = (timestamps[0] || '').slice(0, 10);
+      if (dz && dz.startValue != null && timestamps[dz.startValue]) {{
+        startTs = timestamps[dz.startValue].slice(0, 10);
+      }}
+      const dataUrl = continuousChart.getDataURL({{
+        pixelRatio: 3,
+        backgroundColor: '#FFFFFF',
+        excludeComponents: ['dataZoom']
+      }});
+      const a = document.createElement('a');
+      a.href = dataUrl;
+      a.download = `${{currentContinuousState.replace(/[^A-Za-z0-9_-]+/g, '_')}}_Drawal_vs_Frequency_${{startTs}}.png`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    }}
+
+    function renderContinuousDrawalChart() {{
+      const chartEl = document.getElementById('continuous-drawal-chart');
+      if (!chartEl) return;
+      if (continuousChart) {{
+        continuousChart.dispose();
+      }}
+      continuousChart = echarts.init(chartEl);
+
+      const stateName = currentContinuousState;
+      const stData = (CONTINUOUS_DATA.states && CONTINUOUS_DATA.states[stateName]) || {{}};
+      const timestamps = CONTINUOUS_DATA.timestamps || [];
+      const schedule = stData.schedule || [];
+      const actual = stData.actual || [];
+      const deviation = stData.deviation || [];
+      const frequency = CONTINUOUS_DATA.frequency || [];
+      const lowFreqIntervals = CONTINUOUS_DATA.low_freq_intervals || [];
+
+      document.getElementById('continuous-chart-title').textContent = 
+        `${{stateName}}: schedule, actual drawal and over drawal vs frequency`;
+
+      const overDrawal = deviation.map(v => (v != null && v > 0) ? v : 0);
+      const underDrawal = deviation.map(v => (v != null && v < 0) ? v : 0);
+
+      const crmsPoints = [];
+      const crmsMessages = stData.crms_messages || [];
+      crmsMessages.forEach((m, mIdx) => {{
+        const mTs = (m.timestamp || m.message_date || '').slice(0, 16);
+        const idx = timestamps.indexOf(mTs);
+        if (idx >= 0) {{
+          const yVal = (deviation[idx] ?? 0) + ((mIdx % 5) - 2) * 20;
+          crmsPoints.push({{
+            value: [mTs, yVal],
+            crms: m,
+            itemStyle: {{ color: crmsColor(m), borderColor: '#FFFFFF', borderWidth: 1.5 }}
+          }});
+        }}
+      }});
+
+      const transPoints = [];
+      const transmissionEvents = stData.transmission_line_events || [];
+      transmissionEvents.forEach((ev, eIdx) => {{
+        const evTs = (ev.timestamp || ev.outage_date_time || '').slice(0, 16);
+        const idx = timestamps.indexOf(evTs);
+        if (idx >= 0) {{
+          const yVal = (deviation[idx] ?? 0) + ((eIdx % 4) - 1.5) * 25;
+          transPoints.push({{
+            value: [evTs, yVal],
+            transmission: ev
+          }});
+        }}
+      }});
+
+      const markAreaData = lowFreqIntervals.map(i => [
+        {{ xAxis: i[0].xAxis, itemStyle: {{ color: 'rgba(254, 226, 226, 0.45)' }} }},
+        {{ xAxis: i[1].xAxis }}
+      ]);
+
+      const totalPoints = timestamps.length;
+      const twoDaysPoints = Math.min(2880, totalPoints);
+      const defaultEndPct = totalPoints > 0 ? (twoDaysPoints / totalPoints) * 100 : 100;
+
+      const option = {{
+        animation: false,
+        title: {{
+          text: `${{stateName}}: schedule, actual drawal and over drawal vs frequency`,
+          left: 75,
+          top: 6,
+          textStyle: {{ fontSize: 15, fontWeight: 900, color: '#0F172A' }}
+        }},
+        tooltip: {{
+          trigger: 'axis',
+          axisPointer: {{
+            type: 'cross',
+            link: [{{ xAxisIndex: 'all' }}],
+            label: {{ backgroundColor: '#17365D' }}
+          }},
+          formatter: function(params) {{
+            const list = Array.isArray(params) ? params : [params];
+            if (!list.length) return '';
+            const t = list[0].axisValue || '';
+
+            const crmsItem = list.find(item => item.data && item.data.crms);
+            const transItem = list.find(item => item.data && item.data.transmission);
+
+            let html = `<div style="font-size: 11.5px; line-height: 1.45; min-width: 220px;">`;
+            html += `<div style="font-weight: 800; color: #17365D; border-bottom: 1px solid #E2E8F0; padding-bottom: 4px; margin-bottom: 5px;">${{esc(t)}} IST</div>`;
+
+            if (crmsItem) {{
+              html += crmsTooltip(crmsItem.data.crms);
+              html += `<div style="border-top: 1px dashed #E2E8F0; margin-top: 6px; padding-top: 4px;"></div>`;
+            }}
+            if (transItem) {{
+              html += transmissionTooltip(transItem.data.transmission);
+              html += `<div style="border-top: 1px dashed #E2E8F0; margin-top: 6px; padding-top: 4px;"></div>`;
+            }}
+
+            list.forEach(p => {{
+              if (['Over drawal', 'Under drawal', 'CRMS Violation Messages', 'Physical Regulation (Line)', 'markArea'].includes(p.seriesName)) return;
+              const val = Array.isArray(p.value) ? p.value[1] : p.value;
+              if (val != null) {{
+                const formatted = p.seriesName.includes('Frequency') ? Number(val).toFixed(3) + ' Hz' : Number(val).toFixed(1) + ' MW';
+                html += `<div style="display:flex; justify-content:space-between; gap:12px;">
+                  <span>${{p.marker}} <strong>${{esc(p.seriesName)}}:</strong></span>
+                  <span style="font-weight: 800;">${{formatted}}</span>
+                </div>`;
+              }}
+            }});
+            html += `</div>`;
+            return html;
+          }}
+        }},
+        legend: [
+          {{
+            top: 28,
+            left: 75,
+            data: ['Schedule (MW)', 'Actual drawal (MW)'],
+            textStyle: {{ fontSize: 11, fontWeight: 700, color: '#334155' }}
+          }},
+          {{
+            top: '35.5%',
+            left: 75,
+            data: ['Over drawal', 'Under drawal'],
+            textStyle: {{ fontSize: 11, fontWeight: 700, color: '#334155' }}
+          }}
+        ],
+        axisPointer: {{
+          link: [{{ xAxisIndex: 'all' }}]
+        }},
+        grid: [
+          {{ left: 75, right: 35, top: 52, height: '24%' }},
+          {{ left: 75, right: 35, top: '38%', height: '24%' }},
+          {{ left: 75, right: 35, top: '69%', height: '17%' }}
+        ],
+        xAxis: [
+          {{
+            type: 'category',
+            gridIndex: 0,
+            boundaryGap: false,
+            data: timestamps,
+            axisLabel: {{ show: false }},
+            axisTick: {{ show: false }},
+            axisLine: {{ lineStyle: {{ color: '#94A3B8' }} }}
+          }},
+          {{
+            type: 'category',
+            gridIndex: 1,
+            boundaryGap: false,
+            data: timestamps,
+            axisLabel: {{ show: false }},
+            axisTick: {{ show: false }},
+            axisLine: {{ lineStyle: {{ color: '#94A3B8' }} }}
+          }},
+          {{
+            type: 'category',
+            gridIndex: 2,
+            boundaryGap: false,
+            data: timestamps,
+            axisLabel: {{
+              show: true,
+              fontSize: 10,
+              formatter: (t) => t.slice(11, 16)
+            }},
+            axisTick: {{ show: true }},
+            axisLine: {{ lineStyle: {{ color: '#94A3B8' }} }}
+          }}
+        ],
+        yAxis: [
+          {{
+            type: 'value',
+            gridIndex: 0,
+            name: 'Drawal (MW)',
+            nameTextStyle: {{ fontWeight: 800, color: '#0F172A', fontSize: 11 }},
+            axisLabel: {{ fontSize: 10 }},
+            splitLine: {{ lineStyle: {{ color: '#E2E8F0', type: 'dashed' }} }}
+          }},
+          {{
+            type: 'value',
+            gridIndex: 1,
+            name: 'Deviation (MW)',
+            nameTextStyle: {{ fontWeight: 800, color: '#0F172A', fontSize: 11 }},
+            axisLabel: {{ fontSize: 10 }},
+            splitLine: {{ lineStyle: {{ color: '#E2E8F0', type: 'dashed' }} }}
+          }},
+          {{
+            type: 'value',
+            gridIndex: 2,
+            name: 'Frequency (Hz)',
+            nameTextStyle: {{ fontWeight: 800, color: '#0F172A', fontSize: 11 }},
+            scale: true,
+            min: 49.40,
+            max: 50.35,
+            axisLabel: {{ fontSize: 10, formatter: v => v.toFixed(2) }},
+            splitLine: {{ lineStyle: {{ color: '#E2E8F0', type: 'dashed' }} }}
+          }}
+        ],
+        dataZoom: [
+          {{
+            type: 'inside',
+            xAxisIndex: [0, 1, 2],
+            start: 0,
+            end: defaultEndPct
+          }},
+          {{
+            type: 'slider',
+            xAxisIndex: [0, 1, 2],
+            bottom: 8,
+            height: 20,
+            start: 0,
+            end: defaultEndPct
+          }}
+        ],
+        series: [
+          {{
+            name: 'Schedule (MW)',
+            type: 'line',
+            xAxisIndex: 0,
+            yAxisIndex: 0,
+            data: schedule,
+            step: 'end',
+            showSymbol: false,
+            lineStyle: {{ width: 2, color: '#0F172A' }},
+            itemStyle: {{ color: '#0F172A' }},
+            markArea: {{
+              silent: true,
+              data: markAreaData
+            }}
+          }},
+          {{
+            name: 'Actual drawal (MW)',
+            type: 'line',
+            xAxisIndex: 0,
+            yAxisIndex: 0,
+            data: actual,
+            showSymbol: false,
+            lineStyle: {{ width: 2, color: '#DC2626' }},
+            itemStyle: {{ color: '#DC2626' }}
+          }},
+          {{
+            name: 'Over drawal',
+            type: 'line',
+            xAxisIndex: 1,
+            yAxisIndex: 1,
+            data: overDrawal,
+            showSymbol: false,
+            lineStyle: {{ width: 0 }},
+            itemStyle: {{ color: '#EF4444' }},
+            areaStyle: {{ color: 'rgba(239, 68, 68, 0.45)', origin: 0 }},
+            markArea: {{
+              silent: true,
+              data: markAreaData
+            }}
+          }},
+          {{
+            name: 'Under drawal',
+            type: 'line',
+            xAxisIndex: 1,
+            yAxisIndex: 1,
+            data: underDrawal,
+            showSymbol: false,
+            lineStyle: {{ width: 0 }},
+            itemStyle: {{ color: '#3B82F6' }},
+            areaStyle: {{ color: 'rgba(59, 130, 246, 0.38)', origin: 0 }}
+          }},
+          {{
+            name: 'Deviation (MW)',
+            type: 'line',
+            xAxisIndex: 1,
+            yAxisIndex: 1,
+            data: deviation,
+            showSymbol: false,
+            lineStyle: {{ width: 1.4, color: '#334155' }},
+            itemStyle: {{ color: '#334155' }},
+            markLine: {{
+              silent: true,
+              symbol: 'none',
+              data: [{{ yAxis: 0 }}],
+              lineStyle: {{ color: '#0F172A', width: 1.5 }}
+            }}
+          }},
+          {{
+            name: 'CRMS Violation Messages',
+            type: 'scatter',
+            xAxisIndex: 1,
+            yAxisIndex: 1,
+            data: crmsPoints,
+            symbol: crmsSymbol,
+            symbolSize: 22,
+            itemStyle: {{
+              borderColor: '#FFFFFF',
+              borderWidth: 1.5,
+              shadowColor: 'rgba(0,0,0,0.3)',
+              shadowBlur: 6
+            }},
+            emphasis: {{ scale: 1.4 }},
+            z: 15
+          }},
+          {{
+            name: 'Physical Regulation (Line)',
+            type: 'scatter',
+            xAxisIndex: 1,
+            yAxisIndex: 1,
+            data: transPoints,
+            symbol: towerSymbol,
+            symbolSize: 24,
+            itemStyle: {{
+              color: '#0F172A',
+              borderColor: '#FACC15',
+              borderWidth: 1.5,
+              shadowColor: 'rgba(250,204,21,0.8)',
+              shadowBlur: 8
+            }},
+            emphasis: {{ scale: 1.45 }},
+            z: 16
+          }},
+          {{
+            name: 'Frequency (Hz)',
+            type: 'line',
+            xAxisIndex: 2,
+            yAxisIndex: 2,
+            data: frequency,
+            showSymbol: false,
+            lineStyle: {{ width: 1.8, color: '#2563EB' }},
+            itemStyle: {{ color: '#2563EB' }},
+            markLine: {{
+              silent: true,
+              symbol: 'none',
+              data: [
+                {{ yAxis: 50.05, lineStyle: {{ color: '#64748B', type: 'dotted', width: 1 }}, label: {{ formatter: '50.05', position: 'insideStartTop' }} }},
+                {{ yAxis: 49.90, lineStyle: {{ color: '#0F172A', type: 'dashed', width: 1.5 }}, label: {{ formatter: '49.90', position: 'insideStartTop' }} }},
+                {{ yAxis: 49.50, lineStyle: {{ color: '#DC2626', type: 'dashed', width: 1.5 }}, label: {{ formatter: '49.50', position: 'insideStartTop' }} }}
+              ]
+            }},
+            markArea: {{
+              silent: true,
+              data: markAreaData
+            }}
+          }}
+        ]
+      }};
+
+      continuousChart.setOption(option);
+      updateContinuousFootnote();
+
+      continuousChart.on('datazoom', function() {{
+        updateContinuousFootnote();
+      }});
+    }}
+
+    function updateContinuousFootnote() {{
+      if (!continuousChart) return;
+      const opt = continuousChart.getOption();
+      const dz = opt.dataZoom && opt.dataZoom[0];
+      const timestamps = CONTINUOUS_DATA.timestamps || [];
+      const total = timestamps.length;
+      if (!total) return;
+
+      let sIdx = 0;
+      let eIdx = total - 1;
+      if (dz) {{
+        if (dz.startValue != null && dz.endValue != null) {{
+          sIdx = Math.max(0, Math.min(dz.startValue, total - 1));
+          eIdx = Math.max(sIdx, Math.min(dz.endValue, total - 1));
+        }} else if (dz.start != null && dz.end != null) {{
+          sIdx = Math.max(0, Math.min(Math.floor((dz.start / 100) * total), total - 1));
+          eIdx = Math.max(sIdx, Math.min(Math.ceil((dz.end / 100) * total), total - 1));
+        }}
+      }}
+
+      const stateName = currentContinuousState;
+      const stData = (CONTINUOUS_DATA.states && CONTINUOUS_DATA.states[stateName]) || {{}};
+      const dev = stData.deviation || [];
+      const freq = CONTINUOUS_DATA.frequency || [];
+
+      let lowCount = 0;
+      let odCount = 0;
+      let maxOd = 0;
+
+      for (let i = sIdx; i <= eIdx; i++) {{
+        const f = freq[i];
+        const d = dev[i];
+        if (f != null && f <= 49.90) {{
+          lowCount++;
+          if (d != null && d > 0) {{
+            odCount++;
+            if (d > maxOd) maxOd = d;
+          }}
+        }}
+      }}
+
+      document.getElementById('stat-od-min').textContent = odCount.toLocaleString();
+      document.getElementById('stat-low-min').textContent = lowCount.toLocaleString();
+      document.getElementById('stat-max-od').textContent = maxOd > 0 ? Math.round(maxOd).toLocaleString() : '0';
+      document.getElementById('stat-visible-range').textContent = 
+        `Visible Window: ${{timestamps[sIdx] || ''}} to ${{timestamps[eIdx] || ''}} (${{eIdx - sIdx + 1}} min)`;
+    }}
+
+    // ==========================================
+    // SECTION 3.2: RENDER DISCRETE EVENT CHARTS
     // ==========================================
     let eventChartInstances = [];
 
@@ -896,9 +1915,17 @@ def html_report(tables, title, warnings, session=None, result=None, event_charts
       }});
 
       slots.forEach(s => {{
+        const ev = EVENT_CHARTS.find(e => e.event_index === s);
+        let label = 'Event ' + s;
+        if (ev && ev.start_time) {{
+          const dt = ev.start_time.slice(0, 10);
+          const t1 = ev.start_time.slice(11, 16);
+          const t2 = ev.end_time ? ev.end_time.slice(11, 16) : '';
+          label = `Event ${{s}} (${{dt}} ${{t1}}${{t2 ? '–' + t2 : ''}})`;
+        }}
         const opt = document.createElement('option');
         opt.value = s;
-        opt.textContent = 'Event ' + s;
+        opt.textContent = label;
         slotSelect.appendChild(opt);
       }});
 
@@ -997,10 +2024,99 @@ def html_report(tables, title, warnings, session=None, result=None, event_charts
 
           const positiveShade = deviation.map((v, i) => frequency[i] < 49.9 && v != null && v > 0 ? v : 0);
           const negativeShade = deviation.map((v, i) => frequency[i] < 49.9 && v != null && v < 0 ? v : 0);
+          const freqDipArea = frequency.map(f => (f != null && f < 49.9) ? f : 49.9);
+
+          const crmsSeriesList = [];
+          const crmsGroups = new Map();
+          (event.crms_messages || []).forEach((m, mIdx) => {{
+            const mTs = (m.timestamp || m.message_date || '').slice(11, 16);
+            const nearestIdx = timestamps.map(t => t.slice(11, 16)).indexOf(mTs);
+            const cat = crmsCategory(m);
+            if (!crmsGroups.has(cat)) crmsGroups.set(cat, []);
+            const yVal = nearestIdx >= 0 ? (deviation[nearestIdx] ?? 0) + ((mIdx % 5) - 2) * Math.max(extent * 0.03, 10) : 0;
+            crmsGroups.get(cat).push({{
+              value: [mTs, yVal],
+              crms: m
+            }});
+          }});
+
+          Array.from(crmsGroups.entries()).forEach(([cat, points]) => {{
+            crmsSeriesList.push({{
+              name: `CRMS: ${{cat}}`,
+              type: 'scatter',
+              yAxisIndex: 0,
+              data: points,
+              symbol: crmsSymbol,
+              symbolSize: 22,
+              itemStyle: {{
+                color: crmsColor({{ category: cat }}),
+                borderColor: '#FFFFFF',
+                borderWidth: 1.5,
+                shadowColor: 'rgba(0,0,0,0.3)',
+                shadowBlur: 6
+              }},
+              emphasis: {{ scale: 1.4 }},
+              tooltip: {{
+                trigger: 'item',
+                formatter: params => crmsTooltip(params.data && params.data.crms || {{}})
+              }},
+              z: 20
+            }});
+          }});
+
+          const transMarkers = [];
+          (event.transmission_line_events || []).forEach((pe, eIdx) => {{
+            const peTs = (pe.timestamp || pe.outage_date_time || '').slice(11, 16);
+            const nearestIdx = timestamps.map(t => t.slice(11, 16)).indexOf(peTs);
+            const yVal = nearestIdx >= 0 ? (deviation[nearestIdx] ?? 0) + ((eIdx % 4) - 1.5) * Math.max(extent * 0.035, 12) : 0;
+            transMarkers.push({{
+              value: [peTs, yVal],
+              transmission: pe
+            }});
+          }});
+
+          const transSeries = transMarkers.length ? [{{
+            name: 'Physical Regulation (Line)',
+            type: 'scatter',
+            yAxisIndex: 0,
+            data: transMarkers,
+            symbol: towerSymbol,
+            symbolSize: 24,
+            itemStyle: {{
+              color: '#0F172A',
+              borderColor: '#FACC15',
+              borderWidth: 1.5,
+              shadowColor: 'rgba(250,204,21,0.8)',
+              shadowBlur: 8
+            }},
+            emphasis: {{ scale: 1.45 }},
+            tooltip: {{
+              trigger: 'item',
+              formatter: params => transmissionTooltip(params.data && params.data.transmission || {{}})
+            }},
+            z: 22
+          }}] : [];
 
           chart.setOption({{
             animation: false,
-            tooltip: {{ trigger: 'axis', axisPointer: {{ type: 'cross' }} }},
+            tooltip: {{
+              trigger: 'axis',
+              axisPointer: {{ type: 'cross' }},
+              formatter: params => {{
+                const list = Array.isArray(params) ? params : [params];
+                const msgParam = list.find(item => item.data && item.data.crms);
+                if (msgParam) return crmsTooltip(msgParam.data.crms);
+                const transParam = list.find(item => item.data && item.data.transmission);
+                if (transParam) return transmissionTooltip(transParam.data.transmission);
+                let html = `<div style="font-size:12px;font-weight:800;margin-bottom:5px;color:#17365D;">${{esc(list[0] && list[0].axisValue || '')}}</div>`;
+                list.forEach(item => {{
+                  if (item.value == null || item.seriesName.includes('Overdrawal') || item.seriesName.includes('Helping Grid') || item.seriesName.includes('CRMS:') || item.seriesName.includes('Physical Regulation')) return;
+                  const value = Array.isArray(item.value) ? item.value[1] : item.value;
+                  html += `<div>${{item.marker}} ${{esc(item.seriesName)}}: <strong>${{Number(value).toFixed(item.seriesName.includes('Frequency') ? 3 : 1)}}</strong></div>`;
+                }});
+                return html;
+              }}
+            }},
             legend: {{ top: 4, textStyle: {{ fontSize: 11, fontWeight: 700 }} }},
             grid: {{ top: 45, left: 65, right: 65, bottom: 55 }},
             dataZoom: [{{ type: 'inside' }}, {{ type: 'slider', height: 20, bottom: 10 }}],
@@ -1056,6 +2172,19 @@ def html_report(tables, title, warnings, session=None, result=None, event_charts
                 lineStyle: {{ width: 2.5, color: '#059669' }}
               }},
               {{
+                name: 'Frequency Dip (<49.90 Hz)',
+                type: 'line',
+                data: freqDipArea,
+                yAxisIndex: 1,
+                symbol: 'none',
+                lineStyle: {{ width: 0 }},
+                areaStyle: {{
+                  color: 'rgba(220, 38, 38, 0.28)',
+                  origin: 49.9
+                }},
+                z: 1
+              }},
+              {{
                 name: 'Frequency (Hz)',
                 type: 'line',
                 data: frequency,
@@ -1071,7 +2200,9 @@ def html_report(tables, title, warnings, session=None, result=None, event_charts
                     {{ yAxis: 49.5, lineStyle: {{ color: '#991B1B', type: 'dashed' }}, label: {{ formatter: '49.50 Hz' }} }}
                   ]
                 }}
-              }}
+              }},
+              ...crmsSeriesList,
+              ...transSeries
             ]
           }});
         }}, 50);
@@ -1095,13 +2226,25 @@ def html_report(tables, title, warnings, session=None, result=None, event_charts
 
     function renderChronologyTable() {{
       const allRows = getChronologyData();
+      const stateSelect = document.getElementById('chronology-state');
+      if (stateSelect && stateSelect.options.length <= 1) {{
+        const states = [...new Set(allRows.map(r => r.state || r.entity).filter(Boolean))].sort();
+        states.forEach(st => {{
+          const opt = document.createElement('option');
+          opt.value = st;
+          opt.textContent = st;
+          stateSelect.appendChild(opt);
+        }});
+      }}
+      const stateVal = stateSelect ? stateSelect.value : 'ALL';
       const dateVal = document.getElementById('chronology-date').value;
       const searchVal = document.getElementById('chronology-search').value.toLowerCase();
 
       const filtered = allRows.filter(r => {{
+        if (stateVal && stateVal !== 'ALL' && (r.state || r.entity) !== stateVal) return false;
         if (dateVal && r.date !== dateVal) return false;
         if (searchVal) {{
-          const text = [r.state, r.message_details, r.message_no, r.message_type].join(' ').toLowerCase();
+          const text = [r.state, r.entity, r.message_details, r.message_no, r.message_type].join(' ').toLowerCase();
           if (!text.includes(searchVal)) return false;
         }}
         return true;
@@ -1257,11 +2400,13 @@ def html_report(tables, title, warnings, session=None, result=None, event_charts
     }}
 
     window.addEventListener('resize', () => {{
+      if (continuousChart) continuousChart.resize();
       eventChartInstances.forEach(c => c.resize());
     }});
 
     // Initialize all sections
     initScatterSection();
+    initContinuousDrawalSection();
     initEventCharts();
     renderChronologyTable();
     initPerfSection();
@@ -1283,9 +2428,13 @@ def export_compact(payload, user):
     # Retrieve or generate OD vs Frequency scatter plots
     od_frequency = session.get('od_frequency')
     if not od_frequency and session.get('raw_bytes'):
-        from services.od_frequency_report import generate_od_frequency_plots
+        from services.od_frequency_report import generate_od_frequency_plots, format_period_label
         try:
-            od_frequency = generate_od_frequency_plots(session['raw_bytes'], dpi=300)
+            summary = (result or {}).get('summary') or {}
+            title_period = None
+            if summary.get('analysis_start') and summary.get('analysis_end'):
+                title_period = format_period_label(summary['analysis_start'], summary['analysis_end'])
+            od_frequency = generate_od_frequency_plots(session['raw_bytes'], dpi=300, title_period=title_period)
             session['od_frequency'] = od_frequency
         except Exception as exc:
             warnings.append(f"State Overdrawal plots: {exc}")

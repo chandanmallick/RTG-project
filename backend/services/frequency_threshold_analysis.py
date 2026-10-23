@@ -211,6 +211,8 @@ def chart_points(dataset, selections, entity_id, limit=2400):
     if entity is None:
         raise ValueError('Select a State included in this analysis.')
     freq=dataset['frequency'][index];dev=entity['deviation'][index]
+    actual=entity['actual'][index] if 'actual' in entity else None
+    schedule=entity['schedule'][index] if 'schedule' in entity else None
     # Partition each selected interval independently so gaps/slots stay visible.
     output=[]
     per_range=max(10,(limit-len(ranges))//len(ranges))
@@ -229,10 +231,18 @@ def chart_points(dataset, selections, entity_id, limit=2400):
             for at in sorted(keep):
                 if previous is not None:
                     gaps=gap_at[(gap_at>=previous)&(gap_at<at)]
-                    if len(gaps):output.append({'timestamp':iso(ends[gaps[0]]),'frequency':None,'od_mw':None,'deviation_mw':None,'range_start':iso(from_time)})
+                    if len(gaps):output.append({'timestamp':iso(ends[gaps[0]]),'frequency':None,'od_mw':None,'deviation_mw':None,'actual':None,'schedule':None,'range_start':iso(from_time)})
                 previous=at
-                output.append({'timestamp':iso(starts[at]),'frequency':finite(freq[at]),'od_mw':finite(max(dev[at],0)) if np.isfinite(dev[at]) else None,'deviation_mw':finite(dev[at]),'range_start':iso(from_time)})
-        output.append({'timestamp':iso(to_time),'frequency':None,'od_mw':None,'deviation_mw':None,'range_start':iso(from_time)})
+                output.append({
+                    'timestamp':iso(starts[at]),
+                    'frequency':finite(freq[at]),
+                    'od_mw':finite(max(dev[at],0)) if np.isfinite(dev[at]) else None,
+                    'deviation_mw':finite(dev[at]),
+                    'actual':finite(actual[at]) if actual is not None and np.isfinite(actual[at]) else None,
+                    'schedule':finite(schedule[at]) if schedule is not None and np.isfinite(schedule[at]) else None,
+                    'range_start':iso(from_time)
+                })
+        output.append({'timestamp':iso(to_time),'frequency':None,'od_mw':None,'deviation_mw':None,'actual':None,'schedule':None,'range_start':iso(from_time)})
     return {'entity_id':entity_id,'entity':entity['display_name'],'points':output,'aggregated':True,'point_budget':limit,'point_count':len(output),
             'note':'Envelope display preserves sampled frequency extrema and OD maxima; durations and occurrences use every original reading.'}
 

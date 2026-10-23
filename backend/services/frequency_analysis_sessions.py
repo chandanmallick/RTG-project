@@ -24,8 +24,11 @@ _lock=RLock()
 
 
 def owner(user):
-    value=str(user.get('employeeId') or user.get('userId') or '')
-    if not value:raise HTTPException(401,'Authentication required.')
+    if isinstance(user, dict):
+        value = str(user.get('employeeId') or user.get('userId') or '')
+    else:
+        value = str(user or '')
+    if not value: raise HTTPException(401, 'Authentication required.')
     return value
 
 
@@ -88,10 +91,14 @@ def get_od_frequency(token, user, dpi=400):
     if cached and (dpi <= 150 or cached.get('dpi') == dpi):
         return cached
     if session.get('raw_bytes'):
-        from services.od_frequency_report import generate_od_frequency_plots
+        from services.od_frequency_report import generate_od_frequency_plots, format_period_label
         out_dir = Path('.runtime') / 'od_frequency' / token
         out_dir.mkdir(parents=True, exist_ok=True)
-        res = generate_od_frequency_plots(session['raw_bytes'], output_dir=out_dir, dpi=dpi)
+        title_period = None
+        meta = session.get('metadata') or {}
+        if meta.get('start_time') and meta.get('end_time'):
+            title_period = format_period_label(meta['start_time'], meta['end_time'])
+        res = generate_od_frequency_plots(session['raw_bytes'], output_dir=out_dir, dpi=dpi, title_period=title_period)
         res['dpi'] = dpi
         session['od_frequency'] = res
         return res
@@ -155,8 +162,11 @@ def upload_session(contents,name,user,db=None):
     }
     od_frequency = None
     try:
-        from services.od_frequency_report import generate_od_frequency_plots
-        od_frequency = generate_od_frequency_plots(contents, dpi=300)
+        from services.od_frequency_report import generate_od_frequency_plots, format_period_label
+        title_period = None
+        if times:
+            title_period = format_period_label(times[0], times[-1])
+        od_frequency = generate_od_frequency_plots(contents, dpi=300, title_period=title_period)
     except Exception as exc:
         warnings.append(f"State Overdrawal vs Frequency plots: {exc}")
     return _put(user, dataset, metadata, raw_bytes=contents, od_frequency=od_frequency)

@@ -1121,9 +1121,14 @@ const API = {
   exportFrequencyAnalysis: async (payload) => (await axios.post(`${BASE_URL}/frequency/analysis/export`, payload, { responseType: payload.format === "html" ? "json" : "blob" })).data,
   getOdFrequencyPlots: async (sessionToken) => (await axios.get(`${BASE_URL}/frequency/analysis/od-frequency/${encodeURIComponent(sessionToken)}`)).data,
   downloadOdFrequencyStatistics: async (sessionToken) => (await axios.get(`${BASE_URL}/frequency/analysis/od-frequency-download/${encodeURIComponent(sessionToken)}/statistics`, { responseType: "blob" })).data,
+  downloadOdFrequencyZip: async (sessionToken) => (await axios.get(`${BASE_URL}/frequency/analysis/od-frequency-download/${encodeURIComponent(sessionToken)}/zip`, { responseType: "blob" })).data,
   downloadOdFrequencyPlot: async (sessionToken, state) => (await axios.get(`${BASE_URL}/frequency/analysis/od-frequency-download/${encodeURIComponent(sessionToken)}/plot/${encodeURIComponent(state)}`, { responseType: "blob" })).data,
   getFrequencyEventTables: async (payload) => (await axios.post(`${BASE_URL}/frequency/analysis/event-tables`, payload)).data,
   downloadFrequencyEventTablesExcel: async (payload) => (await axios.post(`${BASE_URL}/frequency/analysis/event-tables/excel`, payload, { responseType: "blob" })).data,
+  getFrequencyCurves: async (payload) => (await axios.post(`${BASE_URL}/frequency/analysis/frequency-curves`, payload)).data,
+  downloadFrequencyCurvePlot: async (curveType, payload) => (await axios.post(`${BASE_URL}/frequency/analysis/frequency-curves/download/${encodeURIComponent(curveType)}`, payload, { responseType: "blob" })).data,
+  downloadFrequencyCurvesZip: async (payload) => (await axios.post(`${BASE_URL}/frequency/analysis/frequency-curves/download-zip`, payload, { responseType: "blob" })).data,
+  getContinuousDrawal: async (payload) => (await axios.post(`${BASE_URL}/frequency/analysis/continuous-drawal`, payload)).data,
   releaseFrequencyAnalysis: async (token) => (await axios.delete(`${BASE_URL}/frequency/analysis/session/${encodeURIComponent(token)}`)).data,
 
 

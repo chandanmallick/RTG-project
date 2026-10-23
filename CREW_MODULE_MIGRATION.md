@@ -870,3 +870,27 @@ Acting SIC can be assigned separately from replacement coverage on the Replaceme
 ### Monthly Frequency Report observations
 
 The monthly low-frequency Word/PDF generator applies `Observation.docx` presentation rules through `frequency_monthly_components.py`, `frequency_monthly_data.py`, `frequency_monthly_report.py` and `monthly_display` in `frequency_report_formatting.py`. Dates display DD-MMM-YY HH:MM, months MMM-YYYY, and minutes without decimals; threshold duration cells show OD/UI minutes (%). ER is excluded from report entities and chronology. Only actual selected event slots and populated daily slot ranges are emitted. Automatic validation, generated coverage notes and UFR output are omitted. Frequency overview charts use severity bands, selected-event shading and an overview strip; state event comparisons use signed deviation, frequency, over-drawal/helping-grid fills and message/physical-action markers. Heatmaps use contrast-aware labels; occurrence plots highlight the top three nonzero hours by percentage. Raw arrays and threshold calculations are unchanged. September report regeneration requires the original source analysis session/data; the supplied DOCX is a visual reference, not a source time-series dataset.
+
+### State Overdrawal vs Frequency Scatter Plots and Continuous Visualizer
+
+The OD vs Frequency analysis module (`backend/services/od_frequency_report.py`, `backend/services/frequency_analysis_sessions.py`, `backend/services/frequency_compact_reports.py`, `backend/services/frequency_monthly_components.py`, `frontend/src/pages/FrequencyReport/components/StateOverdrawalPanel.jsx`) supports arbitrary uploaded SCADA/WBES dataset periods:
+- **Dataset for Any Uploaded Period:** The scatter plots and statistics operate dynamically over any uploaded dataset period (e.g. single day, weekly span, single month such as `September 2026`, multi-month such as `September–October 2026`, or arbitrary date ranges like `15-Oct-2026 to 22-Oct-2026`). Period labels are auto-detected via `format_period_label` and `detect_period_from_dataframe` using the dataset timestamps or session metadata, without hardcoded dates or assumptions.
+- **Data Filtering & Integrity:**
+  - Row 2 containing meter codes/metadata is automatically skipped; data processing begins from Row 3 onwards.
+  - Excludes unrelated columns, retaining only `DATE & TIME`, `FREQUENCY`, and the Schedule/Actual columns for West Bengal, Bihar, DVC, Jharkhand, Odisha, and Sikkim.
+  - Safe numeric conversion handles blanks, non-numeric strings, and NaN values gracefully.
+  - Frequency is validated within the permissible range of 45.0–51.0 Hz.
+  - `Deviation = Actual - Schedule`. Only strictly positive deviations (> 0 MW; Overdrawal for states, Under-injection for DVC) are plotted.
+- **Plot Styling & Standards:**
+  - 4 frequency bands: `<49.50 Hz` (Red `#D7191C`), `49.50–<49.70 Hz` (Orange `#F07800`), `49.70–<49.90 Hz` (Purple `#7B2CBF`), and `≥49.90 Hz` (Green `#159447`).
+  - Fixed horizontal axis limits from 49.3 to 50.5 Hz with 0.1 Hz major tick gridlines for cross-state comparison consistency.
+  - Embedded tabular summary below each scatter chart detailing total valid 1-minute blocks below each threshold (<49.50, <49.70, <49.90 Hz), positive deviation count and percentage, and peak OD/UI MW.
+  - Full export suite: individual high-resolution PNGs (400 DPI), comprehensive multi-state Excel workbook (`OD_Frequency_Statistics.xlsx`), and complete ZIP archive (`OD_Frequency_Plots.zip`).
+- **Continuous 3-Panel Visualizer:**
+  - Panel 1 (Top): Drawal (MW) with black step line (`#0F172A`) for Schedule and coral line (`#DC2626`) for Actual drawal.
+  - Panel 2 (Middle): Deviation (MW) with zero baseline, red fill for Overdrawal (`#EF4444`), blue fill for Underdrawal (`#3B82F6`), superimposed with CRMS violation speech-bubble markers and physical regulatory transmission line outage tower markers with full interactive tooltips.
+  - Panel 3 (Bottom): Frequency (Hz) curve (`#2563EB`), IEGC reference lines (50.05 Hz, 49.90 Hz, 49.50 Hz), and red area shading for dips below 49.90 Hz.
+  - Vertical shading bands across all three panels for intervals where $f \le 49.90$ Hz.
+  - Dynamic footnote calculating: `Shaded = f ≤ 49.90 Hz. Over drawing at f ≤ 49.90 Hz: X of Y min; max over drawal at f ≤ 49.90 Hz: Z MW`.
+  - 2-day default window, scrollable slider, Frequency Overview & Event Selection chip bar, and visible window PNG download. Confined strictly to HTML report and web UI (excluded from PDF/Word).
+

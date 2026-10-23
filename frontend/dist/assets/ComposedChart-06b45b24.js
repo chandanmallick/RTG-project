@@ -1,1 +1,0 @@
-import{r as a}from"./index-904e3588.js";import{ak as o,a7 as t}from"./CartesianChart-9f1d33b3.js";var p=["axis"],l=a.forwardRef((r,e)=>a.createElement(o,{chartName:"ComposedChart",defaultTooltipEventType:"axis",validateTooltipEventTypes:p,tooltipPayloadSearcher:t,categoricalChartProps:r,ref:e}));export{l as C};

@@ -262,14 +262,18 @@ def build_low_blocks(session,result,payload):
     heading('5  State Performance');text(notes.state_observations)
     od_frequency = session.get('od_frequency')
     if not od_frequency and session.get('raw_bytes'):
-        from services.od_frequency_report import generate_od_frequency_plots
+        from services.od_frequency_report import generate_od_frequency_plots, format_period_label
         try:
-            od_frequency = generate_od_frequency_plots(session['raw_bytes'], dpi=300)
+            title_period = model.get('month')
+            meta = session.get('metadata') or {}
+            if not title_period and meta.get('start_time') and meta.get('end_time'):
+                title_period = format_period_label(meta['start_time'], meta['end_time'])
+            od_frequency = generate_od_frequency_plots(session['raw_bytes'], dpi=300, title_period=title_period)
             session['od_frequency'] = od_frequency
         except Exception as exc:
             print(f"Error generating OD frequency plots for monthly report: {exc}")
     if od_frequency and od_frequency.get('plots_bytes'):
-        period = od_frequency.get('period') or 'September–October 2026'
+        period = od_frequency.get('period') or model.get('month') or 'Uploaded Period'
         heading(f'State-wise Overdrawal vs Frequency Analysis ({period})')
         text('Scatter analysis of positive Actual - Schedule deviations (Overdrawal for states, Under-injection for DVC) versus Frequency (Hz). Color-coded by frequency bands (<49.50 Hz red, 49.50–<49.70 Hz orange, 49.70–<49.90 Hz purple, ≥49.90 Hz green) with cumulative threshold statistics.')
         for state, png_bytes in od_frequency['plots_bytes'].items():

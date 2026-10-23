@@ -4,8 +4,11 @@ import {
   Box,
   Button,
   Checkbox,
+  Chip,
   CircularProgress,
+  Collapse,
   FormControlLabel,
+  IconButton,
   Paper,
   Stack,
   Table,
@@ -16,7 +19,7 @@ import {
   TableRow,
   Typography,
 } from "@mui/material";
-import { Download, Play } from "lucide-react";
+import { ChevronDown, ChevronRight, Download, Play } from "lucide-react";
 import CalendarInput from "../../../components/ui/CalendarInput";
 import API from "../../../services/api";
 
@@ -24,6 +27,13 @@ const ALL_THRESHOLDS = [
   { value: 49.5, label: "Min <49.5 Hz" },
   { value: 49.7, label: "Min <49.7 Hz" },
   { value: 49.9, label: "Min <49.9 Hz" },
+];
+
+const PRESETS = [
+  { label: "All 3 Conditions (<49.5, <49.7, <49.9)", thresholds: [49.5, 49.7, 49.9] },
+  { label: "<49.50 Hz Only", thresholds: [49.5] },
+  { label: "<49.70 Hz Only", thresholds: [49.7] },
+  { label: "<49.90 Hz Only", thresholds: [49.9] },
 ];
 
 const ALL_CONSTITUENTS = ["Bihar", "Jharkhand", "Odisha", "West Bengal", "DVC"];
@@ -37,13 +47,14 @@ export default function FrequencyEventTables({ result, sessionToken, saveBlob })
 
   const [startDate, setStartDate] = useState(defaultStart);
   const [endDate, setEndDate] = useState(defaultEnd);
-  const [selectedThresholds, setSelectedThresholds] = useState([49.5, 49.7]);
+  const [selectedThresholds, setSelectedThresholds] = useState([49.5, 49.7, 49.9]);
   const [selectedConstituents, setSelectedConstituents] = useState(ALL_CONSTITUENTS);
 
   const [loading, setLoading] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const [error, setError] = useState("");
   const [tablesData, setTablesData] = useState(null);
+  const [collapsedTables, setCollapsedTables] = useState({});
 
   useEffect(() => {
     if (result?.summary?.analysis_start) {
@@ -66,12 +77,29 @@ export default function FrequencyEventTables({ result, sessionToken, saveBlob })
     );
   };
 
-  const handleGenerate = async () => {
+  const toggleCollapse = (tableId) => {
+    setCollapsedTables((prev) => ({
+      ...prev,
+      [tableId]: !prev[tableId],
+    }));
+  };
+
+  const setAllCollapsed = (collapsed) => {
+    if (!tablesData?.tables) return;
+    const next = {};
+    tablesData.tables.forEach((t) => {
+      next[t.table_id] = collapsed;
+    });
+    setCollapsedTables(next);
+  };
+
+  const handleGenerate = async (overrideThresholds = null) => {
     if (!session) {
       setError("Active session not found. Please upload or run an analysis first.");
       return;
     }
-    if (!selectedThresholds.length) {
+    const threshToUse = overrideThresholds || selectedThresholds;
+    if (!threshToUse.length) {
       setError("Please select at least one frequency event threshold.");
       return;
     }
@@ -88,16 +116,27 @@ export default function FrequencyEventTables({ result, sessionToken, saveBlob })
         result_token: token,
         start_date: startDate || null,
         end_date: endDate || null,
-        thresholds: selectedThresholds,
+        thresholds: threshToUse,
         constituents: selectedConstituents,
       });
       setTablesData(res);
+      // Initially collapse all tables so they don't take up excessive vertical space
+      const initialCollapse = {};
+      (res?.tables || []).forEach((t) => {
+        initialCollapse[t.table_id] = true;
+      });
+      setCollapsedTables(initialCollapse);
     } catch (err) {
       const msg = err?.response?.data?.detail || err.message;
       setError(msg);
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleApplyPreset = (thresholds) => {
+    setSelectedThresholds(thresholds);
+    handleGenerate(thresholds);
   };
 
   const handleDownloadExcel = async () => {
@@ -188,11 +227,38 @@ export default function FrequencyEventTables({ result, sessionToken, saveBlob })
           </Stack>
         </Box>
 
-        {/* Threshold Selection */}
+        {/* Quick Presets & Threshold Selection */}
         <Box sx={{ mb: 2 }}>
-          <Typography sx={{ fontSize: 12, fontWeight: 800, color: "#334155", mb: 0.5 }}>
-            Frequency Event Threshold
-          </Typography>
+          <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap alignItems="center" sx={{ mb: 1 }}>
+            <Typography sx={{ fontSize: 12, fontWeight: 800, color: "#334155", mr: 0.5 }}>
+              Frequency Event Threshold:
+            </Typography>
+            {PRESETS.map((p) => {
+              const isSelected =
+                p.thresholds.length === selectedThresholds.length &&
+                p.thresholds.every((val) => selectedThresholds.includes(val));
+              return (
+                <Chip
+                  key={p.label}
+                  label={p.label}
+                  size="small"
+                  clickable
+                  variant={isSelected ? "filled" : "outlined"}
+                  onClick={() => handleApplyPreset(p.thresholds)}
+                  disabled={loading}
+                  sx={{
+                    fontWeight: 700,
+                    fontSize: 11,
+                    bgcolor: isSelected ? "#17365D" : "white",
+                    color: isSelected ? "white" : "#17365D",
+                    borderColor: isSelected ? "#17365D" : "#CBD5E1",
+                    "&:hover": { bgcolor: isSelected ? "#204B7D" : "#F1F5F9" },
+                  }}
+                />
+              );
+            })}
+          </Stack>
+
           <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
             {ALL_THRESHOLDS.map((t) => (
               <FormControlLabel
@@ -241,7 +307,7 @@ export default function FrequencyEventTables({ result, sessionToken, saveBlob })
             size="small"
             startIcon={loading ? <CircularProgress size={16} color="inherit" /> : <Play size={16} />}
             disabled={loading || !selectedThresholds.length || !selectedConstituents.length}
-            onClick={handleGenerate}
+            onClick={() => handleGenerate()}
             sx={{
               bgcolor: "#17365D",
               "&:hover": { bgcolor: "#204B7D" },
@@ -294,59 +360,128 @@ export default function FrequencyEventTables({ result, sessionToken, saveBlob })
       )}
 
       {tablesData && (
-        <Stack spacing={4}>
-          {tablesData.tables?.map((table) => {
-            const constituents = table.constituents || ALL_CONSTITUENTS;
-            const rows = table.rows || [];
-
-            return (
-              <Paper
-                key={table.table_id}
+        <Box sx={{ mb: 2 }}>
+          {/* Table View Toolbar */}
+          <Stack
+            direction="row"
+            justifyContent="space-between"
+            alignItems="center"
+            flexWrap="wrap"
+            useFlexGap
+            sx={{
+              p: 1.5,
+              mb: 2,
+              bgcolor: "#F8FAFC",
+              border: "1px solid #E2E8F0",
+              borderRadius: 2,
+            }}
+          >
+            <Stack direction="row" spacing={1} alignItems="center">
+              <Typography sx={{ fontSize: 12, fontWeight: 800, color: "#17365D" }}>
+                Table View Options:
+              </Typography>
+              <Button
+                size="small"
                 variant="outlined"
+                onClick={() => setAllCollapsed(false)}
                 sx={{
-                  borderRadius: 2.5,
-                  overflow: "hidden",
-                  borderColor: "#CBD5E1",
-                  boxShadow: "0 2px 8px rgba(15, 23, 42, 0.05)",
+                  textTransform: "none",
+                  py: 0.3,
+                  px: 1.2,
+                  fontSize: 11.5,
+                  fontWeight: 700,
                 }}
               >
-                {/* Table Header Bar */}
-                <Box
+                Expand All
+              </Button>
+              <Button
+                size="small"
+                variant="outlined"
+                onClick={() => setAllCollapsed(true)}
+                sx={{
+                  textTransform: "none",
+                  py: 0.3,
+                  px: 1.2,
+                  fontSize: 11.5,
+                  fontWeight: 700,
+                }}
+              >
+                Collapse All
+              </Button>
+            </Stack>
+            <Typography sx={{ fontSize: 11, color: "#64748B" }}>
+              Click any table header bar to toggle collapse/expand
+            </Typography>
+          </Stack>
+
+          <Stack spacing={3}>
+            {tablesData.tables?.map((table) => {
+              const constituents = table.constituents || ALL_CONSTITUENTS;
+              const rows = table.rows || [];
+              const isCollapsed = Boolean(collapsedTables[table.table_id]);
+
+              return (
+                <Paper
+                  key={table.table_id}
+                  variant="outlined"
                   sx={{
-                    bgcolor: "#17365D",
-                    color: "white",
-                    p: 2,
-                    display: "flex",
-                    justifyContent: "space-between",
-                    alignItems: "center",
-                    flexWrap: "wrap",
-                    gap: 1.5,
+                    borderRadius: 2.5,
+                    overflow: "hidden",
+                    borderColor: "#CBD5E1",
+                    boxShadow: "0 2px 8px rgba(15, 23, 42, 0.05)",
                   }}
                 >
-                  <Box sx={{ maxWidth: "80%" }}>
-                    <Typography sx={{ fontSize: 13.5, fontWeight: 900, lineHeight: 1.4 }}>
-                      {table.title}
-                    </Typography>
+                  {/* Table Header Bar with Collapsible Accordion Click */}
+                  <Box
+                    onClick={() => toggleCollapse(table.table_id)}
+                    sx={{
+                      bgcolor: "#17365D",
+                      color: "white",
+                      p: 1.8,
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      flexWrap: "wrap",
+                      gap: 1.5,
+                      cursor: "pointer",
+                      userSelect: "none",
+                      "&:hover": { bgcolor: "#204B7D" },
+                      transition: "background-color 0.15s ease",
+                    }}
+                  >
+                    <Stack direction="row" spacing={1.2} alignItems="center" sx={{ maxWidth: "80%" }}>
+                      <IconButton size="small" sx={{ color: "white", p: 0.4 }}>
+                        {isCollapsed ? <ChevronRight size={18} /> : <ChevronDown size={18} />}
+                      </IconButton>
+                      <Box>
+                        <Typography sx={{ fontSize: 13.5, fontWeight: 900, lineHeight: 1.4 }}>
+                          {table.title}
+                        </Typography>
+                        <Typography sx={{ fontSize: 11, color: "#93C5FD" }}>
+                          {isCollapsed ? "Collapsed — Click to expand" : "Expanded — Click to collapse"}
+                        </Typography>
+                      </Box>
+                    </Stack>
+                    <Stack direction="row" spacing={1} alignItems="center">
+                      <Typography
+                        sx={{
+                          fontSize: 11.5,
+                          fontWeight: 700,
+                          bgcolor: "rgba(255,255,255,0.18)",
+                          px: 1.5,
+                          py: 0.4,
+                          borderRadius: 1,
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        {table.total_events} Event{table.total_events === 1 ? "" : "s"} ({table.total_minutes} min)
+                      </Typography>
+                    </Stack>
                   </Box>
-                  <Box>
-                    <Typography
-                      sx={{
-                        fontSize: 11.5,
-                        fontWeight: 700,
-                        bgcolor: "rgba(255,255,255,0.18)",
-                        px: 1.5,
-                        py: 0.4,
-                        borderRadius: 1,
-                        whiteSpace: "nowrap",
-                      }}
-                    >
-                      {table.total_events} Event{table.total_events === 1 ? "" : "s"} ({table.total_minutes} min)
-                    </Typography>
-                  </Box>
-                </Box>
 
-                {/* Two-Level Header Table */}
-                <TableContainer sx={{ maxHeight: 600 }}>
+                  {/* Collapsible Table Content */}
+                  <Collapse in={!isCollapsed} timeout="auto">
+                    <TableContainer sx={{ maxHeight: 600 }}>
                   <Table size="small" stickyHeader sx={{ "& td, & th": { borderBottom: "1px solid #E2E8F0" } }}>
                     <TableHead>
                       {/* Row 1 Header */}
@@ -585,11 +720,13 @@ export default function FrequencyEventTables({ result, sessionToken, saveBlob })
                     </TableBody>
                   </Table>
                 </TableContainer>
-              </Paper>
-            );
-          })}
-        </Stack>
-      )}
+              </Collapse>
+            </Paper>
+          );
+        })}
+      </Stack>
     </Box>
+  )}
+</Box>
   );
 }

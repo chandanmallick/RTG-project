@@ -1,7 +1,7 @@
 """Thin authenticated API for temporary long-period and consolidated analyses."""
 import zipfile
 from openpyxl.utils.exceptions import InvalidFileException
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
@@ -206,6 +206,21 @@ async def download_od_plot(token: str, state: str, user=Depends(get_authenticate
     return await checked(fetch)
 
 
+@router.get('/od-frequency-download/{token}/zip')
+async def download_od_zip(token: str, user=Depends(get_authenticated_user)):
+    import io
+    def fetch():
+        res = sessions.get_od_frequency(token, user, dpi=400)
+        if not res or not res.get('zip_bytes'):
+            raise HTTPException(404, "OD Frequency ZIP package is not available.")
+        return StreamingResponse(
+            io.BytesIO(res['zip_bytes']),
+            media_type="application/zip",
+            headers={"Content-Disposition": 'attachment; filename="OD_Frequency_Plots.zip"'}
+        )
+    return await checked(fetch)
+
+
 class EventTablesPayload(BaseModel):
     session_token: str
     result_token: Optional[str] = None
@@ -280,6 +295,116 @@ async def download_event_tables_excel(payload: EventTablesPayload, user=Depends(
         )
     return await checked(generate)
 
+
+class FrequencyCurvesPayload(BaseModel):
+    session_token: str
+    result_token: Optional[str] = None
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
+    comparison_periods: Optional[List[Dict[str, str]]] = None
+    dpi: int = 300
+
+
+@router.post('/frequency-curves')
+async def get_frequency_curves(payload: FrequencyCurvesPayload, user=Depends(get_authenticated_user)):
+    def compute():
+        from services.frequency_curves_service import generate_all_frequency_curves
+        source = _get_session_source(payload, user)
+        res = generate_all_frequency_curves(
+            source=source,
+            start_date=payload.start_date,
+            end_date=payload.end_date,
+            comparison_periods=payload.comparison_periods,
+            dpi=payload.dpi,
+        )
+        return {
+            'success': True,
+            'period': res['period'],
+            'plots_base64': res['plots_base64'],
+            'statistics': res['statistics'],
+        }
+    return await checked(compute)
+
+
+@router.post('/frequency-curves/download/{curve_type}')
+async def download_frequency_curve_plot(curve_type: str, payload: FrequencyCurvesPayload, user=Depends(get_authenticated_user)):
+    import io
+    def generate():
+        from services.frequency_curves_service import generate_all_frequency_curves
+        source = _get_session_source(payload, user)
+        res = generate_all_frequency_curves(
+            source=source,
+            start_date=payload.start_date,
+            end_date=payload.end_date,
+            comparison_periods=payload.comparison_periods,
+            dpi=400,
+        )
+        plots_bytes = res.get('plots_bytes', {})
+        if curve_type not in plots_bytes:
+            raise HTTPException(404, f"Curve plot '{curve_type}' not found.")
+        filename_map = {
+            'daily_min_duration': 'Daily_Minimum_and_Duration.png',
+            'duration_curve': 'Frequency_Duration_Curve.png',
+            'daily_profile': 'Average_Daily_Frequency_Profile.png',
+        }
+        filename = filename_map.get(curve_type, f"{curve_type}.png")
+        return StreamingResponse(
+            io.BytesIO(plots_bytes[curve_type]),
+            media_type="image/png",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+        )
+    return await checked(generate)
+
+
+@router.post('/frequency-curves/download-zip')
+async def download_frequency_curves_zip(payload: FrequencyCurvesPayload, user=Depends(get_authenticated_user)):
+    import io
+    def generate():
+        from services.frequency_curves_service import generate_all_frequency_curves
+        source = _get_session_source(payload, user)
+        res = generate_all_frequency_curves(
+            source=source,
+            start_date=payload.start_date,
+            end_date=payload.end_date,
+            comparison_periods=payload.comparison_periods,
+            dpi=400,
+        )
+        if not res.get('zip_bytes'):
+            raise HTTPException(404, "Frequency Curves ZIP package is not available.")
+        return StreamingResponse(
+            io.BytesIO(res['zip_bytes']),
+            media_type="application/zip",
+            headers={"Content-Disposition": 'attachment; filename="Frequency_Analysis_Curves.zip"'}
+        )
+    return await checked(generate)
+
+
+
+
+class ContinuousDrawalPayload(BaseModel):
+    session_token: str
+    result_token: Optional[str] = None
+
+
+@router.post('/continuous-drawal')
+async def get_continuous_drawal(payload: ContinuousDrawalPayload, user=Depends(get_authenticated_user)):
+    def fetch():
+        session = sessions.get_session(payload.session_token, user)
+        result = None
+        if payload.result_token:
+            try:
+                _, result = sessions.get_result(payload.session_token, payload.result_token, user)
+            except Exception:
+                pass
+        from services.frequency_compact_reports import build_continuous_drawal_data, build_event_charts_data
+        continuous_data = build_continuous_drawal_data(session, result)
+        event_charts = build_event_charts_data(session, result) if result else []
+        return {
+            'success': True,
+            'continuous_data': continuous_data,
+            'event_charts': event_charts,
+        }
+    return await checked(fetch)
 
 
 @router.post('/run')

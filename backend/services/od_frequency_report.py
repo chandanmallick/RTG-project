@@ -35,6 +35,7 @@ from io import BytesIO
 from pathlib import Path
 import base64
 import re
+import zipfile
 
 import numpy as np
 import pandas as pd
@@ -53,6 +54,11 @@ STATE_COLUMNS = {
     "Sikkim": ("SIKKIM SCHEDULE", "SIKKIM ACTUAL"),
 }
 
+# Frequency bands as per requirement:
+# Below 49.50 Hz: Red (#D7191C)
+# 49.50 to below 49.70 Hz: Orange (#F07800)
+# 49.70 to below 49.90 Hz: Purple (#7B2CBF)
+# 49.90 Hz and above: Green (#159447)
 FREQUENCY_BANDS = [
     (0.0, 49.5, "#D7191C", "<49.50 Hz"),
     (49.5, 49.7, "#F07800", "49.50–<49.70 Hz"),
@@ -60,6 +66,11 @@ FREQUENCY_BANDS = [
     (49.9, np.inf, "#159447", "≥49.90 Hz"),
 ]
 THRESHOLDS = (49.5, 49.7, 49.9)
+
+VALID_FREQ_MIN = 45.0
+VALID_FREQ_MAX = 51.0
+AXIS_X_MIN = 49.3
+AXIS_X_MAX = 50.5
 
 
 def _safe_name(text):
@@ -94,11 +105,11 @@ def load_od_frequency_dataframe(excel_source, sheet_name=None):
         excel_file.seek(0)
 
     # Inspect the first few rows to locate the row containing FREQUENCY
-    sample_df = pd.read_excel(excel_file, sheet_name=sheet, header=None, nrows=6, engine="openpyxl")
+    sample_df = pd.read_excel(excel_file, sheet_name=sheet, header=None, nrows=10, engine="openpyxl")
     
     header_row_idx = 0
     found_freq = False
-    for r_idx in range(min(5, len(sample_df))):
+    for r_idx in range(min(10, len(sample_df))):
         row_vals = [str(v).strip().upper() for v in sample_df.iloc[r_idx].dropna().values]
         if any("FREQUENCY" in v for v in row_vals):
             header_row_idx = r_idx
@@ -108,7 +119,7 @@ def load_od_frequency_dataframe(excel_source, sheet_name=None):
     if isinstance(excel_file, BytesIO):
         excel_file.seek(0)
 
-    # Business rule: Ignore row immediately following the header (Row 2 in standard layout)
+    # Business rule: Ignore row immediately following the header (Row 2 in standard layout, containing meter codes/metadata)
     skip_row = header_row_idx + 1
 
     df = pd.read_excel(
@@ -119,6 +130,18 @@ def load_od_frequency_dataframe(excel_source, sheet_name=None):
         engine="openpyxl",
     )
     df.columns = [str(c).strip().upper() for c in df.columns]
+
+    # Resolve Date & Time column if needed
+    dt_candidates = [c for c in df.columns if any(k in c for k in ("DATE", "TIME", "TIMESTAMP"))]
+    if not dt_candidates and len(df.columns) > 0:
+        first_col = df.columns[0]
+        if "UNNAMED" in first_col:
+            df.rename(columns={first_col: "DATE & TIME"}, inplace=True)
+            dt_candidates = ["DATE & TIME"]
+
+    # Handle DVC schedule column alias (DVC ADJUSTED SCHEDULE vs DVC SCHEDULE)
+    if "DVC ADJUSTED SCHEDULE" not in df.columns and "DVC SCHEDULE" in df.columns:
+        df.rename(columns={"DVC SCHEDULE": "DVC ADJUSTED SCHEDULE"}, inplace=True)
 
     # Validate required columns
     required = {"FREQUENCY"}
@@ -133,31 +156,60 @@ def load_od_frequency_dataframe(excel_source, sheet_name=None):
             + ", ".join(missing)
         )
 
+    # Filter to only required columns to exclude unrelated columns and spurious data
+    cols_to_keep = []
+    if dt_candidates and dt_candidates[0] in df.columns:
+        cols_to_keep.append(dt_candidates[0])
+    cols_to_keep.append("FREQUENCY")
+    for schedule_col, actual_col in STATE_COLUMNS.values():
+        cols_to_keep.append(schedule_col.upper())
+        cols_to_keep.append(actual_col.upper())
+
+    df = df[cols_to_keep].copy()
     return df
 
 
+def format_period_label(min_ts, max_ts):
+    """Format human-readable period label for any date/time span."""
+    if min_ts is None or max_ts is None or pd.isna(min_ts) or pd.isna(max_ts):
+        return "Uploaded Period"
+    try:
+        t1 = pd.to_datetime(min_ts)
+        t2 = pd.to_datetime(max_ts)
+        if pd.isna(t1) or pd.isna(t2):
+            return "Uploaded Period"
+        m1, m2 = t1.strftime("%B"), t2.strftime("%B")
+        y1, y2 = t1.strftime("%Y"), t2.strftime("%Y")
+        d1, d2 = t1.strftime("%d-%b-%Y"), t2.strftime("%d-%b-%Y")
+        total_days = (t2 - t1).days
+
+        if total_days == 0:
+            return d1
+        if m1 == m2 and y1 == y2:
+            if total_days >= 26 and t1.day <= 2:
+                return f"{m1} {y1}"
+            return f"{d1} to {d2}"
+        elif y1 == y2:
+            if total_days >= 55 and t1.day <= 2:
+                return f"{m1}–{m2} {y1}"
+            return f"{d1} to {d2}"
+        else:
+            return f"{d1} to {d2}"
+    except Exception:
+        return "Uploaded Period"
+
+
 def detect_period_from_dataframe(df):
-    """Infer a human-readable period label from date/time columns if available."""
+    """Infer a human-readable period label from date/time columns for any uploaded dataset."""
     date_col = next((c for c in df.columns if any(k in c for k in ("DATE", "TIME", "TIMESTAMP"))), None)
     if date_col is not None:
         try:
             ts_series = pd.to_datetime(df[date_col], errors="coerce").dropna()
             if not ts_series.empty:
-                min_ts = ts_series.min()
-                max_ts = ts_series.max()
-                m1 = min_ts.strftime("%B")
-                m2 = max_ts.strftime("%B")
-                y1 = min_ts.strftime("%Y")
-                y2 = max_ts.strftime("%Y")
-                if m1 == m2 and y1 == y2:
-                    return f"{m1} {y1}"
-                elif y1 == y2:
-                    return f"{m1}–{m2} {y1}"
-                else:
-                    return f"{m1} {y1}–{m2} {y2}"
+                return format_period_label(ts_series.min(), ts_series.max())
         except Exception:
             pass
-    return "September–October 2026"
+    return "Uploaded Period"
 
 
 def generate_od_frequency_plots(
@@ -168,14 +220,15 @@ def generate_od_frequency_plots(
     title_period=None,
 ):
     """
-    Generate one OD-only frequency scatter plot per state with embedded statistics table.
+    Generate one positive-deviation frequency scatter plot per state with embedded statistics table.
+    Works dynamically for any uploaded dataset period.
 
     Args:
-        excel_path: Path, BytesIO, or bytes of the combined Excel workbook.
-        output_dir: Optional folder where plot PNGs and statistics XLSX are written.
+        excel_path: Path, BytesIO, or bytes of the uploaded Excel workbook.
+        output_dir: Optional folder where plot PNGs, statistics XLSX, and ZIP are written.
         sheet_name: Sheet name or index (defaults to 'Sheet1' or first sheet).
         dpi: Output resolution, defaults to 400.
-        title_period: Period string displayed in plot titles (e.g. 'September–October 2026').
+        title_period: Optional period string displayed in plot titles (auto-detected if None).
 
     Returns:
         {
@@ -184,9 +237,12 @@ def generate_od_frequency_plots(
           "plots_bytes": {"West Bengal": b'...', ...},
           "statistics": "/path/to/OD_Frequency_Statistics.xlsx" (if output_dir provided),
           "statistics_bytes": b'...',
+          "statistics_base64": "data:...",
+          "zip_path": "/path/to/OD_Frequency_Plots.zip" (if output_dir provided),
+          "zip_bytes": b'...',
           "state_stats": {"West Bengal": [...], ...},
           "statistics_rows": [...],
-          "period": "September–October 2026"
+          "period": "..."
         }
     """
     if output_dir:
@@ -198,6 +254,8 @@ def generate_od_frequency_plots(
         title_period = detect_period_from_dataframe(df)
 
     freq = pd.to_numeric(df["FREQUENCY"], errors="coerce")
+    valid_freq = freq.notna() & (freq >= VALID_FREQ_MIN) & (freq <= VALID_FREQ_MAX)
+
     plot_paths = {}
     plot_base64 = {}
     plot_bytes = {}
@@ -209,8 +267,11 @@ def generate_od_frequency_plots(
         actual = pd.to_numeric(df[actual_col.upper()], errors="coerce")
         deviation = actual - schedule
 
-        valid = freq.notna() & deviation.notna()
-        positive = valid & (deviation > 0)  # Plot OD/UI positive deviation only.
+        # Valid records for statistics: valid frequency (45-51 Hz) and valid numeric deviation
+        valid = valid_freq & deviation.notna()
+
+        # Business rule: Plot strictly positive deviation records (Actual - Schedule > 0)
+        positive = valid & (deviation > 0)
         x = freq[positive].to_numpy()
         y = deviation[positive].to_numpy()
 
@@ -220,17 +281,25 @@ def generate_od_frequency_plots(
 
         for low, high, color, label in FREQUENCY_BANDS:
             band_mask = (x >= low) & (x < high)
-            ax.scatter(
-                x[band_mask], y[band_mask], s=9, c=color,
-                edgecolors="none", alpha=0.78, label=label,
-                rasterized=True,
-            )
+            if np.any(band_mask):
+                ax.scatter(
+                    x[band_mask], y[band_mask], s=11, c=color,
+                    edgecolors="none", alpha=0.72, label=label,
+                    rasterized=True, zorder=2,
+                )
+            else:
+                ax.scatter([], [], s=11, c=color, edgecolors="none", label=label)
 
         for threshold in THRESHOLDS:
             ax.axvline(
                 threshold, color="#333333", linestyle="--",
-                linewidth=1.6, zorder=0,
+                linewidth=1.5, zorder=1,
             )
+
+        # Consistent x-axis range across all state plots
+        ax.set_xlim(left=AXIS_X_MIN, right=AXIS_X_MAX)
+        ax.xaxis.set_major_locator(MultipleLocator(0.1))
+        ax.xaxis.set_major_formatter(plt.FormatStrFormatter('%.1f'))
 
         ax.set_title(
             f"{state} — {title_period}: Frequency vs {measure}",
@@ -239,38 +308,45 @@ def generate_od_frequency_plots(
         ax.set_xlabel("Frequency (Hz)", fontsize=15, fontweight="bold", labelpad=7)
         ax.set_ylabel(f"{measure} (MW)", fontsize=15, fontweight="bold", labelpad=8)
         ax.tick_params(axis="both", labelsize=12)
-        ax.xaxis.set_major_locator(MultipleLocator(0.1))
         ax.grid(True, linestyle=":", linewidth=0.65, alpha=0.35)
         ax.set_axisbelow(True)
         ax.legend(
             title="Frequency band", fontsize=10.5, title_fontsize=10.5,
-            loc="upper right", framealpha=0.96, markerscale=1.5,
+            loc="upper right", framealpha=0.96, markerscale=1.8,
         )
 
         table_rows = []
         state_threshold_list = []
         for threshold in THRESHOLDS:
+            # Denominator: count all valid 1-min blocks below threshold (45-51 Hz), including zero/negative deviation
             below = valid & (freq < threshold)
             total = int(below.sum())
+
+            # Numerator: count only strictly positive deviation blocks below threshold
             positive_below = below & (deviation > 0)
             positive_count = int(positive_below.sum())
-            percentage = (100 * positive_count / total) if total else np.nan
-            maximum = deviation[positive_below].max() if positive_count else np.nan
+
+            percentage = (100.0 * positive_count / total) if total > 0 else np.nan
+            maximum = float(deviation[positive_below].max()) if positive_count > 0 else np.nan
 
             table_rows.append([
                 f"<{threshold:.2f} Hz",
                 f"{total:,}",
-                f"{positive_count:,} ({percentage:.1f}%)" if total else "0 (—)",
+                f"{positive_count:,} ({percentage:.1f}%)" if total and pd.notna(percentage) else "0 (—)",
                 f"{maximum:,.1f}" if pd.notna(maximum) else "—",
             ])
             stat_record = {
                 "Period": title_period,
                 "State": state,
+                "Measure": measure,
                 "Frequency threshold": f"<{threshold:.2f} Hz",
                 "Total valid 1-min blocks below threshold": total,
                 "Positive deviation blocks": positive_count,
                 "Positive deviation blocks (%)": percentage,
                 "Maximum positive deviation (MW)": maximum,
+                f"{measure} blocks": positive_count,
+                f"{measure} blocks (%)": percentage,
+                f"Maximum {measure} (MW)": maximum,
             }
             stats_rows.append(stat_record)
             state_threshold_list.append({
@@ -290,8 +366,8 @@ def generate_od_frequency_plots(
             colLabels=[
                 "Frequency Threshold",
                 "Total No. of 1-min Blocks",
-                "OD/UI Blocks (No. and %)",
-                "Maximum OD/UI (MW)",
+                f"{measure} Time Blocks\n(No. and %)",
+                f"Maximum {measure} (MW)",
             ],
             cellLoc="center", colLoc="center", bbox=[0, 0, 1, 1],
             colWidths=[0.19, 0.22, 0.28, 0.31],
@@ -342,6 +418,21 @@ def generate_od_frequency_plots(
 
     statistics_base64 = f"data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{base64.b64encode(statistics_bytes).decode('ascii')}"
 
+    # Build consolidated ZIP archive containing all 6 PNG plots and the Excel statistics workbook
+    zip_buf = BytesIO()
+    with zipfile.ZipFile(zip_buf, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
+        for state, raw_png in plot_bytes.items():
+            zf.writestr(f"{_safe_name(state)}_OD_Frequency.png", raw_png)
+        zf.writestr("OD_Frequency_Statistics.xlsx", statistics_bytes)
+    zip_buf.seek(0)
+    zip_bytes = zip_buf.getvalue()
+
+    zip_path = None
+    if output_dir:
+        zip_path = str(output_dir / "OD_Frequency_Plots.zip")
+        with open(zip_path, "wb") as f_out:
+            f_out.write(zip_bytes)
+
     return {
         "plots": plot_paths,
         "plots_base64": plot_base64,
@@ -349,6 +440,8 @@ def generate_od_frequency_plots(
         "statistics": statistics_path,
         "statistics_bytes": statistics_bytes,
         "statistics_base64": statistics_base64,
+        "zip_path": zip_path,
+        "zip_bytes": zip_bytes,
         "state_stats": state_stats,
         "statistics_rows": stats_rows,
         "period": title_period,
