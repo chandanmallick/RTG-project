@@ -105,6 +105,29 @@ def get_od_frequency(token, user, dpi=400):
     return cached
 
 
+def get_state_heatmaps(token, user, dpi=250):
+    session = get_session(token, user)
+    cached = session.get('state_heatmaps')
+    if cached and (dpi <= 150 or cached.get('dpi') == dpi):
+        return cached
+    source = session.get('raw_bytes')
+    if not source and session.get('dataset'):
+        source = session['dataset']
+    if source is not None:
+        from services.state_heatmap_service import generate_all_state_heatmaps
+        meta = session.get('metadata') or {}
+        res = generate_all_state_heatmaps(
+            source,
+            start_date=meta.get('start_time'),
+            end_date=meta.get('end_time'),
+            dpi=dpi
+        )
+        res['dpi'] = dpi
+        session['state_heatmaps'] = res
+        return res
+    return cached
+
+
 def release_session(token, user):
     get_session(token, user)
     with _lock:

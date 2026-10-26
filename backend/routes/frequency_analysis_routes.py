@@ -221,6 +221,75 @@ async def download_od_zip(token: str, user=Depends(get_authenticated_user)):
     return await checked(fetch)
 
 
+@router.get('/state-heatmaps/{token}')
+async def get_state_heatmaps(token: str, user=Depends(get_authenticated_user)):
+    def fetch():
+        res = sessions.get_state_heatmaps(token, user, dpi=250)
+        if not res:
+            raise HTTPException(404, "State Performance Heatmaps are not available for this session.")
+        return {
+            'success': True,
+            'period': res.get('period'),
+            'states': res.get('states', []),
+            'plots_base64': res.get('plots_base64', {}),
+            'state_stats': res.get('state_stats', {}),
+            'interactive_data': res.get('interactive_data', {}),
+        }
+    return await checked(fetch)
+
+
+@router.get('/state-heatmaps-download/{token}/plot/{state}')
+async def download_state_heatmap_plot(token: str, state: str, user=Depends(get_authenticated_user)):
+    import io
+    from services.state_heatmap_service import _safe_name
+    def fetch():
+        res = sessions.get_state_heatmaps(token, user, dpi=300)
+        if not res or not res.get('plots_bytes') or state not in res['plots_bytes']:
+            raise HTTPException(404, f"State heatmap for {state} is not available.")
+        raw = res['plots_bytes'][state]
+        period = _safe_name(res.get('period') or 'month')
+        return StreamingResponse(
+            io.BytesIO(raw),
+            media_type="image/png",
+            headers={"Content-Disposition": f'attachment; filename="{_safe_name(state)}_OD_UI_Heatmap_{period}.png"'}
+        )
+    return await checked(fetch)
+
+
+@router.get('/state-heatmaps-download/{token}/zip')
+async def download_state_heatmaps_zip(token: str, user=Depends(get_authenticated_user)):
+    import io
+    from services.state_heatmap_service import _safe_name
+    def fetch():
+        res = sessions.get_state_heatmaps(token, user, dpi=300)
+        if not res or not res.get('zip_bytes'):
+            raise HTTPException(404, "State heatmaps ZIP package is not available.")
+        period = _safe_name(res.get('period') or 'month')
+        return StreamingResponse(
+            io.BytesIO(res['zip_bytes']),
+            media_type="application/zip",
+            headers={"Content-Disposition": f'attachment; filename="State_OD_UI_Heatmaps_{period}.zip"'}
+        )
+    return await checked(fetch)
+
+
+@router.get('/state-heatmaps-download/{token}/excel')
+async def download_state_heatmaps_excel(token: str, user=Depends(get_authenticated_user)):
+    import io
+    from services.state_heatmap_service import _safe_name
+    def fetch():
+        res = sessions.get_state_heatmaps(token, user, dpi=300)
+        if not res or not res.get('excel_bytes'):
+            raise HTTPException(404, "State heatmaps Excel data is not available.")
+        period = _safe_name(res.get('period') or 'month')
+        return StreamingResponse(
+            io.BytesIO(res['excel_bytes']),
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": f'attachment; filename="State_OD_UI_Heatmap_Data_{period}.xlsx"'}
+        )
+    return await checked(fetch)
+
+
 class EventTablesPayload(BaseModel):
     session_token: str
     result_token: Optional[str] = None

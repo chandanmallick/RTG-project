@@ -469,12 +469,13 @@ def build_continuous_drawal_data(session, result=None):
     }
 
 
-def html_report(tables, title, warnings, session=None, result=None, event_charts_data=None, od_frequency=None, event_tables=None, continuous_drawal_data=None, frequency_curves=None):
+def html_report(tables, title, warnings, session=None, result=None, event_charts_data=None, od_frequency=None, event_tables=None, continuous_drawal_data=None, frequency_curves=None, state_heatmaps=None):
     """
-    Restructured 6-section HTML report following user requirements:
+    Restructured multi-section HTML report following user requirements:
     1. Frequency profile analysis (Dynamic Frequency Event Tables: Table-2A, Table-2B, Table-2C)
     2. Frequency Analysis Curves (Daily Min + Duration, FDC, Diurnal Profile)
     3. State Scatter (State-wise Overdrawal vs Frequency Analysis plots with embedded tables)
+    3.2 State Performance by Heatmap (15-minute time block OD/UI heatmaps across day of month)
     4. State Overdrawal plots for each event (continuous 3-panel viewer with inbuilt color scheme & event cards)
     5. Event Chronology & Number of message issue (Category-wise message breakdown + event chronology)
     6. Performance and overall statistics tables
@@ -508,6 +509,27 @@ def html_report(tables, title, warnings, session=None, result=None, event_charts
         'plots': plots_base64,
         'stats': state_stats,
         'statistics_base64': stats_base64
+    }, ensure_ascii=False).replace('<', '\\u003c')
+
+    # State Heatmaps data for Subsection 3.2
+    if state_heatmaps is None and session:
+        state_heatmaps = session.get('state_heatmaps')
+    heatmap_period = (state_heatmaps or {}).get('period') or period
+    heatmap_plots = (state_heatmaps or {}).get('plots_base64') or {}
+    heatmap_stats = (state_heatmaps or {}).get('state_stats') or {}
+    heatmap_interactive = (state_heatmaps or {}).get('interactive_data') or {}
+    heatmap_zip = (state_heatmaps or {}).get('zip_bytes')
+    heatmap_zip_b64 = base64.b64encode(heatmap_zip).decode('ascii') if heatmap_zip else ''
+    heatmap_excel = (state_heatmaps or {}).get('excel_bytes')
+    heatmap_excel_b64 = base64.b64encode(heatmap_excel).decode('ascii') if heatmap_excel else ''
+    state_heatmaps_json = json.dumps({
+        'period': heatmap_period,
+        'plots': heatmap_plots,
+        'stats': heatmap_stats,
+        'interactive': heatmap_interactive,
+        'zip_base64': heatmap_zip_b64,
+        'excel_base64': heatmap_excel_b64,
+        'states': list(heatmap_plots.keys()),
     }, ensure_ascii=False).replace('<', '\\u003c')
 
     # Frequency analysis curves data for Section 2
@@ -1277,6 +1299,7 @@ def html_report(tables, title, warnings, session=None, result=None, event_charts
       <a class="nav-btn" href="#section-profile">1. Frequency Profile</a>
       <a class="nav-btn" href="#section-curves">2. Frequency Curves</a>
       <a class="nav-btn" href="#section-scatter">3. State Scatter</a>
+      <a class="nav-btn" href="#section-heatmap">3.2 State Heatmaps</a>
       <a class="nav-btn" href="#section-events">4. Event Overdrawal Plots</a>
       <a class="nav-btn" href="#section-chronology">5. Chronology & Messages</a>
       <a class="nav-btn" href="#section-performance">6. Performance Tables</a>
@@ -1366,6 +1389,73 @@ def html_report(tables, title, warnings, session=None, result=None, event_charts
       <div class="section-content-body">
         <div class="scatter-grid" id="scatter-container">
           <!-- Rendered dynamically by script for each of the 6 states -->
+        </div>
+      </div>
+    </details>
+
+    <!-- SUBSECTION 3.2: State Performance by Heatmap (15-minute Time Blocks) -->
+    <details class="report-section report-section-collapsible" open id="section-heatmap">
+      <summary class="section-summary-header">
+        <div class="section-summary-left">
+          <span class="collapsible-icon">▼</span>
+          <div>
+            <h2 class="section-title">
+              3.2 State Performance by Heatmap
+              <span class="badge">{escape(heatmap_period)}</span>
+            </h2>
+            <p class="section-desc">
+              15-minute time block average Overdrawal (OD/UI in MW) across each day of the month for constituent states (West Bengal, Bihar, DVC, Jharkhand, Odisha, Sikkim).
+              <strong>X-axis:</strong> 1-96 Time Blocks (15-min intervals). <strong>Y-axis:</strong> Day of the Month. Severe overdrawal spikes (&ge;500 MW) annotated with value badges.
+            </p>
+          </div>
+        </div>
+        <div class="section-actions" onclick="event.stopPropagation()">
+          <button class="action-btn" id="btn-download-heatmap-png" onclick="downloadCurrentHeatmapPng()">
+            📥 Download PNG
+          </button>
+          <button class="action-btn" id="btn-download-heatmap-zip" onclick="downloadHeatmapZip()">
+            📦 Download All States (ZIP)
+          </button>
+          <button class="action-btn success" id="btn-download-heatmap-excel" onclick="downloadHeatmapExcel()">
+            📊 Download Data (.xlsx)
+          </button>
+        </div>
+      </summary>
+      <div class="section-content-body">
+        <div class="filter-bar" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:12px;">
+          <div style="display:flex; align-items:center; gap:8px;">
+            <label for="heatmap-state-select"><strong>Select State:</strong></label>
+            <select id="heatmap-state-select" onchange="onHeatmapStateChange()" class="compact-select" style="min-width:160px; font-weight:700; padding:4px 8px; border-radius:5px; border:1px solid #CBD5E1;">
+              <!-- Populated by JS -->
+            </select>
+          </div>
+          <div style="display:flex; align-items:center; gap:8px;">
+            <span style="font-weight:700; font-size:11.5px; color:var(--muted);">View Mode:</span>
+            <button class="action-btn active" id="btn-heatmap-view-pub" onclick="setHeatmapViewMode('publication')">Publication Chart</button>
+            <button class="action-btn" id="btn-heatmap-view-echarts" onclick="setHeatmapViewMode('interactive')">Interactive ECharts</button>
+            <button class="action-btn" id="btn-heatmap-view-grid" onclick="setHeatmapViewMode('grid')">All States Grid</button>
+            <button class="action-btn" onclick="openHeatmapModal()" style="margin-left:6px;">🔍 Enlarge</button>
+          </div>
+        </div>
+
+        <!-- KPI Summary Cards for selected state -->
+        <div id="heatmap-kpi-container" style="display:flex; flex-wrap:wrap; gap:10px; margin-bottom:14px;">
+          <!-- Rendered by JS -->
+        </div>
+
+        <!-- Publication Chart container -->
+        <div id="heatmap-pub-container" style="background:#FFFFFF; border:1px solid #CBD5E1; border-radius:8px; padding:12px; text-align:center; cursor:zoom-in;" onclick="openHeatmapModal()" title="Click to enlarge">
+          <img id="heatmap-pub-img" src="" style="width:100%; max-height:720px; object-fit:contain; border-radius:4px;" alt="State OD/UI Heatmap" />
+        </div>
+
+        <!-- Interactive ECharts container -->
+        <div id="heatmap-interactive-container" style="display:none; background:#FFFFFF; border:1px solid #CBD5E1; border-radius:8px; padding:12px;">
+          <div id="heatmap-echarts" style="width:100%; height:600px;"></div>
+        </div>
+
+        <!-- All States Grid container -->
+        <div id="heatmap-grid-container" style="display:none;" class="scatter-grid">
+          <!-- Rendered by JS -->
         </div>
       </div>
     </details>
@@ -1721,6 +1811,7 @@ def html_report(tables, title, warnings, session=None, result=None, event_charts
     const TABLES = {tables_json};
     let EVENT_CHARTS = {event_charts_json};
     const OD_DATA = {od_frequency_json};
+    const HEATMAP_DATA = {state_heatmaps_json};
     const CONTINUOUS_DATA = {continuous_drawal_json};
     const FREQ_CURVES_DATA = {frequency_curves_json};
 
@@ -1898,6 +1989,319 @@ def html_report(tables, title, warnings, session=None, result=None, event_charts
       }} else {{
         alert('Statistics spreadsheet not available in this session.');
       }}
+    }}
+
+    // ==========================================
+    // SUBSECTION 3.2: STATE PERFORMANCE BY HEATMAP (15-MINUTE TIME BLOCKS)
+    // ==========================================
+    let heatmapChartInstance = null;
+    let currentHeatmapMode = 'publication';
+
+    function blockTimeLabelJs(block) {{
+      const startMin = (block - 1) * 15;
+      const endMin = block * 15;
+      const sh = String(Math.floor(startMin / 60)).padStart(2, '0');
+      const sm = String(startMin % 60).padStart(2, '0');
+      const eh = String(Math.floor(endMin / 60)).padStart(2, '0');
+      const em = String(endMin % 60).padStart(2, '0');
+      return `${{sh}}:${{sm}}–${{eh}}:${{em}}`;
+    }}
+
+    function initHeatmapSection() {{
+      const select = document.getElementById('heatmap-state-select');
+      const gridContainer = document.getElementById('heatmap-grid-container');
+      const states = HEATMAP_DATA.states || Object.keys(HEATMAP_DATA.plots || {{}});
+
+      if (!states.length) {{
+        const pubContainer = document.getElementById('heatmap-pub-container');
+        if (pubContainer) {{
+          pubContainer.innerHTML =
+            '<div style="padding: 24px; text-align: center; color: var(--muted);">No State OD/UI Heatmap data available. Ensure the uploaded workbook contains State schedule and actual columns.</div>';
+        }}
+        return;
+      }}
+
+      if (select) {{
+        select.innerHTML = '';
+        states.forEach((st, idx) => {{
+          const opt = document.createElement('option');
+          opt.value = st;
+          opt.textContent = st;
+          if (idx === 0) opt.selected = true;
+          select.appendChild(opt);
+        }});
+      }}
+
+      // Build Grid view
+      if (gridContainer) {{
+        gridContainer.innerHTML = '';
+        states.forEach(st => {{
+          const imgUri = HEATMAP_DATA.plots[st];
+          const card = document.createElement('div');
+          card.className = 'scatter-card';
+          card.innerHTML = `
+            <div class="scatter-card-header">
+              <h4>${{esc(st)}}</h4>
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <span class="measure-tag">OD/UI Heatmap</span>
+                <button class="action-btn" style="padding: 2px 8px; font-size: 11px; color: #17365D;" onclick="openHeatmapModal('${{esc(st)}}')">🔍 Enlarge</button>
+              </div>
+            </div>
+            <div class="scatter-img-wrap" style="cursor: zoom-in;" onclick="openHeatmapModal('${{esc(st)}}')" title="Click to enlarge">
+              <img src="${{imgUri}}" alt="${{esc(st)}} Heatmap" loading="lazy" />
+            </div>
+            <div class="scatter-card-footer">
+              <span style="font-size: 11px; color: var(--muted); font-weight: 600;">15-minute time block averages</span>
+              <div style="display: flex; gap: 8px;">
+                <button class="action-btn" onclick="openHeatmapModal('${{esc(st)}}')">🔍 Enlarge</button>
+                <a class="action-btn" href="${{imgUri}}" download="${{st.replace(/[^A-Za-z0-9_-]+/g, '_')}}_OD_UI_Heatmap.png">💾 Save PNG</a>
+              </div>
+            </div>
+          `;
+          gridContainer.appendChild(card);
+        }});
+      }}
+
+      onHeatmapStateChange();
+    }}
+
+    function onHeatmapStateChange() {{
+      const select = document.getElementById('heatmap-state-select');
+      const state = select ? select.value : '';
+      if (!state) return;
+
+      const imgUri = HEATMAP_DATA.plots && HEATMAP_DATA.plots[state];
+      const imgEl = document.getElementById('heatmap-pub-img');
+      if (imgEl && imgUri) {{
+        imgEl.src = imgUri;
+      }}
+
+      // Render KPI cards
+      const stats = HEATMAP_DATA.stats && HEATMAP_DATA.stats[state];
+      const kpiContainer = document.getElementById('heatmap-kpi-container');
+      if (kpiContainer && stats) {{
+        kpiContainer.innerHTML = `
+          <div style="flex: 1 1 200px; padding: 12px 14px; background: #FFFFFF; border: 1px solid #CBD5E1; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.03);">
+            <div style="font-size: 10.5px; font-weight: 800; color: #64748B; text-transform: uppercase;">Peak 15-min OD/UI</div>
+            <div style="font-size: 18px; font-weight: 900; color: #DC2626; margin-top: 2px;">${{stats.max_od.toLocaleString()}} MW</div>
+            <div style="font-size: 10.5px; color: #64748B; margin-top: 2px;">Day ${{stats.max_od_day}}, Block ${{stats.max_od_block}} (${{stats.max_od_time}} IST)</div>
+          </div>
+          <div style="flex: 1 1 200px; padding: 12px 14px; background: #FFFFFF; border: 1px solid #CBD5E1; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.03);">
+            <div style="font-size: 10.5px; font-weight: 800; color: #64748B; text-transform: uppercase;">Avg Positive OD</div>
+            <div style="font-size: 18px; font-weight: 900; color: #D97706; margin-top: 2px;">${{stats.avg_od.toLocaleString()}} MW</div>
+            <div style="font-size: 10.5px; color: #64748B; margin-top: 2px;">Mean overdrawal during adverse blocks</div>
+          </div>
+          <div style="flex: 1 1 200px; padding: 12px 14px; background: #FFFFFF; border: 1px solid #CBD5E1; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.03);">
+            <div style="font-size: 10.5px; font-weight: 800; color: #64748B; text-transform: uppercase;">Overdrawal Blocks</div>
+            <div style="font-size: 18px; font-weight: 900; color: #17365D; margin-top: 2px;">${{stats.od_blocks_count.toLocaleString()}} / ${{stats.total_blocks.toLocaleString()}}</div>
+            <div style="font-size: 10.5px; color: #64748B; margin-top: 2px;">${{stats.od_percentage}}% of total 15-min intervals</div>
+          </div>
+          <div style="flex: 1 1 200px; padding: 12px 14px; background: #FFFFFF; border: 1px solid #CBD5E1; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.03);">
+            <div style="font-size: 10.5px; font-weight: 800; color: #64748B; text-transform: uppercase;">Severe Blocks (&ge;500 MW)</div>
+            <div style="font-size: 18px; font-weight: 900; color: ${{stats.severe_blocks_count > 0 ? '#DC2626' : '#059669'}}; margin-top: 2px;">${{stats.severe_blocks_count.toLocaleString()}} blocks</div>
+            <div style="font-size: 10.5px; color: #64748B; margin-top: 2px;">Annotated with bold badges</div>
+          </div>
+        `;
+      }}
+
+      if (currentHeatmapMode === 'interactive') {{
+        renderInteractiveHeatmap();
+      }}
+    }}
+
+    function setHeatmapViewMode(mode) {{
+      currentHeatmapMode = mode;
+      const btnPub = document.getElementById('btn-heatmap-view-pub');
+      const btnEch = document.getElementById('btn-heatmap-view-echarts');
+      const btnGrid = document.getElementById('btn-heatmap-view-grid');
+      if (btnPub) btnPub.classList.toggle('active', mode === 'publication');
+      if (btnEch) btnEch.classList.toggle('active', mode === 'interactive');
+      if (btnGrid) btnGrid.classList.toggle('active', mode === 'grid');
+
+      const pubCont = document.getElementById('heatmap-pub-container');
+      const echCont = document.getElementById('heatmap-interactive-container');
+      const gridCont = document.getElementById('heatmap-grid-container');
+      if (pubCont) pubCont.style.display = mode === 'publication' ? 'block' : 'none';
+      if (echCont) echCont.style.display = mode === 'interactive' ? 'block' : 'none';
+      if (gridCont) gridCont.style.display = mode === 'grid' ? 'grid' : 'none';
+
+      if (mode === 'interactive') {{
+        renderInteractiveHeatmap();
+      }}
+    }}
+
+    function renderInteractiveHeatmap() {{
+      const select = document.getElementById('heatmap-state-select');
+      const state = select ? select.value : '';
+      const chartEl = document.getElementById('heatmap-echarts');
+      if (!chartEl || !state) return;
+
+      if (!heatmapChartInstance) {{
+        heatmapChartInstance = echarts.init(chartEl);
+      }}
+
+      const activeData = HEATMAP_DATA.interactive && HEATMAP_DATA.interactive[state];
+      if (!activeData) return;
+
+      const {{ days, blocks, matrix, schedule_matrix, actual_matrix, raw_deviation_matrix }} = activeData;
+      const seriesData = [];
+      let maxVal = 100;
+      for (let dIdx = 0; dIdx < days.length; dIdx++) {{
+        for (let bIdx = 0; bIdx < blocks.length; bIdx++) {{
+          const val = matrix[dIdx]?.[bIdx] ?? 0;
+          const sch = schedule_matrix?.[dIdx]?.[bIdx] ?? 0;
+          const act = actual_matrix?.[dIdx]?.[bIdx] ?? 0;
+          const rawDev = raw_deviation_matrix?.[dIdx]?.[bIdx] ?? 0;
+          if (val > maxVal) maxVal = val;
+          seriesData.push([bIdx, dIdx, Math.round(val), Math.round(sch), Math.round(act), Math.round(rawDev)]);
+        }}
+      }}
+
+      const xTicks = [0, 4, 8, 12, 16, 20, 24, 28, 32, 36, 40, 44, 48, 52, 56, 60, 64, 68, 72, 76, 80, 84, 88, 92];
+
+      const opt = {{
+        tooltip: {{
+          position: 'top',
+          formatter: function(params) {{
+            const [bIdx, dIdx, val, sch, act, rawDev] = params.data;
+            const day = days[dIdx];
+            const block = blocks[bIdx];
+            const timeRange = blockTimeLabelJs(block);
+            return `<div style="font-family: sans-serif; font-size: 12px; line-height: 1.5;">
+              <div style="font-weight: 800; color: #17365D; border-bottom: 1px solid #CBD5E1; padding-bottom: 3px; margin-bottom: 4px;">
+                ${{esc(state)}} — Day ${{day}}, Block ${{block}} (${{timeRange}} IST)
+              </div>
+              <div>Positive Deviation (OD/UI): <strong style="color: ${{val >= 500 ? '#DC2626' : val > 0 ? '#D97706' : '#10B981'}};">${{val.toLocaleString()}} MW</strong></div>
+              <div>Average Actual: <strong>${{act.toLocaleString()}} MW</strong></div>
+              <div>Average Schedule: <strong>${{sch.toLocaleString()}} MW</strong></div>
+              <div>Net Deviation: <strong>${{rawDev > 0 ? `+${{rawDev.toLocaleString()}}` : rawDev.toLocaleString()}} MW</strong></div>
+            </div>`;
+          }}
+        }},
+        grid: {{
+          top: 45,
+          left: 60,
+          right: 80,
+          bottom: 60
+        }},
+        xAxis: {{
+          type: 'category',
+          data: blocks.map(b => String(b)),
+          name: 'Time Block (1-96; 15-minute blocks)',
+          nameLocation: 'middle',
+          nameGap: 36,
+          nameTextStyle: {{ fontWeight: 'bold', fontSize: 11, color: '#1E293B' }},
+          splitArea: {{ show: false }},
+          splitLine: {{ show: true, lineStyle: {{ color: '#FFFFFF', width: 0.5 }} }},
+          axisLabel: {{
+            interval: (index) => xTicks.includes(index),
+            formatter: (v) => v,
+            fontSize: 10
+          }}
+        }},
+        yAxis: {{
+          type: 'category',
+          data: days.map(d => String(d)),
+          name: 'Day of the Month',
+          nameLocation: 'middle',
+          nameGap: 42,
+          nameTextStyle: {{ fontWeight: 'bold', fontSize: 11, color: '#1E293B' }},
+          splitArea: {{ show: false }},
+          splitLine: {{ show: true, lineStyle: {{ color: '#FFFFFF', width: 0.5 }} }},
+          axisLabel: {{ fontSize: 10 }}
+        }},
+        visualMap: {{
+          min: 0,
+          max: Math.ceil(maxVal / 100) * 100,
+          calculable: true,
+          orient: 'vertical',
+          right: 5,
+          top: 'middle',
+          itemHeight: 180,
+          inRange: {{
+            color: ['#FFFFD4', '#FED976', '#FEB24C', '#FD8D3C', '#F03B20', '#BD0026', '#800026']
+          }},
+          text: ['High MW', '0 MW'],
+          textStyle: {{ fontSize: 10, fontWeight: 'bold' }}
+        }},
+        series: [{{
+          name: 'OD/UI (MW)',
+          type: 'heatmap',
+          data: seriesData,
+          label: {{
+            show: true,
+            formatter: (params) => {{
+              const val = params.data[2];
+              return val >= 500 ? String(val) : '';
+            }},
+            fontSize: 8.5,
+            fontWeight: 'bold',
+            color: '#FFFFFF',
+            backgroundColor: 'rgba(0,0,0,0.85)',
+            padding: [2, 3],
+            borderRadius: 3
+          }},
+          itemStyle: {{
+            borderColor: '#FFFFFF',
+            borderWidth: 0.5
+          }},
+          emphasis: {{
+            itemStyle: {{
+              shadowBlur: 10,
+              shadowColor: 'rgba(0, 0, 0, 0.5)',
+              borderColor: '#1E3A8A',
+              borderWidth: 1.5
+            }}
+          }}
+        }}]
+      }};
+
+      heatmapChartInstance.setOption(opt);
+      heatmapChartInstance.resize();
+    }}
+
+    function downloadCurrentHeatmapPng() {{
+      const select = document.getElementById('heatmap-state-select');
+      const state = select ? select.value : '';
+      if (!state) return;
+      const imgUri = HEATMAP_DATA.plots && HEATMAP_DATA.plots[state];
+      if (!imgUri) return;
+      const a = document.createElement('a');
+      a.href = imgUri;
+      a.download = `${{state.replace(/[^A-Za-z0-9_-]+/g, '_')}}_OD_UI_Heatmap.png`;
+      a.click();
+    }}
+
+    function downloadHeatmapZip() {{
+      if (HEATMAP_DATA.zip_base64) {{
+        const a = document.createElement('a');
+        a.href = 'data:application/zip;base64,' + HEATMAP_DATA.zip_base64;
+        a.download = `State_OD_UI_Heatmaps_${{HEATMAP_DATA.period || 'month'}}.zip`;
+        a.click();
+      }} else {{
+        alert('Heatmap ZIP package not available in this session.');
+      }}
+    }}
+
+    function downloadHeatmapExcel() {{
+      if (HEATMAP_DATA.excel_base64) {{
+        const a = document.createElement('a');
+        a.href = 'data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,' + HEATMAP_DATA.excel_base64;
+        a.download = `State_OD_UI_Heatmap_Data_${{HEATMAP_DATA.period || 'month'}}.xlsx`;
+        a.click();
+      }} else {{
+        alert('Heatmap spreadsheet not available in this session.');
+      }}
+    }}
+
+    function openHeatmapModal(st) {{
+      const select = document.getElementById('heatmap-state-select');
+      const state = st || (select ? select.value : '');
+      const imgUri = HEATMAP_DATA.plots && HEATMAP_DATA.plots[state];
+      if (!imgUri) return;
+      document.getElementById('modal-scatter-title').textContent = `${{state}} — ${{HEATMAP_DATA.period}}: OD/UI Heatmap (15-minute Time Blocks)`;
+      document.getElementById('modal-scatter-img').src = imgUri;
+      document.getElementById('modal-enlarge-scatter').style.display = 'flex';
     }}
 
     // ==========================================
@@ -3263,12 +3667,14 @@ def html_report(tables, title, warnings, session=None, result=None, event_charts
 
     window.addEventListener('resize', () => {{
       if (continuousChart) continuousChart.resize();
+      if (heatmapChartInstance) heatmapChartInstance.resize();
       eventChartInstances.forEach(c => c.resize());
     }});
 
     // Initialize all sections
     initCurvesSection();
     initScatterSection();
+    initHeatmapSection();
     initContinuousDrawalSection();
     initEventCharts();
     renderChronologyTable();
@@ -3374,6 +3780,21 @@ def export_compact(payload, user):
             except Exception as exc:
                 print(f"Compact HTML frequency curves generation note: {exc}")
 
+        # Retrieve or generate State Performance Heatmaps (15-minute time blocks)
+        state_heatmaps_data = session.get('state_heatmaps')
+        if not state_heatmaps_data and raw_source is not None:
+            try:
+                from services.state_heatmap_service import generate_all_state_heatmaps
+                state_heatmaps_data = generate_all_state_heatmaps(
+                    source=raw_source,
+                    start_date=start_date,
+                    end_date=end_date,
+                    dpi=250
+                )
+                session['state_heatmaps'] = state_heatmaps_data
+            except Exception as exc:
+                print(f"Compact HTML state heatmaps generation note: {exc}")
+
         html_doc = html_report(
             tables,
             title,
@@ -3384,6 +3805,7 @@ def export_compact(payload, user):
             od_frequency=od_frequency,
             event_tables=event_tables_data,
             frequency_curves=frequency_curves_data,
+            state_heatmaps=state_heatmaps_data,
         )
         return {'success': True, 'html_document': html_doc}
 

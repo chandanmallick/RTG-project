@@ -1127,8 +1127,11 @@ const API = {
   downloadFrequencyEventTablesExcel: async (payload) => (await axios.post(`${BASE_URL}/frequency/analysis/event-tables/excel`, payload, { responseType: "blob" })).data,
   getFrequencyCurves: async (payload) => (await axios.post(`${BASE_URL}/frequency/analysis/frequency-curves`, payload)).data,
   downloadFrequencyCurvePlot: async (curveType, payload) => (await axios.post(`${BASE_URL}/frequency/analysis/frequency-curves/download/${encodeURIComponent(curveType)}`, payload, { responseType: "blob" })).data,
-  downloadFrequencyCurvesZip: async (payload) => (await axios.post(`${BASE_URL}/frequency/analysis/frequency-curves/download-zip`, payload, { responseType: "blob" })).data,
   getContinuousDrawal: async (payload) => (await axios.post(`${BASE_URL}/frequency/analysis/continuous-drawal`, payload)).data,
+  getStateHeatmaps: async (sessionToken) => (await axios.get(`${BASE_URL}/frequency/analysis/state-heatmaps/${encodeURIComponent(sessionToken)}`)).data,
+  downloadStateHeatmapPlot: async (sessionToken, state) => (await axios.get(`${BASE_URL}/frequency/analysis/state-heatmaps-download/${encodeURIComponent(sessionToken)}/plot/${encodeURIComponent(state)}`, { responseType: "blob" })).data,
+  downloadStateHeatmapsZip: async (sessionToken) => (await axios.get(`${BASE_URL}/frequency/analysis/state-heatmaps-download/${encodeURIComponent(sessionToken)}/zip`, { responseType: "blob" })).data,
+  downloadStateHeatmapsExcel: async (sessionToken) => (await axios.get(`${BASE_URL}/frequency/analysis/state-heatmaps-download/${encodeURIComponent(sessionToken)}/excel`, { responseType: "blob" })).data,
   releaseFrequencyAnalysis: async (token) => (await axios.delete(`${BASE_URL}/frequency/analysis/session/${encodeURIComponent(token)}`)).data,
 
 

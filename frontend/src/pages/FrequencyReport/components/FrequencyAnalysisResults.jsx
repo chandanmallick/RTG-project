@@ -8,6 +8,7 @@ import FrequencyPeriodStatistics from "./FrequencyPeriodStatistics";
 import FrequencyEventTables from "./FrequencyEventTables";
 import FrequencyCurvesPanel from "./FrequencyCurvesPanel";
 import StateOverdrawalPanel from "./StateOverdrawalPanel";
+import StateHeatmapPanel from "./StateHeatmapPanel";
 import OptimizedWarnings from "./OptimizedWarnings";
 const GROUPS = ["State", "ISGS", "IPP"];
 const reportMonth = month => /^\d{4}-\d{2}$/.test(month || "") ? `${["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][Number(month.slice(5))-1]}-${month.slice(0,4)}` : "";
@@ -51,7 +52,7 @@ export default function FrequencyAnalysisResults({ result, saveBlob, onHtmlRepor
     }
   }, [group, session, odData]);
   useEffect(() => {
-    if (!session || (!detail && !["Chronology", "Message Categories"].includes(group)) || group === "State Scatter" || group === "State Overdrawal Plots" || group === "Frequency Event Tables" || group === "Frequency Curves") return;
+    if (!session || (!detail && !["Chronology", "Message Categories"].includes(group)) || group === "State Scatter" || group === "State Overdrawal Plots" || group === "State Heatmap" || group === "Frequency Event Tables" || group === "Frequency Curves") return;
     let active = true; const key = `${token}:${group}:${page}`;
     setLoadingTable(true); setTable({ rows: [], total: 0 });
     const request = tableCache.current.get(key) ? Promise.resolve(tableCache.current.get(key)) : API.getFrequencyAnalysisTable({ session_token: session, result_token: token, group, offset: page * 50, limit: 50 });
@@ -164,9 +165,12 @@ export default function FrequencyAnalysisResults({ result, saveBlob, onHtmlRepor
     {!high && <TextField type="month" size="small" label="Word / PDF reporting month" value={reportingMonth} disabled={exporting} onChange={event => setReportingMonth(event.target.value)} InputLabelProps={{ shrink: true }} helperText="Uses prepared data for this calendar month and only the selected reporting slots." sx={{ my: 1, minWidth: 280 }} />}
     {editReportText && <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "1fr 1fr" }, gap: 2, my: 2 }}>{[["executive_summary", "Executive summary"], ["general_notes", "General notes"], ["state_observations", "State performance observations"], ["generator_observations", "ISGS / IPP observations"], ["chronology_notes", "Actions and chronology notes"], ["adms_ufr_remarks", "ADMS / UFR remarks"]].map(([key, label]) => <TextField key={key} label={label} multiline minRows={3} value={reportText[key]} disabled={exporting} inputProps={{ maxLength: 6000 }} helperText="Included in Word and PDF. Leave blank to omit optional commentary." onChange={event => setReportText(current => ({ ...current, [key]: event.target.value }))} />)}</Box>}
     <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap sx={{ mb: 2 }}>{["html", "pdf", "xlsx", "docx"].map(format => <Button key={format} size="small" variant="outlined" disabled={exporting} onClick={() => generate(format)}>{format === "html" ? "HTML Report" : format === "pdf" ? "Download PDF" : format === "xlsx" ? "Download Excel" : "Download Word"}</Button>)}<Button size="small" variant="outlined" disabled={exporting} onClick={()=>generate("html",true)}>Download HTML</Button>{exporting && <CircularProgress size={20} />}</Stack>
-    <Stack direction="row" justifyContent="space-between" alignItems="center"><Tabs value={group} onChange={(_, value) => { setGroup(value); setPage(0); }}>{[...GROUPS, "Chronology", "Message Categories", "State Scatter", "State Overdrawal Plots", "Frequency Event Tables", "Frequency Curves"].map(item => <Tab key={item} value={item} label={item} />)}</Tabs>{GROUPS.includes(group) && <FormControlLabel control={<Checkbox checked={detail} onChange={event => { setDetail(event.target.checked); setPage(0); }} size="small" />} label="15-minute detail" />}</Stack>
+    <Stack direction="row" justifyContent="space-between" alignItems="center"><Tabs value={group} onChange={(_, value) => { setGroup(value); setPage(0); }}>{[...GROUPS, "Chronology", "Message Categories", "State Scatter", "State Overdrawal Plots", "State Heatmap", "Frequency Event Tables", "Frequency Curves"].map(item => <Tab key={item} value={item} label={item} />)}</Tabs>{GROUPS.includes(group) && <FormControlLabel control={<Checkbox checked={detail} onChange={event => { setDetail(event.target.checked); setPage(0); }} size="small" />} label="15-minute detail" />}</Stack>
     {group === "State Overdrawal Plots" && (
       <StateOverdrawalPanel result={result} sessionToken={session} saveBlob={saveBlob} />
+    )}
+    {group === "State Heatmap" && (
+      <StateHeatmapPanel result={result} sessionToken={session} saveBlob={saveBlob} />
     )}
     {group === "Frequency Event Tables" && (
       <FrequencyEventTables result={result} sessionToken={session} saveBlob={saveBlob} />
