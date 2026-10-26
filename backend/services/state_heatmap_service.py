@@ -57,70 +57,170 @@ def extract_state_time_series(
     source: Union[pd.DataFrame, dict, bytes, bytearray, BytesIO, Path, str],
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
-) -> Tuple[pd.DataFrame, Dict[str, Tuple[str, str]], str]:
+) -> Tuple[pd.DataFrame, Dict[str, Tuple[Optional[str], Optional[str], Optional[str]]], str]:
     """
     Extract a unified dataframe with datetime, time block (1-96), day of month,
-    and actual/schedule columns for each constituent state.
+    and actual/schedule/deviation columns for each constituent state.
+    Returns: (df, state_cols_resolved, month_label)
+    where state_cols_resolved maps state_name -> (sch_col, act_col, dev_col).
     """
     df = None
     state_cols_resolved = {}
 
+    # Handle session dict wrapper if full session is passed
+    if isinstance(source, dict) and "dataset" in source and isinstance(source["dataset"], dict):
+        source = source["dataset"]
+
     if isinstance(source, dict) and "entities" in source and "times" in source:
         # Pre-parsed session dataset
         times = source["times"]
-        tz_offset = 19800  # IST +05:30 in seconds
-        dt_index = pd.to_datetime(np.asarray(times) + tz_offset, unit="s", utc=False)
+        # times are already local wall-clock seconds from timeline()/timestamp_array()
+        dt_index = pd.to_datetime(np.asarray(times), unit="s", utc=False)
+        n_times = len(dt_index)
         df_data = {"DATETIME": dt_index}
+
         for entity in source.get("entities", []):
             if entity.get("group") == "State":
                 name = entity.get("display_name")
+                if not name:
+                    continue
                 act = entity.get("actual")
                 sch = entity.get("schedule")
-                if name and act is not None and sch is not None:
-                    act_col = f"{name.upper()}_ACTUAL"
-                    sch_col = f"{name.upper()}_SCHEDULE"
-                    df_data[act_col] = act
-                    df_data[sch_col] = sch
+                dev = entity.get("deviation")
+
+                act_col = f"{name.upper()}_ACTUAL"
+                sch_col = f"{name.upper()}_SCHEDULE"
+                dev_col = f"{name.upper()}_DEVIATION"
+
+                has_act_sch = (
+                    act is not None
+                    and sch is not None
+                    and len(act) == n_times
+                    and len(sch) == n_times
+                )
+                has_dev = dev is not None and len(dev) == n_times
+
+                if has_act_sch:
+                    df_data[act_col] = np.asarray(act, dtype=float)
+                    df_data[sch_col] = np.asarray(sch, dtype=float)
+                    if has_dev:
+                        df_data[dev_col] = np.asarray(dev, dtype=float)
+                    else:
+                        df_data[dev_col] = np.asarray(act, dtype=float) - np.asarray(sch, dtype=float)
                     state_cols_resolved[name] = (sch_col, act_col)
+                elif has_dev:
+                    df_data[dev_col] = np.asarray(dev, dtype=float)
+                    df_data[act_col] = np.full(n_times, np.nan)
+                    df_data[sch_col] = np.full(n_times, np.nan)
+                    state_cols_resolved[name] = (None, None, dev_col)
+
         df = pd.DataFrame(df_data)
+
     elif isinstance(source, pd.DataFrame):
         df = source.copy()
-        # Find datetime column
-        dt_cand = next((c for c in df.columns if any(k in c.upper() for k in ("DATETIME", "DATE", "TIME", "TIMESTAMP"))), None)
+        dt_cand = next((c for c in df.columns if any(k in str(c).upper() for k in ("DATETIME", "DATE", "TIME", "TIMESTAMP"))), None)
         if dt_cand:
-            df["DATETIME"] = pd.to_datetime(df[dt_cand], errors="coerce")
+            df["DATETIME"] = pd.to_datetime(df[dt_cand], errors="coerce", format="mixed")
         else:
             raise ValueError("No datetime column identified in dataframe.")
+
     else:
         # Excel bytes, path, or BytesIO
-        df = load_od_frequency_dataframe(source)
-        dt_cand = next((c for c in df.columns if any(k in c.upper() for k in ("DATETIME", "DATE", "TIME", "TIMESTAMP"))), None)
-        if dt_cand:
-            df["DATETIME"] = pd.to_datetime(df[dt_cand], errors="coerce")
-        else:
-            raise ValueError("No datetime column found in Excel workbook.")
+        df = None
+        try:
+            df = load_od_frequency_dataframe(source)
+            dt_cand = next((c for c in df.columns if any(k in str(c).upper() for k in ("DATETIME", "DATE", "TIME", "TIMESTAMP"))), None)
+            if dt_cand:
+                df["DATETIME"] = pd.to_datetime(df[dt_cand], errors="coerce", format="mixed")
+        except Exception:
+            # Fall back to flexible Excel read without hard 12-column requirement
+            pass
+
+        if df is None:
+            if isinstance(source, (bytes, bytearray)):
+                excel_file = BytesIO(source)
+            elif isinstance(source, BytesIO):
+                excel_file = source
+            else:
+                excel_file = Path(source)
+
+            xl = pd.ExcelFile(excel_file, engine="openpyxl")
+            sheet = "Sheet1" if "Sheet1" in xl.sheet_names else xl.sheet_names[0]
+            sample = pd.read_excel(xl, sheet_name=sheet, header=None, nrows=10, engine="openpyxl")
+
+            header_row_idx = 0
+            for r_idx in range(min(10, len(sample))):
+                row_vals = [str(v).strip().upper() for v in sample.iloc[r_idx].dropna().values]
+                if any(any(k in v for k in ("DATE", "TIME", "FREQUENCY")) for v in row_vals):
+                    header_row_idx = r_idx
+                    break
+
+            df = pd.read_excel(xl, sheet_name=sheet, header=header_row_idx, engine="openpyxl")
+            if len(df) > 1 and df.iloc[0].isna().sum() > len(df.columns) * 0.4:
+                df = df.iloc[1:].reset_index(drop=True)
+            df.columns = [str(c).strip().upper() for c in df.columns]
+
+            dt_cand = next((c for c in df.columns if any(k in str(c).upper() for k in ("DATETIME", "DATE", "TIME", "TIMESTAMP"))), None)
+            if not dt_cand and len(df.columns) > 0 and "UNNAMED" in str(df.columns[0]).upper():
+                df.rename(columns={df.columns[0]: "DATETIME"}, inplace=True)
+                dt_cand = "DATETIME"
+
+            if dt_cand:
+                df["DATETIME"] = pd.to_datetime(df[dt_cand], errors="coerce", format="mixed")
+            else:
+                raise ValueError("No datetime column found in Excel workbook.")
 
     # Resolve state columns if not already resolved from dataset
-    if not state_cols_resolved:
-        upper_cols = {c.upper(): c for c in df.columns}
+    if not state_cols_resolved and df is not None:
+        upper_cols = {str(c).upper(): c for c in df.columns}
+
+        # Try predefined STATE_COLUMNS first
         for state, (sch_name, act_name) in STATE_COLUMNS.items():
             s_cand = upper_cols.get(sch_name.upper()) or upper_cols.get(f"{state.upper()} SCHEDULE")
             a_cand = upper_cols.get(act_name.upper()) or upper_cols.get(f"{state.upper()} ACTUAL")
             if s_cand and a_cand:
                 state_cols_resolved[state] = (s_cand, a_cand)
 
-    # Filter by date range if provided
-    df = df[df["DATETIME"].notna()].sort_values("DATETIME").copy()
-    if start_date:
-        t_start = pd.to_datetime(start_date)
-        df = df[df["DATETIME"] >= t_start]
-    if end_date:
-        t_end = pd.to_datetime(end_date)
-        if len(end_date) <= 10:
-            t_end = t_end + pd.Timedelta(days=1) - pd.Timedelta(seconds=1)
-        df = df[df["DATETIME"] <= t_end]
+        # Flexible alias matching for any remaining constituent state
+        STATE_ALIASES = {
+            "West Bengal": ["WB", "WEST BENGAL", "WEST_BENGAL"],
+            "Bihar": ["BIHAR"],
+            "DVC": ["DVC", "DVC ADJUSTED", "DVC_ADJUSTED"],
+            "Jharkhand": ["JHARKHAND"],
+            "Odisha": ["ODISHA", "ORISSA"],
+            "Sikkim": ["SIKKIM"],
+        }
+        for state, aliases in STATE_ALIASES.items():
+            if state in state_cols_resolved:
+                continue
+            s_cand, a_cand, d_cand = None, None, None
+            for alias in aliases:
+                for col_u, orig_c in upper_cols.items():
+                    if alias in col_u:
+                        if any(k in col_u for k in ("SCHEDULE", "SCH")):
+                            s_cand = orig_c
+                        elif any(k in col_u for k in ("ACTUAL", "ACT", "DRAWAL")):
+                            a_cand = orig_c
+                        elif any(k in col_u for k in ("DEVIATION", "DEV", "OD/UI")):
+                            d_cand = orig_c
+            if s_cand and a_cand:
+                state_cols_resolved[state] = (s_cand, a_cand)
+            elif d_cand:
+                state_cols_resolved[state] = (None, None, d_cand)
 
-    if df.empty:
+    # Filter by date range if provided
+    if df is not None and "DATETIME" in df.columns:
+        df = df[df["DATETIME"].notna()].sort_values("DATETIME").copy()
+        if start_date:
+            t_start = pd.to_datetime(start_date)
+            df = df[df["DATETIME"] >= t_start]
+        if end_date:
+            t_end = pd.to_datetime(end_date)
+            if len(str(end_date)) <= 10:
+                t_end = t_end + pd.Timedelta(days=1) - pd.Timedelta(seconds=1)
+            df = df[df["DATETIME"] <= t_end]
+
+    if df is None or df.empty:
         raise ValueError("No valid data rows found in the selected period.")
 
     # Calculate 15-minute time block (1 to 96) and Day of Month
@@ -135,22 +235,27 @@ def extract_state_time_series(
 def compute_state_heatmap_matrix(
     df: pd.DataFrame,
     state: str,
-    sch_col: str,
-    act_col: str,
+    sch_col: Optional[str] = None,
+    act_col: Optional[str] = None,
+    dev_col: Optional[str] = None,
     num_days: Optional[int] = None,
 ) -> Dict:
     """
     Compute 15-minute time block average OD/Deviation matrix for a state.
     Shape: (num_days, 96) where index 0 is Day 1, index num_days-1 is Day N.
     """
-    days_present = sorted(df["DAY"].unique())
+    days_present = sorted(df["DAY"].dropna().unique())
     if num_days is None:
-        num_days = max(days_present) if days_present else 30
+        num_days = int(max(days_present)) if days_present else 30
         num_days = max(num_days, 28)
 
-    schedule = pd.to_numeric(df[sch_col], errors="coerce")
-    actual = pd.to_numeric(df[act_col], errors="coerce")
-    deviation = actual - schedule
+    schedule = pd.to_numeric(df[sch_col], errors="coerce") if sch_col and sch_col in df.columns else pd.Series(np.nan, index=df.index)
+    actual = pd.to_numeric(df[act_col], errors="coerce") if act_col and act_col in df.columns else pd.Series(np.nan, index=df.index)
+
+    if dev_col and dev_col in df.columns:
+        deviation = pd.to_numeric(df[dev_col], errors="coerce")
+    else:
+        deviation = actual - schedule
 
     df_state = pd.DataFrame({
         "DAY": df["DAY"],
@@ -181,8 +286,12 @@ def compute_state_heatmap_matrix(
     positive_sum = 0.0
 
     for _, row in grouped.iterrows():
-        d = int(row["DAY"])
-        b = int(row["TIME_BLOCK"])
+        try:
+            d = int(row["DAY"])
+            b = int(row["TIME_BLOCK"])
+        except (ValueError, TypeError):
+            continue
+
         if 1 <= d <= num_days and 1 <= b <= 96:
             avg_dev = float(row["DEVIATION"]) if pd.notna(row["DEVIATION"]) else 0.0
             avg_sch = float(row["SCHEDULE"]) if pd.notna(row["SCHEDULE"]) else 0.0
@@ -357,8 +466,10 @@ def render_heatmap_figure(
     fig.tight_layout()
 
     buf = BytesIO()
-    fig.savefig(buf, format="png", dpi=dpi, bbox_inches="tight", facecolor="white")
-    plt.close(fig)
+    try:
+        fig.savefig(buf, format="png", dpi=dpi, bbox_inches="tight", facecolor="white")
+    finally:
+        plt.close(fig)
     return fig, buf.getvalue()
 
 
@@ -420,15 +531,21 @@ def generate_heatmap_excel(
                 ws_summary.cell(row_num, col_idx).fill = fill_alt
         row_num += 1
 
-    # Auto-adjust summary column widths
+    if not state_results:
+        ws_summary.append(["No State Performance Heatmap data available for the selected period."])
+        ws_summary.cell(4, 1).font = Font(name="Calibri", size=10, italic=True)
+
+    # Auto-adjust summary column widths safely
     for col in ws_summary.columns:
         max_len = max(len(str(cell.value or "")) for cell in col)
-        col_letter = get_column_letter(col[0].column)
+        col_ref = col[0].column
+        col_letter = get_column_letter(col_ref) if isinstance(col_ref, int) else str(col_ref)
         ws_summary.column_dimensions[col_letter].width = max(max_len + 3, 12)
 
     # Detailed matrix sheet for each state
     for state, res in state_results.items():
-        ws = wb.create_sheet(title=_safe_name(state)[:28])
+        safe_title = _safe_name(state)[:28] or "State"
+        ws = wb.create_sheet(title=safe_title)
         ws.append([f"{state} — 15-Minute Block Average Positive Deviation (OD/UI in MW) — {month_label}"])
         ws.cell(1, 1).font = font_title
         ws.append([])
@@ -494,9 +611,29 @@ def generate_all_state_heatmaps(
             "interactive_data": {"West Bengal": {...}, ...},
         }
     """
-    df, state_cols, month_label = extract_state_time_series(source, start_date, end_date)
+    empty_result = {
+        "period": "Selected Period",
+        "states": [],
+        "plots_base64": {},
+        "plots_bytes": {},
+        "zip_bytes": b"",
+        "excel_bytes": b"",
+        "state_stats": {},
+        "interactive_data": {},
+    }
 
-    num_days = max(df["DAY"].unique()) if not df.empty else 30
+    try:
+        df, state_cols, month_label = extract_state_time_series(source, start_date, end_date)
+    except Exception as exc:
+        print(f"Warning: extract_state_time_series failed: {exc}")
+        return empty_result
+
+    if not state_cols or df.empty:
+        empty_result["period"] = month_label or "Selected Period"
+        return empty_result
+
+    days_unique = df["DAY"].dropna().unique()
+    num_days = int(max(days_unique)) if len(days_unique) > 0 else 30
     num_days = max(num_days, 28)
 
     plots_base64 = {}
@@ -505,34 +642,44 @@ def generate_all_state_heatmaps(
     interactive_data = {}
     state_stats = {}
 
-    for state, (sch_col, act_col) in state_cols.items():
-        matrix_res = compute_state_heatmap_matrix(df, state, sch_col, act_col, num_days=num_days)
-        state_results[state] = matrix_res
-        state_stats[state] = matrix_res["stats"]
+    for state, col_info in state_cols.items():
+        sch_col, act_col, *rest = col_info
+        dev_col = rest[0] if rest else None
 
-        # Render high-res publication chart
-        _, img_bytes = render_heatmap_figure(matrix_res, month_label, dpi=dpi)
-        plots_bytes[state] = img_bytes
-        b64_str = f"data:image/png;base64,{base64.b64encode(img_bytes).decode('ascii')}"
-        plots_base64[state] = b64_str
+        try:
+            matrix_res = compute_state_heatmap_matrix(
+                df, state, sch_col=sch_col, act_col=act_col, dev_col=dev_col, num_days=num_days
+            )
+            state_results[state] = matrix_res
+            state_stats[state] = matrix_res["stats"]
 
-        # Format serializable interactive matrix for frontend ECharts
-        interactive_data[state] = {
-            "days": matrix_res["days"],
-            "blocks": matrix_res["blocks"],
-            "matrix": matrix_res["matrix"].tolist(),
-            "raw_deviation_matrix": matrix_res["raw_deviation_matrix"].tolist(),
-            "schedule_matrix": matrix_res["schedule_matrix"].tolist(),
-            "actual_matrix": matrix_res["actual_matrix"].tolist(),
-            "stats": matrix_res["stats"],
-        }
+            # Render high-res publication chart
+            _, img_bytes = render_heatmap_figure(matrix_res, month_label, dpi=dpi)
+            plots_bytes[state] = img_bytes
+            b64_str = f"data:image/png;base64,{base64.b64encode(img_bytes).decode('ascii')}"
+            plots_base64[state] = b64_str
+
+            # Format serializable interactive matrix for frontend ECharts
+            interactive_data[state] = {
+                "days": matrix_res["days"],
+                "blocks": matrix_res["blocks"],
+                "matrix": matrix_res["matrix"].tolist(),
+                "raw_deviation_matrix": matrix_res["raw_deviation_matrix"].tolist(),
+                "schedule_matrix": matrix_res["schedule_matrix"].tolist(),
+                "actual_matrix": matrix_res["actual_matrix"].tolist(),
+                "stats": matrix_res["stats"],
+            }
+        except Exception as state_err:
+            print(f"Warning: Failed to render heatmap for state '{state}': {state_err}")
+            continue
+
+    excel_bytes = generate_heatmap_excel(state_results, month_label)
 
     # Generate ZIP package
     zip_buf = BytesIO()
     with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
         for state, raw in plots_bytes.items():
             zf.writestr(f"{_safe_name(state)}_OD_UI_Heatmap_{_safe_name(month_label)}.png", raw)
-        excel_bytes = generate_heatmap_excel(state_results, month_label)
         zf.writestr(f"State_OD_UI_Heatmap_Data_{_safe_name(month_label)}.xlsx", excel_bytes)
     zip_bytes = zip_buf.getvalue()
 

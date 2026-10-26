@@ -33,7 +33,17 @@ def owner(user):
 
 
 def memory(dataset):
-    return dataset['times'].nbytes+dataset['frequency'].nbytes+sum(entity[key].nbytes for entity in dataset['entities'] for key in ('deviation','actual','schedule') if key in entity)+(dataset.get('support_seconds').nbytes if dataset.get('support_seconds') is not None else 0)
+    return (
+        dataset['times'].nbytes
+        + dataset['frequency'].nbytes
+        + sum(
+            entity[key].nbytes
+            for entity in dataset.get('entities', [])
+            for key in ('deviation', 'actual', 'schedule')
+            if key in entity and entity[key] is not None and hasattr(entity[key], 'nbytes')
+        )
+        + (dataset.get('support_seconds').nbytes if dataset.get('support_seconds') is not None and hasattr(dataset.get('support_seconds'), 'nbytes') else 0)
+    )
 
 
 def _purge():
@@ -110,22 +120,54 @@ def get_state_heatmaps(token, user, dpi=250):
     cached = session.get('state_heatmaps')
     if cached and (dpi <= 150 or cached.get('dpi') == dpi):
         return cached
-    source = session.get('raw_bytes')
-    if not source and session.get('dataset'):
-        source = session['dataset']
-    if source is not None:
-        from services.state_heatmap_service import generate_all_state_heatmaps
-        meta = session.get('metadata') or {}
-        res = generate_all_state_heatmaps(
-            source,
-            start_date=meta.get('start_time'),
-            end_date=meta.get('end_time'),
-            dpi=dpi
-        )
+
+    # Prioritize pre-parsed dataset (mapped with database entities and timeline), fallback to raw_bytes
+    sources_to_try = []
+    if session.get('dataset'):
+        sources_to_try.append(session['dataset'])
+    if session.get('raw_bytes'):
+        sources_to_try.append(session['raw_bytes'])
+
+    res = None
+    from services.state_heatmap_service import generate_all_state_heatmaps
+    meta = session.get('metadata') or {}
+    start_date = meta.get('start_time')
+    end_date = meta.get('end_time')
+
+    for src in sources_to_try:
+        try:
+            cand = generate_all_state_heatmaps(
+                src,
+                start_date=start_date,
+                end_date=end_date,
+                dpi=dpi
+            )
+            if cand and cand.get('states'):
+                res = cand
+                break
+            elif cand and not res:
+                res = cand
+        except Exception as exc:
+            import traceback
+            traceback.print_exc()
+            continue
+
+    if res:
         res['dpi'] = dpi
         session['state_heatmaps'] = res
         return res
-    return cached
+
+    fallback = cached or {
+        "period": "Selected Period",
+        "states": [],
+        "plots_base64": {},
+        "plots_bytes": {},
+        "zip_bytes": b"",
+        "excel_bytes": b"",
+        "state_stats": {},
+        "interactive_data": {},
+    }
+    return fallback
 
 
 def release_session(token, user):

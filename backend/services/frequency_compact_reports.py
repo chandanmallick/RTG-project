@@ -3782,16 +3782,18 @@ def export_compact(payload, user):
 
         # Retrieve or generate State Performance Heatmaps (15-minute time blocks)
         state_heatmaps_data = session.get('state_heatmaps')
-        if not state_heatmaps_data and raw_source is not None:
+        if not state_heatmaps_data:
             try:
                 from services.state_heatmap_service import generate_all_state_heatmaps
-                state_heatmaps_data = generate_all_state_heatmaps(
-                    source=raw_source,
-                    start_date=start_date,
-                    end_date=end_date,
-                    dpi=250
-                )
-                session['state_heatmaps'] = state_heatmaps_data
+                src = session.get('dataset') or raw_source
+                if src is not None:
+                    state_heatmaps_data = generate_all_state_heatmaps(
+                        source=src,
+                        start_date=start_date,
+                        end_date=end_date,
+                        dpi=250
+                    )
+                    session['state_heatmaps'] = state_heatmaps_data
             except Exception as exc:
                 print(f"Compact HTML state heatmaps generation note: {exc}")
 

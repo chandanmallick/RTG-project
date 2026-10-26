@@ -226,10 +226,17 @@ async def get_state_heatmaps(token: str, user=Depends(get_authenticated_user)):
     def fetch():
         res = sessions.get_state_heatmaps(token, user, dpi=250)
         if not res:
-            raise HTTPException(404, "State Performance Heatmaps are not available for this session.")
+            return {
+                'success': True,
+                'period': 'Selected Period',
+                'states': [],
+                'plots_base64': {},
+                'state_stats': {},
+                'interactive_data': {},
+            }
         return {
             'success': True,
-            'period': res.get('period'),
+            'period': res.get('period') or 'Selected Period',
             'states': res.get('states', []),
             'plots_base64': res.get('plots_base64', {}),
             'state_stats': res.get('state_stats', {}),
