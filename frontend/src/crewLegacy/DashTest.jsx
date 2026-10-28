@@ -31,7 +31,7 @@ const compactName = (name) => {
   return words.length > 1 ? `${words.slice(0, -1).map(word => word[0]).join(". ")}. ${words.at(-1)}` : words[0];
 };
 const isPending = (status) => /pending|applied|nominated|forwarded|requested/i.test(String(status || ""));
-const destinations = { Leave: "/crew/leave?section=tracking", Training: "/crew/reports?tab=training-history", Sports: "/crew/sports?section=approval", Exchange: "/crew/replacement?section=duty&focus=history", Replacement: "/crew/replacement?section=board" };
+const destinations = { Leave: "/crew/leave?section=tracking", Training: "/crew/reports?tab=training-history", Sports: "/crew/sports?section=approval", Exchange: "/crew/replacement?section=duty&focus=history", Replacement: "/crew/replacement?tab=duty" };
 const approvalOptions = [
   { title: "Leave approval", path: "/crew/leave?section=pending" },
   { title: "Training Assignment", path: "/crew/training?section=assign" },
@@ -40,7 +40,7 @@ const approvalOptions = [
   { title: "Replacement approval", path: "/crew/replacement?section=duty&focus=approvals" },
   { title: "Replacement Roster & Duty Matrix", path: "/crew/replacement?tab=roster" },
 ];
-const destinationLabels = { Leave: "Leave tracking", Training: "Training history", Sports: "Sports approval", Exchange: "Exchange history", Replacement: "Replacement duty board" };
+const destinationLabels = { Leave: "Leave tracking", Training: "Training history", Sports: "Sports approval", Exchange: "Exchange history", Replacement: "Duty assignment" };
 const popupPaper = { borderRadius: "28px", background: "#FFFCFC", backgroundImage: "none", boxShadow: "0 24px 90px #7D43552A", border: "1px solid #FFF", "& .MuiDialogTitle-root": { px: 3, py: 2.5, background: "linear-gradient(120deg,#FFF1E8,#FCE7EE)", fontWeight: 850 }, "& .MuiDialogContent-root": { p: 3 }, "& .MuiButton-root": { borderRadius: "14px" } };
 const card = { p: 1.8, borderRadius: "20px", border: "1px solid #E8EDF1", boxShadow: "0 5px 22px #19314B05", background: "#FFF", backgroundImage: "none", minWidth: 0 };
 
@@ -169,7 +169,7 @@ export default function DashTest({ demo = false }) {
     { number: 3, title: "Tracking", subtitle: "(for all application)", icon: ClipboardList, color: "#7760CD", bg: "#F0EBFC", click: () => openRecords("tracking"), count: pendingMine, foot: "Your pending applications" },
     { number: 4, title: "History", subtitle: "(for all application)", icon: History, color: "#B46D83", bg: "#FAEDF2", click: () => openRecords("history"), foot: "Records & cancellation" },
     { number: 11, title: "Report", subtitle: "Employee & period analysis", icon: ClipboardList, color: "#426B8D", bg: "#EAF3F8", click: () => navigate("/crew/reports"), foot: "Open crew reports" },
-    { number: 5, title: "Replacement", subtitle: "Sequential roster & duty matrix", icon: ArrowLeftRight, color: "#4775AB", bg: "#EAF2FB", click: () => navigate("/crew/replacement?tab=roster"), foot: "Sequential D-5 & duty matrix" },
+    { number: 5, title: "Replacement", subtitle: "Duty switching & assignment", icon: ArrowLeftRight, color: "#4775AB", bg: "#EAF2FB", click: () => navigate("/crew/replacement?tab=duty"), foot: "Duty assignment & cover" },
   ];
 
   return <Box sx={{ p: { xs: 1.5, md: 3 }, background: "#F5F7F9", minHeight: "100%", color: "#233442" }}>

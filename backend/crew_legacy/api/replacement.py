@@ -2857,7 +2857,7 @@ def replacement_candidates(
             str(c.get("dutyType") or "").strip().lower() == "replacement"
             or bool(c.get("isIC"))
         )
-        if not configured_replacement and not organization_eligible:
+        if effective_role_filter != "all" and not configured_replacement and not organization_eligible:
             continue
 
         # ==========================================

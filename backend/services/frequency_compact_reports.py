@@ -545,9 +545,186 @@ def html_report(tables, title, warnings, session=None, result=None, event_charts
         'zip_base64': freq_curves_zip_b64
     }, ensure_ascii=False).replace('<', '\\u003c')
 
-    # Category messages table for Section 4
+    # Category messages table for Section 5
     category_table = next((t for t in tables if t[0] == 'Category-wise Messages'), None)
     category_rows = category_table[2] if category_table else []
+
+    # Section 5.1: Aggregate total messages against each entity and category breakdown
+    entity_msg_dict = {}
+    cat_set = set()
+    for r in category_rows:
+        grp = str(r.get('group') or '-').strip()
+        ent = str(r.get('entity') or '-').strip()
+        cat = str(r.get('category') or 'Unspecified').strip()
+        cnt_val = r.get('message_count')
+        try:
+            cnt = int(cnt_val) if cnt_val is not None else 0
+        except (ValueError, TypeError):
+            cnt = 0
+        cat_set.add(cat)
+        key = (grp, ent)
+        if key not in entity_msg_dict:
+            entity_msg_dict[key] = {
+                'group': grp,
+                'entity': ent,
+                'categories': {},
+                'total': 0
+            }
+        entity_msg_dict[key]['categories'][cat] = entity_msg_dict[key]['categories'].get(cat, 0) + cnt
+        entity_msg_dict[key]['total'] += cnt
+
+    priority_order = ['Alert', 'Emergency', 'Physical Regulation', 'Warning', 'Non-compliance']
+    distinct_categories = [c for c in priority_order if c in cat_set] + sorted(c for c in cat_set if c not in priority_order)
+
+    total_messages_all = sum(item['total'] for item in entity_msg_dict.values())
+    cat_column_totals = {c: sum(item['categories'].get(c, 0) for item in entity_msg_dict.values()) for c in distinct_categories}
+
+    entity_msg_summary = sorted(entity_msg_dict.values(), key=lambda x: (-x['total'], x['entity']))
+    top_entity = entity_msg_summary[0] if entity_msg_summary else None
+    top_entity_share = (top_entity['total'] / total_messages_all * 100) if top_entity and total_messages_all > 0 else 0.0
+    top_cat = max(cat_column_totals.items(), key=lambda x: x[1])[0] if cat_column_totals and any(cat_column_totals.values()) else '–'
+    top_cat_count = cat_column_totals.get(top_cat, 0) if top_cat != '–' else 0
+
+    # Build KPI summary cards
+    entity_kpi_cards_html = f'''
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; margin-bottom: 16px;">
+          <div style="background: linear-gradient(135deg, #EFF6FF 0%, #DBEAFE 100%); border: 1px solid #BFDBFE; border-radius: 8px; padding: 10px 14px;">
+            <div style="font-size: 11px; font-weight: 700; color: #1E40AF; text-transform: uppercase; letter-spacing: 0.5px;">Total Messages Issued</div>
+            <div style="font-size: 22px; font-weight: 900; color: #1E3A8A; margin-top: 2px;">{total_messages_all:,}</div>
+            <div style="font-size: 11px; color: #3B82F6; margin-top: 1px;">Across all recipient entities &amp; categories</div>
+          </div>
+          <div style="background: linear-gradient(135deg, #ECFDF5 0%, #D1FAE5 100%); border: 1px solid #A7F3D0; border-radius: 8px; padding: 10px 14px;">
+            <div style="font-size: 11px; font-weight: 700; color: #047857; text-transform: uppercase; letter-spacing: 0.5px;">Entities Addressed</div>
+            <div style="font-size: 22px; font-weight: 900; color: #065F46; margin-top: 2px;">{len(entity_msg_summary)}</div>
+            <div style="font-size: 11px; color: #059669; margin-top: 1px;">States, regional entities &amp; generators</div>
+          </div>
+          <div style="background: linear-gradient(135deg, #FEF2F2 0%, #FEE2E2 100%); border: 1px solid #FECACA; border-radius: 8px; padding: 10px 14px;">
+            <div style="font-size: 11px; font-weight: 700; color: #B91C1C; text-transform: uppercase; letter-spacing: 0.5px;">Top Recipient Entity</div>
+            <div style="font-size: 18px; font-weight: 900; color: #991B1B; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="{escape(top_entity['entity'] if top_entity else '–')}">{escape(top_entity['entity'] if top_entity else '–')}</div>
+            <div style="font-size: 11px; color: #DC2626; margin-top: 1px;">{f"{top_entity['total']} messages ({top_entity_share:.1f}% share)" if top_entity and total_messages_all > 0 else "No violations"}</div>
+          </div>
+          <div style="background: linear-gradient(135deg, #FAF5FF 0%, #F3E8FF 100%); border: 1px solid #E9D5FF; border-radius: 8px; padding: 10px 14px;">
+            <div style="font-size: 11px; font-weight: 700; color: #6D28D9; text-transform: uppercase; letter-spacing: 0.5px;">Dominant Category</div>
+            <div style="font-size: 18px; font-weight: 900; color: #581C87; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="{escape(top_cat)}">{escape(top_cat)}</div>
+            <div style="font-size: 11px; color: #7C3AED; margin-top: 1px;">{f"{top_cat_count} messages issued" if top_cat != '–' else "None"}</div>
+          </div>
+        </div>'''
+
+    # Build Entity-wise Message Totals table HTML
+    cat_th_html = ''.join(f'<th style="text-align: right; padding: 8px 10px; min-width: 90px;">{escape(c)}</th>' for c in distinct_categories)
+    cat_tf_html = ''.join(f'<td style="text-align: right; padding: 8px 10px; font-weight: 800; color: #1E293B;">{cat_column_totals[c]:,}</td>' for c in distinct_categories)
+
+    if entity_msg_summary:
+        rows_list = []
+        for idx, item in enumerate(entity_msg_summary, 1):
+            share = (item['total'] / total_messages_all * 100) if total_messages_all > 0 else 0.0
+            cat_cells = []
+            for c in distinct_categories:
+                cnt = item['categories'].get(c, 0)
+                if cnt > 0:
+                    cat_cells.append(f'<td style="text-align: right; padding: 6px 10px; font-weight: 700; color: #0F172A;">{cnt:,}</td>')
+                else:
+                    cat_cells.append('<td style="text-align: right; padding: 6px 10px; color: #94A3B8;">–</td>')
+            bg_color = '#F8FAFC' if idx % 2 == 0 else '#FFFFFF'
+            rows_list.append(f'''
+            <tr style="background: {bg_color};">
+              <td style="text-align: center; font-weight: 700; color: #64748B; padding: 6px 6px;">{idx}</td>
+              <td style="text-align: left; padding: 6px 12px; font-weight: 800; color: #0F172A;">{escape(item["entity"])}</td>
+              <td style="text-align: center; padding: 6px 10px;">
+                <span class="badge" style="background: #F1F5F9; color: #334155; font-size: 10px; padding: 2px 7px; border-radius: 4px; border: 1px solid #CBD5E1; font-weight: 700;">{escape(item["group"])}</span>
+              </td>
+              {''.join(cat_cells)}
+              <td style="text-align: right; padding: 6px 14px; background: rgba(219, 234, 254, 0.35);">
+                <span style="display: inline-block; background: #DBEAFE; color: #1E40AF; padding: 2px 9px; border-radius: 10px; font-weight: 850; font-size: 12px; border: 1px solid #BFDBFE;">{item["total"]:,}</span>
+              </td>
+              <td style="text-align: right; padding: 6px 12px;">
+                <div style="display: flex; align-items: center; justify-content: flex-end; gap: 8px;">
+                  <div style="flex: 1; max-width: 50px; height: 6px; background: #E2E8F0; border-radius: 3px; overflow: hidden;">
+                    <div style="width: {min(share, 100):.1f}%; height: 100%; background: #2563EB; border-radius: 3px;"></div>
+                  </div>
+                  <span style="font-weight: 800; font-size: 11px; min-width: 42px; text-align: right; color: #334155;">{share:.1f}%</span>
+                </div>
+              </td>
+            </tr>''')
+        entity_table_rows_html = ''.join(rows_list)
+        entity_table_tfoot_html = f'''
+        <tfoot style="background: #F8FAFC; border-top: 2px solid #CBD5E1;">
+          <tr>
+            <td colspan="3" style="text-align: right; padding: 8px 12px; font-weight: 850; color: #0F172A; font-size: 11.5px;">Grand Total:</td>
+            {cat_tf_html}
+            <td style="text-align: right; padding: 8px 14px; font-weight: 900; color: #1E3A8A; font-size: 13px; background: #EFF6FF;">
+              <span style="display: inline-block; background: #1E3A8A; color: white; padding: 2px 10px; border-radius: 10px; font-weight: 900;">{total_messages_all:,}</span>
+            </td>
+            <td style="text-align: right; padding: 8px 12px; font-weight: 850; color: #0F172A; font-size: 11.5px;">100.0%</td>
+          </tr>
+        </tfoot>'''
+    else:
+        total_cols = 5 + len(distinct_categories)
+        entity_table_rows_html = f'<tr><td colspan="{total_cols}" style="text-align: center; color: #64748B; padding: 14px;">No mapped message records available.</td></tr>'
+        entity_table_tfoot_html = ''
+
+    section_5_1_html = f'''
+        <h3 style="font-size: 14px; font-weight: 800; color: var(--primary); margin-bottom: 12px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px;">
+          <span>5.1 Category-wise Messages Issued</span>
+          <span class="badge" style="font-size: 11px; background: #EEF2FF; color: #4338CA; border: 1px solid #C7D2FE; font-weight: 700;">
+            Total Messages: {total_messages_all:,} across {len(entity_msg_summary)} Entities
+          </span>
+        </h3>
+
+        {entity_kpi_cards_html}
+
+        <div style="margin-bottom: 22px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+            <h4 style="font-size: 13px; font-weight: 800; color: #1E293B; margin: 0; display: flex; align-items: center; gap: 6px;">
+              <span style="display: inline-block; width: 8px; height: 8px; background: #2563EB; border-radius: 50%;"></span>
+              Total Messages Against Each Entity
+            </h4>
+            <span style="font-size: 11px; color: #64748B; font-weight: 600;">Aggregated across all event windows &amp; categories</span>
+          </div>
+          <div style="overflow-x: auto; border: 1px solid #CBD5E1; border-radius: 8px; box-shadow: 0 1px 3px rgba(15,23,42,0.04);">
+            <table class="styled-table" id="table-entity-message-totals" style="margin: 0; width: 100%; border-collapse: collapse;">
+              <thead>
+                <tr style="background: #17365D; color: white;">
+                  <th style="width: 45px; text-align: center; padding: 8px 6px;">#</th>
+                  <th style="text-align: left; padding: 8px 12px;">Recipient Entity</th>
+                  <th style="text-align: center; padding: 8px 10px; width: 115px;">Recipient Group</th>
+                  {cat_th_html}
+                  <th style="text-align: right; padding: 8px 14px; width: 135px; background: #0F233D; color: #93C5FD; font-size: 11.5px;">Total Messages</th>
+                  <th style="text-align: right; padding: 8px 12px; width: 120px;">Share (%)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {entity_table_rows_html}
+              </tbody>
+              {entity_table_tfoot_html}
+            </table>
+          </div>
+        </div>
+
+        <details class="category-breakdown-details" style="margin-bottom: 24px; border: 1px solid #CBD5E1; border-radius: 8px; overflow: hidden; background: #FFFFFF;">
+          <summary style="padding: 10px 14px; background: #F8FAFC; cursor: pointer; font-size: 12px; font-weight: 800; color: #1E293B; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #E2E8F0;">
+            <span style="display: flex; align-items: center; gap: 6px;">
+              <span>📑</span>
+              <span>Detailed Recipient &amp; Category Log ({len(category_rows)} line items)</span>
+            </span>
+            <span style="font-size: 11px; color: #64748B; font-weight: 600;">Click to view / hide itemized rows ▼</span>
+          </summary>
+          <div style="overflow-x: auto; max-height: 480px;">
+            <table class="styled-table" id="table-category-summary" style="margin: 0; width: 100%;">
+              <thead>
+                <tr style="position: sticky; top: 0; background: #17365D; color: white; z-index: 1;">
+                  <th style="padding: 7px 10px; text-align: left;">Recipient Group</th>
+                  <th style="padding: 7px 10px; text-align: left;">Recipient</th>
+                  <th style="padding: 7px 10px; text-align: left;">Category</th>
+                  <th style="padding: 7px 10px; text-align: right;">Messages Issued</th>
+                </tr>
+              </thead>
+              <tbody>
+                {''.join(f'<tr><td style="text-align: left;">{escape(str(r.get("group", "-")))}</td><td class="strong" style="text-align: left;">{escape(str(r.get("entity", "-")))}</td><td style="text-align: left;">{escape(str(r.get("category", "-")))}</td><td class="strong" style="text-align: right;">{escape(str(r.get("message_count", "0")))}</td></tr>' for r in category_rows) if category_rows else '<tr><td colspan="4" style="text-align: center; color: #64748B; padding: 12px;">No mapped message records available.</td></tr>'}
+              </tbody>
+            </table>
+          </div>
+        </details>'''
     
     summary = (result or {}).get('summary') or {}
     start_time = summary.get('analysis_start', '')
@@ -1593,22 +1770,7 @@ def html_report(tables, title, warnings, session=None, result=None, event_charts
         </div>
       </summary>
       <div class="section-content-body">
-        <h3 style="font-size: 14px; font-weight: 800; color: var(--primary); margin-bottom: 10px;">5.1 Category-wise Messages Issued</h3>
-        <div style="overflow-x: auto; margin-bottom: 24px;">
-          <table class="styled-table" id="table-category-summary">
-            <thead>
-              <tr>
-                <th>Recipient Group</th>
-                <th>Recipient</th>
-                <th>Category</th>
-                <th>Messages Issued</th>
-              </tr>
-            </thead>
-            <tbody>
-              {''.join(f'<tr><td>{escape(str(r.get("group", "-")))}</td><td class="strong">{escape(str(r.get("entity", "-")))}</td><td>{escape(str(r.get("category", "-")))}</td><td class="strong">{escape(str(r.get("message_count", "0")))}</td></tr>' for r in category_rows) if category_rows else '<tr><td colspan="4">No mapped message records available.</td></tr>'}
-            </tbody>
-          </table>
-        </div>
+        {section_5_1_html}
 
         <h3 style="font-size: 14px; font-weight: 800; color: var(--primary); margin-bottom: 10px;">5.2 Daily Event Chronology</h3>
         <div class="filter-bar">

@@ -143,7 +143,7 @@ export default function DutyReassignmentPanel({
   }, [canManage, mode, destinationDate]);
 
   useEffect(() => {
-    if (!canManage || mode !== "vacancy" || !date) {
+    if (!canManage || !["vacancy", "additional", "single"].includes(mode) || !date) {
       setVacancyCandidates([]);
       return;
     }
@@ -151,12 +151,19 @@ export default function DutyReassignmentPanel({
       .then((result) => setVacancyCandidates(result.data || []))
       .catch((error) => {
         setVacancyCandidates([]);
-        setNotice({ severity: "error", text: error.response?.data?.detail || "Vacancy candidates could not be loaded." });
+        setNotice({ severity: "error", text: error.response?.data?.detail || "Candidates could not be loaded." });
       });
   }, [canManage, mode, date]);
 
-  const first = employees.find((item) => item.employeeId === firstId);
-  const second = employees.find((item) => item.employeeId === secondId);
+  const allAvailableEmployees = useMemo(() => {
+    if (vacancyCandidates.length) {
+      return vacancyCandidates;
+    }
+    return employees;
+  }, [vacancyCandidates, employees]);
+
+  const first = allAvailableEmployees.find((item) => item.employeeId === firstId) || employees.find((item) => item.employeeId === firstId);
+  const second = allAvailableEmployees.find((item) => item.employeeId === secondId) || employees.find((item) => item.employeeId === secondId);
   const destinationAssignment = destinationEmployees.find((item) => item.employeeId === firstId);
   const selectedLeave = leaves.find((item) => item.id === leaveId);
   const vacantDuties = useMemo(
@@ -362,7 +369,7 @@ export default function DutyReassignmentPanel({
           <FormControl fullWidth size="small">
             <Select value={mode} onChange={(event) => { const value = event.target.value; setMode(value); setSecondId(""); setLeaveId(""); setVacancyReplacementId(""); setActingSICId(""); setDebitId(""); if (value === "vacancy") setFirstId(""); }} sx={{ background: "#FFF", fontWeight: 850 }}>
               <MenuItem value="single">Replace an approved leave duty</MenuItem>
-              <MenuItem value="additional">Add an additional leave-replacement duty</MenuItem>
+              <MenuItem value="additional">Add an additional Manpower / leave replacement</MenuItem>
               <MenuItem value="vacancy">Fill a vacant duty / add manpower</MenuItem>
               <MenuItem value="cross_date">Move or reallocate a duty to another date</MenuItem>
               <MenuItem value="exchange">Switch duties between two employees</MenuItem>
@@ -380,18 +387,29 @@ export default function DutyReassignmentPanel({
           </Grid>
 
           <Grid item xs={12} md={["single", "additional"].includes(mode) ? 4.1 : mode === "cross_date" || mode === "balance" ? 4.6 : 3.5}>
-            <Field label={["single", "additional"].includes(mode) ? "Replacement employee" : mode === "vacancy" ? "Vacant duty" : mode === "cross_date" ? "Employee whose duty will move" : mode === "balance" ? "Employee duty balance" : "First employee"} helper={!canManage ? "Your logged-in employee account" : undefined}>
+            <Field label={["single", "additional"].includes(mode) ? (mode === "additional" ? "Additional manpower / replacement employee" : "Replacement employee") : mode === "vacancy" ? "Vacant duty" : mode === "cross_date" ? "Employee whose duty will move" : mode === "balance" ? "Employee duty balance" : "First employee"} helper={!canManage ? "Your logged-in employee account" : undefined}>
               <FormControl fullWidth size="small">
                 <Select value={firstId} disabled={!canManage} displayEmpty onChange={(event) => {
-                  const employee = employees.find((item) => item.employeeId === event.target.value);
+                  const employee = allAvailableEmployees.find((item) => item.employeeId === event.target.value) || employees.find((item) => item.employeeId === event.target.value);
                   setFirstId(event.target.value);
                   setDestinationDuty(employee?.assignedDuty || "");
-                   setSecondId("");
-                   setDebitId("");
-                   setActingSICId("");
+                  setSecondId("");
+                  setDebitId("");
+                  setActingSICId("");
                 }}>
-                  <MenuItem value="" disabled>Select employee</MenuItem>
-                  {(mode === "vacancy" ? vacantDuties : employees.filter((item) => !item.onLeave)).map((item) => <MenuItem key={item.employeeId} value={item.employeeId}>{mode === "vacancy" ? `${item.name || item.employeeId} (${item.employeeId}) · ${item.vacatedDuty} vacancy · ${item.groupName || "No group"}` : employeeLabel(item)}</MenuItem>)}
+                  <MenuItem value="" disabled>{mode === "additional" ? "Select additional manpower" : "Select employee"}</MenuItem>
+                  {(mode === "vacancy"
+                    ? vacantDuties
+                    : ["additional", "single"].includes(mode)
+                      ? allAvailableEmployees.filter((item) => !item.onLeave)
+                      : employees.filter((item) => !item.onLeave)
+                  ).map((item) => (
+                    <MenuItem key={item.employeeId} value={item.employeeId}>
+                      {mode === "vacancy"
+                        ? `${item.name || item.employeeId} (${item.employeeId}) · ${item.vacatedDuty} vacancy · ${item.groupName || "No group"}`
+                        : employeeLabel(item)}
+                    </MenuItem>
+                  ))}
                 </Select>
               </FormControl>
             </Field>

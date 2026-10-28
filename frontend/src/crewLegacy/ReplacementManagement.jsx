@@ -95,7 +95,7 @@ export default function ReplacementManagement({ initialWorkflow } = {}) {
     if (params.get("action") === "assign-sic") return "sic";
     if (params.get("action") === "leave") return "leave";
     if (params.get("action") === "review") return "roster";
-    return "roster";
+    return "duty";
   });
 
   useEffect(() => {
@@ -505,8 +505,8 @@ export default function ReplacementManagement({ initialWorkflow } = {}) {
       <Paper elevation={0} sx={{ mb: 2.5, p: 0.8, borderRadius: 3, border: "1px solid #D8E4F0", bgcolor: "#F8FAFC" }}>
         <Stack direction="row" spacing={1} flexWrap="wrap">
           {[
+            { id: "duty", label: "Duty Assignment", badge: null, icon: "🔁" },
             { id: "roster", label: "Replacement Roster & Matrix", badge: "Sequential D-5", icon: "✨" },
-            { id: "duty", label: "Duty Reassignment", badge: null, icon: "🔁" },
             { id: "leave", label: "Leave Replacements", badge: pendingLeaves.length, icon: "📋" },
             { id: "board", label: "Replacement Board", badge: assignedReplacements.length, icon: "📊" },
             { id: "sic", label: "SIC Coverage", badge: pendingSIC.length, icon: "🛡️" },

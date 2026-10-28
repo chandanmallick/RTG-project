@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import ReactECharts from "echarts-for-react";
-import { Alert, Box, Button, Checkbox, CircularProgress, Dialog, DialogContent, DialogTitle, FormControlLabel, IconButton, MenuItem, Paper, Stack, Tab, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Tabs, TextField, Typography } from "@mui/material";
-import { Expand, X } from "lucide-react";
+import { Alert, Box, Button, Checkbox, Chip, CircularProgress, Collapse, Dialog, DialogContent, DialogTitle, FormControlLabel, IconButton, MenuItem, Paper, Stack, Tab, Table, TableBody, TableCell, TableContainer, TableFooter, TableHead, TableRow, Tabs, TextField, Typography } from "@mui/material";
+import { ChevronDown, ChevronUp, Expand, Search, X } from "lucide-react";
 import API from "../../../services/api";
 import ThresholdPerformanceTable, { LEVELS, frequencyValue, metricValue, overdrawalValue } from "./ThresholdPerformanceTable";
 import FrequencyPeriodStatistics from "./FrequencyPeriodStatistics";
@@ -240,7 +240,7 @@ export default function FrequencyAnalysisResults({ result, saveBlob, onHtmlRepor
         </Box>
       </Box>
     )}
-    {group === "Message Categories" && (loadingTable ? <CircularProgress size={22} /> : <TableContainer><Table size="small"><TableHead><TableRow>{["Recipient group", "Recipient", "Category", "Messages"].map(label => <TableCell key={label}>{label}</TableCell>)}</TableRow></TableHead><TableBody>{table.rows.map((row,index) => <TableRow key={index}>{[row.group,row.entity,row.category,row.message_count].map((value,column) => <TableCell key={column}>{metricValue(value)}</TableCell>)}</TableRow>)}{!table.rows.length && <TableRow><TableCell colSpan={4}>No mapped messages available.</TableCell></TableRow>}</TableBody></Table></TableContainer>)}
+    {group === "Message Categories" && <MessageCategoriesView rows={table.rows} loading={loadingTable} />}
     {group !== "Message Categories" && group !== "State Scatter" && group !== "Frequency Event Tables" && group !== "Frequency Curves" && (loadingTable && (detail || group === "Chronology") ? <CircularProgress size={22} /> : group === "Chronology" ? (
       <Box>
         <Stack direction="row" spacing={1.5} alignItems="center" sx={{ mb: 1.5, mt: 1 }}>
@@ -329,4 +329,432 @@ export default function FrequencyAnalysisResults({ result, saveBlob, onHtmlRepor
 
     <Dialog fullScreen open={expanded} onClose={() => setExpanded(false)}><DialogTitle>{chart?.entity} · State OD and frequency<IconButton sx={{ float: "right" }} onClick={() => setExpanded(false)}><X /></IconButton></DialogTitle><DialogContent><ReactECharts option={option} notMerge style={{ height: "calc(100vh - 110px)" }} /></DialogContent></Dialog>
   </Paper>;
+}
+
+function MessageCategoriesView({ rows, loading }) {
+  const [showDetailed, setShowDetailed] = useState(false);
+  const [filterQuery, setFilterQuery] = useState("");
+
+  const summary = useMemo(() => {
+    if (!rows || !rows.length) {
+      return {
+        entities: [],
+        distinctCategories: [],
+        totalMessages: 0,
+        categoryTotals: {},
+        topEntity: null,
+        dominantCategory: null,
+        dominantCount: 0,
+      };
+    }
+
+    const catSet = new Set();
+    const entMap = new Map();
+    let totalMessages = 0;
+
+    rows.forEach((r) => {
+      const grp = String(r.group || "-").trim();
+      const ent = String(r.entity || "-").trim();
+      const cat = String(r.category || "Unspecified").trim();
+      const count = Number(r.message_count) || 0;
+      catSet.add(cat);
+      totalMessages += count;
+
+      const key = `${grp}:::${ent}`;
+      if (!entMap.has(key)) {
+        entMap.set(key, { group: grp, entity: ent, categories: {}, total: 0 });
+      }
+      const item = entMap.get(key);
+      item.categories[cat] = (item.categories[cat] || 0) + count;
+      item.total += count;
+    });
+
+    const priorityOrder = ["Alert", "Emergency", "Physical Regulation", "Warning", "Non-compliance"];
+    const distinctCategories = [
+      ...priorityOrder.filter((c) => catSet.has(c)),
+      ...Array.from(catSet)
+        .filter((c) => !priorityOrder.includes(c))
+        .sort(),
+    ];
+
+    const categoryTotals = {};
+    distinctCategories.forEach((c) => {
+      categoryTotals[c] = Array.from(entMap.values()).reduce((sum, item) => sum + (item.categories[c] || 0), 0);
+    });
+
+    const entities = Array.from(entMap.values()).sort((a, b) => b.total - a.total || a.entity.localeCompare(b.entity));
+    const topEntity = entities[0] || null;
+
+    let dominantCategory = null;
+    let dominantCount = 0;
+    Object.entries(categoryTotals).forEach(([c, cnt]) => {
+      if (cnt > dominantCount) {
+        dominantCount = cnt;
+        dominantCategory = c;
+      }
+    });
+
+    return {
+      entities,
+      distinctCategories,
+      totalMessages,
+      categoryTotals,
+      topEntity,
+      dominantCategory,
+      dominantCount,
+    };
+  }, [rows]);
+
+  if (loading) {
+    return (
+      <Box sx={{ display: "flex", justifyContent: "center", py: 4 }}>
+        <CircularProgress size={28} />
+      </Box>
+    );
+  }
+
+  const filteredDetailedRows = (rows || []).filter((r) => {
+    if (!filterQuery) return true;
+    const q = filterQuery.toLowerCase();
+    return (
+      String(r.entity || "").toLowerCase().includes(q) ||
+      String(r.group || "").toLowerCase().includes(q) ||
+      String(r.category || "").toLowerCase().includes(q)
+    );
+  });
+
+  return (
+    <Box sx={{ mt: 1.5 }}>
+      {/* KPI Summary Cards */}
+      <Box
+        sx={{
+          display: "grid",
+          gridTemplateColumns: { xs: "1fr", sm: "1fr 1fr", md: "repeat(4, 1fr)" },
+          gap: 1.5,
+          mb: 2.5,
+        }}
+      >
+        <Paper
+          variant="outlined"
+          sx={{
+            p: 1.5,
+            borderRadius: 2,
+            background: "linear-gradient(135deg, #EFF6FF 0%, #DBEAFE 100%)",
+            borderColor: "#BFDBFE",
+          }}
+        >
+          <Typography sx={{ fontSize: 10.5, fontWeight: 700, color: "#1E40AF", textTransform: "uppercase" }}>
+            Total Messages Issued
+          </Typography>
+          <Typography sx={{ fontSize: 22, fontWeight: 900, color: "#1E3A8A", mt: 0.5 }}>
+            {summary.totalMessages.toLocaleString()}
+          </Typography>
+          <Typography sx={{ fontSize: 11, color: "#3B82F6" }}>Across all recipients &amp; categories</Typography>
+        </Paper>
+
+        <Paper
+          variant="outlined"
+          sx={{
+            p: 1.5,
+            borderRadius: 2,
+            background: "linear-gradient(135deg, #ECFDF5 0%, #D1FAE5 100%)",
+            borderColor: "#A7F3D0",
+          }}
+        >
+          <Typography sx={{ fontSize: 10.5, fontWeight: 700, color: "#047857", textTransform: "uppercase" }}>
+            Entities Addressed
+          </Typography>
+          <Typography sx={{ fontSize: 22, fontWeight: 900, color: "#065F46", mt: 0.5 }}>
+            {summary.entities.length}
+          </Typography>
+          <Typography sx={{ fontSize: 11, color: "#059669" }}>States, regional entities &amp; generators</Typography>
+        </Paper>
+
+        <Paper
+          variant="outlined"
+          sx={{
+            p: 1.5,
+            borderRadius: 2,
+            background: "linear-gradient(135deg, #FEF2F2 0%, #FEE2E2 100%)",
+            borderColor: "#FECACA",
+          }}
+        >
+          <Typography sx={{ fontSize: 10.5, fontWeight: 700, color: "#B91C1C", textTransform: "uppercase" }}>
+            Top Recipient Entity
+          </Typography>
+          <Typography
+            sx={{
+              fontSize: 18,
+              fontWeight: 900,
+              color: "#991B1B",
+              mt: 0.5,
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+            }}
+            title={summary.topEntity?.entity || "–"}
+          >
+            {summary.topEntity?.entity || "–"}
+          </Typography>
+          <Typography sx={{ fontSize: 11, color: "#DC2626" }}>
+            {summary.topEntity && summary.totalMessages > 0
+              ? `${summary.topEntity.total} msgs (${((summary.topEntity.total / summary.totalMessages) * 100).toFixed(1)}% share)`
+              : "No messages"}
+          </Typography>
+        </Paper>
+
+        <Paper
+          variant="outlined"
+          sx={{
+            p: 1.5,
+            borderRadius: 2,
+            background: "linear-gradient(135deg, #FAF5FF 0%, #F3E8FF 100%)",
+            borderColor: "#E9D5FF",
+          }}
+        >
+          <Typography sx={{ fontSize: 10.5, fontWeight: 700, color: "#6D28D9", textTransform: "uppercase" }}>
+            Dominant Category
+          </Typography>
+          <Typography
+            sx={{
+              fontSize: 18,
+              fontWeight: 900,
+              color: "#581C87",
+              mt: 0.5,
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+            }}
+            title={summary.dominantCategory || "–"}
+          >
+            {summary.dominantCategory || "–"}
+          </Typography>
+          <Typography sx={{ fontSize: 11, color: "#7C3AED" }}>
+            {summary.dominantCategory ? `${summary.dominantCount} messages issued` : "None"}
+          </Typography>
+        </Paper>
+      </Box>
+
+      {/* Table 1: Entity-wise Message Totals Summary */}
+      <Paper variant="outlined" sx={{ borderRadius: 2, overflow: "hidden", mb: 2.5 }}>
+        <Box sx={{ p: 1.5, bgcolor: "#F8FAFC", borderBottom: "1px solid #E2E8F0", display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 1 }}>
+          <Stack direction="row" spacing={1} alignItems="center">
+            <Box sx={{ width: 8, height: 8, bgcolor: "#2563EB", borderRadius: "50%" }} />
+            <Typography sx={{ fontSize: 13.5, fontWeight: 800, color: "#1E293B" }}>
+              Total Messages Against Each Entity
+            </Typography>
+          </Stack>
+          <Typography sx={{ fontSize: 11, color: "#64748B", fontWeight: 600 }}>
+            Aggregated across all categories
+          </Typography>
+        </Box>
+
+        <TableContainer sx={{ maxHeight: 500 }}>
+          <Table size="small" stickyHeader>
+            <TableHead>
+              <TableRow sx={{ "& th": { bgcolor: "#17365D", color: "#FFFFFF", fontWeight: 700, fontSize: 11.5 } }}>
+                <TableCell sx={{ width: 45, textAlign: "center" }}>#</TableCell>
+                <TableCell>Recipient Entity</TableCell>
+                <TableCell sx={{ textAlign: "center", width: 110 }}>Group</TableCell>
+                {summary.distinctCategories.map((c) => (
+                  <TableCell key={c} sx={{ textAlign: "right", minWidth: 90 }}>
+                    {c}
+                  </TableCell>
+                ))}
+                <TableCell sx={{ textAlign: "right", width: 130, bgcolor: "#0F233D !important", color: "#93C5FD !important" }}>
+                  Total Messages
+                </TableCell>
+                <TableCell sx={{ textAlign: "right", width: 120 }}>Share (%)</TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {summary.entities.map((item, idx) => {
+                const share = summary.totalMessages > 0 ? (item.total / summary.totalMessages) * 100 : 0;
+                return (
+                  <TableRow
+                    key={`${item.group}-${item.entity}`}
+                    sx={{
+                      bgcolor: idx % 2 === 1 ? "#F8FAFC" : "#FFFFFF",
+                      "&:hover": { bgcolor: "#F1F5F9" },
+                    }}
+                  >
+                    <TableCell sx={{ textAlign: "center", fontWeight: 700, color: "#64748B", fontSize: 11 }}>
+                      {idx + 1}
+                    </TableCell>
+                    <TableCell sx={{ fontWeight: 800, color: "#0F172A", fontSize: 12 }}>
+                      {item.entity}
+                    </TableCell>
+                    <TableCell sx={{ textAlign: "center" }}>
+                      <Chip
+                        label={item.group}
+                        size="small"
+                        sx={{ fontSize: 10, height: 20, bgcolor: "#F1F5F9", color: "#334155", border: "1px solid #CBD5E1", fontWeight: 700 }}
+                      />
+                    </TableCell>
+                    {summary.distinctCategories.map((c) => {
+                      const cnt = item.categories[c] || 0;
+                      return (
+                        <TableCell key={c} sx={{ textAlign: "right", fontSize: 11.5, fontWeight: cnt > 0 ? 700 : 400, color: cnt > 0 ? "#0F172A" : "#94A3B8" }}>
+                          {cnt > 0 ? cnt.toLocaleString() : "–"}
+                        </TableCell>
+                      );
+                    })}
+                    <TableCell sx={{ textAlign: "right", bgcolor: "rgba(219, 234, 254, 0.35)" }}>
+                      <Box
+                        component="span"
+                        sx={{
+                          display: "inline-block",
+                          bgcolor: "#DBEAFE",
+                          color: "#1E40AF",
+                          px: 1,
+                          py: 0.25,
+                          borderRadius: 2,
+                          fontWeight: 850,
+                          fontSize: 12,
+                          border: "1px solid #BFDBFE",
+                        }}
+                      >
+                        {item.total.toLocaleString()}
+                      </Box>
+                    </TableCell>
+                    <TableCell sx={{ textAlign: "right" }}>
+                      <Stack direction="row" spacing={1} alignItems="center" justifyContent="flex-end">
+                        <Box sx={{ flex: 1, maxWidth: 50, height: 6, bgcolor: "#E2E8F0", borderRadius: 3, overflow: "hidden" }}>
+                          <Box sx={{ width: `${Math.min(share, 100)}%`, height: "100%", bgcolor: "#2563EB" }} />
+                        </Box>
+                        <Typography sx={{ fontWeight: 800, fontSize: 11, minWidth: 40, textAlign: "right", color: "#334155" }}>
+                          {share.toFixed(1)}%
+                        </Typography>
+                      </Stack>
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+              {!summary.entities.length && (
+                <TableRow>
+                  <TableCell colSpan={5 + summary.distinctCategories.length} sx={{ textAlign: "center", py: 3, color: "#64748B" }}>
+                    No mapped message records available.
+                  </TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+            {summary.entities.length > 0 && (
+              <TableFooter sx={{ bgcolor: "#F8FAFC", borderTop: "2px solid #CBD5E1" }}>
+                <TableRow sx={{ "& td": { fontWeight: 800, fontSize: 11.5 } }}>
+                  <TableCell colSpan={3} sx={{ textAlign: "right", color: "#0F172A" }}>
+                    Grand Total:
+                  </TableCell>
+                  {summary.distinctCategories.map((c) => (
+                    <TableCell key={c} sx={{ textAlign: "right", color: "#1E293B" }}>
+                      {(summary.categoryTotals[c] || 0).toLocaleString()}
+                    </TableCell>
+                  ))}
+                  <TableCell sx={{ textAlign: "right", bgcolor: "#EFF6FF" }}>
+                    <Box
+                      component="span"
+                      sx={{
+                        display: "inline-block",
+                        bgcolor: "#1E3A8A",
+                        color: "#FFFFFF",
+                        px: 1.2,
+                        py: 0.3,
+                        borderRadius: 2,
+                        fontWeight: 900,
+                        fontSize: 12.5,
+                      }}
+                    >
+                      {summary.totalMessages.toLocaleString()}
+                    </Box>
+                  </TableCell>
+                  <TableCell sx={{ textAlign: "right", color: "#0F172A" }}>100.0%</TableCell>
+                </TableRow>
+              </TableFooter>
+            )}
+          </Table>
+        </TableContainer>
+      </Paper>
+
+      {/* Table 2: Detailed Category Breakdown (Itemized) */}
+      <Paper variant="outlined" sx={{ borderRadius: 2, overflow: "hidden" }}>
+        <Box
+          onClick={() => setShowDetailed((prev) => !prev)}
+          sx={{
+            p: 1.5,
+            bgcolor: "#F8FAFC",
+            cursor: "pointer",
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            "&:hover": { bgcolor: "#F1F5F9" },
+          }}
+        >
+          <Stack direction="row" spacing={1} alignItems="center">
+            <Typography sx={{ fontSize: 13, fontWeight: 750, color: "#334155" }}>
+              📑 Detailed Recipient &amp; Category Log ({(rows || []).length} line items)
+            </Typography>
+          </Stack>
+          <Stack direction="row" spacing={1} alignItems="center">
+            <Typography sx={{ fontSize: 11, color: "#64748B", fontWeight: 600 }}>
+              {showDetailed ? "Hide details" : "Show details"}
+            </Typography>
+            {showDetailed ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+          </Stack>
+        </Box>
+
+        <Collapse in={showDetailed}>
+          <Box sx={{ p: 1.5, borderTop: "1px solid #E2E8F0" }}>
+            <Stack direction="row" spacing={1.5} alignItems="center" sx={{ mb: 1.5 }}>
+              <TextField
+                size="small"
+                placeholder="Filter by entity, group, or category..."
+                value={filterQuery}
+                onChange={(e) => setFilterQuery(e.target.value)}
+                sx={{ maxWidth: 320 }}
+                InputProps={{
+                  startAdornment: <Search size={15} style={{ marginRight: 6, color: "#64748B" }} />,
+                }}
+              />
+              {filterQuery && (
+                <Button size="small" variant="outlined" onClick={() => setFilterQuery("")}>
+                  Clear Filter
+                </Button>
+              )}
+            </Stack>
+
+            <TableContainer sx={{ maxHeight: 380, borderRadius: 1, border: "1px solid #E2E8F0" }}>
+              <Table size="small" stickyHeader>
+                <TableHead>
+                  <TableRow sx={{ "& th": { bgcolor: "#17365D", color: "#FFFFFF", fontWeight: 700, fontSize: 11 } }}>
+                    <TableCell>Recipient group</TableCell>
+                    <TableCell>Recipient</TableCell>
+                    <TableCell>Category</TableCell>
+                    <TableCell sx={{ textAlign: "right" }}>Messages</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {filteredDetailedRows.map((row, index) => (
+                    <TableRow key={index} sx={{ "&:hover": { bgcolor: "#F8FAFC" } }}>
+                      <TableCell sx={{ fontSize: 11.5 }}>{metricValue(row.group)}</TableCell>
+                      <TableCell sx={{ fontSize: 11.5, fontWeight: 700 }}>{metricValue(row.entity)}</TableCell>
+                      <TableCell sx={{ fontSize: 11.5 }}>{metricValue(row.category)}</TableCell>
+                      <TableCell sx={{ textAlign: "right", fontSize: 11.5, fontWeight: 700 }}>
+                        {metricValue(row.message_count)}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                  {!filteredDetailedRows.length && (
+                    <TableRow>
+                      <TableCell colSpan={4} sx={{ textAlign: "center", py: 2, color: "#64748B" }}>
+                        No records match the filter.
+                      </TableCell>
+                    </TableRow>
+                  )}
+                </TableBody>
+              </Table>
+            </TableContainer>
+          </Box>
+        </Collapse>
+      </Paper>
+    </Box>
+  );
 }

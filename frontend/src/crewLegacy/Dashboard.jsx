@@ -313,14 +313,23 @@ export default function Dashboard() {
           </Paper>
 
           {/* REPLACEMENT */}
-          <Paper sx={{
-            p:2,
-            mb:2,
-            borderRadius:3,
-            background:"linear-gradient(135deg,#a18cd1,#fbc2eb)",
-            boxShadow:"0 10px 25px rgba(0,0,0,0.08)"
-          }}>
-            <Typography variant="caption">Replacements</Typography>
+          <Paper
+            role="button"
+            tabIndex={0}
+            onClick={() => navigate("/crew/replacement?tab=duty")}
+            onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") navigate("/crew/replacement?tab=duty"); }}
+            sx={{
+              p: 2,
+              mb: 2,
+              borderRadius: 3,
+              background: "linear-gradient(135deg,#a18cd1,#fbc2eb)",
+              boxShadow: "0 10px 25px rgba(0,0,0,0.08)",
+              cursor: "pointer",
+              transition: "transform .2s, box-shadow .2s",
+              "&:hover": { transform: "translateY(-2px)", boxShadow: "0 10px 24px rgba(15,23,42,.14)" }
+            }}
+          >
+            <Typography variant="caption">Replacements (Duty Assignment)</Typography>
             <Typography variant="h4">{replacementAnalytics.replacementCount || 0}</Typography>
           </Paper>
 

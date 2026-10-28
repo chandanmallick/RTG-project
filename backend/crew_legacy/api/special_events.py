@@ -1,10 +1,10 @@
 """Department-scoped special-event announcements and separately enabled leave blocks."""
 from datetime import date, datetime
 from bson import ObjectId
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from crew_legacy.admin_logic.auth_utils import get_authenticated_user
 from crew_legacy.database.database_mongo import system_settings_collection, employee_collection, organization_unit_collection
-from crew_legacy.api.leave_api import is_admin, validate_block_dates, blocked_period_staffing
+from crew_legacy.api.leave_api import is_admin, validate_block_dates, blocked_period_staffing, export_blocked_period_staffing
 
 router = APIRouter()
 
@@ -95,7 +95,15 @@ def block_event(event_id: str, data: dict, user=Depends(get_authenticated_user))
 
 
 @router.get("/{event_id}/staffing")
-def staffing(event_id: str, user=Depends(get_authenticated_user)):
+def staffing(event_id: str, additionalDepartment: str = Query(""), user=Depends(get_authenticated_user)):
     item = event_document(event_id)
     require_scope(user, item.get("departmentIds") or [])
-    return blocked_period_staffing(item)
+    return blocked_period_staffing(item, additionalDepartment)
+
+
+@router.get("/{event_id}/staffing.xlsx")
+def staffing_excel(event_id: str, additionalDepartment: str = Query(""), user=Depends(get_authenticated_user)):
+    item = event_document(event_id)
+    require_scope(user, item.get("departmentIds") or [])
+    return export_blocked_period_staffing(str(item["_id"]), additionalDepartment, user)
+

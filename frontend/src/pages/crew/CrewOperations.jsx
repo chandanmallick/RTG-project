@@ -49,7 +49,7 @@ const categories = [
     request: [{ key: "requestExchange", title: "Request exchange", note: "Select employee and duties", icon: ArrowLeftRight, to: "/crew/replacement?section=duty&mode=exchange" }],
     decide: [{ key: "exchangeApproval", title: "Approve exchange", note: "Employee, SIC and DIC decisions", icon: CheckCircle2, to: "/crew/replacement?section=duty&focus=approvals" }],
     cover: [
-      { key: "leaveReplacement", title: "All replacements", note: "Single replacement workspace", icon: Users, to: "/crew/replacement" },
+      { key: "leaveReplacement", title: "Duty Assignment", note: "Duty reassignment & cover workspace", icon: Users, to: "/crew/replacement?tab=duty" },
       { key: "replacementRosterMatrix", title: "Duty Matrix", note: "Duty counts & reject audit", icon: BarChart3, to: "/crew/replacement?tab=roster" }
     ],
     track: [{ key: "exchangeTracking", title: "Track exchange", note: "History and current stage", icon: ClipboardList, to: "/crew/replacement?section=duty&focus=history" }],

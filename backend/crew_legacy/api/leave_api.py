@@ -222,17 +222,29 @@ def blocked_period_staffing(block: dict, additional_department: str = "") -> dic
         clean_id(item.get("userId") or item.get("employeeId")): item
         for item in employee_collection.find({"$or": [{"userId": {"$in": employee_ids}}, {"employeeId": {"$in": employee_ids}}]})
     }
-    departments = sorted({
+    all_dept_names = {
         clean_id(value)
         for employee in employees.values()
         for value in (employee.get("departments") or [employee.get("department")])
         if clean_id(value)
-    })
+    }
+    for unit in organization_unit_collection.find({"unitType": "department", "isActive": {"$ne": False}}):
+        name = clean_id(unit.get("name"))
+        if name:
+            all_dept_names.add(name)
+    for emp in employee_collection.find({"isActive": {"$ne": False}}, {"departments": 1, "department": 1}):
+        for value in (emp.get("departments") or [emp.get("department")]):
+            val = clean_id(value)
+            if val:
+                all_dept_names.add(val)
+    departments = sorted(all_dept_names)
+
     shifts = {shift: {value: [] for value in dates} for shift in ["Morning", "Evening", "Night"]}
     leave_shifts = {shift: {value: [] for value in dates} for shift in ["Morning", "Evening", "Night"]}
     replacement_shifts = {shift: {value: [] for value in dates} for shift in ["Morning", "Evening", "Night"]}
     additional = {value: [] for value in dates}
     selected_department = clean_id(additional_department)
+
     for record in records:
         employee_id = clean_id(record.get("employeeId"))
         employee = employees.get(employee_id) or {}
@@ -256,8 +268,66 @@ def blocked_period_staffing(block: dict, additional_department: str = "") -> dic
             shifts[record["assignedDuty"]][record["date"]].append(entry)
         if entry["replacement"]:
             replacement_shifts[record["assignedDuty"]][record["date"]].append(entry)
-        if selected_department and selected_department in employee_departments and not on_leave:
-            additional[record["date"]].append(entry)
+
+    if selected_department:
+        dept_emps = list(employee_collection.find({
+            "isActive": {"$ne": False},
+            "$or": [
+                {"department": selected_department},
+                {"departments": selected_department},
+            ],
+        }))
+        dept_emp_ids = [clean_id(emp.get("userId") or emp.get("employeeId")) for emp in dept_emps if clean_id(emp.get("userId") or emp.get("employeeId"))]
+        dept_daily_map = {
+            (clean_id(item.get("employeeId")), item.get("date")): item
+            for item in employee_daily_collection.find({
+                "date": {"$gte": start_date, "$lte": end_date},
+                "employeeId": {"$in": dept_emp_ids},
+            })
+        }
+        dept_leaves_map = {
+            (clean_id(item.get("employeeId")), item.get("date")): item
+            for item in leave_request_collection.find({
+                "date": {"$gte": start_date, "$lte": end_date},
+                "employeeId": {"$in": dept_emp_ids},
+                "finalStatus": {"$in": list(ACTIVE_LEAVE_STATUSES)},
+            })
+        }
+        for d in dates:
+            for emp in dept_emps:
+                eid = clean_id(emp.get("userId") or emp.get("employeeId"))
+                if not eid:
+                    continue
+                daily_rec = dept_daily_map.get((eid, d)) or {}
+                has_leave = (
+                    clean_id(daily_rec.get("leaveStatus")) in ACTIVE_LEAVE_STATUSES
+                    or (eid, d) in dept_leaves_map
+                )
+                if not has_leave:
+                    additional[d].append({
+                        "employeeId": eid,
+                        "name": emp.get("name") or daily_rec.get("name") or eid,
+                        "replacement": bool(daily_rec.get("replacementDuty")),
+                        "department": selected_department,
+                        "assignedDuty": daily_rec.get("assignedDuty") or "Available / General",
+                    })
+        # If no employees found through employee master, fallback to checking records
+        if not any(additional.values()):
+            for record in records:
+                employee_id = clean_id(record.get("employeeId"))
+                employee = employees.get(employee_id) or {}
+                employee_departments = [clean_id(value) for value in (employee.get("departments") or [employee.get("department")]) if clean_id(value)]
+                leave_status = clean_id(record.get("leaveStatus"))
+                on_leave = leave_status in ACTIVE_LEAVE_STATUSES
+                if selected_department in employee_departments and not on_leave:
+                    additional[record["date"]].append({
+                        "employeeId": employee_id,
+                        "name": record.get("name") or employee.get("name") or employee_id,
+                        "replacement": bool(record.get("replacementDuty")),
+                        "department": ", ".join(employee_departments),
+                        "assignedDuty": record.get("assignedDuty") or "Shift",
+                    })
+
     return {
         "id": str(block["_id"]), "startDate": start_date, "endDate": end_date,
         "reason": block.get("reason", ""), "dates": dates,

@@ -61,6 +61,9 @@ class CompactReportsTests(unittest.TestCase):
         self.assertIn('State-wise Overdrawal vs Frequency Analysis', html)
         self.assertIn('Daily Event Chronology', html)
         self.assertIn('Download HTML', html)
+        self.assertIn('table-entity-message-totals', html)
+        self.assertIn('Total Messages Against Each Entity', html)
+        self.assertIn('table-category-summary', html)
 
         for fmt in ('xlsx','docx','pdf'):
             payload.format=fmt;contents=asyncio.run(response_bytes(export_result(payload,USER)))
@@ -130,3 +133,27 @@ class CompactReportsTests(unittest.TestCase):
             response=export_result(payload,USER)
             if fmt=='html':self.assertIn('High Frequency Analysis',response['html_document'])
             else:self.assertTrue(asyncio.run(response_bytes(response)))
+
+    @patch.object(frequency_routes,'get_crms_frequency_transmission_lines',new_callable=AsyncMock)
+    def test_compact_html_entity_message_totals_with_crms_records(self, physical_reader):
+        messages = [
+            {'timestamp': '2026-10-03 17:00:30', 'issued_to': ['BSPTCL', 'UNIT'], 'message_no': 'M1', 'remarks': 'Warning alert', 'category': ['Alert', 'Emergency']},
+            {'timestamp': '2026-10-03 17:02:30', 'issued_to': ['BSPTCL'], 'message_no': 'M2', 'remarks': 'Alert message', 'category': ['Alert']},
+        ]
+        physical_reader.return_value = {'success': True, 'events': [
+            {'timestamp': '2026-10-03 17:00:30', 'line_name': 'Line A', 'owners': ['BSPTCL'], 'reason': 'H/T ON PHYSICAL REGULATION'},
+        ]}
+        metadata = sessions._put(USER, fixture(), {'filename': 'Compact Event report'})
+        with patch.object(frequency_routes, 'fetch_crms_frequency_messages', new=AsyncMock(return_value=(messages, 0))):
+            result = sessions.analyse(metadata['session_token'], USER, [('2026-10-03T17:00:00', '2026-10-03T17:01:00'), ('2026-10-03T17:02:00', '2026-10-03T17:03:00')], db=DB)
+        payload = ResultPayload(session_token=result['session_token'], result_token=result['result_token'], layout='compact', format='html')
+        response = export_result(payload, USER)
+        html = response['html_document']
+
+        self.assertIn('table-entity-message-totals', html)
+        self.assertIn('Total Messages Against Each Entity', html)
+        self.assertIn('Bihar', html)
+        self.assertIn('Unit', html)
+        self.assertIn('Grand Total', html)
+        self.assertIn('table-category-summary', html)
+

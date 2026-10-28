@@ -100,6 +100,7 @@ export default function LeaveBlockedPeriods({ isAdmin = false, allowCreate = tru
           <Stack direction={{ xs: "column", sm: "row" }} spacing={1} alignItems={{ sm: "center" }}>
             <TextField select size="small" label="Additional department strength" value={additionalDepartment} onChange={(event) => viewStaffing(staffing, event.target.value)} sx={{ minWidth: 280 }}><MenuItem value="">Do not show</MenuItem>{staffing.departments.map((department) => <MenuItem key={department} value={department}>{department}</MenuItem>)}</TextField>
             <Button variant="outlined" startIcon={<Download size={16} />} onClick={downloadStaffing}>Download Excel</Button>
+            <Button variant="contained" size="small" onClick={() => window.location.assign(`/crew/replacement?tab=duty&date=${staffing.startDate}`)} sx={{ bgcolor: "#0057B7", fontWeight: 800, textTransform: "none" }}>Allocate additional manpower</Button>
             <Chip label="Duty · Leave · Replacement views" sx={{ bgcolor: "#DBEAFE", color: "#1D4ED8", fontWeight: 800 }} />
           </Stack>
           {staffingSection("1. Main duty strength · employees on leave excluded", staffing.shifts, "#DDEBF7", "NR")}
