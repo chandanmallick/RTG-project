@@ -42,6 +42,7 @@ import ExpandLessIcon from "@mui/icons-material/ExpandLess";
 import DutyReassignmentPanel from "../components/crew/DutyReassignmentPanel";
 import WorkflowHeader from "../components/crew/WorkflowHeader";
 import ReplacementRosterPanel from "../components/crew/ReplacementRosterPanel";
+import SpecialRosterMatrix from "../components/crew/SpecialRosterMatrix";
 
 export default function ReplacementManagement({ initialWorkflow } = {}) {
 
@@ -90,8 +91,8 @@ export default function ReplacementManagement({ initialWorkflow } = {}) {
   const [activeWorkflow, setActiveWorkflow] = useState(() => {
     const params = new URLSearchParams(window.location.search);
     const tabParam = params.get("tab") || params.get("section");
-    if (["duty", "leave", "board", "sic", "roster"].includes(tabParam)) return tabParam;
-    if (["duty", "leave", "board", "sic", "roster"].includes(initialWorkflow)) return initialWorkflow;
+    if (["duty", "matrix", "leave", "board", "sic", "roster"].includes(tabParam)) return tabParam;
+    if (["duty", "matrix", "leave", "board", "sic", "roster"].includes(initialWorkflow)) return initialWorkflow;
     if (params.get("action") === "assign-sic") return "sic";
     if (params.get("action") === "leave") return "leave";
     if (params.get("action") === "review") return "roster";
@@ -506,16 +507,24 @@ export default function ReplacementManagement({ initialWorkflow } = {}) {
         <Stack direction="row" spacing={1} flexWrap="wrap">
           {[
             { id: "duty", label: "Duty Assignment", badge: null, icon: "🔁" },
+            { id: "matrix", label: "Drag & Drop Grid", badge: "Special Roster", icon: "⚡" },
             { id: "roster", label: "Replacement Roster & Matrix", badge: "Sequential D-5", icon: "✨" },
             { id: "leave", label: "Leave Replacements", badge: pendingLeaves.length, icon: "📋" },
             { id: "board", label: "Replacement Board", badge: assignedReplacements.length, icon: "📊" },
             { id: "sic", label: "SIC Coverage", badge: pendingSIC.length, icon: "🛡️" },
+            { id: "events", label: "Special Event Coverage", badge: "Event Roster", icon: "⭐", link: "/crew/special-events" },
           ].map((tab) => {
             const isActive = activeWorkflow === tab.id;
             return (
               <Button
                 key={tab.id}
-                onClick={() => setActiveWorkflow(tab.id)}
+                onClick={() => {
+                  if (tab.link) {
+                    window.location.assign(tab.link);
+                    return;
+                  }
+                  setActiveWorkflow(tab.id);
+                }}
                 sx={{
                   px: 2,
                   py: 0.9,
@@ -568,12 +577,20 @@ export default function ReplacementManagement({ initialWorkflow } = {}) {
         </Box>
       </Collapse>
 
+      {/* ################# Drag & Drop Grid Section (Special Roster Matrix) ################### */}
+      <Collapse in={activeWorkflow === "matrix"} timeout={420} unmountOnExit>
+        <Box id="replacement-workflow-matrix" sx={{ scrollMarginTop: 110, mb: 3 }}>
+          <SpecialRosterMatrix />
+        </Box>
+      </Collapse>
+
       <Collapse in={activeWorkflow === "duty"} timeout={420} unmountOnExit>
       <Box id="replacement-workflow-duty" sx={{ scrollMarginTop: 110 }}>
         <DutyReassignmentPanel
-          key={sicExchangeContext?.token || "default-duty-reassignment"}
-          initialDate={sicExchangeContext?.leave?.date}
-          initialMode="exchange"
+          key={sicExchangeContext?.token || new URLSearchParams(window.location.search).get("date") || "default-duty-reassignment"}
+          initialDate={sicExchangeContext?.leave?.date || new URLSearchParams(window.location.search).get("date")}
+          initialMode={sicExchangeContext?.leave ? "exchange" : (new URLSearchParams(window.location.search).get("mode") || "additional")}
+          initialEmployeeId={new URLSearchParams(window.location.search).get("employeeId") || ""}
           initialLeave={sicExchangeContext?.leave || null}
           onChanged={async () => {
             fetchPendingLeaves();

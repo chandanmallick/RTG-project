@@ -45,17 +45,23 @@ export default function DutyReassignmentPanel({
   onChanged,
   defaultExpanded = true,
 }) {
-  const [date, setDate] = useState(initialDate || dayjs().format("YYYY-MM-DD"));
+  const urlParams = useMemo(() => new URLSearchParams(window.location.search), []);
+  const urlDate = urlParams.get("date");
+  const urlMode = urlParams.get("mode");
+  const urlEmployeeId = urlParams.get("employeeId");
+  const urlShift = urlParams.get("shift");
+
+  const [date, setDate] = useState(initialDate || urlDate || dayjs().format("YYYY-MM-DD"));
   const [role, setRole] = useState({});
-  const [mode, setMode] = useState(initialMode);
+  const [mode, setMode] = useState(urlMode || initialMode);
   const [employees, setEmployees] = useState([]);
   const [leaves, setLeaves] = useState([]);
   const [history, setHistory] = useState([]);
   const [exchangeRequests, setExchangeRequests] = useState([]);
-  const [firstId, setFirstId] = useState(initialEmployeeId);
+  const [firstId, setFirstId] = useState(initialEmployeeId || urlEmployeeId || "");
   const [secondId, setSecondId] = useState("");
-  const [destinationDate, setDestinationDate] = useState(dayjs(initialDate || undefined).add(1, "day").format("YYYY-MM-DD"));
-  const [destinationDuty, setDestinationDuty] = useState("");
+  const [destinationDate, setDestinationDate] = useState(dayjs(initialDate || urlDate || undefined).add(1, "day").format("YYYY-MM-DD"));
+  const [destinationDuty, setDestinationDuty] = useState(urlShift || "Morning");
   const [destinationEmployees, setDestinationEmployees] = useState([]);
   const [vacancyCandidates, setVacancyCandidates] = useState([]);
   const [dutyDebits, setDutyDebits] = useState([]);
@@ -107,8 +113,8 @@ export default function DutyReassignmentPanel({
       );
       setHistory(historyResult?.data || []);
       setDutyDebits(debitResult?.data || []);
-      setFirstId((current) => manager ? current : String(nextRole.employeeId || ""));
-      setMode((current) => manager ? current : "exchange");
+      setFirstId((current) => current || (manager ? (urlEmployeeId || "") : String(nextRole.employeeId || "")));
+      setMode((current) => urlMode || (manager ? current : "exchange"));
     } catch (error) {
       setNotice({ severity: "error", text: error.response?.data?.detail || "Duty reassignment data could not be loaded." });
     } finally {
@@ -218,15 +224,36 @@ export default function DutyReassignmentPanel({
     }
     setLoading(true);
     try {
-      if (mode === "single" || mode === "additional") {
+      if (mode === "single") {
         if (!canManage || !firstId || !leaveId) throw new Error("Select the replacement employee and pending leave.");
         await api.put(`/replacement/assign/${leaveId}`, {
           replacementEmployeeId: firstId,
-          mode: mode === "additional" ? "double" : "normal",
+          mode: "normal",
           halfDuty: false,
           reason: reason.trim(),
         });
-        setNotice({ severity: "success", text: mode === "additional" ? "Additional leave-replacement duty assigned and recorded." : "Leave duty replaced; the employee's original duty was removed." });
+        setNotice({ severity: "success", text: "Leave duty replaced; the employee's original duty was removed." });
+      } else if (mode === "additional") {
+        if (!canManage || !firstId) throw new Error("Select the additional manpower employee.");
+        if (!destinationDuty) throw new Error("Select the shift duty to assign.");
+        if (leaveId) {
+          await api.put(`/replacement/assign/${leaveId}`, {
+            replacementEmployeeId: firstId,
+            mode: "double",
+            halfDuty: false,
+            reason: reason.trim(),
+          });
+          setNotice({ severity: "success", text: "Additional leave-replacement duty assigned and recorded." });
+        } else {
+          const result = await api.put("/replacement/duty-switch/additional-manpower", {
+            employeeId: firstId,
+            date,
+            assignedDuty: destinationDuty,
+            mode: "double",
+            reason: reason.trim(),
+          });
+          setNotice({ severity: "success", text: result.data?.message || "Additional manpower successfully deployed." });
+        }
       } else if (mode === "vacancy") {
         if (!canManage || !firstId || !secondId) throw new Error("Select the vacant duty and additional manpower.");
         const result = await api.put("/replacement/duty-switch/vacancy/assign", {
@@ -386,13 +413,13 @@ export default function DutyReassignmentPanel({
             </Field>
           </Grid>
 
-          <Grid item xs={12} md={["single", "additional"].includes(mode) ? 4.1 : mode === "cross_date" || mode === "balance" ? 4.6 : 3.5}>
-            <Field label={["single", "additional"].includes(mode) ? (mode === "additional" ? "Additional manpower / replacement employee" : "Replacement employee") : mode === "vacancy" ? "Vacant duty" : mode === "cross_date" ? "Employee whose duty will move" : mode === "balance" ? "Employee duty balance" : "First employee"} helper={!canManage ? "Your logged-in employee account" : undefined}>
+          <Grid item xs={12} md={mode === "additional" ? 3.5 : mode === "single" ? 4.1 : mode === "cross_date" || mode === "balance" ? 4.6 : 3.5}>
+            <Field label={mode === "additional" ? "Additional manpower employee" : mode === "single" ? "Replacement employee" : mode === "vacancy" ? "Vacant duty" : mode === "cross_date" ? "Employee whose duty will move" : mode === "balance" ? "Employee duty balance" : "First employee"} helper={!canManage ? "Your logged-in employee account" : undefined}>
               <FormControl fullWidth size="small">
                 <Select value={firstId} disabled={!canManage} displayEmpty onChange={(event) => {
                   const employee = allAvailableEmployees.find((item) => item.employeeId === event.target.value) || employees.find((item) => item.employeeId === event.target.value);
                   setFirstId(event.target.value);
-                  setDestinationDuty(employee?.assignedDuty || "");
+                  setDestinationDuty((current) => current || (SHIFT_OPTIONS.includes(employee?.assignedDuty) ? employee.assignedDuty : "Morning"));
                   setSecondId("");
                   setDebitId("");
                   setActingSICId("");
@@ -415,7 +442,48 @@ export default function DutyReassignmentPanel({
             </Field>
           </Grid>
 
-          {["single", "additional"].includes(mode) ? (
+          {mode === "additional" && (
+            <Grid item xs={12} md={2.3}>
+              <Field label="Shift to deploy">
+                <FormControl fullWidth size="small">
+                  <Select value={destinationDuty || "Morning"} displayEmpty onChange={(event) => setDestinationDuty(event.target.value)}>
+                    <MenuItem value="" disabled>Select shift</MenuItem>
+                    {SHIFT_OPTIONS.map((duty) => (
+                      <MenuItem key={duty} value={duty}>{duty}</MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              </Field>
+            </Grid>
+          )}
+
+          {mode === "additional" ? (
+            <Grid item xs={12} md={4.0}>
+              <Field label="Link to leave vacancy (optional)" helper="Leave empty for surge / special event coverage">
+                <FormControl fullWidth size="small">
+                  <Select
+                    value={leaveId}
+                    displayEmpty
+                    onChange={(event) => {
+                      const selectedVal = event.target.value;
+                      setLeaveId(selectedVal);
+                      const leave = leavesForSourceDate.find((item) => item.id === selectedVal);
+                      if (leave?.assignedDuty) {
+                        setDestinationDuty(leave.assignedDuty);
+                      }
+                    }}
+                  >
+                    <MenuItem value="">Direct additional manpower (no leave link)</MenuItem>
+                    {leavesForSourceDate.map((leave) => (
+                      <MenuItem key={leave.id} value={leave.id}>
+                        {leave.name} ({leave.employeeId}) · {leave.assignedDuty || "Duty"} · {leave.groupName}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              </Field>
+            </Grid>
+          ) : mode === "single" ? (
             <Grid item xs={12} md={5.7}>
               <Field label="Pending leave replacement duty">
                 <FormControl fullWidth size="small">
@@ -561,21 +629,55 @@ export default function DutyReassignmentPanel({
             </Grid>
           )}
 
-          <Grid item xs={12} md={9.5}>
-            <Field label={mode === "single" ? "Reason for leave replacement reassignment" : mode === "additional" ? "Reason for additional leave-replacement duty" : mode === "vacancy" ? "Reason for assigning additional manpower" : mode === "cross_date" ? "Reason for moving duty across dates" : mode === "balance" ? (balanceAction === "defer" ? "Reason for giving OFF / deferring duty" : "Reason for settling deferred duty") : "Reason for manpower exchange"}>
-              <input value={reason} onChange={(event) => setReason(event.target.value)} placeholder="Enter the operational reason" style={{ width: "100%", height: 40, padding: "0 12px", border: "1px solid #CBD5E1", borderRadius: 8, color: "#0F172A", background: "#FFFFFF", fontWeight: 650, boxSizing: "border-box" }} />
+          <Grid item xs={12} md={mode === "additional" ? 9 : 9.5}>
+            <Field label={mode === "single" ? "Reason for leave replacement reassignment" : mode === "additional" ? "Reason for deploying additional manpower" : mode === "vacancy" ? "Reason for assigning additional manpower" : mode === "cross_date" ? "Reason for moving duty across dates" : mode === "balance" ? (balanceAction === "defer" ? "Reason for giving OFF / deferring duty" : "Reason for settling deferred duty") : "Reason for manpower exchange"}>
+              <input value={reason} onChange={(event) => setReason(event.target.value)} placeholder={mode === "additional" ? "Enter operational reason (e.g. Special event coverage, peak grid support, surge staffing)" : "Enter the operational reason"} style={{ width: "100%", height: 40, padding: "0 12px", border: "1px solid #CBD5E1", borderRadius: 8, color: "#0F172A", background: "#FFFFFF", fontWeight: 650, boxSizing: "border-box" }} />
             </Field>
           </Grid>
-          <Grid item xs={12} md={2.5} sx={{ display: "flex", alignItems: "flex-end" }}>
-            <Button fullWidth variant="contained" disabled={loading || !firstId || (["single", "additional"].includes(mode) ? !leaveId : mode === "exchange" || mode === "vacancy" ? !secondId : mode === "balance" ? (balanceAction === "settle" && (!debitId || !destinationDuty)) : !destinationAssignment || !destinationDuty)} onClick={save} sx={{ minHeight: 40, background: "#0057B7", fontWeight: 900 }}>
-              {mode === "single" ? "Replace duty" : mode === "additional" ? "Add duty" : mode === "vacancy" ? "Fill vacant duty" : mode === "cross_date" ? (destinationDate === date ? "Assign duty" : "Move duty") : mode === "balance" ? (balanceAction === "defer" ? "Give OFF + debit" : "Assign + settle") : "Exchange duties"}
+          <Grid item xs={12} md={mode === "additional" ? 3 : 2.5} sx={{ display: "flex", alignItems: "flex-end" }}>
+            <Button
+              fullWidth
+              variant="contained"
+              disabled={
+                loading ||
+                !firstId ||
+                (mode === "single"
+                  ? !leaveId
+                  : mode === "additional"
+                  ? !destinationDuty
+                  : mode === "exchange" || mode === "vacancy"
+                  ? !secondId
+                  : mode === "balance"
+                  ? (balanceAction === "settle" && (!debitId || !destinationDuty))
+                  : (!destinationAssignment || !destinationDuty))
+              }
+              onClick={save}
+              sx={{ minHeight: 40, background: "#0057B7", fontWeight: 900 }}
+            >
+              {mode === "single"
+                ? "Replace duty"
+                : mode === "additional"
+                ? (leaveId ? "Deploy leave replacement" : "Deploy additional manpower")
+                : mode === "vacancy"
+                ? "Fill vacant duty"
+                : mode === "cross_date"
+                ? (destinationDate === date ? "Assign duty" : "Move duty")
+                : mode === "balance"
+                ? (balanceAction === "defer" ? "Give OFF + debit" : "Assign + settle")
+                : "Exchange duties"}
             </Button>
           </Grid>
         </Grid>
 
         {(first || second || selectedLeave || destinationAssignment) && (
           <Box sx={{ mt: 2, p: 1.4, borderRadius: 2, border: "1px solid #BAE6FD", background: "#F0F9FF", color: "#0F172A" }}>
-            {first && <Typography sx={{ fontSize: 12, fontWeight: 800 }}>First: {employeeLabel(first)}</Typography>}
+            {first && <Typography sx={{ fontSize: 12, fontWeight: 800 }}>{mode === "additional" ? "Additional Manpower: " : "First: "}{employeeLabel(first)}</Typography>}
+            {mode === "additional" && (
+              <Typography sx={{ mt: .3, fontSize: 12, fontWeight: 800, color: "#0057B7" }}>
+                Target Shift: <strong>{destinationDuty || "Morning"}</strong> on {dayjs(date).format("DD MMM YYYY")}
+                {selectedLeave ? ` · Linked to approved leave for ${selectedLeave.name}` : " · Direct additional manpower deployment"}
+              </Typography>
+            )}
             {second && <Typography sx={{ fontSize: 12, fontWeight: 800 }}>Exchange with: {employeeLabel(second)}</Typography>}
             {selectedLeave && <Typography sx={{ fontSize: 12, fontWeight: 800 }}>Leave duty: {selectedLeave.name} · {selectedLeave.assignedDuty || "-"} · {selectedLeave.groupName}</Typography>}
             {mode === "balance" && first && (

@@ -68,4 +68,30 @@ class SpecialEventTests(unittest.TestCase):
         rows = self.ctx["list_events"]({"employeeId": "employee-a"})
         self.assertEqual(len(rows), 2)
 
+    def test_matrix_endpoint_returns_grid(self):
+        from crew_legacy.api.special_events import get_special_roster_matrix
+        with patch("crew_legacy.api.special_events.employee_daily_collection") as mock_daily, \
+             patch("crew_legacy.api.special_events.leave_request_collection") as mock_leave, \
+             patch("crew_legacy.api.special_events.organization_unit_collection") as mock_unit, \
+             patch("crew_legacy.api.special_events.employee_collection") as mock_emp:
+            mock_daily.find.return_value = [
+                {"date": "2026-10-20", "employeeId": "emp-1", "name": "Alice", "assignedDuty": "Morning"}
+            ]
+            mock_leave.find.return_value = []
+            mock_unit.find.return_value = [{"unitType": "department", "name": "Operations"}]
+            mock_emp.find.return_value = []
+            res = get_special_roster_matrix(startDate="2026-10-20", endDate="2026-10-21", user={"role": "admin"})
+            self.assertIn("grid", res)
+            self.assertIn("2026-10-20", res["grid"])
+            self.assertEqual(len(res["grid"]["2026-10-20"]["Morning"]), 1)
+            self.assertEqual(res["grid"]["2026-10-20"]["Morning"][0]["name"], "Alice")
+
+    def test_sequential_allocate_requires_source_department(self):
+        from crew_legacy.api.special_events import sequential_allocate_department_manpower
+        with self.assertRaises(HTTPException) as ctx:
+            sequential_allocate_department_manpower({}, user={"role": "admin"})
+        self.assertEqual(ctx.exception.status_code, 400)
+
+
 if __name__ == "__main__": unittest.main()
+

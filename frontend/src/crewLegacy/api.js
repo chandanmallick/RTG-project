@@ -25,10 +25,14 @@ api.interceptors.request.use((config) => {
         requestUrl.includes("/replacement/assign/") ||
         requestUrl.includes("/replacement/duty-switch/exchange") ||
         requestUrl.includes("/replacement/duty-switch/cross-date") ||
+        requestUrl.includes("/replacement/duty-switch/additional-manpower") ||
         requestUrl.includes("/replacement/roster/")
       )
     ) || (
-      method === "POST" && requestUrl.includes("/replacement/roster/")
+      method === "POST" && (
+        requestUrl.includes("/replacement/roster/") ||
+        requestUrl.includes("/special-events/")
+      )
     ) || (method === "DELETE" && requestUrl.includes("/replacement/assign/"));
   // Training approval is a reporting-hierarchy workflow action, not a page edit.
   // The API verifies that the logged-in employee is the nomination's current
@@ -56,7 +60,7 @@ api.interceptors.request.use((config) => {
   const isSportsApproval = method === "POST" && /^\/sports\/applications\/[^/]+\/(approve|reject)$/.test(requestUrl);
   // Calendar applications use the target workflow's server-side employee and
   // reporting-authority checks, independent of calendar layout edit access.
-  const isSpecialEventManagement = ["POST", "PUT"].includes(method) && /^\/special-events(?:\/[^/]+\/blocking)?$/.test(requestUrl);
+  const isSpecialEventManagement = ["POST", "PUT"].includes(method) && /^\/special-events(?:\/.*)?$/.test(requestUrl);
   const isLeaveBlockAdministration = ["POST", "PUT", "DELETE"].includes(method) && /^\/leave\/blocked-periods(?:\/[^/]+(?:\/(?:status|permanent))?)?$/.test(requestUrl);
   // Training programme maintenance (create/edit/delete a programme from the
   // calendar) is authorized on the server by HR training-approval rights, which

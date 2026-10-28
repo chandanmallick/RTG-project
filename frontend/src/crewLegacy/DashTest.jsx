@@ -33,12 +33,14 @@ const compactName = (name) => {
 const isPending = (status) => /pending|applied|nominated|forwarded|requested/i.test(String(status || ""));
 const destinations = { Leave: "/crew/leave?section=tracking", Training: "/crew/reports?tab=training-history", Sports: "/crew/sports?section=approval", Exchange: "/crew/replacement?section=duty&focus=history", Replacement: "/crew/replacement?tab=duty" };
 const approvalOptions = [
-  { title: "Leave approval", path: "/crew/leave?section=pending" },
-  { title: "Training Assignment", path: "/crew/training?section=assign" },
-  { title: "Training approval", path: "/crew/training?section=pending" },
-  { title: "Sports approval", path: "/crew/sports?section=approval" },
-  { title: "Replacement approval", path: "/crew/replacement?section=duty&focus=approvals" },
-  { title: "Replacement Roster & Duty Matrix", path: "/crew/replacement?tab=roster" },
+  { title: "Leave approval", path: "/crew/leave?section=pending", subtitle: "Process pending leave applications" },
+  { title: "Special Event Rostering & Coverage", path: "/crew/special-events", badge: "Event Roster", subtitle: "Special event staffing, leave blocking & additional manpower" },
+  { title: "Replacement approval", path: "/crew/replacement?section=duty&focus=approvals", subtitle: "Review pending duty exchange approvals" },
+  { title: "Duty Assignment (Additional Manpower & Switching)", path: "/crew/replacement?tab=duty", subtitle: "Deploy extra manpower & switch shifts" },
+  { title: "Replacement Roster & Duty Matrix", path: "/crew/replacement?tab=roster", subtitle: "Sequential replacement matrix & roster review" },
+  { title: "Training Assignment", path: "/crew/training?section=assign", subtitle: "Nominate & assign employee training" },
+  { title: "Training approval", path: "/crew/training?section=pending", subtitle: "Review training approvals" },
+  { title: "Sports approval", path: "/crew/sports?section=approval", subtitle: "Review sports participation requests" },
 ];
 const destinationLabels = { Leave: "Leave tracking", Training: "Training history", Sports: "Sports approval", Exchange: "Exchange history", Replacement: "Duty assignment" };
 const popupPaper = { borderRadius: "28px", background: "#FFFCFC", backgroundImage: "none", boxShadow: "0 24px 90px #7D43552A", border: "1px solid #FFF", "& .MuiDialogTitle-root": { px: 3, py: 2.5, background: "linear-gradient(120deg,#FFF1E8,#FCE7EE)", fontWeight: 850 }, "& .MuiDialogContent-root": { p: 3 }, "& .MuiButton-root": { borderRadius: "14px" } };
@@ -137,9 +139,9 @@ export default function DashTest({ demo = false }) {
   const statusOf = row => row.finalStatus || row.status || "Recorded";
   const dateOf = row => row.startDate || row.date || row.sourceDate || "";
   const endOf = row => row.endDate || row.destinationDate || dateOf(row);
-  const approvalKeys = ["leaveApproval", "trainingApproval", "sportsApproval", "exchangeApproval"];
+  const approvalKeys = ["leaveApproval", "trainingApproval", "sportsApproval", "exchangeApproval", "specialEventRoster"];
   const isAdmin = String(user?.role || "").toLowerCase() === "admin" || user?.isAdmin === true || String(user?.employeeId || "") === "50041";
-  const approvalAccess = isAdmin || approvalKeys.slice(0, 3).some(key => actions[key]?.enabled) || actions.trainingAssignment?.enabled || actions.delegate?.enabled;
+  const approvalAccess = isAdmin || approvalKeys.slice(0, 3).some(key => actions[key]?.enabled) || actions.specialEventRoster?.enabled || actions.trainingAssignment?.enabled || actions.delegate?.enabled;
   const pendingApprovals = approvalKeys.reduce((sum, key) => sum + Number(actions[key]?.pending || 0), 0);
   const clubRecords = rows => [...groupLeaveApplications(rows.filter(row => row.kind === "Leave")).map(application => ({ ...application.anchor, ...application, kind: "Leave" })), ...rows.filter(row => row.kind !== "Leave")];
   const pendingMine = clubRecords(records.filter(row => owns(row) && isPending(statusOf(row)) && endOf(row) >= dayjs(today).subtract(2, "day").format("YYYY-MM-DD"))).length;
@@ -200,7 +202,7 @@ export default function DashTest({ demo = false }) {
         <Paper sx={card}><Heading number={6} title="Event Calendar" action={<IconButton aria-label="Open event calendar" onClick={() => navigate("/crew/calendar?view=events")}><ArrowUpRight size={16} /></IconButton>} /><Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 1.4 }}><IconButton size="small" aria-label="Previous month" onClick={() => setMonth(value => value.subtract(1, "month"))}><ChevronLeft size={16} /></IconButton><Typography sx={{ fontSize: 12, fontWeight: 800 }}>{month.format("MMMM YYYY")}</Typography><IconButton size="small" aria-label="Next month" onClick={() => setMonth(value => value.add(1, "month"))}><ChevronRight size={16} /></IconButton></Stack>{eventError && <Alert severity="warning" sx={{ fontSize: 10 }}>{eventError}</Alert>}<Box sx={{ display: "grid", gridTemplateColumns: "repeat(7,1fr)", gap: .5, opacity: eventLoading ? .5 : 1 }}>{["M", "T", "W", "T", "F", "S", "S"].map((day, index) => <Typography key={index} sx={{ textAlign: "center", fontSize: 9, color: "#A0A9B3", mb: .6 }}>{day}</Typography>)}{monthCells.map(date => {
           const key = date.format("YYYY-MM-DD"), dayEvents = events.filter(event => event.startDate <= key && (event.endDate || event.startDate) >= key), inMonth = date.month() === month.month();
           return <Tooltip key={key} title={dayEvents.length ? <Box>{dayEvents.map((event, index) => <Typography key={index} sx={{ fontSize: 11 }}>{event.title} · {event.kind}{event.detail ? ` · ${event.detail}` : ""}</Typography>)}</Box> : date.format("DD MMM YYYY")}><Button onClick={() => navigate("/crew/calendar?view=events")} aria-label={`${date.format("DD MMM YYYY")}${dayEvents.length ? `, ${dayEvents.map(event => event.title).join(", ")}` : ""}`} sx={{ minWidth: 0, height: 31, p: 0, borderRadius: "10px", flexDirection: "column", fontSize: 11, color: key === today ? "#FFF" : dayEvents.length ? palette[dayEvents[0].kind] : "#536170", bgcolor: key === today ? "#188F7B" : dayEvents.length ? `${palette[dayEvents[0].kind] || "#8B5CF6"}12` : "transparent", opacity: inMonth ? 1 : .28, "&:hover": { bgcolor: "#DDEFE8", color: "#233442" } }}>{date.date()}<Box sx={{ display: "flex", gap: "2px" }}>{[...new Set(dayEvents.map(event => event.kind))].map(type => <Box key={type} sx={{ width: 3, height: 3, borderRadius: "50%", bgcolor: palette[type] }} />)}</Box></Button></Tooltip>;
-        })}</Box><Stack direction="row" spacing={1.4} sx={{ mt: 2 }}>{Object.entries(palette).map(([label, color]) => <Stack key={label} direction="row" alignItems="center" spacing={.5}><Box sx={{ width: 5, height: 5, bgcolor: color, borderRadius: "50%" }} /><Typography sx={{ fontSize: 8.5, color: "#87929F", textTransform: "capitalize" }}>{label}</Typography></Stack>)}</Stack>{actions.specialEventRoster?.enabled && <Button fullWidth size="small" onClick={() => demo ? setDemoWorkspace("special-event") : navigate("/crew/roster")} sx={{ mt: 1.5, textTransform: "none" }}>Special Event roster</Button>}</Paper>
+        })}</Box><Stack direction="row" spacing={1.4} sx={{ mt: 2 }}>{Object.entries(palette).map(([label, color]) => <Stack key={label} direction="row" alignItems="center" spacing={.5}><Box sx={{ width: 5, height: 5, bgcolor: color, borderRadius: "50%" }} /><Typography sx={{ fontSize: 8.5, color: "#87929F", textTransform: "capitalize" }}>{label}</Typography></Stack>)}</Stack>{actions.specialEventRoster?.enabled && <Button fullWidth size="small" onClick={() => demo ? setDemoWorkspace("special-event") : navigate("/crew/special-events")} sx={{ mt: 1.5, textTransform: "none" }}>Special Event roster</Button>}</Paper>
         <Paper sx={card}><Heading number={10} title="Upcoming shift" note="From tomorrow · next 5 days" /><Box sx={{ maxHeight: 560, overflowY: "auto", pr: .5 }}>{Array.from({ length: 5 }, (_, i) => dayjs(today).add(i + 1, "day").format("YYYY-MM-DD")).map(date => <Box key={date} sx={{ mb: 2.2 }}><Typography sx={{ fontSize: 14, fontWeight: 800, color: "#536170", mb: 1.5 }}>{dayjs(date).format("ddd, DD MMM")}</Typography>{["M", "E", "N"].map(code => {
           const people = upcomingShiftPeople(groups, date, code, shortShift);
           const shiftLeaders = people.filter(person => person.IsSIC);

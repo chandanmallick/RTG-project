@@ -1023,6 +1023,187 @@ def assign_vacated_duty(
     }
 
 
+@router.put("/duty-switch/additional-manpower")
+def deploy_additional_manpower(
+    payload: dict,
+    user=Depends(get_authenticated_user),
+):
+    """Deploy additional manpower directly to a shift on a given date (for special events, surge staffing, or extra coverage)."""
+    duty_date = str(payload.get("date") or "").strip()
+    employee_id = str(payload.get("employeeId") or "").strip()
+    assigned_duty = str(payload.get("assignedDuty") or "").strip()
+    mode = str(payload.get("mode") or "double").strip()
+    reason = str(payload.get("reason") or "").strip()
+    group_name = str(payload.get("groupName") or "").strip()
+    event_id = str(payload.get("eventId") or "").strip()
+    leave_id = str(payload.get("leaveId") or "").strip()
+
+    try:
+        datetime.strptime(duty_date, "%Y-%m-%d")
+    except ValueError as exc:
+        raise HTTPException(400, "Date must use YYYY-MM-DD format") from exc
+
+    actor = require_duty_switch_authority(user, duty_date)
+    if not employee_id:
+        raise HTTPException(400, "Employee ID is required")
+    if not assigned_duty:
+        raise HTTPException(400, "Assigned duty/shift is required")
+    if not reason:
+        raise HTTPException(400, "Operational reason is required")
+
+    norm_duty = normalized_duty(assigned_duty)
+    if norm_duty not in SHIFT_DUTIES and assigned_duty not in ALL_DUTIES:
+        raise HTTPException(400, f"Invalid duty shift '{assigned_duty}'. Expected a valid shift like Morning, Evening, Night.")
+
+    # Check for active leave conflict
+    active_leave = leave_request_collection.find_one({
+        "employeeId": employee_id_filter(employee_id),
+        "date": duty_date,
+        "finalStatus": {"$in": list(ACTIVE_LEAVE_STATUSES)},
+    })
+    daily_conflict = employee_daily_collection.find_one({
+        "employeeId": employee_id_filter(employee_id),
+        "date": duty_date,
+        "leaveStatus": {"$in": list(ACTIVE_LEAVE_STATUSES)},
+    })
+    if active_leave or daily_conflict:
+        conflict_type = (active_leave or daily_conflict).get("leaveType") or "leave"
+        raise HTTPException(409, f"Employee {employee_id} is on {conflict_type} on {duty_date} and cannot be deployed.")
+
+    # If linked to a leave, delegate to assign_replacement
+    if leave_id and ObjectId.is_valid(leave_id):
+        return assign_replacement(leave_id, {
+            "replacementEmployeeId": employee_id,
+            "mode": mode if mode in {"normal", "double"} else "double",
+            "halfDuty": False,
+            "reason": reason,
+        }, user=user)
+
+    emp = employee_by_id(employee_id) or {}
+    emp_name = emp.get("name") or employee_id
+    emp_desig = emp.get("designation") or ""
+    emp_group = group_name or emp.get("groupName") or "Other Employees"
+
+    existing_daily = employee_daily_collection.find_one({
+        "employeeId": employee_id_filter(employee_id),
+        "date": duty_date,
+    })
+
+    previous_duty = (existing_daily or {}).get("assignedDuty") or "OFF"
+    previous_group = (existing_daily or {}).get("groupName") or emp_group
+    previous = {
+        "assignedDuty": previous_duty,
+        "groupName": previous_group,
+        "replacementDuty": bool((existing_daily or {}).get("replacementDuty")),
+    }
+
+    now = datetime.utcnow()
+    switch_id = str(uuid.uuid4())
+
+    update_fields = {
+        "employeeId": employee_id,
+        "date": duty_date,
+        "name": emp_name,
+        "designation": emp_desig,
+        "groupName": emp_group,
+        "additionalManpower": True,
+        "eventReason": reason,
+        "replacementDuty": True,
+        "replacementMode": mode if mode in {"normal", "double"} else "double",
+    }
+    if event_id:
+        update_fields["specialEventId"] = event_id
+
+    # If already has a working shift on that date and mode is double:
+    norm_prev = normalized_duty(previous_duty)
+    if norm_prev in SHIFT_DUTIES and mode == "double":
+        update_fields["assignedDuty"] = previous_duty
+        update_fields["hasAdditionalDuty"] = True
+        update_fields["additionalDuties"] = [{
+            "shift": assigned_duty,
+            "groupName": emp_group,
+            "type": "AdditionalManpower",
+            "reason": reason,
+            "assignedOn": now,
+        }]
+    else:
+        update_fields["assignedDuty"] = assigned_duty
+
+    audit = {
+        "switchId": switch_id,
+        "date": duty_date,
+        "direction": "additional",
+        "employeeId": employee_id,
+        "employeeName": emp_name,
+        "designation": emp_desig,
+        "previous": previous,
+        "updated": {"assignedDuty": assigned_duty, "groupName": emp_group, "additionalManpower": True},
+        "reason": reason,
+        "changedBy": actor,
+        "changedOn": now,
+        "source": "Additional manpower deployment",
+        "eventId": event_id or None,
+    }
+    inserted_audit = duty_switch_collection.insert_one(audit)
+
+    update_fields["lastDutySwitch"] = {
+        "auditId": str(inserted_audit.inserted_id),
+        "changedBy": actor,
+        "changedOn": now,
+        "reason": reason,
+        "previous": previous,
+        "direction": "additional",
+    }
+
+    employee_daily_collection.update_one(
+        {"employeeId": employee_id_filter(employee_id), "date": duty_date},
+        {"$set": update_fields},
+        upsert=True,
+    )
+
+    # Award C-OFF if deployed on an OFF day
+    comp_off_id = None
+    if norm_prev in OFF_DUTIES:
+        comp_off_id = award_off_day_comp_off(
+            employee_id=employee_id,
+            duty_date=duty_date,
+            previous_duty=previous_duty,
+            assigned_duty=assigned_duty,
+            group_name=emp_group,
+            switch_id=switch_id,
+            source="Additional manpower deployment",
+            reference_type="AdditionalManpower",
+            reference_extra={"eventId": event_id} if event_id else {},
+        )
+        if comp_off_id:
+            duty_switch_collection.update_one(
+                {"_id": inserted_audit.inserted_id},
+                {"$set": {"compOffAwarded": True, "compOffId": comp_off_id}},
+            )
+            employee_daily_collection.update_one(
+                {"employeeId": employee_id_filter(employee_id), "date": duty_date},
+                {"$set": {"lastDutySwitch.compOffAwarded": True, "lastDutySwitch.compOffId": comp_off_id}},
+            )
+
+    notify_all(
+        employee_ids=[employee_id],
+        subject="Additional manpower duty deployed",
+        message=f"You have been deployed for additional manpower duty ({assigned_duty}) on {duty_date}. Reason: {reason}",
+        ref_id=switch_id,
+        action="VIEW_CALENDAR",
+        type="DUTY",
+    )
+
+    return {
+        "message": f"Additional manpower {emp_name} deployed to {assigned_duty} on {duty_date}.",
+        "deployed": True,
+        "compOffAwarded": bool(comp_off_id),
+        "compOffId": comp_off_id,
+        "switchId": switch_id,
+    }
+
+
+
 @router.put("/duty-switch")
 def switch_employee_duty(
     payload: dict,

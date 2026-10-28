@@ -36,6 +36,7 @@ const SportsManagement = lazy(() => import("./pages/crew/SportsManagement"));
 const CrewDashboard = lazy(() => import("./crewLegacy/DashTest"));
 const CrewLeave = lazy(() => import("./crewLegacy/LeaveManagement"));
 const CrewReplacement = lazy(() => import("./crewLegacy/ReplacementManagement"));
+const SpecialEventsPage = lazy(() => import("./pages/crew/SpecialEventsPage"));
 const CrewTraining = lazy(() => import("./crewLegacy/TrainingHolidayMaster"));
 const CrewThreads = lazy(() => import("./pages/crew/CrewThreads"));
 const CrewActivityReport = lazy(() => import("./pages/crew/CrewActivityReport"));
@@ -238,6 +239,14 @@ export default function App() {
           element={(
             <ProtectedRoute pageKey="crew_replacement" allowWorkflowAccess>
               <CrewLegacyShell><CrewReplacement initialWorkflow="roster" /></CrewLegacyShell>
+            </ProtectedRoute>
+          )}
+        />
+        <Route
+          path="/crew/special-events"
+          element={(
+            <ProtectedRoute pageKey="crew_roster" allowWorkflowAccess>
+              <CrewLegacyShell><SpecialEventsPage /></CrewLegacyShell>
             </ProtectedRoute>
           )}
         />
