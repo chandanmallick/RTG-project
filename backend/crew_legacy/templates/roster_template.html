@@ -264,7 +264,7 @@ body {
 
 <table class="header-table" cellspacing="0" cellpadding="0">
 <tr>
-    <td style="width:85px; vertical-align:middle;">
+    <td style="width:95px; vertical-align:middle;">
         {% if logo_path %}
         <img src="file:///{{ logo_path }}" class="logo">
         {% else %}
@@ -273,12 +273,14 @@ body {
     </td>
 
     <td class="title">
-        <div class="header-hi-primary">{{ header.organizationHindi }}</div>
-        <div class="header-hi-secondary">{{ header.officeHindi }}</div>
-        <div class="header-en-primary">{{ header.organizationEnglish }}</div>
-        <div class="header-en-secondary">{{ header.officeEnglish }}</div>
-        <div class="main-title">{{ header.rosterTitle }}</div>
+        <div class="header-hi-primary">{{ (header and header.organizationHindi) or "ग्रिड कंट्रोलर ऑफ इंडिया लिमिटेड (ग्रिड-इंडिया)" }}</div>
+        <div class="header-hi-secondary">{{ (header and header.officeHindi) or "पूर्वी क्षेत्रीय भार प्रेषण केंद्र, कोलकाता" }}</div>
+        <div class="header-en-primary">{{ (header and header.organizationEnglish) or "Grid Controller of India Limited (GRID-INDIA)" }}</div>
+        <div class="header-en-secondary">{{ (header and header.officeEnglish) or "EASTERN REGIONAL LOAD DESPATCH CENTRE, KOLKATA" }}</div>
+        <div class="main-title">{{ (header and header.rosterTitle) or "CONTROL ROOM SHIFT DUTY ROSTER" }}</div>
     </td>
+
+    <td style="width:95px;"></td>
 </tr>
 </table>
 

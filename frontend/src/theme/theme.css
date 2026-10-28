@@ -922,53 +922,84 @@
   }
 }
 
+@media screen {
+  .crew-roster-print {
+    display: none !important;
+  }
+}
+
 @media print {
   @page {
     size: A4 landscape;
-    margin: 6mm 8mm 6mm 8mm;
+    margin: 7mm 8mm 6mm 8mm;
   }
 
-  body {
+  html, body {
+    margin: 0 !important;
+    padding: 0 !important;
     background: #FFFFFF !important;
     -webkit-print-color-adjust: exact !important;
     print-color-adjust: exact !important;
+    height: auto !important;
+    min-height: 0 !important;
+    overflow: visible !important;
   }
 
-  body * {
-    visibility: hidden !important;
+  /* Completely hide the interactive web UI during printing */
+  .crew-roster-screen-only,
+  header,
+  nav,
+  aside,
+  .MuiAppBar-root,
+  .MuiDrawer-root,
+  .MuiDialog-root {
+    display: none !important;
   }
 
-  .crew-roster-print,
-  .crew-roster-print * {
-    visibility: visible !important;
+  /* Clear all potential positioning, margins, paddings, and transforms on parents */
+  #root,
+  #root > div,
+  main,
+  .MuiBox-root {
+    margin: 0 !important;
+    padding: 0 !important;
+    border: none !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    transform: none !important;
+    overflow: visible !important;
+    height: auto !important;
+    min-height: 0 !important;
   }
 
   .crew-roster-print {
     display: block !important;
-    position: absolute;
-    inset: 0 auto auto 0;
-    width: 100%;
-    color: #000000;
-    font-family: Arial, "Nirmala UI", "Noto Sans Devanagari", sans-serif;
-    font-size: 8px;
-    line-height: 1.2;
+    visibility: visible !important;
+    position: static !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    width: 100% !important;
+    color: #000000 !important;
+    font-family: "Nirmala UI", "Noto Sans Devanagari", "Mangal", Arial, sans-serif !important;
+    font-size: 8px !important;
+    line-height: 1.2 !important;
+    box-sizing: border-box !important;
   }
 
   .crew-roster-print-header {
-    display: flex !important;
-    align-items: center;
-    justify-content: center;
-    position: relative;
-    padding-bottom: 3px !important;
+    display: table !important;
+    width: 100% !important;
+    border-collapse: collapse !important;
     border-bottom: 1.5px solid #000000 !important;
-    margin-bottom: 5px !important;
+    margin-bottom: 4px !important;
+    padding-bottom: 2px !important;
   }
 
   .crew-roster-print-period {
-    font-size: 10.5px !important;
+    font-size: 10px !important;
     font-weight: bold !important;
     color: #000000 !important;
-    margin-bottom: 5px !important;
+    margin-bottom: 4px !important;
   }
 
   .crew-roster-print-table {

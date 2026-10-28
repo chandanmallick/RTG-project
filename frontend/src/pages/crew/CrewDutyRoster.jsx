@@ -60,7 +60,16 @@ const DEFAULT_HEADER = {
   officeEnglish: "EASTERN REGIONAL LOAD DESPATCH CENTRE, KOLKATA",
   rosterTitle: "CONTROL ROOM SHIFT DUTY ROSTER",
 };
-const rosterHeader = (value) => ({ ...DEFAULT_HEADER, ...(value || {}) });
+const rosterHeader = (value) => {
+  const val = value || {};
+  return {
+    organizationHindi: val.organizationHindi || DEFAULT_HEADER.organizationHindi,
+    officeHindi: val.officeHindi || DEFAULT_HEADER.officeHindi,
+    organizationEnglish: val.organizationEnglish || DEFAULT_HEADER.organizationEnglish,
+    officeEnglish: val.officeEnglish || DEFAULT_HEADER.officeEnglish,
+    rosterTitle: val.rosterTitle || DEFAULT_HEADER.rosterTitle,
+  };
+};
 
 const today = () => new Date().toISOString().slice(0, 10);
 const addDays = (date, amount) => {
@@ -303,19 +312,48 @@ export default function CrewDutyRoster() {
       {/* Hidden section designed purely for paper print preview */}
       {!!rosterData.length && (
         <section className="crew-roster-print">
-          {/* Header Layout */}
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", position: "relative", paddingBottom: "3px", borderBottom: "1.5px solid #000000", marginBottom: "5px" }}>
-            <div style={{ position: "absolute", left: 0, top: "50%", transform: "translateY(-50%)" }}>
-              <img src="/logo.png" alt="GRID-INDIA" style={{ width: "88px", height: "auto" }} onError={(e) => (e.target.style.display = "none")} />
-            </div>
-            <div style={{ textAlign: "center", color: "#003366", fontFamily: '"Noto Sans Devanagari", "Nirmala UI", Arial, sans-serif' }}>
-              <div style={{ fontSize: "11px", fontWeight: "bold", lineHeight: "1.2" }}>{header.organizationHindi}</div>
-              <div style={{ fontSize: "9px", fontWeight: "bold", marginTop: "0px", lineHeight: "1.15" }}>{header.officeHindi}</div>
-              <div style={{ fontSize: "10.5px", fontWeight: "bold", marginTop: "1px", lineHeight: "1.2" }}>{header.organizationEnglish}</div>
-              <div style={{ fontSize: "9px", fontWeight: "bold", marginTop: "0px", lineHeight: "1.15" }}>{header.officeEnglish}</div>
-              <div style={{ fontSize: "13px", fontWeight: 800, color: "#0056B3", marginTop: "2px", letterSpacing: "0.5px" }}>{header.rosterTitle}</div>
-            </div>
-          </div>
+          {/* Header Layout (Table with Logo left, Centered Hindi & English org headers, Spacer right) */}
+          <table
+            className="crew-roster-print-header"
+            style={{
+              width: "100%",
+              borderCollapse: "collapse",
+              borderBottom: "1.5px solid #000000",
+              marginBottom: "4px",
+              paddingBottom: "2px"
+            }}
+          >
+            <tbody>
+              <tr>
+                <td style={{ width: "95px", verticalAlign: "middle", textAlign: "left", padding: 0 }}>
+                  <img
+                    src="/logo.png"
+                    alt="GRID-INDIA"
+                    style={{ width: "82px", height: "auto", display: "block" }}
+                    onError={(e) => (e.target.style.display = "none")}
+                  />
+                </td>
+                <td style={{ textAlign: "center", verticalAlign: "middle", padding: 0 }}>
+                  <div style={{ fontSize: "11px", fontWeight: "bold", color: "#003366", lineHeight: "1.25", fontFamily: '"Nirmala UI", "Noto Sans Devanagari", Arial, sans-serif' }}>
+                    {header?.organizationHindi || DEFAULT_HEADER.organizationHindi}
+                  </div>
+                  <div style={{ fontSize: "9.5px", fontWeight: "bold", color: "#003366", lineHeight: "1.2", fontFamily: '"Nirmala UI", "Noto Sans Devanagari", Arial, sans-serif' }}>
+                    {header?.officeHindi || DEFAULT_HEADER.officeHindi}
+                  </div>
+                  <div style={{ fontSize: "10.5px", fontWeight: "bold", color: "#003366", lineHeight: "1.2", marginTop: "1px", fontFamily: 'Arial, sans-serif' }}>
+                    {header?.organizationEnglish || DEFAULT_HEADER.organizationEnglish}
+                  </div>
+                  <div style={{ fontSize: "9.5px", fontWeight: "bold", color: "#003366", lineHeight: "1.2", fontFamily: 'Arial, sans-serif' }}>
+                    {header?.officeEnglish || DEFAULT_HEADER.officeEnglish}
+                  </div>
+                  <div style={{ fontSize: "13px", fontWeight: 800, color: "#0056B3", marginTop: "2px", letterSpacing: "0.5px", fontFamily: 'Arial, sans-serif' }}>
+                    {header?.rosterTitle || DEFAULT_HEADER.rosterTitle}
+                  </div>
+                </td>
+                <td style={{ width: "95px" }}></td>
+              </tr>
+            </tbody>
+          </table>
 
           {/* Period Display */}
           <div style={{ fontSize: "10.5px", fontWeight: "bold", color: "#000000", marginBottom: "5px", fontFamily: "Arial, sans-serif" }}>
@@ -450,6 +488,7 @@ export default function CrewDutyRoster() {
         </section>
       )}
 
+      <Box className="crew-roster-screen-only" sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
       {/* 1. TITLE HEADER BLOCK (Floating card style) */}
       <Box
         sx={{
@@ -1170,6 +1209,7 @@ export default function CrewDutyRoster() {
         </Box>
 
       </Stack>
+      </Box>
 
       {/* Roster History Modal */}
       <Dialog

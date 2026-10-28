@@ -35,9 +35,11 @@ import {
   Typography,
 } from "@mui/material";
 import {
+  AlertCircle,
   ArrowLeft,
   ArrowLeftRight,
   ArrowRight,
+  Award,
   Briefcase,
   Calendar,
   CheckCircle2,
@@ -56,6 +58,7 @@ import {
   Sun,
   Sunrise,
   Sunset,
+  Trash2,
   Moon,
   Coffee,
   Umbrella,
@@ -302,9 +305,20 @@ export default function SpecialRosterMatrix({
   const [addEmployeeId, setAddEmployeeId] = useState("");
   const [addEmployeeName, setAddEmployeeName] = useState("");
   const [addReason, setAddReason] = useState("");
-  const [candidateOptions, setCandidateOptions] = useState([]);
   const [candidateLoading, setCandidateLoading] = useState(false);
   const [addSaving, setAddSaving] = useState(false);
+
+  // Deploy Replacement Dialog state (Connects to existing replacement module & C-OFF database)
+  const [deployModalOpen, setDeployModalOpen] = useState(false);
+  const [deployCandidate, setDeployCandidate] = useState(null);
+  const [deployLeave, setDeployLeave] = useState(null);
+  const [deploySlot, setDeploySlot] = useState({ date: "", shift: "Morning" });
+  const [deployMode, setDeployMode] = useState("double"); // Default double duty awards C-OFF credit
+  const [deployHalfDuty, setDeployHalfDuty] = useState(false);
+  const [deployReason, setDeployReason] = useState("");
+  const [deploySaving, setDeploySaving] = useState(false);
+  const [deployCandidateOptions, setDeployCandidateOptions] = useState([]);
+  const [deployCandidateLoading, setDeployCandidateLoading] = useState(false);
 
   // Sequential Allocation from Created Pools & Multi-Department Dialog state
   const [sequentialDialogOpen, setSequentialDialogOpen] = useState(false);
@@ -449,25 +463,31 @@ export default function SpecialRosterMatrix({
       return;
     }
 
-    // Dropping on leave is invalid (leave requires replacement assignment)
+    // Dropping onto an employee who is on Leave -> Deploy as Replacement!
+    if (targetPerson && targetPerson.onLeave) {
+      const leaveRec =
+        (matrixData.grid?.[targetDate]?.["Leave"] || []).find(
+          (l) => l.employeeId === targetPerson.employeeId
+        ) ||
+        (matrixData.replacementRequirements || []).find(
+          (r) => r.employeeId === targetPerson.employeeId && r.date === targetDate
+        ) ||
+        targetPerson;
+      openDeployReplacementModal(payload, leaveRec, targetDate, targetPerson.assignedDuty || targetShift);
+      return;
+    }
+
+    // Dropping directly into Leave row (empty space)
     if (targetShift === "Leave") {
       setNotice({
-        severity: "warning",
-        text: "Cannot move employee into Leave. Leaves must be approved through Leave Management.",
+        severity: "info",
+        text: "To deploy a replacement for an employee on leave, drop candidate directly onto the 'Replacement Place' slot in the shift or onto the employee on leave.",
       });
       return;
     }
 
     // Dropping onto another person on the same date = Mutual Shift Exchange!
     if (targetPerson && targetPerson.employeeId !== payload.employeeId) {
-      if (targetPerson.onLeave) {
-        setNotice({
-          severity: "warning",
-          text: "Cannot swap with an employee who is on leave. Use replacement assignment.",
-        });
-        return;
-      }
-
       setLoading(true);
       try {
         await api.put("/replacement/duty-switch/exchange", {
@@ -516,6 +536,107 @@ export default function SpecialRosterMatrix({
       setLoading(false);
       setDraggedItem(null);
     }
+  };
+
+  // Open Deploy Replacement Modal
+  const openDeployReplacementModal = async (candidate, leaveItem, dateStr, shiftKey) => {
+    setDeployCandidate(candidate || null);
+    setDeployLeave(leaveItem || null);
+    setDeploySlot({ date: dateStr, shift: shiftKey });
+    setDeployMode("double");
+    setDeployHalfDuty(false);
+    setDeployReason(
+      candidate
+        ? `Replacement deployed for ${leaveItem?.name || "leave"} (${shiftKey}) via Drag & Drop Special Roster`
+        : `Replacement deployed for ${leaveItem?.name || "leave"} (${shiftKey})`
+    );
+    setDeployModalOpen(true);
+
+    // Load available candidates for date
+    setDeployCandidateLoading(true);
+    try {
+      const { data } = await api.get("/replacement/duty-switch/options", {
+        params: { date: dateStr },
+      });
+      setDeployCandidateOptions(Array.isArray(data) ? data : []);
+    } catch {
+      setDeployCandidateOptions([]);
+    } finally {
+      setDeployCandidateLoading(false);
+    }
+  };
+
+  // Submit Deploy Replacement to Existing Replacement Feature & Database
+  const handleDeploySubmit = async () => {
+    if (!deployCandidate || !deployCandidate.employeeId) {
+      setNotice({ severity: "error", text: "Please select a replacement candidate." });
+      return;
+    }
+    const leaveId = deployLeave?.leaveId || deployLeave?._id || deployLeave?.id;
+    if (!leaveId) {
+      setNotice({ severity: "error", text: "Leave request identifier not found." });
+      return;
+    }
+
+    setDeploySaving(true);
+    try {
+      await api.put(`/replacement/assign/${leaveId}`, {
+        replacementEmployeeId: deployCandidate.employeeId,
+        mode: deployMode,
+        halfDuty: deployHalfDuty,
+        reason: deployReason || `Replacement duty for ${deployLeave.name} (${deploySlot.shift})`,
+        autoApprove: true,
+      });
+
+      setNotice({
+        severity: "success",
+        text: `Successfully deployed ${deployCandidate.name || deployCandidate.employeeId} as replacement for ${deployLeave.name}! C-OFF record created in database & available in ledger.`,
+      });
+      setDeployModalOpen(false);
+      await loadMatrix();
+    } catch (err) {
+      setNotice({
+        severity: "error",
+        text: err.response?.data?.detail || "Failed to deploy replacement.",
+      });
+    } finally {
+      setDeploySaving(false);
+    }
+  };
+
+  // Release / Remove an existing replacement assignment
+  const handleReleaseReplacement = async (leaveId, empName) => {
+    if (!window.confirm(`Release replacement assignment for ${empName}?`)) return;
+    setLoading(true);
+    try {
+      await api.delete(`/replacement/assign/${leaveId}`);
+      setNotice({
+        severity: "success",
+        text: `Replacement released for ${empName}. Slot is now open for replacement.`,
+      });
+      await loadMatrix();
+    } catch (err) {
+      setNotice({
+        severity: "error",
+        text: err.response?.data?.detail || "Failed to release replacement.",
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Handle drop directly on a Replacement Place Slot
+  const handleDropOnReplacement = (e, leaveReq, dateStr, shiftKey) => {
+    let payload = draggedItem;
+    if (!payload) {
+      try {
+        payload = JSON.parse(e.dataTransfer.getData("text/plain"));
+      } catch {
+        return;
+      }
+    }
+    if (!payload || !payload.employeeId) return;
+    openDeployReplacementModal(payload, leaveReq, dateStr, shiftKey);
   };
 
   // Open Quick Add Dialog
@@ -1278,11 +1399,183 @@ export default function SpecialRosterMatrix({
                                             />
                                           )}
                                         </Stack>
+
+                                        {/* Direct Cover Action for Leave Card */}
+                                        {person.onLeave && (
+                                          <Box sx={{ mt: 0.8, pt: 0.6, borderTop: "1px dashed #FECACA" }}>
+                                            {person.replacementAssigned ? (
+                                              <Stack direction="row" alignItems="center" justifyContent="space-between" spacing={0.5}>
+                                                <Stack direction="row" alignItems="center" spacing={0.4} sx={{ minWidth: 0 }}>
+                                                  <Award size={12} color="#16A34A" />
+                                                  <Typography fontSize={10} color="#166534" fontWeight={850} noWrap>
+                                                    Cover: {person.replacement?.name || "Assigned"}
+                                                  </Typography>
+                                                </Stack>
+                                                <Tooltip title="Release replacement">
+                                                  <IconButton
+                                                    size="small"
+                                                    onClick={(e) => {
+                                                      e.stopPropagation();
+                                                      handleReleaseReplacement(person.leaveId, person.name);
+                                                    }}
+                                                    sx={{ p: 0.2, color: "#991B1B", "&:hover": { bgcolor: "#FEE2E2" } }}
+                                                  >
+                                                    <Trash2 size={11} />
+                                                  </IconButton>
+                                                </Tooltip>
+                                              </Stack>
+                                            ) : (
+                                              <Button
+                                                size="small"
+                                                startIcon={<UserCheck size={11} />}
+                                                onClick={(e) => {
+                                                  e.stopPropagation();
+                                                  openDeployReplacementModal(null, person, dateStr, person.assignedDuty || "Morning");
+                                                }}
+                                                sx={{
+                                                  fontSize: "0.64rem",
+                                                  py: 0.1,
+                                                  px: 0.6,
+                                                  minHeight: 0,
+                                                  bgcolor: "#FEF3C7",
+                                                  color: "#92400E",
+                                                  border: "1px solid #FCD34D",
+                                                  borderRadius: 1,
+                                                  fontWeight: 850,
+                                                  textTransform: "none",
+                                                  width: "100%",
+                                                  "&:hover": { bgcolor: "#FDE68A" },
+                                                }}
+                                              >
+                                                + Drop or Assign Cover
+                                              </Button>
+                                            )}
+                                          </Box>
+                                        )}
                                       </Box>
                                     </Stack>
                                   </Paper>
                                 );
                               })}
+
+                              {/* Replacement Place & Covered Slots for Shift Cells */}
+                              {shiftKey !== "Leave" && shiftKey !== "Off" && (() => {
+                                const shiftLeaves = (matrixData.grid?.[dateStr]?.["Leave"] || []).filter((l) => {
+                                  const d = (l.assignedDuty || "Morning").toLowerCase();
+                                  const sk = shiftKey.toLowerCase();
+                                  return d === sk || (sk === "morning" && !["evening", "night", "general"].includes(d));
+                                });
+
+                                return shiftLeaves.map((l) => {
+                                  if (l.replacementAssigned) {
+                                    return (
+                                      <Paper
+                                        key={`cov-${l.leaveId || l.employeeId}`}
+                                        elevation={0}
+                                        sx={{
+                                          p: 0.8,
+                                          borderRadius: 1.5,
+                                          border: "1px solid #86EFAC",
+                                          borderLeft: "3.5px solid #16A34A",
+                                          bgcolor: "#F0FDF4",
+                                        }}
+                                      >
+                                        <Stack direction="row" alignItems="center" justifyContent="space-between" spacing={0.5}>
+                                          <Stack direction="row" alignItems="center" spacing={0.5} sx={{ minWidth: 0 }}>
+                                            <Award size={13} color="#16A34A" />
+                                            <Box sx={{ minWidth: 0 }}>
+                                              <Typography fontSize={11} fontWeight={850} color="#166534" noWrap>
+                                                Cover: {l.replacement?.name || "Assigned"}
+                                              </Typography>
+                                              <Typography fontSize={9} color="#15803D" fontWeight={700} noWrap>
+                                                For {l.name} · C-OFF Credited
+                                              </Typography>
+                                            </Box>
+                                          </Stack>
+                                          <Tooltip title="Release Replacement">
+                                            <IconButton
+                                              size="small"
+                                              onClick={(e) => {
+                                                e.stopPropagation();
+                                                handleReleaseReplacement(l.leaveId, l.name);
+                                              }}
+                                              sx={{
+                                                p: 0.3,
+                                                color: "#991B1B",
+                                                bgcolor: "#FEE2E2",
+                                                "&:hover": { bgcolor: "#FECACA" },
+                                              }}
+                                            >
+                                              <Trash2 size={11} />
+                                            </IconButton>
+                                          </Tooltip>
+                                        </Stack>
+                                      </Paper>
+                                    );
+                                  }
+
+                                  return (
+                                    <Paper
+                                      key={`slot-${l.leaveId || l.employeeId}`}
+                                      elevation={0}
+                                      onDragOver={(e) => {
+                                        e.preventDefault();
+                                        e.stopPropagation();
+                                      }}
+                                      onDrop={(e) => {
+                                        e.stopPropagation();
+                                        handleDropOnReplacement(e, l, dateStr, shiftKey);
+                                      }}
+                                      onClick={() => openDeployReplacementModal(null, l, dateStr, shiftKey)}
+                                      sx={{
+                                        p: 0.9,
+                                        borderRadius: 2,
+                                        border: "2px dashed #F59E0B",
+                                        bgcolor: "#FFFBEB",
+                                        cursor: "pointer",
+                                        transition: "all 0.18s ease",
+                                        "&:hover": {
+                                          bgcolor: "#FEF3C7",
+                                          borderColor: "#D97706",
+                                          transform: "translateY(-1px)",
+                                          boxShadow: "0 3px 10px rgba(245, 158, 11, 0.25)",
+                                        },
+                                      }}
+                                    >
+                                      <Stack spacing={0.3}>
+                                        <Stack direction="row" alignItems="center" justifyContent="space-between">
+                                          <Stack direction="row" alignItems="center" spacing={0.5}>
+                                            <AlertCircle size={13} color="#D97706" />
+                                            <Typography fontSize={11} fontWeight={900} color="#92400E">
+                                              Replacement Place
+                                            </Typography>
+                                          </Stack>
+                                          <Chip
+                                            size="small"
+                                            label="DROP HERE"
+                                            sx={{
+                                              height: 16,
+                                              fontSize: "0.58rem",
+                                              fontWeight: 900,
+                                              bgcolor: "#FDE68A",
+                                              color: "#78350F",
+                                            }}
+                                          />
+                                        </Stack>
+                                        <Typography fontSize={10} color="#B45309" fontWeight={750} noWrap>
+                                          Need cover for {l.name} ({l.leaveType || "Leave"})
+                                        </Typography>
+                                        <Stack direction="row" alignItems="center" spacing={0.4} sx={{ mt: 0.1 }}>
+                                          <Award size={11} color="#B45309" />
+                                          <Typography fontSize={9} color="#92400E" fontWeight={700}>
+                                            Drop candidate → Awards C-OFF in DB
+                                          </Typography>
+                                        </Stack>
+                                      </Stack>
+                                    </Paper>
+                                  );
+                                });
+                              })()}
 
                               {/* Empty slot cue */}
                               {shiftList.length === 0 && (
@@ -1901,6 +2194,239 @@ export default function SpecialRosterMatrix({
               : previewOnly
               ? "Simulate Allocation"
               : "Commit Live Allocation"}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* DEPLOY REPLACEMENT & RECORD C-OFF DIALOG */}
+      <Dialog
+        open={deployModalOpen}
+        onClose={() => !deploySaving && setDeployModalOpen(false)}
+        fullWidth
+        maxWidth="sm"
+        slotProps={{
+          paper: { sx: { borderRadius: "22px !important", p: 1, background: "#FAF9FF !important" } },
+        }}
+      >
+        <DialogTitle sx={{ fontWeight: 900, pb: 1 }}>
+          <Stack direction="row" alignItems="center" spacing={1.2}>
+            <Box
+              sx={{
+                width: 38,
+                height: 38,
+                borderRadius: "10px",
+                bgcolor: "#EDE9FE",
+                color: "#6D28D9",
+                display: "grid",
+                placeItems: "center",
+              }}
+            >
+              <Sparkles size={20} />
+            </Box>
+            <Box>
+              <Typography fontWeight={900} fontSize={17} color="#1E1B4B">
+                Deploy Replacement & Credit C-OFF
+              </Typography>
+              <Typography variant="body2" color="#64748B">
+                Integrated with Replacement Module · Records C-OFF in database for employee to avail
+              </Typography>
+            </Box>
+          </Stack>
+        </DialogTitle>
+
+        <DialogContent>
+          <Stack spacing={2} sx={{ pt: 1 }}>
+            {/* 1. Target Replaced Person / Leave Info */}
+            <Paper
+              variant="outlined"
+              sx={{
+                p: 1.8,
+                borderRadius: 3,
+                bgcolor: "#FFFBEB",
+                borderColor: "#FDE68A",
+              }}
+            >
+              <Stack spacing={1}>
+                <Stack direction="row" justifyContent="space-between" alignItems="center">
+                  <Typography fontSize={11} fontWeight={900} color="#B45309" sx={{ letterSpacing: 0.5 }}>
+                    LEAVE DUTY TO BE REPLACED
+                  </Typography>
+                  <Chip
+                    size="small"
+                    label={deploySlot.shift}
+                    sx={{ fontWeight: 900, bgcolor: "#FEF3C7", color: "#92400E" }}
+                  />
+                </Stack>
+                <Stack direction="row" justifyContent="space-between" alignItems="flex-start">
+                  <Box>
+                    <Typography fontSize={14.5} fontWeight={900} color="#0F172A">
+                      {deployLeave?.name || "Leave Applicant"}
+                    </Typography>
+                    <Typography fontSize={12} color="#64748B" fontWeight={700}>
+                      ID: {deployLeave?.employeeId} · {deployLeave?.designation || "Staff"}
+                    </Typography>
+                  </Box>
+                  <Box sx={{ textAlign: "right" }}>
+                    <Chip
+                      size="small"
+                      label={deployLeave?.leaveType || "Leave"}
+                      sx={{ bgcolor: "#FEE2E2", color: "#991B1B", fontWeight: 800 }}
+                    />
+                    <Typography fontSize={11} color="#64748B" sx={{ mt: 0.4 }}>
+                      Date: {deploySlot.date}
+                    </Typography>
+                  </Box>
+                </Stack>
+              </Stack>
+            </Paper>
+
+            {/* 2. Replacement Candidate Selector */}
+            <Paper
+              variant="outlined"
+              sx={{
+                p: 1.8,
+                borderRadius: 3,
+                bgcolor: "#FFFFFF",
+                borderColor: "#E2E8F0",
+              }}
+            >
+              <Stack spacing={1.5}>
+                <Stack direction="row" justifyContent="space-between" alignItems="center">
+                  <Typography fontSize={11} fontWeight={900} color="#475569" sx={{ letterSpacing: 0.5 }}>
+                    REPLACEMENT CANDIDATE (DEPLOYED PERSON)
+                  </Typography>
+                  {deployCandidate && (
+                    <Chip
+                      size="small"
+                      label="Dragged Candidate"
+                      sx={{ fontWeight: 850, bgcolor: "#EDE9FE", color: "#6D28D9" }}
+                    />
+                  )}
+                </Stack>
+
+                {deployCandidate ? (
+                  <Box sx={{ p: 1.2, bgcolor: "#F8FAFC", borderRadius: 2, border: "1px solid #E2E8F0" }}>
+                    <Stack direction="row" justifyContent="space-between" alignItems="center">
+                      <Box>
+                        <Typography fontSize={14} fontWeight={900} color="#0F172A">
+                          {deployCandidate.name || deployCandidate.employeeId}
+                        </Typography>
+                        <Typography fontSize={11.5} color="#64748B">
+                          ID: {deployCandidate.employeeId} · Current: {deployCandidate.sourceDuty || "Off / Rest Pool"}
+                        </Typography>
+                      </Box>
+                      <Button
+                        size="small"
+                        onClick={() => setDeployCandidate(null)}
+                        sx={{ fontSize: 11, textTransform: "none", color: "#6D28D9", fontWeight: 800 }}
+                      >
+                        Change Candidate
+                      </Button>
+                    </Stack>
+                  </Box>
+                ) : (
+                  <Autocomplete
+                    options={deployCandidateOptions}
+                    loading={deployCandidateLoading}
+                    getOptionLabel={(opt) =>
+                      typeof opt === "string"
+                        ? opt
+                        : `${opt.name || opt.employeeId} (${opt.employeeId}) · ${opt.assignedDuty || "Duty"}`
+                    }
+                    onChange={(e, val) => {
+                      if (val) {
+                        setDeployCandidate({
+                          employeeId: val.employeeId,
+                          name: val.name,
+                          designation: val.designation,
+                          sourceDuty: val.assignedDuty,
+                          groupName: val.groupName,
+                        });
+                      }
+                    }}
+                    renderInput={(params) => (
+                      <TextField
+                        {...params}
+                        size="small"
+                        label="Select from Available Candidates on this Date"
+                        placeholder="Search employee name or ID"
+                      />
+                    )}
+                  />
+                )}
+              </Stack>
+            </Paper>
+
+            {/* 3. C-OFF Database Creation & Policy Guarantee */}
+            <Paper
+              variant="outlined"
+              sx={{
+                p: 1.8,
+                borderRadius: 3,
+                bgcolor: "#F0FDF4",
+                borderColor: "#BBF7D0",
+              }}
+            >
+              <Stack spacing={1}>
+                <Stack direction="row" alignItems="center" spacing={1}>
+                  <CheckCircle2 size={16} color="#16A34A" />
+                  <Typography fontSize={12} fontWeight={900} color="#15803D">
+                    C-OFF DATABASE RECORD BUILDING
+                  </Typography>
+                </Stack>
+                <Typography fontSize={11.5} color="#166534" sx={{ lineHeight: 1.5 }}>
+                  Deploying this replacement creates an official credit in <strong>compensatory_off_collection</strong> with 1-year validity. The employee will immediately see this credit in their <strong>C-OFF Ledger</strong> and can avail it in Leave Management.
+                </Typography>
+                <FormControl size="small" sx={{ mt: 0.5 }}>
+                  <InputLabel>Replacement Mode</InputLabel>
+                  <Select
+                    value={deployMode}
+                    label="Replacement Mode"
+                    onChange={(e) => setDeployMode(e.target.value)}
+                    sx={{ bgcolor: "#FFFFFF", borderRadius: 2 }}
+                  >
+                    <MenuItem value="double" sx={{ fontWeight: 800 }}>
+                      ⭐ Double Duty / Rest Day (Awards 1 C-OFF Credit in Database)
+                    </MenuItem>
+                    <MenuItem value="normal">
+                      Normal Duty Coverage
+                    </MenuItem>
+                  </Select>
+                </FormControl>
+              </Stack>
+            </Paper>
+
+            {/* 4. Notes & Details */}
+            <TextField
+              size="small"
+              label="Reason / Notes"
+              fullWidth
+              value={deployReason}
+              onChange={(e) => setDeployReason(e.target.value)}
+            />
+          </Stack>
+        </DialogContent>
+
+        <DialogActions sx={{ p: 2, bgcolor: "#FFFFFF" }}>
+          <Button disabled={deploySaving} onClick={() => setDeployModalOpen(false)} sx={{ fontWeight: 700 }}>
+            Cancel
+          </Button>
+          <Button
+            variant="contained"
+            disabled={deploySaving || !deployCandidate?.employeeId}
+            onClick={handleDeploySubmit}
+            sx={{
+              bgcolor: "#059669 !important",
+              color: "#FFF",
+              fontWeight: 900,
+              textTransform: "none",
+              borderRadius: 2,
+              px: 2.5,
+              py: 0.8,
+              boxShadow: "0 4px 14px rgba(5, 150, 105, 0.35)",
+            }}
+          >
+            {deploySaving ? <CircularProgress size={18} color="inherit" /> : "Deploy Replacement & Create C-OFF"}
           </Button>
         </DialogActions>
       </Dialog>

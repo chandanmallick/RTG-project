@@ -60,7 +60,14 @@ DEFAULT_ROSTER_HEADER = {
 
 
 def roster_header(value: dict | None) -> dict:
-    return {**DEFAULT_ROSTER_HEADER, **(value or {})}
+    val = value or {}
+    return {
+        "organizationHindi": val.get("organizationHindi") or DEFAULT_ROSTER_HEADER["organizationHindi"],
+        "officeHindi": val.get("officeHindi") or DEFAULT_ROSTER_HEADER["officeHindi"],
+        "organizationEnglish": val.get("organizationEnglish") or DEFAULT_ROSTER_HEADER["organizationEnglish"],
+        "officeEnglish": val.get("officeEnglish") or DEFAULT_ROSTER_HEADER["officeEnglish"],
+        "rosterTitle": val.get("rosterTitle") or DEFAULT_ROSTER_HEADER["rosterTitle"],
+    }
 
 
 def oid(value: str) -> ObjectId:
