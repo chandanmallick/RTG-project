@@ -1,4 +1,4 @@
-﻿# roster_api.py
+# roster_api.py
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from datetime import datetime, timedelta
@@ -722,6 +722,9 @@ def download_roster_pdf(data: dict):
         key=lambda x: int(x["groupName"].split("-")[-1])
     )
 
+    logo_file = os.path.normpath(os.path.join(BASE_DIR, "..", "..", "frontend", "public", "logo.png"))
+    logo_path = logo_file.replace("\\", "/") if os.path.exists(logo_file) else ""
+
     html_content = template.render(
         roster_data=roster_data,
         group_details=group_details,
@@ -736,10 +739,9 @@ def download_roster_pdf(data: dict):
         sign_name_hindi=sign_name_hindi,
         sign_designation=sign_designation,
         sign_designation_hindi=sign_designation_hindi,
-        sign_employee_id=sign_employee_id
-        # sign_designation = data.get("signedDesignation", "")
+        sign_employee_id=sign_employee_id,
+        logo_path=logo_path
     )
-    print(html_content, roster_data)
 
     temp_html = os.path.join(BASE_DIR, "temp_roster.html")
     with open(temp_html, "w", encoding="utf-8") as f:

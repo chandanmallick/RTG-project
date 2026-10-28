@@ -18,6 +18,7 @@ from crew_legacy.database.database_mongo import (
     compensatory_off_collection,
     deleted_leave_collection,
     page_access_collection,
+    organization_unit_collection,
     roster_group_collection,
     roster_master_collection,
     holiday_master_collection,

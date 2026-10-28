@@ -10,6 +10,7 @@ from crew_legacy.database.database_mongo import (
     employee_daily_collection,
     leave_request_collection,
     duty_switch_collection,
+    roster_group_collection,
 )
 from crew_legacy.api.leave_api import is_admin, validate_block_dates, blocked_period_staffing, export_blocked_period_staffing
 
@@ -20,6 +21,30 @@ def department_ids(employee):
     from crew_legacy.api.admin_api import resolve_employee_organization
     resolved = resolve_employee_organization(employee.get("manualFunctionIds", employee.get("functionIds")), str(employee.get("userId") or employee.get("employeeId") or ""))
     return set(str(value) for value in resolved.get("departmentIds", []))
+
+
+def resolve_employee_group_map(records=None):
+    emp_to_group = {}
+    try:
+        for g in roster_group_collection.find({"isActive": {"$ne": False}}, {"groupName": 1, "members": 1, "shiftInCharge": 1}):
+            gname = str(g.get("groupName") or "").strip()
+            sic = g.get("shiftInCharge") or {}
+            if isinstance(sic, dict) and sic.get("employeeId"):
+                emp_to_group[str(sic["employeeId"]).strip()] = gname
+            for m in (g.get("members") or []):
+                if isinstance(m, dict) and m.get("employeeId"):
+                    emp_to_group[str(m["employeeId"]).strip()] = gname
+                elif isinstance(m, str):
+                    emp_to_group[m.strip()] = gname
+    except Exception:
+        pass
+    if records:
+        for r in records:
+            reid = str(r.get("employeeId") or "").strip()
+            rg = str(r.get("groupName") or "").strip()
+            if reid and rg and reid not in emp_to_group:
+                emp_to_group[reid] = rg
+    return emp_to_group
 
 
 def event_access(user):
@@ -64,7 +89,21 @@ def list_events(user=Depends(get_authenticated_user)):
         scope = set(item.get("departmentIds") or [])
         if not access["allowAll"] and scope and not scope.intersection(own | managed):
             continue
-        rows.append({"id": str(item["_id"]), "title": item.get("title") or item.get("reason", "Special event"), "reason": item.get("reason", ""), "startDate": item["startDate"], "endDate": item["endDate"], "submissionDeadline": item.get("submissionDeadline", ""), "departmentIds": list(scope), "departmentNames": item.get("departmentNames", []), "leaveBlocked": item.get("leaveBlocked", True), "canManage": access["canManage"] and (access["allowAll"] or bool(scope) and scope.issubset(managed))})
+        rows.append({
+            "id": str(item["_id"]),
+            "title": item.get("title") or item.get("reason", "Special event"),
+            "reason": item.get("reason", ""),
+            "startDate": item["startDate"],
+            "endDate": item["endDate"],
+            "submissionDeadline": item.get("submissionDeadline", ""),
+            "departmentIds": list(scope),
+            "departmentNames": item.get("departmentNames", []),
+            "leaveBlocked": item.get("leaveBlocked", True),
+            "rosterCommitted": bool(item.get("rosterCommitted", False)),
+            "rosterCommittedAt": item.get("rosterCommittedAt").strftime("%Y-%m-%d %H:%M") if item.get("rosterCommittedAt") else None,
+            "rosterCommittedBy": item.get("rosterCommittedBy"),
+            "canManage": access["canManage"] and (access["allowAll"] or bool(scope) and scope.issubset(managed)),
+        })
     return rows
 
 
@@ -99,6 +138,50 @@ def block_event(event_id: str, data: dict, user=Depends(get_authenticated_user))
         raise HTTPException(400, "blocked must be true or false")
     system_settings_collection.update_one({"_id": item["_id"], "type": "leave_block"}, {"$set": {"leaveBlocked": data["blocked"]}, "$push": {"eventAudit": {"blocked": data["blocked"], "actor": str(user.get("employeeId")), "at": datetime.utcnow()}}})
     return {"message": "No leave application in this period" if data["blocked"] else "Leave applications reopened; event remains announced"}
+
+
+@router.put("/{event_id}/commit-roster")
+@router.post("/{event_id}/commit-roster")
+def commit_special_duty_roster(event_id: str, data: dict = None, user=Depends(get_authenticated_user)):
+    """
+    Accept or commit special duty roster for the event.
+    """
+    item = event_document(event_id)
+    require_scope(user, item.get("departmentIds") or [])
+    payload = data or {}
+    commit = bool(payload.get("commit", True))
+    notes = str(payload.get("notes") or "").strip()
+    actor_id = str(user.get("employeeId") or "")
+
+    now = datetime.utcnow()
+    update_doc = {
+        "rosterCommitted": commit,
+        "rosterCommittedAt": now if commit else None,
+        "rosterCommittedBy": actor_id if commit else None,
+    }
+
+    audit_entry = {
+        "action": "commit_special_duty_roster" if commit else "reopen_special_duty_roster",
+        "actor": actor_id,
+        "at": now,
+        "notes": notes,
+    }
+
+    system_settings_collection.update_one(
+        {"_id": item["_id"], "type": "leave_block"},
+        {
+            "$set": update_doc,
+            "$push": {"eventAudit": audit_entry},
+        },
+    )
+
+    event_title = item.get("title") or "Special Event"
+    status_msg = "committed and accepted successfully" if commit else "reopened for draft edits"
+    return {
+        "success": True,
+        "rosterCommitted": commit,
+        "message": f"Special duty roster for '{event_title}' {status_msg}.",
+    }
 
 
 @router.get("/{event_id}/staffing")
@@ -234,6 +317,9 @@ def get_special_roster_matrix(
 
     replacement_requirements = []
 
+    # Resolve employee groups from roster_group_collection & daily records
+    emp_to_group = resolve_employee_group_map(records)
+
     for l in leaves:
         ldate = str(l.get("date") or "").strip()
         if ldate in grid:
@@ -246,6 +332,7 @@ def get_special_roster_matrix(
                 "name": str(l.get("employeeName") or l.get("name") or eid),
                 "designation": str(l.get("designation") or "Staff"),
                 "department": str(l.get("department") or ""),
+                "groupName": str(l.get("groupName") or "").strip() or emp_to_group.get(eid, ""),
                 "assignedDuty": assigned_duty,
                 "leaveType": str(l.get("leaveType") or "Leave"),
                 "leaveId": str(l.get("_id")),
@@ -281,7 +368,7 @@ def get_special_roster_matrix(
             "employeeId": eid,
             "name": str(r.get("name") or eid),
             "designation": str(r.get("designation") or "Staff"),
-            "groupName": str(r.get("groupName") or ""),
+            "groupName": str(r.get("groupName") or "").strip() or emp_to_group.get(eid, ""),
             "assignedDuty": assigned_duty,
             "normalizedDuty": norm,
             "onLeave": False,
@@ -309,8 +396,22 @@ def get_special_roster_matrix(
             "startDate": event_item.get("startDate"),
             "endDate": event_item.get("endDate"),
             "leaveBlocked": bool(event_item.get("leaveBlocked")),
+            "rosterCommitted": bool(event_item.get("rosterCommitted", False)),
+            "rosterCommittedAt": event_item.get("rosterCommittedAt").strftime("%Y-%m-%d %H:%M") if event_item.get("rosterCommittedAt") else None,
+            "rosterCommittedBy": event_item.get("rosterCommittedBy"),
             "departmentNames": event_item.get("departmentNames") or [],
         }
+
+    from crew_legacy.services.replacement_roster_service import get_replacement_roster_config
+    cfg = get_replacement_roster_config()
+    sic_pool = [x for x in (cfg.get("sicPool") or []) if x.get("isActive", True)]
+    se_pool = [x for x in (cfg.get("shiftEngineerPool") or []) if x.get("isActive", True)]
+    sequential_pools = [
+        {"id": "all_pools", "name": f"All Created Sequential Pools ({len(sic_pool) + len(se_pool)} members)", "count": len(sic_pool) + len(se_pool)},
+        {"id": "sic", "name": f"SIC Pool ({len(sic_pool)} members)", "count": len(sic_pool)},
+        {"id": "shift_engineer", "name": f"Shift Engineer Pool ({len(se_pool)} members)", "count": len(se_pool)},
+        {"id": "departments", "name": "Department Manpower Pools", "count": 0},
+    ]
 
     return {
         "dates": dates,
@@ -319,6 +420,7 @@ def get_special_roster_matrix(
         "grid": grid,
         "replacementRequirements": replacement_requirements,
         "departments": departments,
+        "sequentialPools": sequential_pools,
         "event": event_summary,
     }
 
@@ -329,13 +431,18 @@ def sequential_allocate_department_manpower(
     user=Depends(get_authenticated_user),
 ):
     """
-    Roster for manpower from another department:
-    Allocates manpower sequentially from the selected department to where replacement
-    is required (as marked by SIC or DIC, or surge coverage slots).
+    Roster from created sequential roster pool or multi-department selection:
+    Allocates manpower sequentially to fill duties requiring replacement (marked by SIC/DIC)
+    or surge coverage slots.
     """
-    source_dept = str(payload.get("sourceDepartment") or "").strip()
-    if not source_dept:
-        raise HTTPException(400, "Source department is required")
+    source_pool = str(payload.get("sourcePool") or "all_pools").strip()
+    raw_depts = payload.get("sourceDepartments") or payload.get("sourceDepartment") or []
+    if isinstance(raw_depts, str):
+        source_depts = [d.strip() for d in raw_depts.split(",") if d.strip()]
+    elif isinstance(raw_depts, list):
+        source_depts = [str(d).strip() for d in raw_depts if str(d).strip()]
+    else:
+        source_depts = []
 
     start_date = str(payload.get("startDate") or "").strip()
     end_date = str(payload.get("endDate") or "").strip()
@@ -343,6 +450,8 @@ def sequential_allocate_department_manpower(
     preview_only = bool(payload.get("previewOnly", False))
     target_shifts = payload.get("targetShifts") or ["Morning", "Evening", "Night"]
     max_duties_per_person = int(payload.get("maxDutiesPerPerson") or 2)
+    allocation_type = str(payload.get("allocationType") or "both").strip() # "leave", "surge", "both"
+    surge_per_shift = max(1, int(payload.get("surgePerShift") or 1))
 
     if event_id and ObjectId.is_valid(event_id):
         item = event_document(event_id)
@@ -359,72 +468,151 @@ def sequential_allocate_department_manpower(
         ACTIVE_LEAVE_STATUSES,
         SHIFT_DUTIES,
         assign_replacement,
+        deploy_additional_manpower,
         employee_id_filter,
     )
+    from crew_legacy.services.replacement_roster_service import get_replacement_roster_config
 
-    # 1. Identify slots requiring replacement / coverage as marked by SIC/DIC
-    leave_query = {
-        "date": {"$gte": start_date, "$lte": end_date},
-        "finalStatus": "Approved",
-        "$or": [
-            {"replacementRequired": True},
-            {"sicReplacementRequired": True},
-            {"dicReplacementRequired": True},
-        ],
-        "$and": [
-            {"$or": [{"replacementAssigned": {"$ne": True}}, {"replacement": None}]},
-        ],
+    # Gather candidate pool
+    candidates = []
+    cfg = get_replacement_roster_config()
+    sic_pool = [x for x in (cfg.get("sicPool") or []) if x.get("isActive", True)]
+    se_pool = [x for x in (cfg.get("shiftEngineerPool") or []) if x.get("isActive", True)]
+
+    if source_pool == "sic":
+        candidates = sic_pool
+    elif source_pool == "shift_engineer":
+        candidates = se_pool
+    elif source_pool == "all_pools":
+        candidates = sic_pool + se_pool
+    else:
+        # source_pool == "departments" or general
+        query = {"isActive": {"$ne": False}}
+        if source_depts:
+            query["$or"] = [
+                {"department": {"$in": source_depts}},
+                {"departments": {"$in": source_depts}},
+            ]
+        candidates = list(employee_collection.find(query).sort([("name", 1), ("employeeId", 1)]))
+
+    # If source_depts is provided and source_pool was sic/shift_engineer/all_pools, filter candidates by department
+    if source_depts and source_pool in ["sic", "shift_engineer", "all_pools"]:
+        cand_ids = [str(c.get("userId") or c.get("employeeId") or "").strip() for c in candidates if str(c.get("userId") or c.get("employeeId") or "").strip()]
+        emp_docs = {
+            str(e.get("userId") or e.get("employeeId") or "").strip(): e
+            for e in employee_collection.find({"$or": [{"userId": {"$in": cand_ids}}, {"employeeId": {"$in": cand_ids}}]})
+        }
+        filtered = []
+        for c in candidates:
+            cid = str(c.get("userId") or c.get("employeeId") or "").strip()
+            emp = emp_docs.get(cid) or {}
+            emp_depts = [str(d).strip() for d in (emp.get("departments") or [emp.get("department")]) if str(d).strip()]
+            if not emp_depts:
+                emp_depts = [str(d).strip() for d in (c.get("departments") or [c.get("department")]) if str(d).strip()]
+            if any(d in source_depts for d in emp_depts):
+                filtered.append(c)
+        if filtered:
+            candidates = filtered
+
+    if not candidates:
+        source_label = f"pool '{source_pool}'" if source_pool != "departments" else f"departments {source_depts}"
+        raise HTTPException(404, f"No active candidates found in selected {source_label}.")
+
+    # Deduplicate candidates while preserving order
+    seen_ids = set()
+    unique_candidates = []
+    for c in candidates:
+        cid = str(c.get("userId") or c.get("employeeId") or "").strip()
+        if cid and cid not in seen_ids:
+            seen_ids.add(cid)
+            unique_candidates.append(c)
+    candidates = unique_candidates
+
+    # Read stored sequential pointer
+    pointer_key = {
+        "type": "sequential_roster_pointer",
+        "sourcePool": source_pool,
+        "departments": sorted(source_depts),
     }
-    leaves_to_replace = list(leave_request_collection.find(leave_query).sort("date", 1))
-
-    # 2. Get active candidates from source department
-    dept_candidates = list(employee_collection.find({
-        "isActive": {"$ne": False},
-        "$or": [
-            {"department": source_dept},
-            {"departments": source_dept},
-        ],
-    }).sort([("name", 1), ("employeeId", 1)]))
-
-    if not dept_candidates:
-        raise HTTPException(404, f"No active employees found in source department '{source_dept}'")
-
-    # 3. Read stored sequential pointer for this department
-    pointer_key = {"type": "department_sequential_pointer", "department": source_dept}
     pointer_doc = system_settings_collection.find_one(pointer_key) or {}
-    start_pointer = int(pointer_doc.get("nextIndex", 0)) % len(dept_candidates)
+    start_pointer = int(pointer_doc.get("nextIndex", 0)) % len(candidates)
+
+    # 1. Gather slots requiring allocation
+    slots_to_fill = []
+    if allocation_type in ["leave", "both"]:
+        leave_query = {
+            "date": {"$gte": start_date, "$lte": end_date},
+            "finalStatus": "Approved",
+            "$or": [
+                {"replacementRequired": True},
+                {"sicReplacementRequired": True},
+                {"dicReplacementRequired": True},
+            ],
+            "$and": [
+                {"$or": [{"replacementAssigned": {"$ne": True}}, {"replacement": None}]},
+            ],
+        }
+        leaves = list(leave_request_collection.find(leave_query).sort("date", 1))
+        for leave in leaves:
+            s = str(leave.get("assignedDuty") or "Morning").strip()
+            if s not in target_shifts and s not in SHIFT_DUTIES:
+                s = target_shifts[0] if target_shifts else "Morning"
+            slots_to_fill.append({
+                "type": "leave_replacement",
+                "date": str(leave.get("date")),
+                "shift": s,
+                "leave": leave,
+                "applicantId": str(leave.get("employeeId") or "").strip(),
+                "applicantName": str(leave.get("employeeName") or leave.get("name") or leave.get("employeeId")),
+            })
+
+    # B) Surge coverage if requested or if no leaves found
+    if allocation_type == "surge" or (allocation_type == "both" and not slots_to_fill):
+        dates = []
+        curr = datetime.strptime(start_date, "%Y-%m-%d")
+        thru = datetime.strptime(end_date, "%Y-%m-%d")
+        while curr <= thru:
+            dates.append(curr.strftime("%Y-%m-%d"))
+            curr += timedelta(days=1)
+
+        for d in dates:
+            for s in target_shifts:
+                for _ in range(surge_per_shift):
+                    slots_to_fill.append({
+                        "type": "surge_coverage",
+                        "date": d,
+                        "shift": s,
+                        "leave": None,
+                        "applicantId": None,
+                        "applicantName": None,
+                    })
 
     allocations = []
     unallocated_slots = []
     curr_idx = start_pointer
-    duty_counts = {str(c.get("userId") or c.get("employeeId") or "").strip(): 0 for c in dept_candidates}
-
+    duty_counts = {str(c.get("userId") or c.get("employeeId") or "").strip(): 0 for c in candidates}
     actor_id = str(user.get("employeeId") or "").strip()
+    emp_to_group = resolve_employee_group_map()
 
-    for leave in leaves_to_replace:
-        ldate = str(leave.get("date") or "").strip()
-        assigned_duty = str(leave.get("assignedDuty") or "Morning").strip()
-        if assigned_duty not in target_shifts and assigned_duty not in SHIFT_DUTIES:
-            assigned_duty = target_shifts[0] if target_shifts else "Morning"
+    for slot in slots_to_fill:
+        sdate = slot["date"]
+        sshift = slot["shift"]
+        slot_type = slot["type"]
+        applicant_id = slot["applicantId"]
 
-        leave_id = str(leave["_id"])
-        applicant_id = str(leave.get("employeeId") or "").strip()
-        applicant_name = str(leave.get("employeeName") or leave.get("name") or applicant_id)
-
-        # Find next eligible candidate from dept_candidates (round-robin)
         assigned_candidate = None
         searched = 0
-        total_candidates = len(dept_candidates)
+        total_candidates = len(candidates)
 
         while searched < total_candidates:
-            candidate = dept_candidates[curr_idx]
+            candidate = candidates[curr_idx]
             cand_id = str(candidate.get("userId") or candidate.get("employeeId") or "").strip()
             cand_name = str(candidate.get("name") or cand_id)
 
             curr_idx = (curr_idx + 1) % total_candidates
             searched += 1
 
-            if not cand_id or cand_id == applicant_id:
+            if not cand_id or (applicant_id and cand_id == applicant_id):
                 continue
 
             if duty_counts[cand_id] >= max_duties_per_person:
@@ -433,7 +621,7 @@ def sequential_allocate_department_manpower(
             # Check if candidate is on leave on this date
             cand_leave = leave_request_collection.find_one({
                 "employeeId": employee_id_filter(cand_id),
-                "date": ldate,
+                "date": sdate,
                 "finalStatus": {"$in": list(ACTIVE_LEAVE_STATUSES)},
             })
             if cand_leave:
@@ -442,12 +630,12 @@ def sequential_allocate_department_manpower(
             # Check if candidate is already scheduled on a shift on this date
             cand_daily = employee_daily_collection.find_one({
                 "employeeId": employee_id_filter(cand_id),
-                "date": ldate,
+                "date": sdate,
             })
             if cand_daily and cand_daily.get("assignedDuty") in SHIFT_DUTIES:
                 continue
 
-            # Candidate is eligible!
+            # Candidate match found!
             assigned_candidate = candidate
             duty_counts[cand_id] += 1
             break
@@ -459,48 +647,59 @@ def sequential_allocate_department_manpower(
 
             if not preview_only:
                 try:
-                    assign_replacement(
-                        leave_id=leave_id,
-                        payload={
-                            "replacementEmployeeId": cand_id,
-                            "mode": "double",
-                            "halfDuty": False,
-                            "reason": f"Sequential department allocation ({source_dept}) by {actor_id}",
-                        },
-                        user=user,
-                    )
+                    if slot_type == "leave_replacement" and slot["leave"]:
+                        assign_replacement(
+                            leave_id=str(slot["leave"]["_id"]),
+                            payload={
+                                "replacementEmployeeId": cand_id,
+                                "mode": "double",
+                                "halfDuty": False,
+                                "reason": f"Sequential roster allocation ({source_pool}) by {actor_id}",
+                            },
+                            user=user,
+                        )
+                    else:
+                        deploy_additional_manpower(
+                            payload={
+                                "date": sdate,
+                                "employeeId": cand_id,
+                                "assignedDuty": sshift,
+                                "reason": f"Sequential surge roster ({source_pool}) by {actor_id}",
+                                "eventId": event_id,
+                                "mode": "double",
+                            },
+                            user=user,
+                        )
                 except Exception as assign_err:
                     unallocated_slots.append({
-                        "date": ldate,
-                        "shift": assigned_duty,
-                        "leaveId": leave_id,
-                        "replacedEmployee": applicant_name,
-                        "reason": f"Allocation failed: {str(assign_err)}",
+                        "date": sdate,
+                        "shift": sshift,
+                        "slotType": slot_type,
+                        "reason": f"Assignment error: {str(assign_err)}",
                     })
                     continue
 
             allocations.append({
-                "date": ldate,
-                "shift": assigned_duty,
-                "leaveId": leave_id,
-                "replacedEmployee": applicant_name,
+                "date": sdate,
+                "shift": sshift,
+                "slotType": "Leave Replacement" if slot_type == "leave_replacement" else "Surge Coverage",
+                "replacedEmployee": slot["applicantName"] or "Surge Slot",
                 "allocatedEmployeeId": cand_id,
                 "allocatedEmployeeName": cand_name,
                 "allocatedDesignation": cand_desig,
-                "sourceDepartment": source_dept,
+                "allocatedGroupName": str(assigned_candidate.get("groupName") or "").strip() or emp_to_group.get(cand_id, ""),
+                "sourcePool": source_pool,
                 "status": "Simulated" if preview_only else "Allocated",
             })
         else:
             unallocated_slots.append({
-                "date": ldate,
-                "shift": assigned_duty,
-                "leaveId": leave_id,
-                "replacedEmployee": applicant_name,
-                "reason": f"Department candidate pool ({source_dept}) exhausted or on leave on {ldate}",
+                "date": sdate,
+                "shift": sshift,
+                "slotType": slot_type,
+                "reason": f"Candidate pool exhausted or unavailable on {sdate}",
             })
 
-    # Save updated pointer if not preview
-    if not preview_only and dept_candidates:
+    if not preview_only and candidates:
         system_settings_collection.update_one(
             pointer_key,
             {"$set": {"nextIndex": curr_idx, "updatedAt": datetime.utcnow()}},
@@ -510,8 +709,9 @@ def sequential_allocate_department_manpower(
     return {
         "success": True,
         "previewOnly": preview_only,
-        "sourceDepartment": source_dept,
-        "totalRequirements": len(leaves_to_replace),
+        "sourcePool": source_pool,
+        "sourceDepartments": source_depts,
+        "totalRequirements": len(slots_to_fill),
         "allocatedCount": len(allocations),
         "unallocatedCount": len(unallocated_slots),
         "allocations": allocations,

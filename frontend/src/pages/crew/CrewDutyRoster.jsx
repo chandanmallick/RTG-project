@@ -1,4 +1,4 @@
-﻿import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Alert,
   Box,
@@ -304,31 +304,31 @@ export default function CrewDutyRoster() {
       {!!rosterData.length && (
         <section className="crew-roster-print">
           {/* Header Layout */}
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", position: "relative", paddingBottom: "8px", borderBottom: "2px solid #000000", marginBottom: "12px" }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", position: "relative", paddingBottom: "3px", borderBottom: "1.5px solid #000000", marginBottom: "5px" }}>
             <div style={{ position: "absolute", left: 0, top: "50%", transform: "translateY(-50%)" }}>
-            <img src="/logo.png" alt="GRID-INDIA" style={{ width: "118px", height: "auto" }} onError={(e) => e.target.style.display = 'none'} />
-          </div>
-            <div style={{ textAlign: "center", color: "#003366", fontFamily: "Arial, sans-serif" }}>
-              <div style={{ fontSize: "15px", fontWeight: "bold" }}>{header.organizationHindi}</div>
-              <div style={{ fontSize: "12px", fontWeight: "bold", marginTop: "1px" }}>{header.officeHindi}</div>
-              <div style={{ fontSize: "14px", fontWeight: "bold", marginTop: "2px" }}>{header.organizationEnglish}</div>
-              <div style={{ fontSize: "12px", fontWeight: "bold", marginTop: "1px" }}>{header.officeEnglish}</div>
-              <div style={{ fontSize: "17px", fontWeight: 800, color: "#0056B3", marginTop: "3px", letterSpacing: "0.5px" }}>{header.rosterTitle}</div>
+              <img src="/logo.png" alt="GRID-INDIA" style={{ width: "88px", height: "auto" }} onError={(e) => (e.target.style.display = "none")} />
+            </div>
+            <div style={{ textAlign: "center", color: "#003366", fontFamily: '"Noto Sans Devanagari", "Nirmala UI", Arial, sans-serif' }}>
+              <div style={{ fontSize: "11px", fontWeight: "bold", lineHeight: "1.2" }}>{header.organizationHindi}</div>
+              <div style={{ fontSize: "9px", fontWeight: "bold", marginTop: "0px", lineHeight: "1.15" }}>{header.officeHindi}</div>
+              <div style={{ fontSize: "10.5px", fontWeight: "bold", marginTop: "1px", lineHeight: "1.2" }}>{header.organizationEnglish}</div>
+              <div style={{ fontSize: "9px", fontWeight: "bold", marginTop: "0px", lineHeight: "1.15" }}>{header.officeEnglish}</div>
+              <div style={{ fontSize: "13px", fontWeight: 800, color: "#0056B3", marginTop: "2px", letterSpacing: "0.5px" }}>{header.rosterTitle}</div>
             </div>
           </div>
 
           {/* Period Display */}
-          <div style={{ fontSize: "15px", fontWeight: "bold", color: "#000000", marginBottom: "10px", fontFamily: "Arial, sans-serif" }}>
+          <div style={{ fontSize: "10.5px", fontWeight: "bold", color: "#000000", marginBottom: "5px", fontFamily: "Arial, sans-serif" }}>
             Period: {formatPrintDateRange(startDate, endDate)}
           </div>
 
           {/* Compact Duty Roster Table */}
-          <table data-crew-table-tools="off" className="crew-roster-print-table" style={{ width: "100%", borderCollapse: "collapse", tableLayout: "auto", fontSize: "10px", fontFamily: "Arial, sans-serif" }}>
+          <table data-crew-table-tools="off" className="crew-roster-print-table" style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed", fontSize: "8.5px", fontFamily: "Arial, sans-serif" }}>
             <thead>
               <tr>
-                <th style={{ border: "1px solid #000000", padding: "4px 6px", background: "#E8E8E8", fontWeight: 800, textAlign: "center" }}>Group</th>
+                <th style={{ border: "1px solid #000000", padding: "2.5px 1px", background: "#E8E8E8", fontWeight: 800, textAlign: "center", width: "55px" }}>Group</th>
                 {dates.map((date) => (
-                  <th key={`print-head-${date}`} title={holidayByDate[date] || undefined} style={{ border: "1px solid #000000", borderBottom: holidayByDate[date] ? "4px solid #A855F7" : "1px solid #000000", padding: "4px 6px", background: holidayByDate[date] ? "#F3E8FF" : "#E8E8E8", color: holidayByDate[date] ? "#581C87" : "#000000", fontWeight: 800, textAlign: "center" }}>
+                  <th key={`print-head-${date}`} title={holidayByDate[date] || undefined} style={{ border: "1px solid #000000", borderBottom: holidayByDate[date] ? "3px solid #A855F7" : "1px solid #000000", padding: "2.5px 1px", background: holidayByDate[date] ? "#F3E8FF" : "#E8E8E8", color: holidayByDate[date] ? "#581C87" : "#000000", fontWeight: 800, textAlign: "center" }}>
                     {new Date(`${date}T00:00:00`).getDate()}{holidayByDate[date] ? " H" : ""}
                   </th>
                 ))}
@@ -337,7 +337,7 @@ export default function CrewDutyRoster() {
             <tbody>
               {rosterData.map((group) => (
                 <tr key={`print-${group.groupName}`}>
-                  <td style={{ border: "1px solid #000000", padding: "5px 6px", fontWeight: 800, background: "#F5F5F5", textAlign: "center" }}>
+                  <td style={{ border: "1px solid #000000", padding: "3px 1px", fontWeight: 800, background: "#F5F5F5", textAlign: "center", width: "55px", fontSize: "8.5px" }}>
                     {group.groupName}
                   </td>
                   {dates.map((date) => {
@@ -353,12 +353,13 @@ export default function CrewDutyRoster() {
                         key={`print-${group.groupName}-${date}`}
                         style={{
                           border: "1px solid #000000",
-                          padding: "5px 6px",
+                          padding: "3px 1px",
                           textAlign: "center",
                           fontWeight: 800,
                           backgroundColor: printBg,
-                          boxShadow: holidayByDate[date] ? "inset 4px 0 #A855F7" : undefined,
-                          color: "#000000"
+                          boxShadow: holidayByDate[date] ? "inset 3px 0 #A855F7" : undefined,
+                          color: "#000000",
+                          fontSize: "8.5px"
                         }}
                       >
                         {duty || "-"}
@@ -370,38 +371,39 @@ export default function CrewDutyRoster() {
             </tbody>
           </table>
 
-          {/* Group Details section */}
-          <div className="crew-roster-print-group-details" style={{ marginTop: "15px", display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "10px", fontFamily: "Arial, sans-serif" }}>
+          {/* Group Details section (4 Compact Cards) */}
+          <div className="crew-roster-print-group-details" style={{ marginTop: "6px", display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "6px", fontFamily: "Arial, sans-serif" }}>
             {groupsToDisplay.map((group, idx) => (
               <div
                 key={group.groupName || idx}
                 style={{
                   border: "1px solid #CCCCCC",
-                  borderRadius: "6px",
+                  borderRadius: "3px",
                   overflow: "hidden",
-                  fontSize: "8.5px",
-                  lineHeight: "1.3"
+                  fontSize: "7.5px",
+                  lineHeight: "1.2",
+                  background: "#FFFFFF"
                 }}
               >
                 {/* Header strip */}
-                <div className="crew-roster-print-group-title" style={{ backgroundColor: "#E2F0D9", borderBottom: "1px solid #CCCCCC", padding: "4px 6px", fontWeight: "bold", color: "#000000" }}>
+                <div className="crew-roster-print-group-title" style={{ backgroundColor: "#E2F0D9", borderBottom: "1px solid #CCCCCC", padding: "2px 4px", fontWeight: "bold", fontSize: "9.5px", color: "#000000" }}>
                   {group.groupName}
                 </div>
                 {/* Content */}
-                <div style={{ padding: "6px" }}>
-                  <div className="crew-roster-print-label" style={{ fontWeight: "bold", marginBottom: "2px" }}>Shift Incharge:</div>
-                  <div className="crew-roster-print-person" style={{ marginBottom: "6px", color: "#000000" }}>
+                <div style={{ padding: "3px 5px" }}>
+                  <div className="crew-roster-print-label" style={{ fontWeight: "bold", marginBottom: "1px", fontSize: "8px", color: "#000000" }}>Shift Incharge:</div>
+                  <div className="crew-roster-print-person" style={{ marginBottom: "3px", color: "#000000", fontSize: "7.5px", lineHeight: "1.2" }}>
                     {group.shiftInCharge ? `${group.shiftInCharge.name} - (${group.shiftInCharge.employeeId}) - ${group.shiftInCharge.designation}` : "Not assigned"}
                   </div>
-                  <div className="crew-roster-print-label" style={{ fontWeight: "bold", marginBottom: "2px" }}>Members:</div>
-                  <div style={{ display: "flex", flexDirection: "column", gap: "1px" }}>
+                  <div className="crew-roster-print-label" style={{ fontWeight: "bold", marginBottom: "1px", fontSize: "8px", color: "#000000" }}>Members:</div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: "0.5px" }}>
                     {(group.members || []).map((member, mIdx) => (
-                      <div className="crew-roster-print-person" key={member.employeeId} style={{ color: "#000000" }}>
+                      <div className="crew-roster-print-person" key={member.employeeId} style={{ color: "#000000", fontSize: "7.5px", lineHeight: "1.2" }}>
                         {mIdx + 1}. {member.name} ({member.designation}) - {member.employeeId}
                       </div>
                     ))}
                     {(!group.members || group.members.length === 0) && (
-                      <div style={{ color: "#999999", fontStyle: "italic" }}>No members</div>
+                      <div style={{ color: "#999999", fontStyle: "italic", fontSize: "7.5px" }}>No members</div>
                     )}
                   </div>
                 </div>
@@ -410,36 +412,40 @@ export default function CrewDutyRoster() {
           </div>
 
           {/* Bilingual Special Instructions section */}
-          <div className="crew-roster-print-notes" style={{ marginTop: "15px", fontSize: "10px", fontFamily: '"Nirmala UI", "Noto Sans Devanagari", Arial, sans-serif' }}>
-            <strong>विशेष निर्देश / Special Instructions:</strong>
-            <div style={{ marginTop: "4px" }}>
+          <div className="crew-roster-print-notes" style={{ marginTop: "6px", fontSize: "7.5px", fontFamily: '"Nirmala UI", "Noto Sans Devanagari", Arial, sans-serif', color: "#000000" }}>
+            <strong style={{ fontSize: "8.5px", color: "#000000", fontWeight: "bold" }}>विशेष निर्देश / Special Instructions:</strong>
+            <div style={{ marginTop: "2px" }}>
               {(instructions || lastPublishedRoster?.instructions || DEFAULT_INSTRUCTIONS).split("\n").map((line, lIdx) => (
-                <div key={lIdx} style={{ marginBottom: "2.5px", lineHeight: "1.4", color: "#000000" }}>{line}</div>
+                <div key={lIdx} style={{ marginBottom: "1.5px", lineHeight: "1.25", color: "#000000", fontSize: "7.5px" }}>{line}</div>
               ))}
             </div>
           </div>
 
-          {/* Distribution section */}
-          <div className="crew-roster-print-notes" style={{ marginTop: "15px", fontSize: "10px", fontFamily: "Arial, sans-serif" }}>
-            <strong>Distribution:</strong>
-            <div style={{ marginTop: "4px" }}>
+          {/* Bottom section: Distribution (Left) & Signature (Right) */}
+          <div className="crew-roster-print-bottom-row" style={{ marginTop: "5px", display: "flex", justifyContent: "space-between", alignItems: "flex-end", gap: "15px", pageBreakInside: "avoid" }}>
+            <div className="crew-roster-print-distribution" style={{ flex: 1, fontSize: "7.5px", fontFamily: "Arial, sans-serif" }}>
+              <strong style={{ fontSize: "8px", color: "#000000", display: "block", marginBottom: "1px" }}>Distribution:</strong>
               {(distribution || lastPublishedRoster?.distribution || DEFAULT_DISTRIBUTION).split("\n").map((line, lIdx) => (
-                <div key={lIdx} style={{ marginBottom: "2.5px", lineHeight: "1.4", color: "#000000" }}>{line}</div>
+                <div key={lIdx} style={{ marginBottom: "1px", lineHeight: "1.2", color: "#000000", fontSize: "7.5px" }}>{line}</div>
               ))}
             </div>
-          </div>
 
-          <div className="crew-roster-print-footer" style={{ marginTop: "18px", display: "flex", justifyContent: "space-between", alignItems: "flex-end", gap: "20px", pageBreakInside: "avoid" }}>
-            <div className="crew-roster-print-timestamp" style={{ textAlign: "left", fontFamily: "Arial, sans-serif", fontSize: "9px", color: "#7B8BAA", fontWeight: "600", paddingLeft: "2px" }}>
-              Generated on {getPrintGenerationTime()}
-            </div>
             {signedBy && (
-              <div className="crew-roster-print-signature" style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", fontFamily: "Arial, sans-serif", fontSize: "11px", textAlign: "right", paddingRight: "15px" }}>
-                <div style={{ fontWeight: "bold", marginBottom: "2px" }}>{formatBilingual(signingAuthority?.name, signingAuthority?.nameHindi)}</div>
-                <div style={{ marginBottom: "2px" }}>{formatBilingual(signingAuthority?.designation, signingAuthority?.designationHindi)}</div>
-                <div>ERLDC, GRID-INDIA</div>
+              <div className="crew-roster-print-signature-block" style={{ textAlign: "right", fontFamily: '"Nirmala UI", "Noto Sans Devanagari", Arial, sans-serif', fontSize: "7.5px", minWidth: "220px", paddingRight: "8px" }}>
+                <div className="crew-roster-print-signature-name" style={{ fontWeight: "bold", fontSize: "8.5px", marginBottom: "1px", color: "#000000" }}>
+                  {formatBilingual(signingAuthority?.name, signingAuthority?.nameHindi)}
+                </div>
+                <div style={{ marginBottom: "1px", fontSize: "8px", color: "#000000" }}>
+                  {formatBilingual(signingAuthority?.designation, signingAuthority?.designationHindi)}
+                </div>
+                <div style={{ fontSize: "8px", color: "#000000" }}>ERLDC, GRID-INDIA</div>
               </div>
             )}
+          </div>
+
+          {/* Timestamp Footer */}
+          <div className="crew-roster-print-timestamp" style={{ textAlign: "left", fontFamily: "Arial, sans-serif", fontSize: "7px", color: "#555555", marginTop: "3px", paddingLeft: "1px" }}>
+            Generated on {getPrintGenerationTime()}
           </div>
         </section>
       )}

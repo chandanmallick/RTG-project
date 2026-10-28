@@ -5,49 +5,83 @@
 
 <style>
 
-/* ================= PAGE ================= */
+/* ================= PAGE SETUP ================= */
 
 @page {
     size: A4 landscape;
-    margin: 8mm 12mm 12mm 12mm;
+    margin: 6mm 8mm 6mm 8mm;
 }
 
 body {
-    font-family: "Noto Sans Devanagari", "Mangal", "Arial Unicode MS", sans-serif;
-    font-size: 11.5px;
+    font-family: "Noto Sans Devanagari", "Mangal", "Arial Unicode MS", "Calibri", "Segoe UI", Arial, sans-serif;
+    font-size: 8px;
     margin: 0;
     padding: 0;
+    color: #000000;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
 }
 
 /* ================= HEADER ================= */
 
 .header-table {
     width: 100%;
-    border-bottom: 1px solid #444;
-    margin-bottom: 4px;
+    border-bottom: 1.5px solid #000000;
+    margin-bottom: 3px;
+    padding-bottom: 2px;
 }
 
 .logo {
-    width: 95px;
+    width: 82px;
+    height: auto;
 }
 
 .title {
     text-align: center;
-    color: #0d47a1;
-    line-height: 1.1;
+    color: #003366;
+    line-height: 1.2;
 }
 
-.title h2,
-.title h3 {
-    margin: 0;
-    font-size: 13px;
+.header-hi-primary {
+    font-size: 11px;
+    font-weight: 700;
+    color: #003366;
+}
+
+.header-hi-secondary {
+    font-size: 9.5px;
     font-weight: 600;
+    color: #003366;
+}
+
+.header-en-primary {
+    font-size: 10.5px;
+    font-weight: 700;
+    margin-top: 1px;
+    color: #003366;
+}
+
+.header-en-secondary {
+    font-size: 9.5px;
+    font-weight: 600;
+    color: #003366;
 }
 
 .main-title {
-    font-weight: 700;
-    font-size: 15px;
+    font-weight: 800;
+    font-size: 13px;
+    color: #0056B3;
+    letter-spacing: 0.5px;
     margin-top: 2px;
+}
+
+/* ================= PERIOD ================= */
+
+.period-bar {
+    font-weight: bold;
+    font-size: 10px;
+    margin-bottom: 4px;
+    color: #000000;
 }
 
 /* ================= ROSTER TABLE ================= */
@@ -55,126 +89,171 @@ body {
 .roster-table {
     width: 100%;
     border-collapse: collapse;
-    font-size: 10.5px;
-    margin-top: 5px;
+    table-layout: fixed;
+    font-size: 8.5px;
+    margin-top: 2px;
 }
 
 .roster-table th,
 .roster-table td {
-    border: 1px solid #444;
-    padding: 2px;
+    border: 1px solid #000000;
+    padding: 2.5px 1px;
     text-align: center;
+    vertical-align: middle;
+    font-size: 8.5px;
+    line-height: 1.2;
+    color: #000000;
 }
 
 .roster-table th {
-    background-color: #dbeafe;
-    font-weight: bold;
+    background-color: #E8E8E8;
+    font-weight: 800;
 }
+
+.roster-table th:first-child,
+.roster-table td:first-child {
+    width: 55px;
+    background-color: #F5F5F5;
+    font-weight: 800;
+    text-align: center;
+}
+
+/* Shift duty cell styles */
+.duty-E { background-color: #FFF2CC !important; font-weight: 800; }
+.duty-M { background-color: #DDEBF7 !important; font-weight: 800; }
+.duty-N { background-color: #E2F0D9 !important; font-weight: 800; }
+.duty-O { background-color: #FCE4D6 !important; font-weight: 800; }
 
 /* ================= GROUP DETAILS ================= */
 
 .group-table {
     width: 100%;
-    border-collapse: collapse;
+    border-collapse: separate;
+    border-spacing: 5px;
     table-layout: fixed;
-    margin-top: 6px;
-    /* Use print units. Fixed layout prevents Chrome from shrinking the page. */
-    font-size: 14px !important;
-    line-height: 1.35;
-    color: #000000 !important;
+    margin-top: 5px;
 }
 
-.group-table td {
+.group-cell {
     width: 25%;
     vertical-align: top;
-    border: 1px solid #ccc;
-    padding: 6px;
-    color: #000000 !important;
-    overflow-wrap: anywhere;
-    word-break: normal;
+    border: 1px solid #CCCCCC;
+    border-radius: 3px;
+    padding: 0;
+    background-color: #FFFFFF;
+    overflow: hidden;
 }
 
 .group-title {
-    background-color: #e8f5e9;
+    background-color: #E2F0D9;
     color: #000000;
     font-weight: bold;
-    font-size: 18px !important;
-    padding: 4px;
-    margin-bottom: 6px;
+    font-size: 9.5px;
+    padding: 2.5px 5px;
+    border-bottom: 1px solid #CCCCCC;
 }
 
-/* ================= SIGNATURE ================= */
+.group-inner {
+    padding: 3px 5px;
+}
 
-.signature-table {
+.group-label {
+    font-weight: bold;
+    font-size: 8px;
+    color: #000000;
+    margin-bottom: 1px;
+}
+
+.group-person {
+    font-size: 7.5px;
+    line-height: 1.2;
+    color: #000000;
+    margin-bottom: 3px;
+}
+
+.group-member {
+    font-size: 7.5px;
+    line-height: 1.2;
+    color: #000000;
+}
+
+/* ================= INSTRUCTIONS ================= */
+
+.instructions-section {
+    margin-top: 5px;
+    color: #000000;
+    font-size: 7.5px;
+    line-height: 1.25;
+}
+
+.instructions-title {
+    color: #000000;
+    font-size: 8.5px;
+    font-weight: bold;
+    margin-bottom: 2px;
+}
+
+/* ================= BOTTOM ROW (DISTRIBUTION & SIGNATURE SIDE BY SIDE) ================= */
+
+.bottom-table {
     width: 100%;
-    margin-top: 25px;
+    border-collapse: collapse;
+    margin-top: 5px;
+    page-break-inside: avoid;
 }
 
-.signature-right {
+.bottom-left-dist {
+    width: 62%;
+    vertical-align: top;
+    font-size: 7.5px;
+    line-height: 1.2;
+    color: #000000;
+    padding-right: 15px;
+}
+
+.dist-title {
+    font-size: 8px;
+    font-weight: bold;
+    color: #000000;
+    margin-bottom: 1px;
+}
+
+.bottom-right-sig {
+    width: 38%;
+    vertical-align: bottom;
     text-align: right;
-    font-size: 11.5px;
+    font-size: 7.5px;
+    line-height: 1.25;
+    color: #000000;
+    padding-right: 8px;
+}
+
+.sig-name {
+    font-weight: bold;
+    font-size: 8.5px;
+    color: #000000;
+    margin-bottom: 1px;
+}
+
+.sig-desig {
+    font-size: 8px;
+    color: #000000;
+    margin-bottom: 1px;
+}
+
+.sig-org {
+    font-size: 8px;
+    color: #000000;
 }
 
 /* ================= FOOTER ================= */
 
 .footer {
-    position: fixed;
-    bottom: 5mm;
-    left: 10mm;
-    right: auto;
-    font-size: 9.5px;
-    color: #444;
+    font-size: 7px;
+    color: #555555;
+    margin-top: 3px;
     text-align: left;
 }
-
-.group-table b {
-    font-size: 16px !important;
-    color: #000000 !important;
-}
-
-.group-person-details,
-.group-person-details * {
-    font-size: 14px !important;
-    line-height: 1.35 !important;
-    color: #000000 !important;
-    font-weight: 400 !important;
-}
-
-.group-person-details b {
-    font-size: 16px !important;
-    font-weight: 800 !important;
-}
-
-.print-section {
-    margin-top: 10px;
-    color: #000000 !important;
-    font-size: 14px !important;
-    line-height: 1.4 !important;
-    font-weight: 400 !important;
-}
-
-.print-section-title {
-    color: #000000 !important;
-    font-size: 16px !important;
-    font-weight: 800 !important;
-}
-
-.title > h2,
-.title > h3 {
-    display: none;
-}
-
-.header-hi-primary,
-.header-hi-secondary,
-.header-en-primary,
-.header-en-secondary {
-    font-weight: 600;
-}
-
-.header-hi-primary,
-.header-en-primary { font-size: 13px; }
-.header-hi-secondary,
-.header-en-secondary { font-size: 12px; }
 
 </style>
 </head>
@@ -183,11 +262,14 @@ body {
 
 <!-- ================= HEADER ================= -->
 
-<table class="header-table">
+<table class="header-table" cellspacing="0" cellpadding="0">
 <tr>
-    <td style="width:110px;">
-        <!-- IMPORTANT: logo_path must be passed from backend as absolute path -->
+    <td style="width:85px; vertical-align:middle;">
+        {% if logo_path %}
         <img src="file:///{{ logo_path }}" class="logo">
+        {% else %}
+        <img src="file:///d:/Application/RTG/frontend/public/logo.png" class="logo">
+        {% endif %}
     </td>
 
     <td class="title">
@@ -195,22 +277,18 @@ body {
         <div class="header-hi-secondary">{{ header.officeHindi }}</div>
         <div class="header-en-primary">{{ header.organizationEnglish }}</div>
         <div class="header-en-secondary">{{ header.officeEnglish }}</div>
-        <h2>ग्रिड कंट्रोलर ऑफ इंडिया लिमिटेड (ग्रिड-इंडिया)</h2>
-        <h3>पूर्वी क्षेत्रीय भार प्रेषण केंद्र, कोलकाता</h3>
-        <h3>Grid Controller of India Limited (GRID-INDIA)</h3>
-        <h3>EASTERN REGIONAL LOAD DESPATCH CENTRE, KOLKATA</h3>
         <div class="main-title">{{ header.rosterTitle }}</div>
     </td>
 </tr>
 </table>
 
-<div style="font-weight:bold; font-size:16px; margin-bottom:10px;">
+<div class="period-bar">
   Period: {{ start_date }} to {{ end_date }}
 </div>
 
 <!-- ================= ROSTER TABLE ================= -->
 
-<table class="roster-table" border="1" cellspacing="0" cellpadding="4">
+<table class="roster-table" cellspacing="0" cellpadding="0">
 <tr>
     <th>Group</th>
     {% for d in dates %}
@@ -220,10 +298,21 @@ body {
 
 {% for group in roster_data %}
 <tr>
-    <td><b>{{ group.groupName }}</b></td>
+    <td>{{ group.groupName }}</td>
 
     {% for d in dates %}
-    <td>{{ group.data.get(d, '') }}</td>
+    {% set val = group.data.get(d, '') %}
+    {% if val.startswith('E') %}
+    <td class="duty-E">{{ val }}</td>
+    {% elif val.startswith('M') %}
+    <td class="duty-M">{{ val }}</td>
+    {% elif val.startswith('N') %}
+    <td class="duty-N">{{ val }}</td>
+    {% elif val.startswith('O') %}
+    <td class="duty-O">{{ val }}</td>
+    {% else %}
+    <td>{{ val or '-' }}</td>
+    {% endif %}
     {% endfor %}
 </tr>
 {% endfor %}
@@ -232,33 +321,31 @@ body {
 
 <!-- ================= GROUP DETAILS ================= -->
 
-<table class="group-table">
+<table class="group-table" cellspacing="0" cellpadding="0">
 <tr>
 
 {% for g in group_details %}
-<td>
+<td class="group-cell">
 
 <div class="group-title">
-Group {{ g.get('groupName','') }}
+{% if g.get('groupName','').startswith('Group') %}{{ g.get('groupName','') }}{% else %}Group {{ g.get('groupName','') }}{% endif %}
 </div>
 
-<div class="group-person-details">
-<b>Shift Incharge:</b><br>
-{{ g.get('shiftInCharge', {}).get('name','') }}
--
-({{ g.get('shiftInCharge', {}).get('employeeId','') }})
--
-{{ g.get('shiftInCharge', {}).get('designation','') }}
+<div class="group-inner">
+<div class="group-label">Shift Incharge:</div>
+<div class="group-person">
+{{ g.get('shiftInCharge', {}).get('name','') }} - ({{ g.get('shiftInCharge', {}).get('employeeId','') }}) - {{ g.get('shiftInCharge', {}).get('designation','') }}
+</div>
 
-<br><br>
-
-<b>Members:</b><br>
-
+<div class="group-label">Members:</div>
 {% for m in g.get('members', []) %}
-{{ loop.index }}.
-{{ m.get('name','') }} ({{ m.get('designation','') }}) - {{ m.get('employeeId','') }}
-<br>
+<div class="group-member">
+{{ loop.index }}. {{ m.get('name','') }} ({{ m.get('designation','') }}) - {{ m.get('employeeId','') }}
+</div>
 {% endfor %}
+{% if not g.get('members') %}
+<div style="color:#999; font-style:italic; font-size:7.5px;">No members</div>
+{% endif %}
 </div>
 
 </td>
@@ -269,45 +356,37 @@ Group {{ g.get('groupName','') }}
 
 <!-- ================= INSTRUCTIONS ================= -->
 
-<div class="print-section">
-<div class="print-section-title">विशेष निर्देश / Special Instructions:</div>
+<div class="instructions-section">
+<div class="instructions-title">विशेष निर्देश / Special Instructions:</div>
 {{ instructions | safe }}
 </div>
 
-<div class="print-section">
-<div class="print-section-title">Distribution:</div>
-{{ distribution | safe }}
-</div>
+<!-- ================= BOTTOM ROW: DISTRIBUTION (LEFT) + SIGNATURE (RIGHT) ================= -->
 
-<!-- ================= SIGNATURE ================= -->
-
-<table class="signature-table">
+<table class="bottom-table" cellspacing="0" cellpadding="0">
 <tr>
-<td width="60%"></td>
+    <td class="bottom-left-dist">
+        <div class="dist-title">Distribution:</div>
+        {{ distribution | safe }}
+    </td>
 
-<td width="40%" class="signature-right">
-
-<div style="font-weight:600;">
-  {{ sign_name_english }}
-  {% if sign_name_hindi %}
-    &nbsp; / &nbsp;
-    {{ sign_name_hindi }}
-  {% endif %}
-</div>
-
-<div>
-  {{ sign_designation }}
-  {% if sign_designation_hindi %}
-    &nbsp; / &nbsp;
-    {{ sign_designation_hindi }}
-  {% endif %}
-</div>
-
-<div>
-  ERLDC, GRID-INDIA
-</div>
-
-</td>
+    <td class="bottom-right-sig">
+        <div class="sig-name">
+          {{ sign_name_english }}
+          {% if sign_name_hindi %}
+            / {{ sign_name_hindi }}
+          {% endif %}
+        </div>
+        <div class="sig-desig">
+          {{ sign_designation }}
+          {% if sign_designation_hindi %}
+            / {{ sign_designation_hindi }}
+          {% endif %}
+        </div>
+        <div class="sig-org">
+          ERLDC, GRID-INDIA
+        </div>
+    </td>
 </tr>
 </table>
 

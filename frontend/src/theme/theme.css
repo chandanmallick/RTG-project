@@ -925,13 +925,13 @@
 @media print {
   @page {
     size: A4 landscape;
-    margin: 8mm;
+    margin: 6mm 8mm 6mm 8mm;
   }
 
   body {
     background: #FFFFFF !important;
-    -webkit-print-color-adjust: exact;
-    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
   }
 
   body * {
@@ -949,107 +949,72 @@
     inset: 0 auto auto 0;
     width: 100%;
     color: #000000;
-    font-family: Arial, Helvetica, sans-serif;
-    font-size: 10px;
-    line-height: 1.25;
+    font-family: Arial, "Nirmala UI", "Noto Sans Devanagari", sans-serif;
+    font-size: 8px;
+    line-height: 1.2;
   }
 
   .crew-roster-print-header {
-    display: grid;
-    grid-template-columns: 1.15fr 1fr 1.15fr;
-    align-items: start;
-    gap: 10px;
-    padding-bottom: 6px;
-    border-bottom: 2px solid #000000;
-    margin-bottom: 6px;
-  }
-
-  .crew-roster-print-org {
-    font-size: 18px;
-    font-weight: 800;
-    letter-spacing: 0;
-  }
-
-  .crew-roster-print-subtitle {
-    margin-top: 2px;
-    font-size: 9px;
-    font-weight: 700;
-  }
-
-  .crew-roster-print-title-block {
-    text-align: center;
-  }
-
-  .crew-roster-print-title {
-    font-size: 18px;
-    font-weight: 800;
-    text-transform: uppercase;
-    text-decoration: underline;
+    display: flex !important;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    padding-bottom: 3px !important;
+    border-bottom: 1.5px solid #000000 !important;
+    margin-bottom: 5px !important;
   }
 
   .crew-roster-print-period {
-    margin-top: 3px;
-    font-size: 11px;
-    font-weight: 700;
-  }
-
-  .crew-roster-print-meta {
-    text-align: right;
-    font-size: 9px;
-    font-weight: 700;
+    font-size: 10.5px !important;
+    font-weight: bold !important;
+    color: #000000 !important;
+    margin-bottom: 5px !important;
   }
 
   .crew-roster-print-table {
-    width: 100%;
-    border-collapse: collapse;
-    table-layout: fixed;
-    font-size: 11.5px !important;
+    width: 100% !important;
+    border-collapse: collapse !important;
+    table-layout: fixed !important;
+    font-size: 8.5px !important;
+    margin-top: 4px !important;
   }
 
   .crew-roster-print-table th,
   .crew-roster-print-table td {
-    border: 1px solid #000000;
-    padding: 3px 4px;
-    vertical-align: middle;
-    color: #000000;
-    font-size: 11.5px !important;
-    line-height: 1.35 !important;
+    border: 1px solid #000000 !important;
+    padding: 2.5px 1px !important;
+    vertical-align: middle !important;
+    color: #000000 !important;
+    font-size: 8.5px !important;
+    line-height: 1.2 !important;
+    text-align: center !important;
   }
 
   .crew-roster-print-table th {
     background: #E8E8E8 !important;
-    text-align: center;
-    font-size: 9px;
-    font-weight: 800;
+    text-align: center !important;
+    font-weight: 800 !important;
   }
 
   .crew-roster-group-col {
-    width: 70px;
-  }
-
-  .crew-roster-sic-col {
-    width: 190px;
+    width: 55px !important;
   }
 
   .crew-roster-print-day {
-    font-size: 8px;
-    font-weight: 700;
+    font-size: 8px !important;
+    font-weight: 700 !important;
   }
 
   .crew-roster-print-group {
-    text-align: center;
-    font-weight: 800;
+    text-align: center !important;
+    font-weight: 800 !important;
     background: #F5F5F5 !important;
   }
 
-  .crew-roster-print-people {
-    font-size: 8.5px;
-  }
-
   .crew-roster-duty {
-    text-align: center;
-    font-size: 12px;
-    font-weight: 800;
+    text-align: center !important;
+    font-size: 8.5px !important;
+    font-weight: 800 !important;
   }
 
   .crew-roster-duty-E1,
@@ -1072,19 +1037,52 @@
     background: #FCE4D6 !important;
   }
 
-  .crew-roster-print-footer {
-    display: grid;
-    grid-template-columns: 1fr 0.85fr;
-    gap: 16px;
-    margin-top: 8px;
-    page-break-inside: avoid;
+  .crew-roster-print-group-details {
+    margin-top: 6px !important;
+    display: grid !important;
+    grid-template-columns: repeat(4, 1fr) !important;
+    gap: 6px !important;
+    font-family: Arial, sans-serif !important;
+  }
+
+  .crew-roster-print-group-details,
+  .crew-roster-print-group-details * {
+    font-size: 7.5px !important;
+    line-height: 1.2 !important;
+  }
+
+  .crew-roster-print-group-details .crew-roster-print-group-title {
+    font-size: 9.5px !important;
+    line-height: 1.2 !important;
+    color: #000000 !important;
+    font-weight: bold !important;
+    background-color: #E2F0D9 !important;
+    border-bottom: 1px solid #CCCCCC !important;
+    padding: 2px 4px !important;
+  }
+
+  .crew-roster-print-group-details .crew-roster-print-label {
+    font-size: 8px !important;
+    line-height: 1.2 !important;
+    color: #000000 !important;
+    font-weight: bold !important;
+    margin-bottom: 1px !important;
+  }
+
+  .crew-roster-print-group-details .crew-roster-print-person,
+  .crew-roster-print-group-details .crew-roster-print-person * {
+    font-size: 7.5px !important;
+    line-height: 1.18 !important;
+    color: #000000 !important;
+    font-weight: 400 !important;
   }
 
   .crew-roster-print-notes {
-    font-size: 14px !important;
+    font-size: 7.5px !important;
     font-weight: 400 !important;
-    line-height: 1.4 !important;
+    line-height: 1.25 !important;
     color: #000000 !important;
+    margin-top: 6px !important;
   }
 
   .crew-roster-print-notes * {
@@ -1095,56 +1093,58 @@
   }
 
   .crew-roster-print-notes > strong {
-    font-size: 16px !important;
-    font-weight: 800 !important;
+    font-size: 8.5px !important;
+    font-weight: bold !important;
     color: #000000 !important;
   }
 
-  .crew-roster-print-group-details,
-  .crew-roster-print-group-details * {
-    font-size: 10.5px !important;
-    line-height: 1.4 !important;
+  .crew-roster-print-bottom-row {
+    margin-top: 5px !important;
+    display: flex !important;
+    justify-content: space-between !important;
+    align-items: flex-end !important;
+    gap: 15px !important;
+    page-break-inside: avoid !important;
   }
 
-  .crew-roster-print-group-details .crew-roster-print-person,
-  .crew-roster-print-group-details .crew-roster-print-person * {
-    font-size: 14px !important;
-    line-height: 1.35 !important;
-    color: #000000 !important;
-    font-weight: 400 !important;
-  }
-
-  .crew-roster-print-group-details .crew-roster-print-label {
-    font-size: 16px !important;
-    line-height: 1.25 !important;
-    color: #000000 !important;
-    font-weight: 800 !important;
-  }
-
-  .crew-roster-print-group-details .crew-roster-print-group-title {
-    font-size: 18px !important;
+  .crew-roster-print-distribution {
+    flex: 1 !important;
+    font-size: 7.5px !important;
     line-height: 1.2 !important;
     color: #000000 !important;
-    font-weight: 800 !important;
   }
 
-  .crew-roster-print-signature,
-  .crew-roster-print-signature * {
-    font-size: 12.5px !important;
-    line-height: 1.4 !important;
+  .crew-roster-print-distribution strong {
+    font-size: 8px !important;
+    font-weight: bold !important;
+    display: block !important;
+    margin-bottom: 1px !important;
+    color: #000000 !important;
+  }
+
+  .crew-roster-print-signature-block {
+    text-align: right !important;
+    font-family: "Noto Sans Devanagari", "Nirmala UI", Arial, sans-serif !important;
+    font-size: 7.5px !important;
+    line-height: 1.25 !important;
+    color: #000000 !important;
+    flex-shrink: 0 !important;
+    min-width: 220px !important;
+    padding-right: 8px !important;
+  }
+
+  .crew-roster-print-signature-block .crew-roster-print-signature-name {
+    font-size: 8.5px !important;
+    font-weight: bold !important;
+    color: #000000 !important;
+    margin-bottom: 1px !important;
   }
 
   .crew-roster-print-timestamp {
-    font-size: 10.5px !important;
-  }
-
-  .crew-roster-print-signatures {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 16px;
-    text-align: center;
-    font-size: 9px;
-    padding-top: 22px;
+    font-size: 7px !important;
+    color: #555555 !important;
+    margin-top: 3px !important;
+    text-align: left !important;
   }
 }
 .psp-comparison-row {

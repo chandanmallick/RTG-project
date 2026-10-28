@@ -237,6 +237,26 @@ export default function SpecialEventRoster({ onOpenMatrix } = {}) {
     }
   };
 
+  const handleToggleCommitRoster = async (ev) => {
+    const isCurrentlyCommitted = Boolean(ev.rosterCommitted);
+    const actionLabel = isCurrentlyCommitted ? "reopen for draft revisions" : "accept and commit";
+    const confirmed = window.confirm(
+      `Do you want to ${actionLabel} the special duty roster for "${ev.title}"?`
+    );
+    if (!confirmed) return;
+
+    try {
+      const { data } = await api.put(`/special-events/${ev.id}/commit-roster`, {
+        commit: !isCurrentlyCommitted,
+      });
+      setSuccessNotice(data.message || `Special duty roster ${actionLabel}ed.`);
+      await load();
+      window.dispatchEvent(new Event("crew-special-events-changed"));
+    } catch (err) {
+      setError(err.response?.data?.detail || "Could not update roster commit status.");
+    }
+  };
+
   const openDeployModal = (event, prefillDate = "", prefillEmp = null) => {
     const targetEvent = event || staffingEvent;
     if (!targetEvent) return;
@@ -566,6 +586,31 @@ export default function SpecialEventRoster({ onOpenMatrix } = {}) {
                               fontSize: "0.75rem",
                             }}
                           />
+                          {event.rosterCommitted ? (
+                            <Chip
+                              size="small"
+                              icon={<CheckCircle2 size={13} color="#166534" />}
+                              label="Roster Committed"
+                              sx={{
+                                bgcolor: "#DCFCE7",
+                                color: "#166534",
+                                fontWeight: 800,
+                                fontSize: "0.75rem",
+                              }}
+                            />
+                          ) : (
+                            <Chip
+                              size="small"
+                              label="Roster Draft"
+                              sx={{
+                                bgcolor: "#F8FAFC",
+                                color: "#64748B",
+                                border: "1px dashed #CBD5E1",
+                                fontWeight: 750,
+                                fontSize: "0.75rem",
+                              }}
+                            />
+                          )}
                         </Stack>
 
                         <Tooltip title="One-click Excel Roster Export">
@@ -742,6 +787,43 @@ export default function SpecialEventRoster({ onOpenMatrix } = {}) {
                             Duty Exchange
                           </Button>
                         </Stack>
+
+                        {event.canManage && (
+                          <Button
+                            variant={event.rosterCommitted ? "outlined" : "contained"}
+                            fullWidth
+                            size="small"
+                            startIcon={
+                              event.rosterCommitted ? (
+                                <CheckCircle2 size={14} color="#166534" />
+                              ) : (
+                                <Sparkles size={14} />
+                              )
+                            }
+                            onClick={() => handleToggleCommitRoster(event)}
+                            sx={{
+                              bgcolor: event.rosterCommitted ? "#F0FDF4" : "#059669",
+                              color: event.rosterCommitted ? "#166534" : "#FFF",
+                              borderColor: event.rosterCommitted ? "#86EFAC" : undefined,
+                              fontWeight: 850,
+                              borderRadius: 2,
+                              textTransform: "none",
+                              fontSize: "0.78rem",
+                              py: 0.65,
+                              boxShadow: event.rosterCommitted
+                                ? "none"
+                                : "0 3px 10px rgba(5, 150, 105, 0.25)",
+                              "&:hover": {
+                                bgcolor: event.rosterCommitted ? "#DCFCE7" : "#047857",
+                                borderColor: event.rosterCommitted ? "#4ADE80" : undefined,
+                              },
+                            }}
+                          >
+                            {event.rosterCommitted
+                              ? "✓ Roster Accepted (Click to Revise)"
+                              : "Accept / Commit Special Duty Roster"}
+                          </Button>
+                        )}
 
                         {event.canManage && (
                           <Button

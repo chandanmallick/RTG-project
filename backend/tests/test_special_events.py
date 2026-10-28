@@ -86,12 +86,110 @@ class SpecialEventTests(unittest.TestCase):
             self.assertEqual(len(res["grid"]["2026-10-20"]["Morning"]), 1)
             self.assertEqual(res["grid"]["2026-10-20"]["Morning"][0]["name"], "Alice")
 
-    def test_sequential_allocate_requires_source_department(self):
+    def test_matrix_endpoint_returns_sequential_pools(self):
+        from crew_legacy.api.special_events import get_special_roster_matrix
+        with patch("crew_legacy.api.special_events.employee_daily_collection") as mock_daily, \
+             patch("crew_legacy.api.special_events.leave_request_collection") as mock_leave, \
+             patch("crew_legacy.api.special_events.organization_unit_collection") as mock_unit, \
+             patch("crew_legacy.api.special_events.employee_collection") as mock_emp, \
+             patch("crew_legacy.services.replacement_roster_service.get_replacement_roster_config") as mock_cfg:
+            mock_daily.find.return_value = []
+            mock_leave.find.return_value = []
+            mock_unit.find.return_value = [{"unitType": "department", "name": "Market Operation"}, {"unitType": "department", "name": "RTG"}]
+            mock_emp.find.return_value = []
+            mock_cfg.return_value = {
+                "sicPool": [{"employeeId": "sic-1", "name": "SIC One", "isActive": True}],
+                "shiftEngineerPool": [{"employeeId": "se-1", "name": "SE One", "isActive": True}],
+            }
+            res = get_special_roster_matrix(startDate="2026-10-20", endDate="2026-10-20", user={"role": "admin"})
+            self.assertIn("sequentialPools", res)
+            pool_ids = [p["id"] for p in res["sequentialPools"]]
+            self.assertIn("all_pools", pool_ids)
+            self.assertIn("sic", pool_ids)
+            self.assertIn("shift_engineer", pool_ids)
+            self.assertIn("departments", pool_ids)
+
+    def test_sequential_allocate_requires_dates(self):
         from crew_legacy.api.special_events import sequential_allocate_department_manpower
         with self.assertRaises(HTTPException) as ctx:
             sequential_allocate_department_manpower({}, user={"role": "admin"})
         self.assertEqual(ctx.exception.status_code, 400)
 
+    def test_sequential_allocate_with_pool_and_multidepartments(self):
+        from crew_legacy.api.special_events import sequential_allocate_department_manpower
+        with patch("crew_legacy.services.replacement_roster_service.get_replacement_roster_config") as mock_cfg, \
+             patch("crew_legacy.api.special_events.system_settings_collection") as mock_settings, \
+             patch("crew_legacy.api.special_events.leave_request_collection") as mock_leaves, \
+             patch("crew_legacy.api.special_events.employee_daily_collection") as mock_daily, \
+             patch("crew_legacy.api.special_events.employee_collection") as mock_emp:
+            mock_cfg.return_value = {
+                "sicPool": [{"employeeId": "sic-1", "name": "SIC One", "designation": "Manager", "department": "Market Operation", "isActive": True}],
+                "shiftEngineerPool": [{"employeeId": "se-1", "name": "SE One", "designation": "Engineer", "department": "RTG", "isActive": True}],
+            }
+            mock_settings.find_one.return_value = None
+            mock_emp.find.return_value = [
+                {"employeeId": "sic-1", "department": "Market Operation"},
+                {"employeeId": "se-1", "department": "RTG"},
+            ]
+            mock_leaves.find.return_value.sort.return_value = [
+                {
+                    "_id": "leave-1",
+                    "employeeId": "leave-emp-1",
+                    "employeeName": "Sick Worker",
+                    "date": "2026-10-20",
+                    "assignedDuty": "Morning",
+                }
+            ]
+            mock_leaves.find_one.return_value = None
+            mock_daily.find_one.return_value = None
+
+            res = sequential_allocate_department_manpower({
+                "startDate": "2026-10-20",
+                "endDate": "2026-10-20",
+                "sourcePool": "all_pools",
+                "sourceDepartments": ["Market Operation", "RTG"],
+                "targetShifts": ["Morning"],
+                "previewOnly": True,
+            }, user={"role": "admin", "employeeId": "admin-1"})
+
+            self.assertTrue(res["success"])
+            self.assertTrue(res["previewOnly"])
+            self.assertEqual(res["allocatedCount"], 1)
+            self.assertEqual(res["allocations"][0]["allocatedEmployeeId"], "sic-1")
+
+    def test_commit_special_duty_roster(self):
+        from crew_legacy.api.special_events import commit_special_duty_roster
+        with patch("crew_legacy.api.special_events.system_settings_collection") as mock_settings:
+            mock_settings.find_one.return_value = {
+                "_id": ObjectId("6ae19e852645c499e3283107"),
+                "title": "Diwali 2026",
+                "departmentIds": [],
+            }
+            res = commit_special_duty_roster("6ae19e852645c499e3283107", {"commit": True}, user={"role": "admin", "employeeId": "50041"})
+            self.assertTrue(res["success"])
+            self.assertTrue(res["rosterCommitted"])
+            self.assertIn("committed and accepted successfully", res["message"])
+
+    def test_get_blocked_period_staffing_loads_without_name_error(self):
+        from crew_legacy.api.leave_api import blocked_period_staffing
+        with patch("crew_legacy.api.leave_api.employee_daily_collection") as mock_daily, \
+             patch("crew_legacy.api.leave_api.employee_collection") as mock_emp, \
+             patch("crew_legacy.api.leave_api.organization_unit_collection") as mock_units:
+            mock_daily.find.return_value = []
+            mock_emp.find.return_value = []
+            mock_units.find.return_value = [{"unitType": "department", "name": "System Operation", "isActive": True}]
+            block = {
+                "_id": ObjectId("6ae19e852645c499e3283107"),
+                "startDate": "2026-11-07",
+                "endDate": "2026-11-10",
+                "reason": "Diwali",
+            }
+            res = blocked_period_staffing(block, "")
+            self.assertEqual(res["startDate"], "2026-11-07")
+            self.assertIn("System Operation", res["departments"])
+
 
 if __name__ == "__main__": unittest.main()
+
+
 
