@@ -91,6 +91,7 @@ export default function DashTest({ demo = false }) {
   // Duty Notifications & Approvals State
   const [dutyNotifs, setDutyNotifs] = useState([]);
   const [dutyNotifsLoading, setDutyNotifsLoading] = useState(false);
+  const [dutyFullListOpen, setDutyFullListOpen] = useState(false);
   const [denyDialogOpen, setDenyDialogOpen] = useState(false);
   const [selectedNotifForDeny, setSelectedNotifForDeny] = useState(null);
   const [denyReason, setDenyReason] = useState("");
@@ -254,66 +255,28 @@ export default function DashTest({ demo = false }) {
           {quickActions.map(item => <Button key={item.number} onClick={item.click} disabled={item.disabled} sx={{ display: "flex", flexDirection: "column", alignItems: "stretch", textAlign: "left", textTransform: "none", p: 1.2, minHeight: 120, borderRadius: "20px", color: item.color, bgcolor: item.bg, border: `1px solid ${item.color}16`, transition: "transform .18s,box-shadow .18s", "&:hover": { bgcolor: item.bg, transform: "translateY(-3px)", boxShadow: `0 8px 20px ${item.color}15` } }}><Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", mb: 1 }}><item.icon size={19} strokeWidth={1.7} /><Typography sx={{ fontSize: 10, opacity: .65 }}>{String(item.number).padStart(2, "0")}</Typography></Box><Typography sx={{ fontSize: 15, fontWeight: 850, color: "#263746" }}>{item.title}</Typography><Typography sx={{ fontSize: 9, lineHeight: 1.5, minHeight: 27, mt: .3, color: "#71808E" }}>{item.subtitle}</Typography><Box sx={{ display: "flex", alignItems: "center", gap: .5, mt: 1.2 }}><Typography sx={{ fontSize: 9, flex: 1 }}>{item.foot}</Typography>{item.count > 0 || item.number === 2 && approvalAccess ? <Chip size="small" label={item.count} sx={{ bgcolor: "#FFF", color: item.color, fontWeight: 950, fontSize: item.number === 2 ? 20 : 13, height: item.number === 2 ? 34 : 24, minWidth: item.number === 2 ? 42 : 24 }} /> : <ArrowUpRight size={13} />}</Box></Button>)}
         </Box>
         <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", lg: "minmax(0,1.65fr) minmax(280px,1fr)" }, gap: 2.2, alignItems: "start" }}>
-          <Paper sx={{ ...card, p: 0, overflow: "hidden" }}>
-            <Box sx={{ px: 2.3, pt: 2.3 }}><Heading number={7} title="Roster Calendar" note="Yesterday through the next 7 days" action={<IconButton aria-label="Open full roster calendar" onClick={() => navigate("/crew/calendar")}><ArrowUpRight size={17} /></IconButton>} /></Box>
-            <Box sx={{ overflow: "auto", maxHeight: 640 }}><Box component="table" data-crew-table-tools="off" sx={{ width: "100%", borderCollapse: "collapse", minWidth: 520, fontSize: 10, "& th,& td": { borderBottom: "1px solid #EFF2F5", p: .75, textAlign: "center" } }}>
-              <thead><tr><Box component="th" sx={{ position: "sticky", top: 0, left: 0, zIndex: 3, bgcolor: "#FFF", width: 130, textAlign: "left !important", pl: "18px !important" }}>Personnel</Box>{dates.map(date => <Box component="th" key={date} sx={{ position: "sticky", top: 0, zIndex: 2, bgcolor: date === today ? "#EAF6F0" : "#FFF", color: date === today ? "#11806A" : "#788594", fontWeight: 600 }}><Typography sx={{ fontSize: 8.5 }}>{date === today ? "Today" : dayjs(date).format("ddd")}</Typography><Typography sx={{ fontSize: 12, fontWeight: 850 }}>{dayjs(date).format("DD")}</Typography></Box>)}</tr></thead>
-              <tbody>{groups.map(group => <RosterGroup key={group.groupId || group.groupName} group={group} dates={dates} onOpen={() => navigate("/crew/calendar")} />)}</tbody>
-            </Box></Box>
-            {!groups.length && <Box sx={{ p: 5, textAlign: "center", color: "#83909E" }}>{loading ? <CircularProgress size={22} /> : "No roster available for this period."}</Box>}
-            <Stack direction="row" spacing={1.2} sx={{ p: 1.7, borderTop: "1px solid #EDF1F4" }} flexWrap="wrap">{Object.entries(shifts).map(([key, tone]) => <Typography key={key} sx={{ fontSize: 9, color: tone.color }}>{key} · {tone.name}</Typography>)}<Typography sx={{ fontSize: 9, color: "#B7791D" }}>Amber · Pending</Typography></Stack>
-          </Paper>
           <Stack spacing={2.2}>
-            <Paper sx={card}><Heading number={8} title="Leader Board" note="Replacement duties · last 60 days" /><Stack spacing={1.6}>{leaderboard.slice(0, 5).map((row, index) => <Box key={`${row.name}-${index}`}><Stack direction="row" spacing={1} alignItems="center"><Box sx={{ width: 26, height: 26, borderRadius: "9px", bgcolor: index === 0 ? "#FFF2D4" : "#F2F5F8", color: index === 0 ? "#B88624" : "#8C97A4", display: "grid", placeItems: "center", fontSize: 11 }}>{index === 0 ? <Trophy size={14} /> : String(index + 1).padStart(2, "0")}</Box><Typography noWrap sx={{ flex: 1, fontSize: 11, fontWeight: 750 }}>{row.name}</Typography><Typography sx={{ fontSize: 14, fontWeight: 850 }}>{row.value}</Typography></Stack><Box sx={{ mt: .8, ml: 4.3, height: 5, bgcolor: "#F1F4F6", borderRadius: 9 }}><Box sx={{ height: "100%", width: `${Number(row.value || 0) / maxReplacement * 100}%`, bgcolor: index === 0 ? "#0D9685" : "#B0DCD1", borderRadius: 9 }} /></Box></Box>)}</Stack>{!leaderboard.length && <Empty loading={loading} text="No replacement duties recorded." />}</Paper>
-            <Paper sx={card}><Heading number={9} title="Stat of leave" note={dayjs(today).format("MMMM YYYY · Group wise")} /><Stack direction="row" spacing={1} alignItems="baseline" sx={{ mb: 2 }}><Typography sx={{ fontSize: 30, fontWeight: 850, letterSpacing: -1 }}>{totalLeaves}</Typography><Typography sx={{ color: "#929DA9", fontSize: 10 }}>leave days</Typography></Stack><Box sx={{ display: "flex", gap: 1.2, height: 160, alignItems: "end", overflowX: "auto" }}>{leaveStats.map((row, index) => <Tooltip key={`${row.group}-${index}`} title={`${row.group}: ${row.count} leave days`}><Box sx={{ minWidth: 38, flex: 1, height: "100%", display: "flex", flexDirection: "column", justifyContent: "end", alignItems: "center" }}><Typography sx={{ fontSize: 10, color: "#6F7C8A", mb: .5 }}>{row.count}</Typography><Box sx={{ width: "75%", maxWidth: 42, height: `${Number(row.count || 0) / maxLeave * 115}px`, bgcolor: ["#8EBCB0", "#A69BDE", "#E4C681", "#93BED8"][index % 4], borderRadius: "7px 7px 2px 2px" }} /><Typography noWrap sx={{ fontSize: 8.5, maxWidth: 55, mt: 1 }}>{row.group || "Group"}</Typography></Box></Tooltip>)}</Box>{!leaveStats.length && <Empty loading={loading} text="No leave data this month." />}</Paper>
-          </Stack>
-        </Box>
-      </Box>
-      <Stack spacing={2.2}>
-        <Paper sx={card}><Heading number={6} title="Event Calendar" action={<IconButton aria-label="Open event calendar" onClick={() => navigate("/crew/calendar?view=events")}><ArrowUpRight size={16} /></IconButton>} /><Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 1.4 }}><IconButton size="small" aria-label="Previous month" onClick={() => setMonth(value => value.subtract(1, "month"))}><ChevronLeft size={16} /></IconButton><Typography sx={{ fontSize: 12, fontWeight: 800 }}>{month.format("MMMM YYYY")}</Typography><IconButton size="small" aria-label="Next month" onClick={() => setMonth(value => value.add(1, "month"))}><ChevronRight size={16} /></IconButton></Stack>{eventError && <Alert severity="warning" sx={{ fontSize: 10 }}>{eventError}</Alert>}<Box sx={{ display: "grid", gridTemplateColumns: "repeat(7,1fr)", gap: .5, opacity: eventLoading ? .5 : 1 }}>{["M", "T", "W", "T", "F", "S", "S"].map((day, index) => <Typography key={index} sx={{ textAlign: "center", fontSize: 9, color: "#A0A9B3", mb: .6 }}>{day}</Typography>)}{monthCells.map(date => {
-          const key = date.format("YYYY-MM-DD"), dayEvents = events.filter(event => event.startDate <= key && (event.endDate || event.startDate) >= key), inMonth = date.month() === month.month();
-          return <Tooltip key={key} title={dayEvents.length ? <Box>{dayEvents.map((event, index) => <Typography key={index} sx={{ fontSize: 11 }}>{event.title} · {event.kind}{event.detail ? ` · ${event.detail}` : ""}</Typography>)}</Box> : date.format("DD-MMM-YYYY")}><Button onClick={() => navigate("/crew/calendar?view=events")} aria-label={`${date.format("DD-MMM-YYYY")}${dayEvents.length ? `, ${dayEvents.map(event => event.title).join(", ")}` : ""}`} sx={{ minWidth: 0, height: 31, p: 0, borderRadius: "10px", flexDirection: "column", fontSize: 11, color: key === today ? "#FFF" : dayEvents.length ? palette[dayEvents[0].kind] : "#536170", bgcolor: key === today ? "#188F7B" : dayEvents.length ? `${palette[dayEvents[0].kind] || "#8B5CF6"}12` : "transparent", opacity: inMonth ? 1 : .28, "&:hover": { bgcolor: "#DDEFE8", color: "#233442" } }}>{date.date()}<Box sx={{ display: "flex", gap: "2px" }}>{[...new Set(dayEvents.map(event => event.kind))].map(type => <Box key={type} sx={{ width: 3, height: 3, borderRadius: "50%", bgcolor: palette[type] }} />)}</Box></Button></Tooltip>;
-        })}</Box><Stack direction="row" spacing={1.4} sx={{ mt: 2 }}>{Object.entries(palette).map(([label, color]) => <Stack key={label} direction="row" alignItems="center" spacing={.5}><Box sx={{ width: 5, height: 5, bgcolor: color, borderRadius: "50%" }} /><Typography sx={{ fontSize: 8.5, color: "#87929F", textTransform: "capitalize" }}>{label}</Typography></Stack>)}</Stack>{actions.specialEventRoster?.enabled && <Button fullWidth size="small" onClick={() => demo ? setDemoWorkspace("special-event") : navigate("/crew/special-events")} sx={{ mt: 1.5, textTransform: "none" }}>Special Event roster</Button>}</Paper>
+            <Paper sx={{ ...card, p: 0, overflow: "hidden" }}>
+              <Box sx={{ px: 2.3, pt: 2.3 }}><Heading number={7} title="Roster Calendar" note="Yesterday through the next 7 days" action={<IconButton aria-label="Open full roster calendar" onClick={() => navigate("/crew/calendar")}><ArrowUpRight size={17} /></IconButton>} /></Box>
+              <Box sx={{ overflow: "auto", maxHeight: 640 }}><Box component="table" data-crew-table-tools="off" sx={{ width: "100%", borderCollapse: "collapse", minWidth: 520, fontSize: 10, "& th,& td": { borderBottom: "1px solid #EFF2F5", p: .75, textAlign: "center" } }}>
+                <thead><tr><Box component="th" sx={{ position: "sticky", top: 0, left: 0, zIndex: 3, bgcolor: "#FFF", width: 130, textAlign: "left !important", pl: "18px !important" }}>Personnel</Box>{dates.map(date => <Box component="th" key={date} sx={{ position: "sticky", top: 0, zIndex: 2, bgcolor: date === today ? "#EAF6F0" : "#FFF", color: date === today ? "#11806A" : "#788594", fontWeight: 600 }}><Typography sx={{ fontSize: 8.5 }}>{date === today ? "Today" : dayjs(date).format("ddd")}</Typography><Typography sx={{ fontSize: 12, fontWeight: 850 }}>{dayjs(date).format("DD")}</Typography></Box>)}</tr></thead>
+                <tbody>{groups.map(group => <RosterGroup key={group.groupId || group.groupName} group={group} dates={dates} onOpen={() => navigate("/crew/calendar")} />)}</tbody>
+              </Box></Box>
+              {!groups.length && <Box sx={{ p: 5, textAlign: "center", color: "#83909E" }}>{loading ? <CircularProgress size={22} /> : "No roster available for this period."}</Box>}
+              <Stack direction="row" spacing={1.2} sx={{ p: 1.7, borderTop: "1px solid #EDF1F4" }} flexWrap="wrap">{Object.entries(shifts).map(([key, tone]) => <Typography key={key} sx={{ fontSize: 9, color: tone.color }}>{key} · {tone.name}</Typography>)}<Typography sx={{ fontSize: 9, color: "#B7791D" }}>Amber · Pending</Typography></Stack>
+            </Paper>
 
-        {/* Small section below compact calendar: Duty Assignments & Approvals */}
-        <Paper
-          sx={{
-            ...card,
-            ...(dutyNotifs.some(n => n.isDenied || n.status === "Denied") ? {
-              border: "1.5px solid #EF4444",
-              boxShadow: "0 0 16px rgba(239, 68, 68, 0.4)",
-            } : {}),
-          }}
-        >
-          <Heading
-            number={7}
-            title="Duty Assignments & Approvals"
-            note="Accept or deny replacement duties"
-            action={
-              <IconButton size="small" onClick={loadDutyNotifs} disabled={dutyNotifsLoading}>
-                <RefreshCw size={14} className={dutyNotifsLoading ? "animate-spin" : ""} />
-              </IconButton>
-            }
-          />
-
-          {actionFeedback && (
-            <Alert
-              severity={actionFeedback.severity}
-              onClose={() => setActionFeedback(null)}
-              sx={{ mb: 1.5, fontSize: 11 }}
-            >
-              {actionFeedback.text}
-            </Alert>
-          )}
-
-          <Stack spacing={1.2}>
-            {/* 1. Denied Duties - Blinking Red for Admin in same section */}
-            {dutyNotifs.filter(n => n.isDenied || n.status === "Denied").map(n => (
-              <Box
-                key={`denied-${n._id}`}
-                sx={{
-                  p: 1.3,
-                  borderRadius: 2,
+            {/* Duty Assignments & Approvals (Landscape, just below Roster Calendar - Image 2) */}
+            <Paper
+              onClick={() => setDutyFullListOpen(true)}
+              sx={{
+                ...card,
+                p: 1.8,
+                borderRadius: "20px",
+                cursor: "pointer",
+                transition: "all .18s ease",
+                "&:hover": { transform: "translateY(-2px)", boxShadow: "0 8px 24px rgba(0,0,0,0.08)" },
+                ...(dutyNotifs.some(n => n.isDenied || n.status === "Denied") ? {
                   border: "2px solid #DC2626",
                   bgcolor: "#FEF2F2",
                   animation: "adminDenialBlink 1.4s ease-in-out infinite",
@@ -334,128 +297,173 @@ export default function DashTest({ demo = false }) {
                   "@media (prefers-reduced-motion: reduce)": {
                     animation: "none",
                   },
-                }}
-              >
-                <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 0.6 }}>
-                  <Chip
-                    size="small"
-                    label="⚠️ DUTY DENIED"
-                    sx={{
-                      height: 20,
-                      fontSize: "0.65rem",
-                      fontWeight: 950,
-                      bgcolor: "#DC2626",
-                      color: "#FFF",
-                      letterSpacing: 0.5,
-                    }}
-                  />
-                  <Typography fontSize={10.5} color="#991B1B" fontWeight={850}>
-                    {dayjs(n.date).format("DD-MMM-YYYY")}
-                  </Typography>
-                </Stack>
-                <Typography fontSize={12.5} fontWeight={850} color="#991B1B">
-                  {n.assignedDuty} Shift — {n.employeeName} ({n.employeeId})
-                </Typography>
-                <Typography fontSize={11} color="#7F1D1D" sx={{ mt: 0.3 }}>
-                  <strong>Denied By:</strong> {n.deniedByRole || "Reporting/HOD Officer"} ({n.deniedBy})
-                </Typography>
-                {n.reason && (
-                  <Typography fontSize={11} color="#991B1B" sx={{ mt: 0.3, fontStyle: "italic", bgcolor: "rgba(254, 226, 226, 0.6)", p: 0.5, borderRadius: 1 }}>
-                    <strong>Reason:</strong> {n.reason}
-                  </Typography>
-                )}
-              </Box>
-            ))}
+                } : {
+                  bgcolor: "#FFFFFF",
+                }),
+              }}
+            >
+              {dutyNotifs.some(n => n.isDenied || n.status === "Denied") ? (
+                // DENIAL DISPLAYED FULL (LANDSCAPE)
+                <Box>
+                  {dutyNotifs.filter(n => n.isDenied || n.status === "Denied").map(n => (
+                    <Box key={`denied-bar-${n._id}`}>
+                      <Stack direction={{ xs: "column", sm: "row" }} alignItems={{ sm: "center" }} justifyContent="space-between" spacing={1} sx={{ mb: 1 }}>
+                        <Stack direction="row" alignItems="center" spacing={1}>
+                          <Chip
+                            size="small"
+                            label="⚠️ DUTY DENIED"
+                            sx={{
+                              height: 22,
+                              fontSize: "0.7rem",
+                              fontWeight: 950,
+                              bgcolor: "#DC2626",
+                              color: "#FFF",
+                              letterSpacing: 0.5,
+                            }}
+                          />
+                          <Typography fontSize={12} color="#991B1B" fontWeight={900}>
+                            {dayjs(n.date).format("DD-MMM-YYYY")}
+                          </Typography>
+                        </Stack>
+                        <Button
+                          size="small"
+                          variant="outlined"
+                          onClick={(e) => { e.stopPropagation(); setDutyFullListOpen(true); }}
+                          sx={{
+                            fontSize: 11,
+                            fontWeight: 850,
+                            textTransform: "none",
+                            color: "#991B1B",
+                            borderColor: "#FCA5A5",
+                            bgcolor: "#FFF",
+                            "&:hover": { bgcolor: "#FEE2E2" },
+                          }}
+                        >
+                          View Full List (Pop-up) ↗
+                        </Button>
+                      </Stack>
 
-            {/* 2. Pending Duty Assignments */}
-            {dutyNotifs.filter(n => n.status === "Pending" || n.status === "Accepted").map(n => (
-              <Box
-                key={`duty-${n._id}`}
-                sx={{
-                  p: 1.3,
-                  borderRadius: 2,
-                  border: "1px solid #E2E8F0",
-                  borderLeft: n.status === "Accepted" ? "4px solid #16A34A" : "4px solid #F59E0B",
-                  bgcolor: n.status === "Accepted" ? "#F0FDF4" : "#FFFBEB",
-                }}
-              >
-                <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 0.5 }}>
-                  <Chip
-                    size="small"
-                    label={n.status === "Accepted" ? "Accepted" : "Pending Response"}
-                    sx={{
-                      height: 18,
-                      fontSize: "0.62rem",
-                      fontWeight: 850,
-                      bgcolor: n.status === "Accepted" ? "#DCFCE7" : "#FEF3C7",
-                      color: n.status === "Accepted" ? "#166534" : "#92400E",
-                    }}
-                  />
-                  <Typography fontSize={11} fontWeight={800} color="#475569">
-                    {dayjs(n.date).format("DD-MMM-YYYY")}
-                  </Typography>
-                </Stack>
+                      <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "1.4fr 1fr 1.6fr" }, gap: 1.5, alignItems: "center", bgcolor: "rgba(255, 255, 255, 0.85)", p: 1.2, borderRadius: 2 }}>
+                        <Box>
+                          <Typography fontSize={13} fontWeight={900} color="#991B1B">
+                            {n.assignedDuty} Shift — {n.employeeName}
+                          </Typography>
+                          <Typography fontSize={10.5} color="#7F1D1D" fontWeight={750}>
+                            Emp ID: {n.employeeId}
+                          </Typography>
+                        </Box>
+                        <Box>
+                          <Typography fontSize={11} color="#7F1D1D">
+                            <strong>Denied By:</strong> {n.deniedByRole || "Reporting/HOD Officer"}
+                          </Typography>
+                          <Typography fontSize={10} color="#991B1B">
+                            ({n.deniedBy})
+                          </Typography>
+                        </Box>
+                        <Box>
+                          <Typography fontSize={11} color="#991B1B" sx={{ fontStyle: "italic", bgcolor: "#FEE2E2", p: 0.6, borderRadius: 1.5 }}>
+                            <strong>Reason:</strong> {n.reason || "Unable to perform assigned duty"}
+                          </Typography>
+                        </Box>
+                      </Box>
+                    </Box>
+                  ))}
+                </Box>
+              ) : (
+                // CLEAN LANDSCAPE BAR WHEN NO DENIALS
+                <Stack direction={{ xs: "column", sm: "row" }} alignItems="center" justifyContent="space-between" spacing={1.5}>
+                  <Stack direction="row" alignItems="center" spacing={1.2}>
+                    <Box sx={{ width: 34, height: 34, borderRadius: "10px", bgcolor: "#EAF2FB", color: "#2563EB", display: "grid", placeItems: "center" }}>
+                      <ArrowLeftRight size={18} />
+                    </Box>
+                    <Box>
+                      <Typography fontSize={13} fontWeight={900} color="#1E293B">
+                        Duty Assignments & Approvals
+                      </Typography>
+                      <Typography fontSize={10.5} color="#64748B">
+                        Accept or deny replacement duties
+                      </Typography>
+                    </Box>
+                  </Stack>
 
-                <Typography fontSize={12.5} fontWeight={850} color="#1E293B">
-                  {n.assignedDuty} Shift · {n.employeeName} ({n.employeeId})
-                </Typography>
-                <Typography fontSize={10.5} color="#64748B">
-                  Role: {n.viewerRole} {n.leaveId ? `· Replacement for leave` : ""}
-                </Typography>
-
-                {/* Accept / Deny Buttons */}
-                <Stack direction="row" spacing={1} sx={{ mt: 1 }}>
-                  {n.canAccept && (
-                    <Button
+                  <Stack direction="row" alignItems="center" spacing={1} flexWrap="wrap">
+                    <Chip
                       size="small"
-                      variant="contained"
-                      onClick={() => handleAcceptDuty(n._id)}
+                      label={`${dutyNotifs.filter(n => n.status === "Pending").length} Pending`}
                       sx={{
-                        py: 0.4,
-                        px: 1.4,
-                        fontSize: 11,
+                        height: 22,
+                        fontSize: "0.68rem",
                         fontWeight: 850,
-                        bgcolor: "#16A34A",
-                        "&:hover": { bgcolor: "#15803D" },
-                        textTransform: "none",
+                        bgcolor: dutyNotifs.some(n => n.status === "Pending") ? "#FEF3C7" : "#F1F5F9",
+                        color: dutyNotifs.some(n => n.status === "Pending") ? "#92400E" : "#64748B",
                       }}
-                    >
-                      Accept Duty
-                    </Button>
-                  )}
-
-                  {/* DENY OPTION ONLY TO REPORTING / HOD OFFICER */}
-                  {n.canDeny && (
+                    />
+                    <Chip
+                      size="small"
+                      label={`${dutyNotifs.filter(n => n.status === "Accepted").length} Accepted`}
+                      sx={{
+                        height: 22,
+                        fontSize: "0.68rem",
+                        fontWeight: 850,
+                        bgcolor: "#DCFCE7",
+                        color: "#166534",
+                      }}
+                    />
+                    {dutyNotifs.find(n => n.canAccept) && (
+                      <Button
+                        size="small"
+                        variant="contained"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleAcceptDuty(dutyNotifs.find(n => n.canAccept)._id);
+                        }}
+                        sx={{
+                          py: 0.3,
+                          px: 1.2,
+                          fontSize: 10.5,
+                          fontWeight: 900,
+                          bgcolor: "#16A34A",
+                          "&:hover": { bgcolor: "#15803D" },
+                          textTransform: "none",
+                        }}
+                      >
+                        Accept Duty
+                      </Button>
+                    )}
                     <Button
                       size="small"
                       variant="outlined"
-                      color="error"
-                      onClick={() => handleOpenDenyDialog(n)}
+                      onClick={(e) => { e.stopPropagation(); setDutyFullListOpen(true); }}
                       sx={{
-                        py: 0.4,
-                        px: 1.4,
+                        py: 0.3,
+                        px: 1.2,
                         fontSize: 11,
                         fontWeight: 850,
                         textTransform: "none",
-                        borderColor: "#DC2626",
-                        color: "#DC2626",
-                        "&:hover": { bgcolor: "#FEE2E2", borderColor: "#B91C1C" },
+                        borderColor: "#CBD5E1",
+                        color: "#334155",
+                        "&:hover": { bgcolor: "#F1F5F9" },
                       }}
                     >
-                      Deny Duty (HOD)
+                      View Full List ↗
                     </Button>
-                  )}
+                  </Stack>
                 </Stack>
-              </Box>
-            ))}
-
-            {dutyNotifs.length === 0 && (
-              <Typography fontSize={11} color="#94A3B8" sx={{ py: 1, textAlign: "center" }}>
-                No pending replacement duty assignments.
-              </Typography>
-            )}
+              )}
+            </Paper>
           </Stack>
-        </Paper>
+          <Stack spacing={2.2}>
+            <Paper sx={card}><Heading number={8} title="Leader Board" note="Replacement duties · last 60 days" /><Stack spacing={1.6}>{leaderboard.slice(0, 5).map((row, index) => <Box key={`${row.name}-${index}`}><Stack direction="row" spacing={1} alignItems="center"><Box sx={{ width: 26, height: 26, borderRadius: "9px", bgcolor: index === 0 ? "#FFF2D4" : "#F2F5F8", color: index === 0 ? "#B88624" : "#8C97A4", display: "grid", placeItems: "center", fontSize: 11 }}>{index === 0 ? <Trophy size={14} /> : String(index + 1).padStart(2, "0")}</Box><Typography noWrap sx={{ flex: 1, fontSize: 11, fontWeight: 750 }}>{row.name}</Typography><Typography sx={{ fontSize: 14, fontWeight: 850 }}>{row.value}</Typography></Stack><Box sx={{ mt: .8, ml: 4.3, height: 5, bgcolor: "#F1F4F6", borderRadius: 9 }}><Box sx={{ height: "100%", width: `${Number(row.value || 0) / maxReplacement * 100}%`, bgcolor: index === 0 ? "#0D9685" : "#B0DCD1", borderRadius: 9 }} /></Box></Box>)}</Stack>{!leaderboard.length && <Empty loading={loading} text="No replacement duties recorded." />}</Paper>
+            <Paper sx={card}><Heading number={9} title="Stat of leave" note={dayjs(today).format("MMMM YYYY · Group wise")} /><Stack direction="row" spacing={1} alignItems="baseline" sx={{ mb: 2 }}><Typography sx={{ fontSize: 30, fontWeight: 850, letterSpacing: -1 }}>{totalLeaves}</Typography><Typography sx={{ color: "#929DA9", fontSize: 10 }}>leave days</Typography></Stack><Box sx={{ display: "flex", gap: 1.2, height: 160, alignItems: "end", overflowX: "auto" }}>{leaveStats.map((row, index) => <Tooltip key={`${row.group}-${index}`} title={`${row.group}: ${row.count} leave days`}><Box sx={{ minWidth: 38, flex: 1, height: "100%", display: "flex", flexDirection: "column", justifyContent: "end", alignItems: "center" }}><Typography sx={{ fontSize: 10, color: "#6F7C8A", mb: .5 }}>{row.count}</Typography><Box sx={{ width: "75%", maxWidth: 42, height: `${Number(row.count || 0) / maxLeave * 115}px`, bgcolor: ["#8EBCB0", "#A69BDE", "#E4C681", "#93BED8"][index % 4], borderRadius: "7px 7px 2px 2px" }} /><Typography noWrap sx={{ fontSize: 8.5, maxWidth: 55, mt: 1 }}>{row.group || "Group"}</Typography></Box></Tooltip>)}</Box>{!leaveStats.length && <Empty loading={loading} text="No leave data this month." />}</Paper>
+          </Stack>
+        </Box>
+      </Box>
+      <Stack spacing={2.2}>
+        <Paper sx={card}><Heading number={6} title="Event Calendar" action={<IconButton aria-label="Open event calendar" onClick={() => navigate("/crew/calendar?view=events")}><ArrowUpRight size={16} /></IconButton>} /><Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 1.4 }}><IconButton size="small" aria-label="Previous month" onClick={() => setMonth(value => value.subtract(1, "month"))}><ChevronLeft size={16} /></IconButton><Typography sx={{ fontSize: 12, fontWeight: 800 }}>{month.format("MMMM YYYY")}</Typography><IconButton size="small" aria-label="Next month" onClick={() => setMonth(value => value.add(1, "month"))}><ChevronRight size={16} /></IconButton></Stack>{eventError && <Alert severity="warning" sx={{ fontSize: 10 }}>{eventError}</Alert>}<Box sx={{ display: "grid", gridTemplateColumns: "repeat(7,1fr)", gap: .5, opacity: eventLoading ? .5 : 1 }}>{["M", "T", "W", "T", "F", "S", "S"].map((day, index) => <Typography key={index} sx={{ textAlign: "center", fontSize: 9, color: "#A0A9B3", mb: .6 }}>{day}</Typography>)}{monthCells.map(date => {
+          const key = date.format("YYYY-MM-DD"), dayEvents = events.filter(event => event.startDate <= key && (event.endDate || event.startDate) >= key), inMonth = date.month() === month.month();
+          return <Tooltip key={key} title={dayEvents.length ? <Box>{dayEvents.map((event, index) => <Typography key={index} sx={{ fontSize: 11 }}>{event.title} · {event.kind}{event.detail ? ` · ${event.detail}` : ""}</Typography>)}</Box> : date.format("DD-MMM-YYYY")}><Button onClick={() => navigate("/crew/calendar?view=events")} aria-label={`${date.format("DD-MMM-YYYY")}${dayEvents.length ? `, ${dayEvents.map(event => event.title).join(", ")}` : ""}`} sx={{ minWidth: 0, height: 31, p: 0, borderRadius: "10px", flexDirection: "column", fontSize: 11, color: key === today ? "#FFF" : dayEvents.length ? palette[dayEvents[0].kind] : "#536170", bgcolor: key === today ? "#188F7B" : dayEvents.length ? `${palette[dayEvents[0].kind] || "#8B5CF6"}12` : "transparent", opacity: inMonth ? 1 : .28, "&:hover": { bgcolor: "#DDEFE8", color: "#233442" } }}>{date.date()}<Box sx={{ display: "flex", gap: "2px" }}>{[...new Set(dayEvents.map(event => event.kind))].map(type => <Box key={type} sx={{ width: 3, height: 3, borderRadius: "50%", bgcolor: palette[type] }} />)}</Box></Button></Tooltip>;
+        })}</Box><Stack direction="row" spacing={1.4} sx={{ mt: 2 }}>{Object.entries(palette).map(([label, color]) => <Stack key={label} direction="row" alignItems="center" spacing={.5}><Box sx={{ width: 5, height: 5, bgcolor: color, borderRadius: "50%" }} /><Typography sx={{ fontSize: 8.5, color: "#87929F", textTransform: "capitalize" }}>{label}</Typography></Stack>)}</Stack>{actions.specialEventRoster?.enabled && <Button fullWidth size="small" onClick={() => demo ? setDemoWorkspace("special-event") : navigate("/crew/special-events")} sx={{ mt: 1.5, textTransform: "none" }}>Special Event roster</Button>}</Paper>
+
         <Paper sx={card}><Heading number={10} title="Upcoming shift" note="From tomorrow · next 5 days" /><Box sx={{ maxHeight: 560, overflowY: "auto", pr: .5 }}>{Array.from({ length: 5 }, (_, i) => dayjs(today).add(i + 1, "day").format("YYYY-MM-DD")).map(date => <Box key={date} sx={{ mb: 2.2 }}><Typography sx={{ fontSize: 14, fontWeight: 800, color: "#536170", mb: 1.5 }}>{dayjs(date).format("ddd, DD MMM")}</Typography>{["M", "E", "N"].map(code => {
           const people = upcomingShiftPeople(groups, date, code, shortShift);
           const shiftLeaders = people.filter(person => person.IsSIC);
@@ -484,6 +492,155 @@ export default function DashTest({ demo = false }) {
     <Dialog PaperProps={{ sx: { ...popupPaper, "& .MuiDialogTitle-root": { px: 3, py: 2.5, background: "linear-gradient(120deg,#EBF5FB,#EFF6FF)", fontWeight: 850 } } }} open={popup === "replacement-options"} onClose={() => setPopup("")} fullWidth maxWidth="sm"><DialogTitle sx={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>Replacement & Rostering<IconButton aria-label="Close replacement options" onClick={() => setPopup("")}><X size={18} /></IconButton></DialogTitle><DialogContent dividers><Box sx={{ textAlign: "center", mb: 3 }}><Box sx={{ width: 78, height: 78, mx: "auto", mb: 1.8, borderRadius: "50%", bgcolor: "#E0F2FE", color: "#0284C7", border: "4px solid #38BDF8", display: "grid", placeItems: "center", boxShadow: "0 0 0 10px #F0F9FF" }}><ArrowLeftRight size={38} /></Box><Typography sx={{ fontSize: 23, fontWeight: 850, color: "#0F172A" }}>Replacement & Rostering</Typography><Typography sx={{ color: "#64748B", mt: .7 }}>Choose the duty replacement, exchange, or special event rostering module.</Typography></Box><Stack spacing={1.3}>{replacementOptions.map(option => <Button key={option.path} variant="outlined" endIcon={<ArrowUpRight size={18} />} onClick={() => { setPopup(""); navigate(option.path); }} sx={{ justifyContent: "space-between", textTransform: "none", textAlign: "left", p: 1.8, borderRadius: "16px !important", color: "#0369A1", borderColor: "#BAE6FD", bgcolor: "#F0F9FF", "&:hover": { bgcolor: "#E0F2FE", borderColor: "#0284C7" } }}><Box><Stack direction="row" alignItems="center" spacing={1}><Typography fontSize={14.5} fontWeight={850}>{option.title}</Typography>{option.badge && <Chip size="small" label={option.badge} sx={{ height: 20, fontSize: 10.5, fontWeight: 800, bgcolor: "#E0F2FE", color: "#0369A1" }} />}</Stack>{option.subtitle && <Typography fontSize={11.5} color="#64748B" sx={{ mt: .3 }}>{option.subtitle}</Typography>}</Box></Button>)}</Stack></DialogContent></Dialog>
     <Dialog PaperProps={{ sx: popupPaper }} open={popup === "restricted"} onClose={() => setPopup("")}><DialogTitle>Access Restricted</DialogTitle><DialogContent><Typography>Approval is available to reporting officers and employees with delegated approval power.</Typography><Button onClick={() => setPopup("")} sx={{ mt: 2 }}>Close</Button></DialogContent></Dialog>
     <Dialog PaperProps={{ sx: popupPaper }} open={["tracking", "history"].includes(popup)} onClose={() => setPopup("")} fullWidth maxWidth="lg"><DialogTitle sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}><Box>{popup === "tracking" ? "Application Tracking" : "Application History"}<Typography sx={{ fontSize: 11, color: "#83909E" }}>{popup === "tracking" ? "From D−2 through all future applications. Pending rows are amber." : "Leave, training, sports, exchange and replacement records."}</Typography></Box><IconButton aria-label="Close applications" onClick={() => setPopup("")}><X size={18} /></IconButton></DialogTitle><DialogContent dividers><Tabs value={kind} onChange={(_, value) => setKind(value)} variant="scrollable" scrollButtons="auto">{["All", ...Object.keys(destinations)].map(value => <Tab key={value} value={value} label={value} sx={{ textTransform: "none" }} />)}</Tabs><Stack direction={{ xs: "column", sm: "row" }} spacing={1} sx={{ my: 2 }}><TextField label="Search applications" size="small" value={search} onChange={event => setSearch(event.target.value)} sx={{ flex: 1 }} /><TextField select label="Application status" size="small" value={recordStatus} onChange={event => setRecordStatus(event.target.value)} sx={{ minWidth: 160 }}>{["All", "Pending", "Approved", "Cancelled", "Rejected", "Withdrawn"].map(value => <MenuItem key={value} value={value}>{value === "All" ? "All statuses" : value}</MenuItem>)}</TextField><Button variant={recordStatus === "Approved" && kind === "Leave" ? "contained" : "outlined"} onClick={() => { setKind("Leave"); setRecordStatus("Approved"); }}>Approved leave</Button><Button variant={scope === "mine" ? "contained" : "outlined"} onClick={() => setScope("mine")}>My applications</Button><Button variant={scope === "all" ? "contained" : "outlined"} onClick={() => setScope("all")}>Authorised records</Button></Stack>{popup === "history" && <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5} sx={{ mb: 2, p: 2, bgcolor: "#FFF1F4", borderRadius: 3 }}><TextField label="History from" type="date" size="small" value={historyFrom} onChange={event => setHistoryFrom(event.target.value)} InputLabelProps={{ shrink: true }} /><TextField label="History to" type="date" size="small" value={historyTo} onChange={event => setHistoryTo(event.target.value)} InputLabelProps={{ shrink: true }} error={Boolean(historyFrom && historyTo && historyTo < historyFrom)} helperText={historyFrom && historyTo && historyTo < historyFrom ? "End date must follow start date" : ""} /><Button onClick={() => { setHistoryFrom(""); setHistoryTo(""); }}>All dates</Button><Typography sx={{ alignSelf: "center", fontSize: 12, color: "#786B74" }}>{visibleRecords.length} matching applications</Typography></Stack>}{errors.some(error => Object.keys(destinations).includes(error)) && <Alert severity="warning" sx={{ mb: 2 }}>Some application records could not be loaded. Use Refresh on the dashboard to retry.</Alert>}<Stack spacing={1}>{visibleRecords.map((row, index) => <Paper variant="outlined" key={`${row.kind}-${row.id || row._id || index}`} sx={{ p: 1.6, borderRadius: 2, background: isPending(statusOf(row)) ? "#FFF8E5" : "#FAFCFD", borderColor: isPending(statusOf(row)) ? "#EED28D" : "#E5EAF0" }}><Stack direction={{ xs: "column", sm: "row" }} spacing={1} alignItems={{ sm: "center" }}><Box sx={{ flex: 1 }}><Typography sx={{ fontSize: 13, fontWeight: 800 }}>{row.employeeName || row.name || row.employeeId || row.firstEmployee?.name || row.requesterName || "Application"} · {row.kind}</Typography><Typography sx={{ fontSize: 11, color: "#788493", mt: .4 }}>{row.leaveType || row.trainingName || row.sportsName || row.eventName || row.assignedDuty || "Duty application"} · {dateOf(row) || "Date unavailable"}{endOf(row) !== dateOf(row) ? ` → ${endOf(row)}` : ""}</Typography></Box><Chip size="small" label={statusOf(row)} color={isPending(statusOf(row)) ? "warning" : "default"} /><ApplicationActions row={row} saving={saving} selectedDatesOnly={popup === "tracking" && (recordStatus === "Approved" || row.finalStatus === "Approved")} allowReapply={popup === "history"} onReapply={record => demo ? setDemoWorkspace("apply") : navigate(`/crew/leave?${new URLSearchParams({ section: "apply", employeeId: record.employeeId, from: record.startDate || record.date, to: record.endDate || record.date, reviseLeaveId: (record.anchor || record).id })}`)} demo={demo} onUpdated={refresh} onDemoDelete={ids => setRecords(current => current.filter(item => !ids.includes(item.id)))} onDemoEdit={(leave, originals, applications, reason) => setRecords(current => [...current.filter(item => !originals.some(original => original.id === item.id)), ...applications.map((application, i) => ({ ...leave, ...application, reason, kind: "Leave", id: `demo-edit-${Date.now()}-${i}`, leaveGroupId: leave.leaveGroupId || `demo-group-${Date.now()}`, finalStatus: "Applied" }))])} onMutation={requestMutation} onTrainingReview={record => demo ? setDemoWorkspace(destinations.Training) : setTrainingReview(record.id)} /><Button size="small" onClick={() => navigate(destinations[row.kind])} endIcon={<ArrowUpRight size={13} />} sx={{ textTransform: "none" }}>{destinationLabels[row.kind]}</Button></Stack><Box sx={{ mt: 1.3, borderTop: "1px solid #E6E6EF", pt: .5 }}><LeaveProgress leave={row.kind === "Leave" ? row.anchor || row : { ...row, finalStatus: statusOf(row), approvalChain: [{ name: `${row.kind} review`, status: /^(approved|accepted|completed)$/i.test(statusOf(row)) ? "Approved" : "Pending" }] }} compact /></Box></Paper>)}</Stack>{!visibleRecords.length && <Empty loading={loading} text="No applications match this view." />}</DialogContent></Dialog>
+    {/* Full Duty Assignments & Approvals Dialog (Pop-up from landscape section) */}
+    <Dialog PaperProps={{ sx: popupPaper }} open={dutyFullListOpen} onClose={() => setDutyFullListOpen(false)} maxWidth="md" fullWidth>
+      <DialogTitle sx={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <Box>
+          <Typography fontSize={17} fontWeight={900}>
+            Duty Assignments & Approvals
+          </Typography>
+          <Typography fontSize={11} color="#64748B">
+            Accept or deny replacement duties
+          </Typography>
+        </Box>
+        <Stack direction="row" spacing={1} alignItems="center">
+          <IconButton size="small" onClick={loadDutyNotifs} disabled={dutyNotifsLoading}>
+            <RefreshCw size={15} className={dutyNotifsLoading ? "animate-spin" : ""} />
+          </IconButton>
+          <IconButton aria-label="Close" onClick={() => setDutyFullListOpen(false)}>
+            <X size={18} />
+          </IconButton>
+        </Stack>
+      </DialogTitle>
+      <DialogContent dividers>
+        {actionFeedback && (
+          <Alert severity={actionFeedback.severity} onClose={() => setActionFeedback(null)} sx={{ mb: 2, fontSize: 12 }}>
+            {actionFeedback.text}
+          </Alert>
+        )}
+
+        <Stack spacing={1.5}>
+          {/* 1. Denied Duties - High Visibility with Blink */}
+          {dutyNotifs.filter(n => n.isDenied || n.status === "Denied").map(n => (
+            <Box
+              key={`pop-denied-${n._id}`}
+              sx={{
+                p: 1.5,
+                borderRadius: 2,
+                border: "2px solid #DC2626",
+                bgcolor: "#FEF2F2",
+                animation: "adminDenialBlink 1.4s ease-in-out infinite",
+              }}
+            >
+              <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 0.6 }}>
+                <Chip size="small" label="⚠️ DUTY DENIED" sx={{ height: 20, fontSize: "0.65rem", fontWeight: 950, bgcolor: "#DC2626", color: "#FFF" }} />
+                <Typography fontSize={11} color="#991B1B" fontWeight={850}>
+                  {dayjs(n.date).format("DD-MMM-YYYY")}
+                </Typography>
+              </Stack>
+              <Typography fontSize={13} fontWeight={850} color="#991B1B">
+                {n.assignedDuty} Shift — {n.employeeName} ({n.employeeId})
+              </Typography>
+              <Typography fontSize={11.5} color="#7F1D1D" sx={{ mt: 0.3 }}>
+                <strong>Denied By:</strong> {n.deniedByRole || "Reporting/HOD Officer"} ({n.deniedBy})
+              </Typography>
+              {n.reason && (
+                <Typography fontSize={11.5} color="#991B1B" sx={{ mt: 0.5, fontStyle: "italic", bgcolor: "rgba(254, 226, 226, 0.7)", p: 0.8, borderRadius: 1.5 }}>
+                  <strong>Reason:</strong> {n.reason}
+                </Typography>
+              )}
+            </Box>
+          ))}
+
+          {/* 2. Pending and Accepted Duties */}
+          {dutyNotifs.filter(n => n.status === "Pending" || n.status === "Accepted").map(n => (
+            <Box
+              key={`pop-duty-${n._id}`}
+              sx={{
+                p: 1.5,
+                borderRadius: 2,
+                border: "1px solid #E2E8F0",
+                borderLeft: n.status === "Accepted" ? "4px solid #16A34A" : "4px solid #F59E0B",
+                bgcolor: n.status === "Accepted" ? "#F0FDF4" : "#FFFBEB",
+              }}
+            >
+              <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 0.5 }}>
+                <Chip
+                  size="small"
+                  label={n.status === "Accepted" ? "Accepted" : "Pending Response"}
+                  sx={{
+                    height: 18,
+                    fontSize: "0.62rem",
+                    fontWeight: 850,
+                    bgcolor: n.status === "Accepted" ? "#DCFCE7" : "#FEF3C7",
+                    color: n.status === "Accepted" ? "#166534" : "#92400E",
+                  }}
+                />
+                <Typography fontSize={11.5} fontWeight={800} color="#475569">
+                  {dayjs(n.date).format("DD-MMM-YYYY")}
+                </Typography>
+              </Stack>
+              <Typography fontSize={13} fontWeight={850} color="#1E293B">
+                {n.assignedDuty} Shift · {n.employeeName} ({n.employeeId})
+              </Typography>
+              <Typography fontSize={11} color="#64748B">
+                Role: {n.viewerRole} {n.leaveId ? `· Replacement for leave` : ""}
+              </Typography>
+              <Stack direction="row" spacing={1} sx={{ mt: 1.2 }}>
+                {n.canAccept && (
+                  <Button
+                    size="small"
+                    variant="contained"
+                    onClick={() => handleAcceptDuty(n._id)}
+                    sx={{
+                      py: 0.4,
+                      px: 1.4,
+                      fontSize: 11,
+                      fontWeight: 850,
+                      bgcolor: "#16A34A",
+                      "&:hover": { bgcolor: "#15803D" },
+                      textTransform: "none",
+                    }}
+                  >
+                    Accept Duty
+                  </Button>
+                )}
+                {n.canDeny && (
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    color="error"
+                    onClick={() => handleOpenDenyDialog(n)}
+                    sx={{
+                      py: 0.4,
+                      px: 1.4,
+                      fontSize: 11,
+                      fontWeight: 850,
+                      textTransform: "none",
+                      borderColor: "#DC2626",
+                      color: "#DC2626",
+                      "&:hover": { bgcolor: "#FEE2E2", borderColor: "#B91C1C" },
+                    }}
+                  >
+                    Deny Duty (HOD)
+                  </Button>
+                )}
+              </Stack>
+            </Box>
+          ))}
+
+          {dutyNotifs.length === 0 && (
+            <Typography fontSize={12} color="#94A3B8" sx={{ py: 3, textAlign: "center" }}>
+              No replacement duty assignments or approvals found.
+            </Typography>
+          )}
+        </Stack>
+      </DialogContent>
+      <Box sx={{ display: "flex", justifyContent: "flex-end", p: 2 }}>
+        <Button onClick={() => setDutyFullListOpen(false)}>Close</Button>
+      </Box>
+    </Dialog>
+
     {/* Deny Replacement Duty Dialog (Reporting/HOD Only) */}
     <Dialog PaperProps={{ sx: popupPaper }} open={denyDialogOpen} onClose={() => !denySubmitting && setDenyDialogOpen(false)} maxWidth="xs" fullWidth>
       <DialogTitle sx={{ fontSize: 16, fontWeight: 850, color: "#DC2626" }}>

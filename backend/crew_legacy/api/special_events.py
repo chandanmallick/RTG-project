@@ -363,6 +363,14 @@ def get_special_roster_matrix(
     # Resolve employee groups from roster_group_collection & daily records
     emp_to_group = resolve_employee_group_map(records)
 
+    # Shift-In-Charge employee IDs from roster groups
+    sic_emp_ids = set()
+    for grp in roster_group_collection.find({}, {"shiftInCharge": 1}):
+        sic = grp.get("shiftInCharge") or {}
+        sid = str(sic.get("employeeId") or "").strip()
+        if sid:
+            sic_emp_ids.add(sid)
+
     for l in leaves:
         ldate = str(l.get("date") or "").strip()
         if ldate in grid:
@@ -399,6 +407,7 @@ def get_special_roster_matrix(
 
             # Only Shift/Control Room person need replacement. Remove cover for general shift persons.
             req_flag = is_shift_person
+            is_leave_sic = bool(l.get("isSIC")) or (eid in sic_emp_ids) or bool(d_rec.get("isSIC"))
 
             entry = {
                 "employeeId": eid,
@@ -410,6 +419,8 @@ def get_special_roster_matrix(
                 "leaveType": str(l.get("leaveType") or "Leave"),
                 "leaveId": str(l.get("_id")),
                 "onLeave": True,
+                "isSIC": is_leave_sic,
+                "actingSIC": l.get("actingSIC"),
                 "isShiftPerson": is_shift_person,
                 "replacementRequired": req_flag,
                 "replacementAssigned": is_covered,
@@ -426,6 +437,8 @@ def get_special_roster_matrix(
                     "groupName": emp_group,
                     "leaveId": entry["leaveId"],
                     "leaveType": entry["leaveType"],
+                    "isSIC": is_leave_sic,
+                    "actingSIC": l.get("actingSIC"),
                     "status": "Covered" if is_covered else "Uncovered",
                 })
 
@@ -440,6 +453,7 @@ def get_special_roster_matrix(
 
         assigned_duty = str(r.get("assignedDuty") or "General").strip()
         norm = normalized_duty(assigned_duty)
+        is_sic = bool(r.get("isSIC")) or eid in sic_emp_ids
         entry = {
             "employeeId": eid,
             "name": str(r.get("name") or eid),
@@ -450,8 +464,10 @@ def get_special_roster_matrix(
             "onLeave": False,
             "replacementDuty": bool(r.get("replacementDuty")),
             "additionalManpower": bool(r.get("additionalManpower")),
-            "isSIC": bool(r.get("isSIC")),
+            "isSIC": is_sic,
             "isActingSIC": bool(r.get("isActingSIC")),
+            "actingSICGroup": str(r.get("actingSICGroup") or ""),
+            "actingSICFor": r.get("actingSICFor"),
         }
         if norm in ["MORNING", "M1", "M2"]:
             grid[rdate]["Morning"].append(entry)

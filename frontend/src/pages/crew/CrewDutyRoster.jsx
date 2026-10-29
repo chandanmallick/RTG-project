@@ -469,7 +469,7 @@ export default function CrewDutyRoster() {
             </div>
 
             {signedBy && (
-              <div className="crew-roster-print-signature-block" style={{ textAlign: "right", fontFamily: '"Nirmala UI", "Noto Sans Devanagari", Arial, sans-serif', fontSize: "7.5px", minWidth: "220px", paddingRight: "8px" }}>
+              <div className="crew-roster-print-signature-block" style={{ textAlign: "right", fontFamily: '"Nirmala UI", "Noto Sans Devanagari", Arial, sans-serif', fontSize: "7.5px", minWidth: "220px", paddingRight: "8px", paddingTop: "26px" }}>
                 <div className="crew-roster-print-signature-name" style={{ fontWeight: "bold", fontSize: "8.5px", marginBottom: "1px", color: "#000000" }}>
                   {formatBilingual(signingAuthority?.name, signingAuthority?.nameHindi)}
                 </div>

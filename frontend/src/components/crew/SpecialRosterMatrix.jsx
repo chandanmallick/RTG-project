@@ -66,6 +66,7 @@ import {
   UserPlus,
   Users,
   Wand2,
+  X,
 } from "lucide-react";
 import dayjs from "dayjs";
 import api from "../../crewLegacy/api";
@@ -323,6 +324,15 @@ export default function SpecialRosterMatrix({
   const [deployCandidateOptions, setDeployCandidateOptions] = useState([]);
   const [deployCandidateLoading, setDeployCandidateLoading] = useState(false);
 
+  // Temporary Acting SIC Assignment Modal state (for SIC on leave)
+  const [sicDialogOpen, setSicDialogOpen] = useState(false);
+  const [selectedSicLeave, setSelectedSicLeave] = useState(null);
+  const [sicCandidates, setSicCandidates] = useState([]);
+  const [sicCandidatesLoading, setSicCandidatesLoading] = useState(false);
+  const [selectedSIC, setSelectedSIC] = useState("");
+  const [sicScope, setSicScope] = useState("shift");
+  const [sicSaving, setSicSaving] = useState(false);
+
   // Sequential Allocation from Created Pools & Multi-Department Dialog state
   const [sequentialDialogOpen, setSequentialDialogOpen] = useState(false);
   const [sourcePool, setSourcePool] = useState("all_pools");
@@ -379,6 +389,25 @@ export default function SpecialRosterMatrix({
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    let changed = false;
+    let s = startDate;
+    let e = endDate;
+    if (initialStartDate && initialStartDate !== startDate) {
+      setStartDate(initialStartDate);
+      s = initialStartDate;
+      changed = true;
+    }
+    if (initialEndDate && initialEndDate !== endDate) {
+      setEndDate(initialEndDate);
+      e = initialEndDate;
+      changed = true;
+    }
+    if (changed) {
+      loadMatrix(s, e, selectedEventId);
+    }
+  }, [initialStartDate, initialEndDate]);
 
   useEffect(() => {
     loadMatrix();
@@ -546,11 +575,20 @@ export default function SpecialRosterMatrix({
     setDeployCandidate(candidate || null);
     setDeployLeave(leaveItem || null);
     setDeploySlot({ date: dateStr, shift: shiftKey });
-    setDeployMode("double");
+
+    // USER REQUIREMENT: Drag & drop, then it will not be double duty.
+    // Double duty only when add people or drag from general shift
+    const isFromGeneral = candidate && (
+      candidate.sourceDuty === "General" ||
+      candidate.assignedDuty === "General" ||
+      String(candidate.groupName || "").toLowerCase() === "general"
+    );
+    const calculatedMode = (!candidate || isFromGeneral) ? "double" : "normal";
+    setDeployMode(calculatedMode);
     setDeployHalfDuty(false);
     setDeployReason(
       candidate
-        ? `Replacement deployed for ${leaveItem?.name || "leave"} (${shiftKey}) via Drag & Drop Special Roster`
+        ? `Replacement deployed for ${leaveItem?.name || "leave"} (${shiftKey}) via Drag & Drop Special Roster (${calculatedMode === "double" ? "Double Duty (Awards C-OFF)" : "Single Duty Reassignment"})`
         : `Replacement deployed for ${leaveItem?.name || "leave"} (${shiftKey})`
     );
     setDeployModalOpen(true);
@@ -598,6 +636,9 @@ export default function SpecialRosterMatrix({
       });
       setDeployModalOpen(false);
       await loadMatrix();
+      if (deployLeave?.isSIC) {
+        openAssignSicDialog(deployLeave);
+      }
     } catch (err) {
       setNotice({
         severity: "error",
@@ -605,6 +646,60 @@ export default function SpecialRosterMatrix({
       });
     } finally {
       setDeploySaving(false);
+    }
+  };
+
+  // Open Assign Acting SIC Modal (for SIC on leave)
+  const openAssignSicDialog = async (leaveItem, scope = "shift") => {
+    setSelectedSicLeave(leaveItem);
+    setSicScope(scope);
+    setSelectedSIC(leaveItem?.actingSIC?.employeeId || "");
+    setSicDialogOpen(true);
+    setSicCandidatesLoading(true);
+    try {
+      const leaveId = leaveItem?.leaveId || leaveItem?.id || leaveItem?._id;
+      if (!leaveId) return;
+      const res = await api.get(`/replacement/sic-candidates/${leaveId}`, { params: { scope } });
+      const list = Array.isArray(res.data) ? res.data : [];
+      setSicCandidates(list);
+      if (!leaveItem?.actingSIC?.employeeId && list.length > 0) {
+        setSelectedSIC(list[0].employeeId);
+      }
+    } catch (err) {
+      setNotice({ severity: "error", text: err.response?.data?.detail || "Failed to load SIC candidates." });
+      setSicCandidates([]);
+    } finally {
+      setSicCandidatesLoading(false);
+    }
+  };
+
+  // Submit Acting SIC assignment
+  const handleSaveActingSIC = async () => {
+    const leaveId = selectedSicLeave?.leaveId || selectedSicLeave?.id || selectedSicLeave?._id;
+    if (!leaveId || !selectedSIC) {
+      setNotice({ severity: "warning", text: "Please select an acting SIC candidate." });
+      return;
+    }
+    setSicSaving(true);
+    try {
+      await api.put(`/replacement/assign-sic/${leaveId}`, {
+        sicEmployeeId: selectedSIC,
+        scope: sicScope,
+        source: "Special Event Matrix Drag & Drop SIC assignment",
+      });
+      setNotice({
+        severity: "success",
+        text: `Acting Shift In-Charge assigned successfully to ${selectedSIC}.`,
+      });
+      setSicDialogOpen(false);
+      await loadMatrix();
+    } catch (err) {
+      setNotice({
+        severity: "error",
+        text: err.response?.data?.detail || "Failed to assign acting SIC.",
+      });
+    } finally {
+      setSicSaving(false);
     }
   };
 
@@ -786,6 +881,448 @@ export default function SpecialRosterMatrix({
       (r) => r.status === "Uncovered"
     ).length;
   }, [matrixData]);
+
+  // Render individual person card
+  const renderPersonCard = (person, dateStr, shiftKey) => {
+    const personGroup = (person.groupName && String(person.groupName).trim()) || "General";
+    const grp = getGroupStyle(personGroup);
+    const isGroupMatch = selectedGroupFilter === "all" || selectedGroupFilter === personGroup;
+    const isCurrentDrag =
+      draggedItem &&
+      draggedItem.employeeId === person.employeeId &&
+      draggedItem.date === dateStr;
+
+    return (
+      <Paper
+        key={`person-${person.employeeId}-${dateStr}`}
+        draggable={!person.onLeave}
+        onDragStart={(e) =>
+          handleDragStart(e, person, shiftKey, dateStr)
+        }
+        onDragOver={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+        }}
+        onDrop={(e) => {
+          e.stopPropagation();
+          handleDrop(e, dateStr, shiftKey, person);
+        }}
+        elevation={0}
+        sx={{
+          p: 0.55,
+          mb: 0.35,
+          borderRadius: 1.5,
+          border: "1px solid",
+          borderColor: person.onLeave
+            ? "#FCA5A5"
+            : person.replacementDuty
+            ? "#86EFAC"
+            : (grp.borderColor || "#CBD5E1"),
+          borderLeft: `4px solid ${person.onLeave ? "#DC2626" : grp.accent}`,
+          bgcolor: person.onLeave
+            ? "#FEF2F2"
+            : person.replacementDuty
+            ? "#F0FDF4"
+            : (grp.cardBg || "#FFFFFF"),
+          cursor: person.onLeave ? "default" : "grab",
+          opacity: isCurrentDrag ? 0.35 : (!isGroupMatch ? 0.22 : 1),
+          transform: !isGroupMatch ? "none" : (selectedGroupFilter !== "all" ? "scale(1.02)" : "none"),
+          boxShadow: "0 1px 3px rgba(0,0,0,0.03)",
+          transition: "all 0.15s ease",
+          "&:hover": {
+            transform: person.onLeave ? "none" : "translateY(-1px)",
+            borderColor: grp.accent,
+          },
+        }}
+      >
+        <Stack direction="row" alignItems="center" spacing={0.4}>
+          {!person.onLeave && (
+            <GripVertical
+              size={11}
+              color={grp.accent}
+              style={{ flexShrink: 0 }}
+            />
+          )}
+          <Box sx={{ minWidth: 0, flexGrow: 1 }}>
+            {/* Name & Compact Group / SIC Tag (No designation shown per user request) */}
+            <Stack direction="row" justifyContent="space-between" alignItems="center" spacing={0.4}>
+              <Typography
+                fontSize={11}
+                fontWeight={person.isSIC || person.isActingSIC ? 950 : 800}
+                color={person.onLeave ? "#991B1B" : "#0F172A"}
+                sx={{ lineHeight: 1.15 }}
+                noWrap
+              >
+                {person.name}
+              </Typography>
+              <Stack direction="row" spacing={0.3} alignItems="center">
+                {person.isSIC && (
+                  <Chip
+                    size="small"
+                    label="SIC"
+                    sx={{
+                      height: 15,
+                      fontSize: "0.58rem",
+                      fontWeight: 950,
+                      bgcolor: "#DBEAFE",
+                      color: "#1E40AF",
+                      px: 0.1,
+                      "& .MuiChip-label": { px: 0.4 },
+                    }}
+                  />
+                )}
+                {person.isActingSIC && (
+                  <Chip
+                    size="small"
+                    label="Acting SIC"
+                    sx={{
+                      height: 15,
+                      fontSize: "0.58rem",
+                      fontWeight: 950,
+                      bgcolor: "#FEF3C7",
+                      color: "#92400E",
+                      border: "1px solid #FCD34D",
+                      px: 0.1,
+                      "& .MuiChip-label": { px: 0.4 },
+                    }}
+                  />
+                )}
+                <Tooltip title={`Group: ${personGroup}`}>
+                  <Chip
+                    size="small"
+                    label={grp.tag || personGroup}
+                    sx={{
+                      height: 15,
+                      fontSize: "0.58rem",
+                      fontWeight: 850,
+                      bgcolor: grp.badgeBg,
+                      color: grp.badgeText,
+                      border: `1px solid ${grp.badgeBorder}`,
+                      borderRadius: "3px",
+                      flexShrink: 0,
+                      px: 0.1,
+                      "& .MuiChip-label": { px: 0.4 },
+                    }}
+                  />
+                </Tooltip>
+              </Stack>
+            </Stack>
+
+            {/* If marked as replacement duty, show word "Replacement" and blink! */}
+            {person.replacementDuty && (
+              <Stack direction="row" spacing={0.3} sx={{ mt: 0.2 }}>
+                <Chip
+                  size="small"
+                  label="Replacement"
+                  sx={{
+                    height: 15,
+                    fontSize: "0.58rem",
+                    fontWeight: 950,
+                    bgcolor: "#DCFCE7",
+                    color: "#166534",
+                    border: "1px solid #86EFAC",
+                    animation: "replacementBlink 1.4s ease-in-out infinite",
+                    "@keyframes replacementBlink": {
+                      "0%, 100%": { opacity: 1, backgroundColor: "#DCFCE7", boxShadow: "0 0 6px rgba(34, 197, 94, 0.5)" },
+                      "50%": { opacity: 0.4, backgroundColor: "#F0FDF4", boxShadow: "none" },
+                    },
+                  }}
+                />
+              </Stack>
+            )}
+
+            {/* Direct Cover Action for Leave Card in Leave Row */}
+            {person.onLeave && (
+              <Box sx={{ mt: 0.4, pt: 0.3, borderTop: "1px dashed #FECACA" }}>
+                {person.replacementAssigned ? (
+                  <Box
+                    sx={{
+                      px: 0.4,
+                      py: 0.2,
+                      borderRadius: 1,
+                      bgcolor: "#DCFCE7",
+                      border: "1px solid #86EFAC",
+                      animation: "replacementBlink 1.4s ease-in-out infinite",
+                    }}
+                  >
+                    <Stack direction="row" alignItems="center" justifyContent="space-between" spacing={0.4}>
+                      <Typography fontSize={10} color="#166534" fontWeight={950} noWrap>
+                        🔄 Replacement: {person.replacement?.name || "Assigned"}
+                      </Typography>
+                      <Tooltip title="Release replacement">
+                        <IconButton
+                          size="small"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleReleaseReplacement(person.leaveId, person.name);
+                          }}
+                          sx={{ p: 0.2, color: "#991B1B", "&:hover": { bgcolor: "#FEE2E2" } }}
+                        >
+                          <Trash2 size={10} />
+                        </IconButton>
+                      </Tooltip>
+                    </Stack>
+                  </Box>
+                ) : (
+                  <Button
+                    size="small"
+                    startIcon={<UserCheck size={10} />}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      openDeployReplacementModal(null, person, dateStr, person.assignedDuty || "Morning");
+                    }}
+                    sx={{
+                      fontSize: "0.62rem",
+                      py: 0.1,
+                      px: 0.5,
+                      minHeight: 0,
+                      bgcolor: "#FEF3C7",
+                      color: "#92400E",
+                      border: "1px solid #FCD34D",
+                      borderRadius: 1,
+                      fontWeight: 850,
+                      textTransform: "none",
+                      width: "100%",
+                      "&:hover": { bgcolor: "#FDE68A" },
+                    }}
+                  >
+                    + Drop / Assign Cover
+                  </Button>
+                )}
+              </Box>
+            )}
+          </Box>
+        </Stack>
+      </Paper>
+    );
+  };
+
+  // Render unified Leave & Replacement Box
+  const renderUnifiedLeaveCard = (l, dateStr, shiftKey) => {
+    const isCovered = Boolean(l.replacementAssigned);
+    return (
+      <Paper
+        key={`unified-leave-${l.leaveId || l.employeeId}-${dateStr}`}
+        elevation={0}
+        onDragOver={(e) => {
+          if (!isCovered) {
+            e.preventDefault();
+            e.stopPropagation();
+          }
+        }}
+        onDrop={(e) => {
+          if (!isCovered) {
+            e.stopPropagation();
+            handleDropOnReplacement(e, l, dateStr, shiftKey);
+          }
+        }}
+        onClick={() => {
+          if (!isCovered) {
+            openDeployReplacementModal(null, l, dateStr, shiftKey);
+          }
+        }}
+        sx={{
+          p: 0.8,
+          mb: 0.4,
+          borderRadius: 1.5,
+          border: isCovered ? "1px solid #86EFAC" : "1.5px dashed #F59E0B",
+          borderLeft: isCovered ? "4px solid #16A34A" : "4px solid #D97706",
+          bgcolor: isCovered ? "#F0FDF4" : "#FFFBEB",
+          cursor: isCovered ? "default" : "pointer",
+          transition: "all 0.18s ease",
+          "&:hover": isCovered ? {} : {
+            bgcolor: "#FEF3C7",
+            borderColor: "#D97706",
+            transform: "translateY(-1px)",
+            boxShadow: "0 2px 8px rgba(245, 158, 11, 0.25)",
+          },
+        }}
+      >
+        <Stack spacing={0.4}>
+          {/* Same Box Header: Leave Person (With SIC badge if SIC) */}
+          <Stack direction="row" alignItems="center" justifyContent="space-between" spacing={0.4}>
+            <Stack direction="row" alignItems="center" spacing={0.4} sx={{ minWidth: 0 }}>
+              <Typography
+                fontSize={11}
+                fontWeight={l.isSIC ? 950 : 800}
+                color="#991B1B"
+                sx={{ textDecoration: "line-through", textDecorationColor: "#DC2626" }}
+                noWrap
+              >
+                {l.name}
+              </Typography>
+              {l.isSIC && (
+                <Chip
+                  size="small"
+                  label="SIC"
+                  sx={{
+                    height: 15,
+                    fontSize: "0.58rem",
+                    fontWeight: 950,
+                    bgcolor: "#FEE2E2",
+                    color: "#991B1B",
+                    border: "1px solid #F87171",
+                    borderRadius: "3px",
+                    px: 0.1,
+                    "& .MuiChip-label": { px: 0.3 },
+                  }}
+                />
+              )}
+            </Stack>
+            <Chip
+              size="small"
+              label={l.leaveType || "Leave"}
+              sx={{
+                height: 15,
+                fontSize: "0.58rem",
+                fontWeight: 850,
+                bgcolor: "#FEE2E2",
+                color: "#991B1B",
+                border: "1px solid #FCA5A5",
+                borderRadius: "3px",
+                px: 0.1,
+                "& .MuiChip-label": { px: 0.4 },
+              }}
+            />
+          </Stack>
+
+          {/* Same Box Body: Connected Replacement with Blinking Word */}
+          {isCovered ? (
+            <Box
+              sx={{
+                p: 0.4,
+                borderRadius: 1,
+                bgcolor: "#DCFCE7",
+                border: "1px solid #86EFAC",
+                animation: "replacementBlink 1.4s ease-in-out infinite",
+                "@keyframes replacementBlink": {
+                  "0%, 100%": { opacity: 1, backgroundColor: "#DCFCE7", boxShadow: "0 0 6px rgba(34, 197, 94, 0.4)" },
+                  "50%": { opacity: 0.5, backgroundColor: "#F0FDF4", boxShadow: "none" },
+                },
+              }}
+            >
+              <Stack direction="row" alignItems="center" justifyContent="space-between" spacing={0.4}>
+                <Stack direction="row" alignItems="center" spacing={0.4} sx={{ minWidth: 0 }}>
+                  <Chip
+                    size="small"
+                    label="Replacement"
+                    sx={{
+                      height: 15,
+                      fontSize: "0.58rem",
+                      fontWeight: 950,
+                      bgcolor: "#16A34A",
+                      color: "#FFF",
+                      borderRadius: "3px",
+                      px: 0.1,
+                      "& .MuiChip-label": { px: 0.4 },
+                    }}
+                  />
+                  <Typography fontSize={10.5} fontWeight={900} color="#166534" noWrap>
+                    {l.replacement?.name || "Assigned"}
+                  </Typography>
+                </Stack>
+                <Tooltip title="Release replacement">
+                  <IconButton
+                    size="small"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleReleaseReplacement(l.leaveId, l.name);
+                    }}
+                    sx={{
+                      p: 0.2,
+                      color: "#991B1B",
+                      bgcolor: "#FEE2E2",
+                      "&:hover": { bgcolor: "#FECACA" },
+                    }}
+                  >
+                    <Trash2 size={10} />
+                  </IconButton>
+                </Tooltip>
+              </Stack>
+            </Box>
+          ) : (
+            <Box
+              sx={{
+                py: 0.35,
+                px: 0.5,
+                borderRadius: 1,
+                bgcolor: "#FEF3C7",
+                border: "1px dashed #D97706",
+                textAlign: "center",
+              }}
+            >
+              <Typography fontSize={9.5} fontWeight={800} color="#92400E">
+                + Drop candidate here to replace
+              </Typography>
+            </Box>
+          )}
+
+          {/* Option to Assign Acting SIC like manual module when SIC is on leave */}
+          {l.isSIC && (
+            <Box sx={{ mt: 0.3, pt: 0.3, borderTop: "1px dashed #FCD34D" }}>
+              {l.actingSIC?.name ? (
+                <Stack direction="row" alignItems="center" justifyContent="space-between" spacing={0.3} sx={{ bgcolor: "#FEF3C7", p: 0.35, borderRadius: 1, border: "1px solid #FCD34D" }}>
+                  <Stack direction="row" alignItems="center" spacing={0.3} sx={{ minWidth: 0 }}>
+                    <Shield size={11} color="#B45309" />
+                    <Typography fontSize={9.5} fontWeight={900} color="#92400E" noWrap>
+                      Acting SIC: {l.actingSIC.name}
+                    </Typography>
+                  </Stack>
+                  <Button
+                    size="small"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      openAssignSicDialog(l);
+                    }}
+                    sx={{
+                      fontSize: "0.58rem",
+                      py: 0,
+                      px: 0.4,
+                      minHeight: 0,
+                      textTransform: "none",
+                      fontWeight: 850,
+                      color: "#92400E",
+                      bgcolor: "#FFF",
+                      border: "1px solid #FCD34D",
+                      borderRadius: 1,
+                      "&:hover": { bgcolor: "#FDE68A" },
+                    }}
+                  >
+                    Change
+                  </Button>
+                </Stack>
+              ) : (
+                <Button
+                  size="small"
+                  fullWidth
+                  startIcon={<Shield size={11} />}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    openAssignSicDialog(l);
+                  }}
+                  sx={{
+                    fontSize: "0.65rem",
+                    py: 0.25,
+                    px: 0.6,
+                    minHeight: 0,
+                    bgcolor: "#FEF3C7",
+                    color: "#92400E",
+                    border: "1px solid #FCD34D",
+                    borderRadius: 1,
+                    fontWeight: 900,
+                    textTransform: "none",
+                    "&:hover": { bgcolor: "#FDE68A" },
+                  }}
+                >
+                  👑 Assign Acting SIC
+                </Button>
+              )}
+            </Box>
+          )}
+        </Stack>
+      </Paper>
+    );
+  };
 
   return (
     <Box sx={{ width: "100%" }}>
@@ -1221,11 +1758,37 @@ export default function SpecialRosterMatrix({
 
                       {/* Day Cells for this Shift */}
                       {(matrixData.dates || []).map((dateStr) => {
-                        const shiftList = matrixData.grid?.[dateStr]?.[shiftKey] || [];
+                        const rawShiftList = matrixData.grid?.[dateStr]?.[shiftKey] || [];
                         const isDragTarget =
                           dragOverCell &&
                           dragOverCell.date === dateStr &&
                           dragOverCell.shift === shiftKey;
+
+                        const shiftLeaves = (shiftKey !== "Leave" && shiftKey !== "Off")
+                          ? (matrixData.grid?.[dateStr]?.["Leave"] || []).filter((l) => {
+                              // USER REQUIREMENT: Only shift/Control Room person need replacement. Remove cover for general shift persons.
+                              if (l.isShiftPerson === false) return false;
+                              const grp = (l.groupName || "").toLowerCase();
+                              if (grp === "general" || grp.startsWith("gen")) return false;
+                              const d = (l.assignedDuty || "").toLowerCase();
+                              if (d === "general" || d === "gen") return false;
+
+                              const sk = shiftKey.toLowerCase();
+                              return d === sk || (sk === "morning" && !["evening", "night", "general"].includes(d));
+                            })
+                          : [];
+
+                        // USER REQUIREMENT: SIC name should be on the top!
+                        // 1. If regular SIC is on leave, their leave box is at the top with Assign Acting SIC option.
+                        const sicLeaves = shiftLeaves.filter((l) => l.isSIC);
+                        // 2. Working SIC or designated Acting SIC
+                        const activeSics = rawShiftList.filter((p) => p.isSIC || p.isActingSIC);
+                        // 3. Regular active roster members
+                        const regularMembers = rawShiftList
+                          .filter((p) => !p.isSIC && !p.isActingSIC)
+                          .sort((a, b) => (a.groupName || "").localeCompare(b.groupName || ""));
+                        // 4. Non-SIC leaves requiring replacement
+                        const otherLeaves = shiftLeaves.filter((l) => !l.isSIC);
 
                         return (
                           <TableCell
@@ -1244,369 +1807,18 @@ export default function SpecialRosterMatrix({
                             }}
                           >
                             <Stack spacing={0.8} sx={{ minHeight: 65 }}>
-                              {/* Roster Block Cards */}
-                              {shiftList.map((person) => {
-                                const personGroup = (person.groupName && String(person.groupName).trim()) || "General";
-                                const grp = getGroupStyle(personGroup);
-                                const isGroupMatch = selectedGroupFilter === "all" || selectedGroupFilter === personGroup;
-                                const isCurrentDrag =
-                                  draggedItem &&
-                                  draggedItem.employeeId === person.employeeId &&
-                                  draggedItem.date === dateStr;
+                              {/* 1. Shift In-Charge at the very top (SIC on leave, Active SIC, or Acting SIC) */}
+                              {sicLeaves.map((l) => renderUnifiedLeaveCard(l, dateStr, shiftKey))}
+                              {activeSics.map((person) => renderPersonCard(person, dateStr, shiftKey))}
 
-                                return (
-                                  <Paper
-                                    key={person.employeeId}
-                                    draggable={!person.onLeave}
-                                    onDragStart={(e) =>
-                                      handleDragStart(e, person, shiftKey, dateStr)
-                                    }
-                                    onDragOver={(e) => {
-                                      // Allow dropping directly onto this card to swap duties
-                                      e.preventDefault();
-                                      e.stopPropagation();
-                                    }}
-                                    onDrop={(e) => {
-                                      e.stopPropagation();
-                                      handleDrop(e, dateStr, shiftKey, person);
-                                    }}
-                                    elevation={0}
-                                    sx={{
-                                      p: 0.9,
-                                      borderRadius: 2,
-                                      border: "1px solid",
-                                      borderColor: person.onLeave
-                                        ? "#FCA5A5"
-                                        : person.replacementDuty
-                                        ? "#86EFAC"
-                                        : (grp.borderColor || "#CBD5E1"),
-                                      borderLeft: `4.5px solid ${person.onLeave ? "#DC2626" : grp.accent}`,
-                                      bgcolor: person.onLeave
-                                        ? "#FEF2F2"
-                                        : person.replacementDuty
-                                        ? "#F0FDF4"
-                                        : (grp.cardBg || "#FFFFFF"),
-                                      cursor: person.onLeave ? "default" : "grab",
-                                      opacity: isCurrentDrag ? 0.35 : (!isGroupMatch ? 0.22 : 1),
-                                      transform: !isGroupMatch ? "none" : (selectedGroupFilter !== "all" ? "scale(1.02)" : "none"),
-                                      boxShadow: !isGroupMatch
-                                        ? "none"
-                                        : selectedGroupFilter !== "all"
-                                        ? `0 4px 14px ${grp.accent}35`
-                                        : "0 2px 6px rgba(0,0,0,0.04)",
-                                      transition: "all 0.18s ease",
-                                      "&:hover": {
-                                        transform: person.onLeave ? "none" : "translateY(-2px)",
-                                        boxShadow: `0 6px 16px ${grp.accent}30`,
-                                        borderColor: grp.accent,
-                                      },
-                                    }}
-                                  >
-                                    <Stack direction="row" alignItems="flex-start" spacing={0.6}>
-                                      {!person.onLeave && (
-                                        <GripVertical
-                                          size={13}
-                                          color={grp.accent}
-                                          style={{ marginTop: 2, flexShrink: 0 }}
-                                        />
-                                      )}
-                                      <Box sx={{ minWidth: 0, flexGrow: 1 }}>
-                                        {/* Name & Group Distinction Badge */}
-                                        <Stack direction="row" justifyContent="space-between" alignItems="center" spacing={0.5}>
-                                          <Typography
-                                            fontSize={11.5}
-                                            fontWeight={850}
-                                            color={person.onLeave ? "#991B1B" : "#0F172A"}
-                                            sx={{ lineHeight: 1.25 }}
-                                            noWrap
-                                          >
-                                            {person.name}
-                                          </Typography>
-                                          <Tooltip title={`Group: ${personGroup}`}>
-                                            <Chip
-                                              size="small"
-                                              label={personGroup}
-                                              sx={{
-                                                height: 16,
-                                                fontSize: "0.60rem",
-                                                fontWeight: 900,
-                                                bgcolor: grp.badgeBg,
-                                                color: grp.badgeText,
-                                                border: `1px solid ${grp.badgeBorder}`,
-                                                borderRadius: "4px",
-                                                flexShrink: 0,
-                                                px: 0.1,
-                                                "& .MuiChip-label": { px: 0.5 },
-                                              }}
-                                            />
-                                          </Tooltip>
-                                        </Stack>
+                              {/* 2. Regular Shift Members */}
+                              {regularMembers.map((person) => renderPersonCard(person, dateStr, shiftKey))}
 
-                                        <Stack direction="row" spacing={0.5} alignItems="center" sx={{ mt: 0.3 }} flexWrap="wrap">
-                                          <Typography fontSize={10} color="#64748B" fontWeight={750}>
-                                            {person.employeeId}
-                                          </Typography>
-                                          {person.designation && (
-                                            <Typography fontSize={9.5} color="#94A3B8" noWrap>
-                                              · {person.designation}
-                                            </Typography>
-                                          )}
-                                        </Stack>
-
-                                        {/* Status & Coverage Badges */}
-                                        <Stack direction="row" spacing={0.4} sx={{ mt: 0.4 }} flexWrap="wrap">
-                                          {person.replacementDuty && (
-                                            <Chip
-                                              size="small"
-                                              label="Cover"
-                                              sx={{
-                                                height: 15,
-                                                fontSize: "0.62rem",
-                                                fontWeight: 900,
-                                                bgcolor: "#DCFCE7",
-                                                color: "#166534",
-                                              }}
-                                            />
-                                          )}
-                                          {person.additionalManpower && (
-                                            <Chip
-                                              size="small"
-                                              label="Surge"
-                                              sx={{
-                                                height: 15,
-                                                fontSize: "0.62rem",
-                                                fontWeight: 900,
-                                                bgcolor: "#EDE9FE",
-                                                color: "#6D28D9",
-                                              }}
-                                            />
-                                          )}
-                                          {person.isSIC && (
-                                            <Chip
-                                              size="small"
-                                              label="SIC"
-                                              sx={{
-                                                height: 15,
-                                                fontSize: "0.62rem",
-                                                fontWeight: 900,
-                                                bgcolor: "#DBEAFE",
-                                                color: "#1E40AF",
-                                              }}
-                                            />
-                                          )}
-                                          {person.onLeave && (
-                                            <Chip
-                                              size="small"
-                                              label={person.leaveType || "Leave"}
-                                              sx={{
-                                                height: 15,
-                                                fontSize: "0.62rem",
-                                                fontWeight: 900,
-                                                bgcolor: "#FEE2E2",
-                                                color: "#991B1B",
-                                              }}
-                                            />
-                                          )}
-                                          {person.replacementRequired && !person.replacementAssigned && (
-                                            <Chip
-                                              size="small"
-                                              label="Needs Cover"
-                                              sx={{
-                                                height: 15,
-                                                fontSize: "0.62rem",
-                                                fontWeight: 900,
-                                                bgcolor: "#FEF3C7",
-                                                color: "#B45309",
-                                              }}
-                                            />
-                                          )}
-                                        </Stack>
-
-                                        {/* Direct Cover Action for Leave Card */}
-                                        {person.onLeave && (
-                                          <Box sx={{ mt: 0.8, pt: 0.6, borderTop: "1px dashed #FECACA" }}>
-                                            {person.replacementAssigned ? (
-                                              <Stack direction="row" alignItems="center" justifyContent="space-between" spacing={0.5}>
-                                                <Stack direction="row" alignItems="center" spacing={0.4} sx={{ minWidth: 0 }}>
-                                                  <Award size={12} color="#16A34A" />
-                                                  <Typography fontSize={10} color="#166534" fontWeight={850} noWrap>
-                                                    Cover: {person.replacement?.name || "Assigned"}
-                                                  </Typography>
-                                                </Stack>
-                                                <Tooltip title="Release replacement">
-                                                  <IconButton
-                                                    size="small"
-                                                    onClick={(e) => {
-                                                      e.stopPropagation();
-                                                      handleReleaseReplacement(person.leaveId, person.name);
-                                                    }}
-                                                    sx={{ p: 0.2, color: "#991B1B", "&:hover": { bgcolor: "#FEE2E2" } }}
-                                                  >
-                                                    <Trash2 size={11} />
-                                                  </IconButton>
-                                                </Tooltip>
-                                              </Stack>
-                                            ) : (
-                                              <Button
-                                                size="small"
-                                                startIcon={<UserCheck size={11} />}
-                                                onClick={(e) => {
-                                                  e.stopPropagation();
-                                                  openDeployReplacementModal(null, person, dateStr, person.assignedDuty || "Morning");
-                                                }}
-                                                sx={{
-                                                  fontSize: "0.64rem",
-                                                  py: 0.1,
-                                                  px: 0.6,
-                                                  minHeight: 0,
-                                                  bgcolor: "#FEF3C7",
-                                                  color: "#92400E",
-                                                  border: "1px solid #FCD34D",
-                                                  borderRadius: 1,
-                                                  fontWeight: 850,
-                                                  textTransform: "none",
-                                                  width: "100%",
-                                                  "&:hover": { bgcolor: "#FDE68A" },
-                                                }}
-                                              >
-                                                + Drop or Assign Cover
-                                              </Button>
-                                            )}
-                                          </Box>
-                                        )}
-                                      </Box>
-                                    </Stack>
-                                  </Paper>
-                                );
-                              })}
-
-                              {/* Replacement Place & Covered Slots for Shift Cells */}
-                              {shiftKey !== "Leave" && shiftKey !== "Off" && (() => {
-                                const shiftLeaves = (matrixData.grid?.[dateStr]?.["Leave"] || []).filter((l) => {
-                                  // USER REQUIREMENT: Only shift/Control Room person need replacement. Remove cover for general shift persons.
-                                  if (l.isShiftPerson === false) return false;
-                                  const grp = (l.groupName || "").toLowerCase();
-                                  if (grp === "general" || grp.startsWith("gen")) return false;
-                                  const d = (l.assignedDuty || "").toLowerCase();
-                                  if (d === "general" || d === "gen") return false;
-
-                                  const sk = shiftKey.toLowerCase();
-                                  return d === sk || (sk === "morning" && !["evening", "night", "general"].includes(d));
-                                });
-
-                                return shiftLeaves.map((l) => {
-                                  if (l.replacementAssigned) {
-                                    return (
-                                      <Paper
-                                        key={`cov-${l.leaveId || l.employeeId}`}
-                                        elevation={0}
-                                        sx={{
-                                          p: 0.8,
-                                          borderRadius: 1.5,
-                                          border: "1px solid #86EFAC",
-                                          borderLeft: "3.5px solid #16A34A",
-                                          bgcolor: "#F0FDF4",
-                                        }}
-                                      >
-                                        <Stack direction="row" alignItems="center" justifyContent="space-between" spacing={0.5}>
-                                          <Stack direction="row" alignItems="center" spacing={0.5} sx={{ minWidth: 0 }}>
-                                            <Award size={13} color="#16A34A" />
-                                            <Box sx={{ minWidth: 0 }}>
-                                              <Typography fontSize={11} fontWeight={850} color="#166534" noWrap>
-                                                Cover: {l.replacement?.name || "Assigned"}
-                                              </Typography>
-                                              <Typography fontSize={9} color="#15803D" fontWeight={700} noWrap>
-                                                For {l.name} · C-OFF Credited
-                                              </Typography>
-                                            </Box>
-                                          </Stack>
-                                          <Tooltip title="Release Replacement">
-                                            <IconButton
-                                              size="small"
-                                              onClick={(e) => {
-                                                e.stopPropagation();
-                                                handleReleaseReplacement(l.leaveId, l.name);
-                                              }}
-                                              sx={{
-                                                p: 0.3,
-                                                color: "#991B1B",
-                                                bgcolor: "#FEE2E2",
-                                                "&:hover": { bgcolor: "#FECACA" },
-                                              }}
-                                            >
-                                              <Trash2 size={11} />
-                                            </IconButton>
-                                          </Tooltip>
-                                        </Stack>
-                                      </Paper>
-                                    );
-                                  }
-
-                                  return (
-                                    <Paper
-                                      key={`slot-${l.leaveId || l.employeeId}`}
-                                      elevation={0}
-                                      onDragOver={(e) => {
-                                        e.preventDefault();
-                                        e.stopPropagation();
-                                      }}
-                                      onDrop={(e) => {
-                                        e.stopPropagation();
-                                        handleDropOnReplacement(e, l, dateStr, shiftKey);
-                                      }}
-                                      onClick={() => openDeployReplacementModal(null, l, dateStr, shiftKey)}
-                                      sx={{
-                                        p: 0.9,
-                                        borderRadius: 2,
-                                        border: "2px dashed #F59E0B",
-                                        bgcolor: "#FFFBEB",
-                                        cursor: "pointer",
-                                        transition: "all 0.18s ease",
-                                        "&:hover": {
-                                          bgcolor: "#FEF3C7",
-                                          borderColor: "#D97706",
-                                          transform: "translateY(-1px)",
-                                          boxShadow: "0 3px 10px rgba(245, 158, 11, 0.25)",
-                                        },
-                                      }}
-                                    >
-                                      <Stack spacing={0.3}>
-                                        <Stack direction="row" alignItems="center" justifyContent="space-between">
-                                          <Stack direction="row" alignItems="center" spacing={0.5}>
-                                            <AlertCircle size={13} color="#D97706" />
-                                            <Typography fontSize={11} fontWeight={900} color="#92400E">
-                                              Replacement Place
-                                            </Typography>
-                                          </Stack>
-                                          <Chip
-                                            size="small"
-                                            label="DROP HERE"
-                                            sx={{
-                                              height: 16,
-                                              fontSize: "0.58rem",
-                                              fontWeight: 900,
-                                              bgcolor: "#FDE68A",
-                                              color: "#78350F",
-                                            }}
-                                          />
-                                        </Stack>
-                                        <Typography fontSize={10} color="#B45309" fontWeight={750} noWrap>
-                                          Need cover for {l.name} ({l.leaveType || "Leave"})
-                                        </Typography>
-                                        <Stack direction="row" alignItems="center" spacing={0.4} sx={{ mt: 0.1 }}>
-                                          <Award size={11} color="#B45309" />
-                                          <Typography fontSize={9} color="#92400E" fontWeight={700}>
-                                            Drop candidate → Awards C-OFF in DB
-                                          </Typography>
-                                        </Stack>
-                                      </Stack>
-                                    </Paper>
-                                  );
-                                });
-                              })()}
+                              {/* 3. Non-SIC Leave Boxes */}
+                              {otherLeaves.map((l) => renderUnifiedLeaveCard(l, dateStr, shiftKey))}
 
                               {/* Empty slot cue */}
-                              {shiftList.length === 0 && (
+                              {rawShiftList.length === 0 && shiftLeaves.length === 0 && (
                                 <Box
                                   sx={{
                                     py: 1.2,
@@ -2437,11 +2649,11 @@ export default function SpecialRosterMatrix({
                     onChange={(e) => setDeployMode(e.target.value)}
                     sx={{ bgcolor: "#FFFFFF", borderRadius: 2 }}
                   >
-                    <MenuItem value="double" sx={{ fontWeight: 800 }}>
-                      ⭐ Double Duty / Rest Day (Awards 1 C-OFF Credit in Database)
-                    </MenuItem>
                     <MenuItem value="normal">
-                      Normal Duty Coverage
+                      Single Duty / Shift Reassignment (No extra C-OFF)
+                    </MenuItem>
+                    <MenuItem value="double" sx={{ fontWeight: 800 }}>
+                      ⭐ Double Duty (General Shift or Added Pool - Awards 1 C-OFF Credit in Database)
                     </MenuItem>
                   </Select>
                 </FormControl>
@@ -2479,6 +2691,206 @@ export default function SpecialRosterMatrix({
             }}
           >
             {deploySaving ? <CircularProgress size={18} color="inherit" /> : "Deploy Replacement & Create C-OFF"}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* ASSIGN TEMPORARY / ACTING SIC DIALOG (Like Manual Replacement Module) */}
+      <Dialog
+        open={sicDialogOpen}
+        onClose={() => !sicSaving && setSicDialogOpen(false)}
+        fullWidth
+        maxWidth="sm"
+        slotProps={{
+          paper: {
+            sx: {
+              borderRadius: "22px !important",
+              background: "#FAF9FF !important",
+              overflow: "hidden",
+            },
+          },
+        }}
+      >
+        <DialogTitle
+          sx={{
+            background: "linear-gradient(135deg, #D97706 0%, #B45309 100%)",
+            color: "#FFFFFF",
+            p: 2.2,
+          }}
+        >
+          <Stack direction="row" alignItems="center" justifyContent="space-between">
+            <Stack direction="row" alignItems="center" spacing={1.2}>
+              <Box
+                sx={{
+                  width: 36,
+                  height: 36,
+                  borderRadius: "10px",
+                  bgcolor: "rgba(255, 255, 255, 0.2)",
+                  display: "grid",
+                  placeItems: "center",
+                }}
+              >
+                <Shield size={20} color="#FFFFFF" />
+              </Box>
+              <Box>
+                <Typography fontWeight={900} fontSize={17} color="#FFFFFF">
+                  Assign Temporary / Acting SIC
+                </Typography>
+                <Typography fontSize={11.5} sx={{ color: "rgba(255, 255, 255, 0.85)" }}>
+                  Shift-In-Charge designation module · Identical to manual workflow
+                </Typography>
+              </Box>
+            </Stack>
+            <IconButton
+              size="small"
+              onClick={() => setSicDialogOpen(false)}
+              sx={{ color: "rgba(255, 255, 255, 0.85)", "&:hover": { bgcolor: "rgba(255, 255, 255, 0.15)" } }}
+            >
+              <X size={18} />
+            </IconButton>
+          </Stack>
+        </DialogTitle>
+
+        <DialogContent sx={{ p: 2.5, bgcolor: "#FAF9FF" }}>
+          <Stack spacing={2.2} sx={{ pt: 1 }}>
+            {/* Target SIC on Leave Card */}
+            <Paper
+              variant="outlined"
+              sx={{
+                p: 1.8,
+                borderRadius: 2.5,
+                bgcolor: "#FFFBEB",
+                borderColor: "#FDE68A",
+              }}
+            >
+              <Stack spacing={0.8}>
+                <Stack direction="row" justifyContent="space-between" alignItems="center">
+                  <Typography fontSize={11} fontWeight={900} color="#B45309" sx={{ letterSpacing: 0.5 }}>
+                    REGULAR SHIFT IN-CHARGE ON LEAVE
+                  </Typography>
+                  <Chip
+                    size="small"
+                    label="SIC"
+                    sx={{
+                      height: 18,
+                      fontSize: "0.64rem",
+                      fontWeight: 950,
+                      bgcolor: "#FEE2E2",
+                      color: "#991B1B",
+                      border: "1px solid #F87171",
+                    }}
+                  />
+                </Stack>
+                <Stack direction="row" justifyContent="space-between" alignItems="flex-start">
+                  <Box>
+                    <Typography fontSize={15} fontWeight={900} color="#0F172A">
+                      {selectedSicLeave?.name || "Shift In-Charge"}
+                    </Typography>
+                    <Typography fontSize={12} color="#64748B" fontWeight={700}>
+                      ID: {selectedSicLeave?.employeeId} · Group: {selectedSicLeave?.groupName || "N/A"}
+                    </Typography>
+                  </Box>
+                  <Box sx={{ textAlign: "right" }}>
+                    <Chip
+                      size="small"
+                      label={selectedSicLeave?.leaveType || "Leave"}
+                      sx={{ bgcolor: "#FEE2E2", color: "#991B1B", fontWeight: 800 }}
+                    />
+                    <Typography fontSize={11} color="#64748B" sx={{ mt: 0.3 }}>
+                      Date: {selectedSicLeave?.date ? dayjs(selectedSicLeave.date).format("DD-MMM-YYYY") : "Selected Date"}
+                    </Typography>
+                  </Box>
+                </Stack>
+                {selectedSicLeave?.replacement?.name && (
+                  <Box sx={{ mt: 0.5, p: 0.8, bgcolor: "#F0FDF4", borderRadius: 1.5, border: "1px solid #BBF7D0" }}>
+                    <Typography fontSize={11} color="#166534" fontWeight={800}>
+                      ✓ Replacement Deployed: {selectedSicLeave.replacement.name} ({selectedSicLeave.replacement.employeeId})
+                    </Typography>
+                  </Box>
+                )}
+              </Stack>
+            </Paper>
+
+            {/* Explanation Alert */}
+            <Alert severity="info" sx={{ fontSize: 12 }}>
+              Choose from this group/shift or the entire fleet on {selectedSicLeave?.date ? dayjs(selectedSicLeave.date).format("DD-MMM-YYYY") : "the leave date"}. You can assign acting SIC with or without replacement duty; the replacement employee can be a different person. Fleet selection designates SIC without changing the employee roster duty.
+            </Alert>
+
+            {/* Candidate Scope Selector */}
+            <FormControl fullWidth size="small">
+              <InputLabel id="sic-scope-label">Candidate Scope</InputLabel>
+              <Select
+                labelId="sic-scope-label"
+                label="Candidate Scope"
+                value={sicScope}
+                onChange={(e) => openAssignSicDialog(selectedSicLeave, e.target.value)}
+                sx={{ bgcolor: "#FFFFFF", borderRadius: 2 }}
+              >
+                <MenuItem value="shift">This group and shift</MenuItem>
+                <MenuItem value="fleet">Entire fleet (not on leave)</MenuItem>
+              </Select>
+            </FormControl>
+
+            {/* Acting SIC Candidate Selector */}
+            <FormControl fullWidth size="small">
+              <InputLabel id="select-sic-label">Select Acting Shift In-Charge</InputLabel>
+              <Select
+                labelId="select-sic-label"
+                label="Select Acting Shift In-Charge"
+                value={selectedSIC}
+                onChange={(e) => setSelectedSIC(e.target.value)}
+                disabled={sicCandidatesLoading}
+                sx={{ bgcolor: "#FFFFFF", borderRadius: 2 }}
+              >
+                {sicCandidates.length === 0 && (
+                  <MenuItem disabled>
+                    {sicCandidatesLoading ? "Loading candidates..." : "No available staff for this date and scope"}
+                  </MenuItem>
+                )}
+                {sicCandidates.map((s) => (
+                  <MenuItem key={s.employeeId} value={s.employeeId}>
+                    <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ width: "100%" }}>
+                      <Box>
+                        <Typography fontSize={13} fontWeight={800} color="#0F172A">
+                          {s.name || s.employeeId} ({s.employeeId})
+                        </Typography>
+                        <Typography fontSize={11} color="#64748B">
+                          {s.designation || "Staff"} · {s.assignedDuty || "Rostered"}
+                        </Typography>
+                      </Box>
+                      <Chip
+                        size="small"
+                        label={s.groupName || "Fleet"}
+                        sx={{ fontSize: "0.65rem", height: 18, fontWeight: 800 }}
+                      />
+                    </Stack>
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+          </Stack>
+        </DialogContent>
+
+        <DialogActions sx={{ p: 2, bgcolor: "#FFFFFF", borderTop: "1px solid #E2E8F0" }}>
+          <Button disabled={sicSaving} onClick={() => setSicDialogOpen(false)} sx={{ fontWeight: 700 }}>
+            Skip / Close
+          </Button>
+          <Button
+            variant="contained"
+            disabled={sicSaving || !selectedSIC}
+            onClick={handleSaveActingSIC}
+            sx={{
+              background: "linear-gradient(135deg, #D97706 0%, #B45309 100%) !important",
+              color: "#FFF",
+              fontWeight: 900,
+              textTransform: "none",
+              borderRadius: 2,
+              px: 2.5,
+              py: 0.8,
+              boxShadow: "0 4px 14px rgba(217, 119, 6, 0.35)",
+            }}
+          >
+            {sicSaving ? <CircularProgress size={18} color="inherit" /> : "Assign Acting SIC"}
           </Button>
         </DialogActions>
       </Dialog>

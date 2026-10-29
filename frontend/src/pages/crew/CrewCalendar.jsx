@@ -15,6 +15,7 @@ import crewApi from "../../services/crewApi";
 import LeaveManagement from "../../crewLegacy/LeaveManagement";
 import TrainingHolidayMaster from "../../crewLegacy/TrainingHolidayMaster";
 import SportsManagement from "./SportsManagement";
+import SpecialRosterMatrix from "../../components/crew/SpecialRosterMatrix";
 import api from "../../crewLegacy/api";
 
 const iso = (date) => {
@@ -271,7 +272,12 @@ export default function CrewCalendar({ publicView = false, applicationOnly = fal
   const [endDate, setEndDate] = useState(publicView ? addDays(today, 7) : addDays(today, 10));
   const [data, setData] = useState([]);
   const [events, setEvents] = useState([]);
-  const [calendarView, setCalendarView] = useState(() => new URLSearchParams(window.location.search).get("view") === "events" ? "events" : "duty");
+  const [calendarView, setCalendarView] = useState(() => {
+    const v = new URLSearchParams(window.location.search).get("view");
+    if (v === "matrix_alternate" || v === "matrix") return "matrix_alternate";
+    if (v === "events") return "events";
+    return "duty";
+  });
   const [eventMonth, setEventMonth] = useState(today.slice(0, 7));
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -331,6 +337,10 @@ export default function CrewCalendar({ publicView = false, applicationOnly = fal
   const eventDates = useMemo(() => monthGrid(eventMonth), [eventMonth]);
 
   const load = async ({ quiet = false } = {}) => {
+    if (calendarView === "matrix_alternate") {
+      setLoading(false);
+      return;
+    }
     const loadId = loadIdRef.current + 1;
     loadIdRef.current = loadId;
     if (!quiet) setLoading(true);
@@ -755,12 +765,25 @@ export default function CrewCalendar({ publicView = false, applicationOnly = fal
       {!applicationOnly && <Box sx={{ height: publicView ? "calc(100dvh - 16px)" : "100%", flex: 1, minHeight: 0, overflow: "hidden", display: "flex", flexDirection: "column", gap: 0.85 }}>
       <Box sx={{ px: { xs: 1.2, md: 1.8 }, py: 0.85, borderRadius: 2.5, background: "linear-gradient(105deg,#081F5C 0%,#075DB8 62%,#1678D4 100%)", color: "#FFF", display: "flex", alignItems: "center", gap: 1, flexWrap: { xs: "wrap", xl: "nowrap" }, flexShrink: 0 }}>
         <Box sx={{ minWidth: { md: 220 }, mr: { xl: "auto" } }}>
-          <Typography sx={{ fontSize: 18, fontWeight: 950, lineHeight: 1.05 }}>{calendarView === "events" ? "Crew Event Calendar" : "Daily Duty Calendar"}</Typography>
-          <Typography sx={{ mt: .2, fontSize: 10, color: "rgba(255,255,255,.82)" }}>{calendarView === "events" ? "Training, holidays and sports in one planning view" : "Click a duty to apply, review approval or assign cover"}</Typography>
+          <Typography sx={{ fontSize: 18, fontWeight: 950, lineHeight: 1.05 }}>
+            {calendarView === "events"
+              ? "Crew Event Calendar"
+              : calendarView === "matrix_alternate"
+              ? "Compact Duty Matrix (Alternate Test View)"
+              : "Daily Duty Calendar"}
+          </Typography>
+          <Typography sx={{ mt: .2, fontSize: 10, color: "rgba(255,255,255,.82)" }}>
+            {calendarView === "events"
+              ? "Training, holidays and sports in one planning view"
+              : calendarView === "matrix_alternate"
+              ? "Compact 4-group shift view · SIC on top · Names only · Unified leave & replacement"
+              : "Click a duty to apply, review approval or assign cover"}
+          </Typography>
         </Box>
         {!publicView && <><Stack direction="row" spacing={.35} alignItems="center" sx={{ p: .3, border: "1px solid rgba(255,255,255,.4)", borderRadius: 2 }}>
           <Button size="small" onClick={() => { setCalendarView("duty"); window.history.replaceState(null, "", `${window.location.pathname}?view=duty`); }} sx={{ minHeight: 28, px: 1, color: calendarView === "duty" ? "#073B75" : "#FFF", background: calendarView === "duty" ? "#FFF" : "transparent", textTransform: "none", fontWeight: 900 }}>Duty view</Button>
           <Button size="small" onClick={() => { setCalendarView("events"); window.history.replaceState(null, "", `${window.location.pathname}?view=events`); }} sx={{ minHeight: 28, px: 1, color: calendarView === "events" ? "#073B75" : "#FFF", background: calendarView === "events" ? "#FFF" : "transparent", textTransform: "none", fontWeight: 900 }}>Event view</Button>
+          <Button size="small" onClick={() => { setCalendarView("matrix_alternate"); window.history.replaceState(null, "", `${window.location.pathname}?view=matrix_alternate`); }} sx={{ minHeight: 28, px: 1, color: calendarView === "matrix_alternate" ? "#073B75" : "#FFF", background: calendarView === "matrix_alternate" ? "#FFF" : "transparent", textTransform: "none", fontWeight: 900 }}>Compact Matrix View (Test)</Button>
         </Stack><Stack direction="row" spacing={.35} alignItems="center">
           <Tooltip title={calendarView === "events" ? "Previous month" : "Previous 7 days"}><IconButton size="small" onClick={() => calendarView === "events" ? setEventMonth((value) => shiftMonth(value, -1)) : move(-7)} sx={{ color: "#FFF", border: "1px solid rgba(255,255,255,.35)" }}><ChevronLeft size={17} /></IconButton></Tooltip>
           <Button onClick={() => calendarView === "events" ? setEventMonth(today.slice(0, 7)) : (setStartDate(addDays(today, -7)), setEndDate(addDays(today, 7)))} startIcon={<CalendarDays size={15} />} size="small" sx={{ minHeight: 30, color: "#073B75", background: "#FFF", borderRadius: 2, textTransform: "none", fontWeight: 900, "&:hover": { background: "#F1F5F9" } }}>Today</Button>
@@ -788,7 +811,15 @@ export default function CrewCalendar({ publicView = false, applicationOnly = fal
         onAddHoliday={() => navigate("/crew/training?section=holiday")}
         onOpenTraining={() => navigate("/crew/training?section=training")}
         onOpenSports={() => navigate("/crew/sports?section=events")}
-      /> : <>
+      /> : calendarView === "matrix_alternate" ? (
+        <Box sx={{ flex: 1, minHeight: 0, overflow: "auto", display: "flex", flexDirection: "column" }}>
+          <SpecialRosterMatrix
+            key={`matrix-${startDate}-${endDate}`}
+            initialStartDate={startDate}
+            initialEndDate={endDate}
+          />
+        </Box>
+      ) : <>
       {!publicView && <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap sx={{ flexShrink: 0 }}>
         <TextField size="small" label="Find employee or group" value={employeeSearch} onChange={(event) => setEmployeeSearch(event.target.value)} sx={{ minWidth: 220 }} />
         {[["all", "All duties"], ["pending", "Pending approval"], ["coverage", "Replacement needed"]].map(([value, label]) => <Button key={value} variant={calendarFilter === value ? "contained" : "outlined"} onClick={() => setCalendarFilter(value)} sx={{ textTransform: "none" }}>{label}</Button>)}
