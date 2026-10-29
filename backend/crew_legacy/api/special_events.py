@@ -389,24 +389,40 @@ def get_special_roster_matrix(
             # Resolve assigned duty
             raw_duty = str(d_rec.get("assignedDuty") or l.get("assignedDuty") or "").strip()
             if not raw_duty or raw_duty.lower() == "none":
-                raw_duty = group_shift_on_date.get((emp_group, ldate)) or ("Morning" if re.search(r"group[\s_-]*\d+", emp_group, re.I) else "General")
+                grp_duty = group_shift_on_date.get((emp_group, ldate))
+                if grp_duty:
+                    raw_duty = grp_duty
+                elif re.search(r"group[\s_-]*\d+", emp_group, re.I):
+                    # Group has no operational shift duty on this date (weekly off / rest)
+                    raw_duty = "Off"
+                else:
+                    raw_duty = "General"
 
             is_shift_person = is_shift_or_control_room_employee(eid, emp_group, raw_duty, emp_to_group)
 
             norm_duty = normalized_duty(raw_duty)
-            if norm_duty in ["EVENING", "E1", "E2"]:
+            OFF_DUTY_VALUES = {
+                "OFF", "O1", "O2", "O", "REST", "WO", "W-OFF", "W_OFF", "WEEKLY OFF",
+                "WEEKLY_OFF", "WEEKLY-OFF", "C-OFF", "COMP-OFF", "COMPENSATORY OFF", "NONE", ""
+            }
+
+            if norm_duty in ["MORNING", "M1", "M2"]:
+                shift_bucket = "Morning"
+                req_flag = is_shift_person
+            elif norm_duty in ["EVENING", "E1", "E2"]:
                 shift_bucket = "Evening"
+                req_flag = is_shift_person
             elif norm_duty in ["NIGHT", "N1", "N2"]:
                 shift_bucket = "Night"
-            elif is_shift_person:
-                shift_bucket = "Morning"
+                req_flag = is_shift_person
+            elif norm_duty in OFF_DUTY_VALUES or norm_duty in OFF_DUTIES:
+                shift_bucket = "Off"
+                req_flag = False  # USER REQUIREMENT: If no duty then no replacement required!
             else:
                 shift_bucket = "General"
+                req_flag = False  # General shift persons do not require replacement
 
             is_covered = bool(l.get("replacementAssigned") or l.get("replacement"))
-
-            # Only Shift/Control Room person need replacement. Remove cover for general shift persons.
-            req_flag = is_shift_person
             is_leave_sic = bool(l.get("isSIC")) or (eid in sic_emp_ids) or bool(d_rec.get("isSIC"))
 
             entry = {
@@ -499,7 +515,7 @@ def get_special_roster_matrix(
     sic_pool = [x for x in (cfg.get("sicPool") or []) if x.get("isActive", True)]
     se_pool = [x for x in (cfg.get("shiftEngineerPool") or []) if x.get("isActive", True)]
     sequential_pools = [
-        {"id": "all_pools", "name": f"All Created Sequential Pools ({len(sic_pool) + len(se_pool)} members)", "count": len(sic_pool) + len(se_pool)},
+        {"id": "all_pools", "name": f"All Sequential Pools: SIC Pool for SIC & Shift Engineer Pool for Rest ({len(sic_pool) + len(se_pool)} members)", "count": len(sic_pool) + len(se_pool)},
         {"id": "sic", "name": f"SIC Pool ({len(sic_pool)} members)", "count": len(sic_pool)},
         {"id": "shift_engineer", "name": f"Shift Engineer Pool ({len(se_pool)} members)", "count": len(se_pool)},
         {"id": "departments", "name": "Department Manpower Pools", "count": 0},
@@ -543,6 +559,7 @@ def sequential_allocate_department_manpower(
     target_shifts = payload.get("targetShifts") or ["Morning", "Evening", "Night"]
     max_duties_per_person = int(payload.get("maxDutiesPerPerson") or 2)
     allocation_type = str(payload.get("allocationType") or "both").strip() # "leave", "surge", "both"
+    leave_scope = str(payload.get("leaveScope") or "mandatory").strip() # "mandatory" (default) or "all"
     surge_per_shift = max(1, int(payload.get("surgePerShift") or 1))
 
     if event_id and ObjectId.is_valid(event_id):
@@ -559,117 +576,213 @@ def sequential_allocate_department_manpower(
     from crew_legacy.api.replacement import (
         ACTIVE_LEAVE_STATUSES,
         SHIFT_DUTIES,
+        OFF_DUTIES,
+        normalized_duty,
         assign_replacement,
         deploy_additional_manpower,
         employee_id_filter,
     )
     from crew_legacy.services.replacement_roster_service import get_replacement_roster_config
 
-    # Gather candidate pool
-    candidates = []
+    # Gather candidate pools:
+    # USER REQUIREMENT: Sequential--- SIC replacement will be done by SIC pool automatically, rest by shift engineer pool.
     cfg = get_replacement_roster_config()
     sic_pool = [x for x in (cfg.get("sicPool") or []) if x.get("isActive", True)]
     se_pool = [x for x in (cfg.get("shiftEngineerPool") or []) if x.get("isActive", True)]
 
-    if source_pool == "sic":
-        candidates = sic_pool
-    elif source_pool == "shift_engineer":
-        candidates = se_pool
-    elif source_pool == "all_pools":
-        candidates = sic_pool + se_pool
-    else:
-        # source_pool == "departments" or general
-        query = {"isActive": {"$ne": False}}
-        if source_depts:
-            query["$or"] = [
-                {"department": {"$in": source_depts}},
-                {"departments": {"$in": source_depts}},
-            ]
-        candidates = list(employee_collection.find(query).sort([("name", 1), ("employeeId", 1)]))
+    # Strictly preserve defined sequence order in pools
+    sic_pool.sort(key=lambda x: int(x.get("seniorityOrder") or 999))
+    se_pool.sort(key=lambda x: int(x.get("seniorityOrder") or 999))
 
-    # If source_depts is provided and source_pool was sic/shift_engineer/all_pools, filter candidates by department
-    if source_depts and source_pool in ["sic", "shift_engineer", "all_pools"]:
-        cand_ids = [str(c.get("userId") or c.get("employeeId") or "").strip() for c in candidates if str(c.get("userId") or c.get("employeeId") or "").strip()]
+    # General / department candidates
+    dept_query = {"isActive": {"$ne": False}}
+    if source_depts:
+        dept_query["$or"] = [
+            {"department": {"$in": source_depts}},
+            {"departments": {"$in": source_depts}},
+        ]
+    dept_cursor = employee_collection.find(dept_query)
+    try:
+        dept_candidates = list(dept_cursor.sort([("seniorityOrder", 1), ("name", 1), ("employeeId", 1)]))
+    except (TypeError, AttributeError):
+        dept_candidates = list(dept_cursor)
+
+    # Helper to filter candidate lists by department
+    def filter_candidates_by_dept(c_list, depts):
+        if not depts:
+            return c_list
+        c_ids = [str(c.get("userId") or c.get("employeeId") or "").strip() for c in c_list if str(c.get("userId") or c.get("employeeId") or "").strip()]
         emp_docs = {
             str(e.get("userId") or e.get("employeeId") or "").strip(): e
-            for e in employee_collection.find({"$or": [{"userId": {"$in": cand_ids}}, {"employeeId": {"$in": cand_ids}}]})
+            for e in employee_collection.find({"$or": [{"userId": {"$in": c_ids}}, {"employeeId": {"$in": c_ids}}]})
         }
         filtered = []
-        for c in candidates:
+        for c in c_list:
             cid = str(c.get("userId") or c.get("employeeId") or "").strip()
             emp = emp_docs.get(cid) or {}
             emp_depts = [str(d).strip() for d in (emp.get("departments") or [emp.get("department")]) if str(d).strip()]
             if not emp_depts:
                 emp_depts = [str(d).strip() for d in (c.get("departments") or [c.get("department")]) if str(d).strip()]
-            if any(d in source_depts for d in emp_depts):
+            if any(d in depts for d in emp_depts):
                 filtered.append(c)
-        if filtered:
-            candidates = filtered
+        return filtered
 
-    if not candidates:
+    if source_depts:
+        filtered_sic = filter_candidates_by_dept(sic_pool, source_depts)
+        if filtered_sic:
+            sic_pool = filtered_sic
+        filtered_se = filter_candidates_by_dept(se_pool, source_depts)
+        if filtered_se:
+            se_pool = filtered_se
+
+    # Ensure pools are non-empty or fallback
+    if not sic_pool:
+        sic_pool = [e for e in dept_candidates if bool(e.get("isSIC")) or bool(e.get("isIC")) or "in-charge" in str(e.get("designation") or "").lower()]
+    if not se_pool:
+        se_pool = dept_candidates
+
+    # Deduplicate while strictly preserving sequence order
+    def dedupe_pool(p_list):
+        seen = set()
+        out = []
+        for c in p_list:
+            cid = str(c.get("userId") or c.get("employeeId") or "").strip()
+            if cid and cid not in seen:
+                seen.add(cid)
+                out.append(c)
+        return out
+
+    sic_pool = dedupe_pool(sic_pool)
+    se_pool = dedupe_pool(se_pool)
+    dept_candidates = dedupe_pool(dept_candidates)
+    all_candidates = dedupe_pool(sic_pool + se_pool + dept_candidates)
+
+    if not all_candidates:
         source_label = f"pool '{source_pool}'" if source_pool != "departments" else f"departments {source_depts}"
         raise HTTPException(404, f"No active candidates found in selected {source_label}.")
 
-    # Deduplicate candidates while preserving order
-    seen_ids = set()
-    unique_candidates = []
-    for c in candidates:
-        cid = str(c.get("userId") or c.get("employeeId") or "").strip()
-        if cid and cid not in seen_ids:
-            seen_ids.add(cid)
-            unique_candidates.append(c)
-    candidates = unique_candidates
+    # Read stored sequential pointers
+    sic_pointer_doc = system_settings_collection.find_one({"type": "sequential_roster_pointer", "pool": "sic"}) or {}
+    start_sic_ptr = int(sic_pointer_doc.get("nextIndex", cfg.get("nextSicIndex", 0)))
+    curr_sic_ptr = (start_sic_ptr % len(sic_pool)) if sic_pool else 0
 
-    # Read stored sequential pointer
-    pointer_key = {
-        "type": "sequential_roster_pointer",
-        "sourcePool": source_pool,
-        "departments": sorted(source_depts),
-    }
-    pointer_doc = system_settings_collection.find_one(pointer_key) or {}
-    start_pointer = int(pointer_doc.get("nextIndex", 0)) % len(candidates)
+    se_pointer_doc = system_settings_collection.find_one({"type": "sequential_roster_pointer", "pool": "shift_engineer"}) or {}
+    start_se_ptr = int(se_pointer_doc.get("nextIndex", cfg.get("nextShiftEngineerIndex", 0)))
+    curr_se_ptr = (start_se_ptr % len(se_pool)) if se_pool else 0
 
     # 1. Gather slots requiring allocation
+    OFF_DUTY_VALUES = {
+        "OFF", "O1", "O2", "O", "REST", "WO", "W-OFF", "W_OFF", "WEEKLY OFF",
+        "WEEKLY_OFF", "WEEKLY-OFF", "C-OFF", "COMP-OFF", "COMPENSATORY OFF", "NONE", ""
+    }
+
+    # Fetch daily duties in date range to build group shift map and daily lookups
+    daily_query = {"date": {"$gte": start_date, "$lte": end_date}}
+    records = list(employee_daily_collection.find(daily_query))
+    group_shift_on_date = {}
+    daily_by_emp_date = {}
+    for r in records:
+        rdate = str(r.get("date") or "").strip()
+        reid = str(r.get("employeeId") or "").strip()
+        rg = str(r.get("groupName") or "").strip()
+        rd = str(r.get("assignedDuty") or "").strip()
+        if reid and rdate:
+            daily_by_emp_date[(reid, rdate)] = r
+        if rg and rd and normalized_duty(rd) in SHIFT_DUTIES:
+            if (rg, rdate) not in group_shift_on_date:
+                group_shift_on_date[(rg, rdate)] = rd
+
+    # Shift-In-Charge employee IDs from roster groups
+    sic_emp_ids = set()
+    for grp in roster_group_collection.find({}, {"shiftInCharge": 1}):
+        sic = grp.get("shiftInCharge") or {}
+        sid = str(sic.get("employeeId") or "").strip()
+        if sid:
+            sic_emp_ids.add(sid)
+
     slots_to_fill = []
     if allocation_type in ["leave", "both"]:
         leave_query = {
             "date": {"$gte": start_date, "$lte": end_date},
             "finalStatus": "Approved",
-            "$or": [
-                {"replacementRequired": True},
-                {"sicReplacementRequired": True},
-                {"dicReplacementRequired": True},
-            ],
             "$and": [
                 {"$or": [{"replacementAssigned": {"$ne": True}}, {"replacement": None}]},
             ],
         }
+        # If mandatory only: only fill leaves that have mandatory replacement requirement or SIC
+        if leave_scope == "mandatory":
+            leave_query["$or"] = [
+                {"replacementRequired": True},
+                {"sicReplacementRequired": True},
+                {"dicReplacementRequired": True},
+                {"isSIC": True},
+            ]
+
         leaves = list(leave_request_collection.find(leave_query).sort("date", 1))
-        emp_to_group = resolve_employee_group_map()
+        emp_to_group = resolve_employee_group_map(records)
         for leave in leaves:
             eid = str(leave.get("employeeId") or "").strip()
-            # Only shift / Control Room persons need replacement. Exclude general shift!
-            if not is_shift_or_control_room_employee(eid, leave.get("groupName"), leave.get("assignedDuty"), emp_to_group):
+            ldate = str(leave.get("date") or "").strip()
+
+            # USER REQUIREMENT: If replacement is explicitly not required, skip!
+            if leave.get("replacementRequired") is False:
                 continue
 
-            # Determine actual shift:
-            s = str(leave.get("assignedDuty") or "").strip()
-            if s not in SHIFT_DUTIES:
-                daily = employee_daily_collection.find_one({"employeeId": eid, "date": str(leave.get("date"))})
-                if daily and str(daily.get("assignedDuty") or "").strip() in SHIFT_DUTIES:
-                    s = str(daily.get("assignedDuty")).strip()
+            d_rec = daily_by_emp_date.get((eid, ldate)) or {}
+            emp_group = (
+                str(leave.get("groupName") or "").strip()
+                or str(d_rec.get("groupName") or "").strip()
+                or emp_to_group.get(eid, "")
+            )
+
+            # Resolve duty on date
+            raw_duty = str(d_rec.get("assignedDuty") or leave.get("assignedDuty") or "").strip()
+            if not raw_duty or raw_duty.lower() == "none":
+                grp_duty = group_shift_on_date.get((emp_group, ldate))
+                if grp_duty:
+                    raw_duty = grp_duty
+                elif re.search(r"group[\s_-]*\d+", emp_group, re.I):
+                    raw_duty = "Off"
                 else:
-                    s = target_shifts[0] if target_shifts else "Morning"
+                    raw_duty = "General"
+
+            # Exclude General shift persons
+            if not is_shift_or_control_room_employee(eid, emp_group, raw_duty, emp_to_group):
+                continue
+
+            norm = normalized_duty(raw_duty)
+            # USER REQUIREMENT: If no duty then no replacement required!
+            if norm in OFF_DUTY_VALUES or norm in OFF_DUTIES:
+                continue
+
+            if norm in ["MORNING", "M1", "M2"]:
+                s = "Morning"
+            elif norm in ["EVENING", "E1", "E2"]:
+                s = "Evening"
+            elif norm in ["NIGHT", "N1", "N2"]:
+                s = "Night"
+            else:
+                continue
+
             if target_shifts and s not in target_shifts:
                 continue
 
+            is_leave_sic = (
+                bool(leave.get("isSIC"))
+                or bool(leave.get("sicReplacementRequired"))
+                or (eid in sic_emp_ids)
+                or bool(d_rec.get("isSIC"))
+            )
+
             slots_to_fill.append({
                 "type": "leave_replacement",
-                "date": str(leave.get("date")),
+                "date": ldate,
                 "shift": s,
                 "leave": leave,
                 "applicantId": eid,
                 "applicantName": str(leave.get("employeeName") or leave.get("name") or leave.get("employeeId")),
+                "isSIC": is_leave_sic,
+                "groupName": emp_group,
             })
 
     # B) Surge coverage if requested or if no leaves found
@@ -691,37 +804,59 @@ def sequential_allocate_department_manpower(
                         "leave": None,
                         "applicantId": None,
                         "applicantName": None,
+                        "isSIC": False,
+                        "groupName": "",
                     })
+
+    # Strictly sort slots by chronological date and shift order (Morning -> Evening -> Night)
+    SHIFT_SORT_ORDER = {"Morning": 1, "Evening": 2, "Night": 3}
+    slots_to_fill.sort(key=lambda x: (x["date"], SHIFT_SORT_ORDER.get(x["shift"], 99)))
 
     allocations = []
     unallocated_slots = []
-    curr_idx = start_pointer
-    duty_counts = {str(c.get("userId") or c.get("employeeId") or "").strip(): 0 for c in candidates}
+    duty_counts = {str(c.get("userId") or c.get("employeeId") or "").strip(): 0 for c in all_candidates}
     actor_id = str(user.get("employeeId") or "").strip()
-    emp_to_group = resolve_employee_group_map()
 
     for slot in slots_to_fill:
         sdate = slot["date"]
         sshift = slot["shift"]
         slot_type = slot["type"]
         applicant_id = slot["applicantId"]
+        is_sic = bool(slot.get("isSIC"))
+
+        # USER REQUIREMENT: Sequential--- SIC replacement will be done by SIC pool automatically, rest by shift engineer pool.
+        if is_sic:
+            cand_pool = sic_pool if sic_pool else (se_pool or dept_candidates)
+            pool_label = "SIC Pool"
+            ptr = curr_sic_ptr
+        else:
+            if source_pool == "departments" and dept_candidates:
+                cand_pool = dept_candidates
+                pool_label = "Department Manpower Pool"
+            elif source_pool == "sic" and sic_pool:
+                cand_pool = sic_pool
+                pool_label = "SIC Pool"
+            else:
+                cand_pool = se_pool if se_pool else (dept_candidates or sic_pool)
+                pool_label = "Shift Engineer Pool"
+            ptr = curr_se_ptr
 
         assigned_candidate = None
         searched = 0
-        total_candidates = len(candidates)
+        total_cand_count = len(cand_pool)
 
-        while searched < total_candidates:
-            candidate = candidates[curr_idx]
+        while searched < total_cand_count:
+            candidate = cand_pool[ptr]
             cand_id = str(candidate.get("userId") or candidate.get("employeeId") or "").strip()
             cand_name = str(candidate.get("name") or cand_id)
 
-            curr_idx = (curr_idx + 1) % total_candidates
+            ptr = (ptr + 1) % total_cand_count
             searched += 1
 
             if not cand_id or (applicant_id and cand_id == applicant_id):
                 continue
 
-            if duty_counts[cand_id] >= max_duties_per_person:
+            if duty_counts.get(cand_id, 0) >= max_duties_per_person:
                 continue
 
             # Check if candidate is on leave on this date
@@ -743,7 +878,11 @@ def sequential_allocate_department_manpower(
 
             # Candidate match found!
             assigned_candidate = candidate
-            duty_counts[cand_id] += 1
+            duty_counts[cand_id] = duty_counts.get(cand_id, 0) + 1
+            if is_sic:
+                curr_sic_ptr = ptr
+            else:
+                curr_se_ptr = ptr
             break
 
         if assigned_candidate:
@@ -762,17 +901,27 @@ def sequential_allocate_department_manpower(
                                 "halfDuty": False,
                                 "assignedDuty": sshift,
                                 "autoApprove": True,
-                                "reason": f"Sequential roster allocation ({source_pool}) by {actor_id}",
+                                "reason": f"Sequential roster allocation ({pool_label}) by {actor_id}",
                             },
                             user=user,
                         )
+                        # If replacing an SIC, also tag Acting SIC in daily collection for visibility
+                        if is_sic:
+                            employee_daily_collection.update_one(
+                                {"employeeId": cand_id, "date": sdate},
+                                {"$set": {
+                                    "isActingSIC": True,
+                                    "actingSICGroup": str(slot["leave"].get("groupName") or ""),
+                                    "actingSICFor": slot["leave"].get("name") or slot["leave"].get("employeeName"),
+                                }}
+                            )
                     else:
                         deploy_additional_manpower(
                             payload={
                                 "date": sdate,
                                 "employeeId": cand_id,
                                 "assignedDuty": sshift,
-                                "reason": f"Sequential surge roster ({source_pool}) by {actor_id}",
+                                "reason": f"Sequential surge roster ({pool_label}) by {actor_id}",
                                 "eventId": event_id,
                                 "mode": "double",
                             },
@@ -790,27 +939,42 @@ def sequential_allocate_department_manpower(
             allocations.append({
                 "date": sdate,
                 "shift": sshift,
-                "slotType": "Leave Replacement" if slot_type == "leave_replacement" else "Surge Coverage",
+                "slotType": "SIC Replacement" if is_sic else ("Leave Replacement" if slot_type == "leave_replacement" else "Surge Coverage"),
                 "replacedEmployee": slot["applicantName"] or "Surge Slot",
                 "allocatedEmployeeId": cand_id,
                 "allocatedEmployeeName": cand_name,
                 "allocatedDesignation": cand_desig,
                 "allocatedGroupName": str(assigned_candidate.get("groupName") or "").strip() or emp_to_group.get(cand_id, ""),
-                "sourcePool": source_pool,
+                "sourcePool": pool_label,
                 "status": "Simulated" if preview_only else "Allocated",
             })
         else:
             unallocated_slots.append({
                 "date": sdate,
                 "shift": sshift,
-                "slotType": slot_type,
-                "reason": f"Candidate pool exhausted or unavailable on {sdate}",
+                "slotType": "SIC Replacement" if is_sic else ("Leave Replacement" if slot_type == "leave_replacement" else "Surge Coverage"),
+                "reason": f"Candidate pool ({pool_label}) exhausted or unavailable on {sdate}",
             })
 
-    if not preview_only and candidates:
+    if not preview_only:
+        # Save both pointers in replacement config & system settings
+        replacement_roster_config_collection.update_one(
+            {"_id": "replacement-roster-config"},
+            {"$set": {
+                "nextSicIndex": curr_sic_ptr,
+                "nextShiftEngineerIndex": curr_se_ptr,
+                "updatedAt": datetime.utcnow(),
+            }},
+            upsert=True,
+        )
         system_settings_collection.update_one(
-            pointer_key,
-            {"$set": {"nextIndex": curr_idx, "updatedAt": datetime.utcnow()}},
+            {"type": "sequential_roster_pointer", "pool": "sic"},
+            {"$set": {"nextIndex": curr_sic_ptr, "updatedAt": datetime.utcnow()}},
+            upsert=True,
+        )
+        system_settings_collection.update_one(
+            {"type": "sequential_roster_pointer", "pool": "shift_engineer"},
+            {"$set": {"nextIndex": curr_se_ptr, "updatedAt": datetime.utcnow()}},
             upsert=True,
         )
 

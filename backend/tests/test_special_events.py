@@ -135,10 +135,19 @@ class SpecialEventTests(unittest.TestCase):
                 {
                     "_id": "leave-1",
                     "employeeId": "leave-emp-1",
-                    "employeeName": "Sick Worker",
+                    "employeeName": "SIC on Leave",
                     "date": "2026-10-20",
                     "assignedDuty": "Morning",
-                }
+                    "isSIC": True,
+                },
+                {
+                    "_id": "leave-2",
+                    "employeeId": "leave-emp-2",
+                    "employeeName": "Engineer on Leave",
+                    "date": "2026-10-20",
+                    "assignedDuty": "Morning",
+                    "isSIC": False,
+                },
             ]
             mock_leaves.find_one.return_value = None
             mock_daily.find_one.return_value = None
@@ -154,8 +163,13 @@ class SpecialEventTests(unittest.TestCase):
 
             self.assertTrue(res["success"])
             self.assertTrue(res["previewOnly"])
-            self.assertEqual(res["allocatedCount"], 1)
+            self.assertEqual(res["allocatedCount"], 2)
+            # SIC replacement is done by SIC pool automatically
             self.assertEqual(res["allocations"][0]["allocatedEmployeeId"], "sic-1")
+            self.assertEqual(res["allocations"][0]["sourcePool"], "SIC Pool")
+            # Rest by shift engineer pool
+            self.assertEqual(res["allocations"][1]["allocatedEmployeeId"], "se-1")
+            self.assertEqual(res["allocations"][1]["sourcePool"], "Shift Engineer Pool")
 
     def test_commit_special_duty_roster(self):
         from crew_legacy.api.special_events import commit_special_duty_roster
