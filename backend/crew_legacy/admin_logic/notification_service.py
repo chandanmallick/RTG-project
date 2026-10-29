@@ -21,16 +21,16 @@ LEGACY_REPLACEMENT_BODY = (
 )
 DEFAULT_REPLACEMENT_SUBJECT = "Replacement Duty Assigned - {shift_name} - {date}"
 DEFAULT_REPLACEMENT_BODY = (
-    "Dear Sir/Madam,\n\n"
     "A replacement duty has been assigned.\n\n"
     "Replacement employee: {replacement_person}\n"
     "Duty: {shift_name}\n"
     "Date / period: {date}\n"
     "In place of: {leave_person}\n"
     "Group: {group_name}\n\n"
-    "Please check the duty calendar for details.\n\n"
-    "{rejection_prompt}"
+    "Please check the duty calendar for details.\n"
+    "To convey any difficulty to perform duty, it may be conveyed via \"COMPASS\" Portal login. Crew Management Dashboard: {dashboard_url}"
 )
+
 
 WORKFLOW_MAIL_DEFAULTS = {
     "schedule_data_charts": {
@@ -404,11 +404,15 @@ class _TemplateValues(dict):
 def send_replacement_duty_email(to_list, values):
     settings = replacement_mail_settings()
     template = workflow_mail_templates()["replacement_assigned"]
-    rendered_values = _TemplateValues({key: str(value or "") for key, value in (values or {}).items()})
+    rendered_dict = dict(values or {})
+    if not rendered_dict.get("dashboard_url"):
+        base_url = os.getenv("CREW_FRONTEND_URL", "http://localhost:5173").rstrip("/")
+        rendered_dict["dashboard_url"] = f"{base_url}/crew/dashboard"
+    rendered_values = _TemplateValues({key: str(value or "") for key, value in rendered_dict.items()})
     try:
         subject = str(template["subjectTemplate"]).format_map(rendered_values)
         body = str(template["bodyTemplate"]).format_map(rendered_values)
-        rejection_prompt = (values or {}).get("rejection_prompt")
+        rejection_prompt = rendered_dict.get("rejection_prompt")
         if rejection_prompt and rejection_prompt not in body:
             body = f"{body.rstrip()}\n\n{rejection_prompt}"
     except (KeyError, ValueError):

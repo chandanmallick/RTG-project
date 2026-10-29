@@ -60,8 +60,21 @@ const parseLocalDate = (dateStr) => {
   }
   return new Date(parts[0], parts[1] - 1, parts[2]);
 };
-const displayDate = (dateStr) => new Intl.DateTimeFormat("en-IN", { day: "2-digit", month: "short" }).format(parseLocalDate(dateStr));
-const displayFullDate = (dateStr) => new Intl.DateTimeFormat("en-IN", { day: "2-digit", month: "short", year: "numeric" }).format(parseLocalDate(dateStr));
+const displayDate = (dateStr) => {
+  const d = parseLocalDate(dateStr);
+  if (!d || isNaN(d)) return dateStr;
+  const day = String(d.getDate()).padStart(2, "0");
+  const month = d.toLocaleString("en-US", { month: "short" });
+  return `${day}-${month}`;
+};
+const displayFullDate = (dateStr) => {
+  const d = parseLocalDate(dateStr);
+  if (!d || isNaN(d)) return dateStr;
+  const day = String(d.getDate()).padStart(2, "0");
+  const month = d.toLocaleString("en-US", { month: "short" });
+  const year = d.getFullYear();
+  return `${day}-${month}-${year}`;
+};
 const weekday = (dateStr) => new Intl.DateTimeFormat("en-IN", { weekday: "short" }).format(parseLocalDate(dateStr));
 const compactShift = (value) => {
   const duty = String(value || "").trim().toUpperCase();

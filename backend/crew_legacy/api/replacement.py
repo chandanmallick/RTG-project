@@ -3393,15 +3393,24 @@ def assign_replacement(leave_id: str, payload: dict, user=Depends(get_authentica
     # =============================
     # UPDATE LEAVE
     # =============================
+    assigned_duty = (
+        payload.get("assignedDuty")
+        or (employee_daily_collection.find_one({"employeeId": leave["employeeId"], "date": leave_date}) or {}).get("assignedDuty")
+        or leave.get("assignedDuty")
+        or "Morning"
+    )
+
     leave_request_collection.update_one(
         {"_id": ObjectId(leave_id)},
         {
             "$set": {
+                "replacementAssigned": True,
                 "replacement": {
                     "employeeId": replacement_emp["userId"],
                     "name": replacement_emp["name"],
                     "assignedOn": datetime.utcnow(),
-                    "mode": mode
+                    "mode": mode,
+                    "assignedDuty": assigned_duty,
                 }
             }
         }
@@ -3418,7 +3427,7 @@ def assign_replacement(leave_id: str, payload: dict, user=Depends(get_authentica
     update_data = {
         "replacementDuty": True,
         "replacementMode": mode,
-        "halfDuty": half_duty,   # âœ… STORE
+        "halfDuty": half_duty,   # ✅ STORE
 
         "replacementFor": {
             "employeeId": leave["employeeId"],
@@ -3442,8 +3451,6 @@ def assign_replacement(leave_id: str, payload: dict, user=Depends(get_authentica
     })
 
     roster_id = leave_daily.get("rosterId") if leave_daily else None
-
-    assigned_duty = leave_daily.get("assignedDuty") if leave_daily else None
 
     update_data["assignedDuty"] = assigned_duty
     if roster_id:
@@ -3698,7 +3705,8 @@ def assign_replacement(leave_id: str, payload: dict, user=Depends(get_authentica
     )
     leave_employee = employee_by_id(leave.get("employeeId"))
     try:
-        display_date = datetime.strptime(leave_date, "%Y-%m-%d").strftime("%d-%m-%Y")
+        dt = datetime.strptime(leave_date, "%Y-%m-%d")
+        display_date = f"{dt.strftime('%d-%b-%Y')}, {dt.strftime('%A')}"
     except (TypeError, ValueError):
         display_date = leave_date
     replacement_designation = replacement_emp.get("designation") or ""
@@ -4193,19 +4201,29 @@ def pending_sic(user=Depends(get_current_user)):
 @router.get("/notifications")
 def get_notifications(user=Depends(get_current_user)):
 
-    user_id = user.get("userId")
+    user_id = str(user.get("userId") or user.get("employeeId") or "")
+    user_is_admin = str(user.get("role") or "").lower() == "admin" or user_id == "50041"
     auto_accept_pending_duty_notifications()
     now = datetime.utcnow()
 
-    data = list(duty_notification_collection.find({
-        "$or": [
-            {"employeeId": user_id},
-            {"controllerIds": user_id},
-        ],
-        "leaveId": {"$exists": True},
-        "assignedDuty": {"$exists": True},
-        "status": {"$ne": "Superseded"},
-    }).sort([("createdAt", -1)]))
+    if user_is_admin:
+        query = {
+            "leaveId": {"$exists": True},
+            "assignedDuty": {"$exists": True},
+            "status": {"$ne": "Superseded"},
+        }
+    else:
+        query = {
+            "$or": [
+                {"employeeId": user_id},
+                {"controllerIds": user_id},
+            ],
+            "leaveId": {"$exists": True},
+            "assignedDuty": {"$exists": True},
+            "status": {"$ne": "Superseded"},
+        }
+
+    data = list(duty_notification_collection.find(query).sort([("createdAt", -1)]))
 
     result = []
 
@@ -4220,16 +4238,28 @@ def get_notifications(user=Depends(get_current_user)):
         n["decisionHistory"] = api_decision_history(n.get("decisionHistory"))
         is_assignee = n.get("employeeId") == user_id
         is_controller = user_id in normalized_categories(n.get("controllerIds"))
+        is_reporting_or_hod = bool(is_controller or user_is_admin or user.get("role") in ["admin", "hod", "controller"])
         before_cutoff = bool(cutoff and now <= cutoff)
+        
+        # Format date as DD-MMM-YYYY
+        raw_date = str(n.get("date") or "")
+        try:
+            display_date = datetime.strptime(raw_date, "%Y-%m-%d").strftime("%d-%b-%Y")
+        except Exception:
+            display_date = raw_date
+        n["displayDate"] = display_date
+
         n["notificationKind"] = "replacement"
         n["unread"] = user_id not in normalized_categories(n.get("readBy"))
-        n["viewerRole"] = "Employee" if is_assignee else "Controlling Officer"
+        n["viewerRole"] = "Admin" if user_is_admin else ("Controlling Officer" if is_controller else "Employee")
         n["canAccept"] = bool(is_assignee and n.get("status") == "Pending" and before_cutoff)
+        # Deny option ONLY to Reporting / HOD officer (or Admin/Controller)
         n["canDeny"] = bool(
-            (is_assignee or is_controller)
+            is_reporting_or_hod
             and n.get("status") in {"Pending", "Accepted"}
             and before_cutoff
         )
+        n["isDenied"] = bool(n.get("status") == "Denied")
 
         result.append(n)
 
@@ -4292,10 +4322,13 @@ def deny_duty(id: str, payload: dict, user=Depends(get_current_user)):
         raise HTTPException(404, "Notification not found")
 
     user_id = str(user.get("userId") or user.get("employeeId") or "")
-    is_assignee = notif.get("employeeId") == user_id
     is_controller = user_id in normalized_categories(notif.get("controllerIds"))
-    if not is_assignee and not is_controller:
-        raise HTTPException(403, "Only the assigned employee or controlling officer can deny this duty")
+    user_is_admin = str(user.get("role") or "").lower() == "admin" or user_id == "50041" or user.get("role") in ["hod", "controller"]
+
+    # USER REQUIREMENT: Deny option only to Reporting/ HOD officer.
+    if not is_controller and not user_is_admin:
+        raise HTTPException(403, "Deny option is restricted to Reporting / HOD officers only")
+
     if notif.get("status") not in {"Pending", "Accepted"}:
         raise HTTPException(409, f"Duty is already {notif.get('status')}")
 
@@ -4308,7 +4341,7 @@ def deny_duty(id: str, payload: dict, user=Depends(get_current_user)):
     reason = str(payload.get("reason") or "").strip()
     if not reason:
         raise HTTPException(400, "Denial reason is required")
-    actor_role = "Employee" if is_assignee else "Controlling Officer"
+    actor_role = "Reporting/HOD Officer" if is_controller else ("Admin" if user_is_admin else "Controlling Officer")
     leave = None
     if ObjectId.is_valid(str(notif.get("leaveId") or "")):
         leave = leave_request_collection.find_one({"_id": ObjectId(notif["leaveId"])})
@@ -4365,6 +4398,43 @@ def deny_duty(id: str, payload: dict, user=Depends(get_current_user)):
             user_id,
             actor_role,
         )
+
+    # USER REQUIREMENT: In case of denial mail to Admin
+    notif_date = str(notif.get("date") or "")
+    try:
+        dt = datetime.strptime(notif_date, "%Y-%m-%d")
+        display_date = f"{dt.strftime('%d-%b-%Y')}, {dt.strftime('%A')}"
+    except Exception:
+        display_date = notif_date
+
+    admin_users = list(employee_collection.find({"$or": [{"role": "admin"}, {"employeeId": "50041"}]}))
+    admin_emails = [a.get("email") for a in admin_users if a.get("email")]
+    from crew_legacy.admin_logic.notification_service import replacement_mail_settings, send_email
+    settings = replacement_mail_settings()
+    if settings.get("reportMailbox") and settings.get("reportMailbox") not in admin_emails:
+        admin_emails.append(settings.get("reportMailbox"))
+
+    import os
+    frontend_url = os.getenv("CREW_FRONTEND_URL", "http://localhost:5173").rstrip("/")
+    dash_link = f"{frontend_url}/crew/dashboard"
+
+    denial_subject = f"Replacement Duty DENIED - {notif.get('assignedDuty')} on {display_date} - {notif.get('employeeName')}"
+    denial_body = (
+        f"A replacement duty assignment has been DENIED.\n\n"
+        f"Replacement employee: {notif.get('employeeName')} ({notif.get('employeeId')})\n"
+        f"Duty: {notif.get('assignedDuty')}\n"
+        f"Date / period: {display_date}\n"
+        f"Denied by: {user.get('name') or user_id} ({actor_role})\n"
+        f"Reason for Denial: {reason}\n\n"
+        f"Please check the duty calendar for details.\n"
+        f"To convey any difficulty to perform duty or reassign, it may be conveyed via \"COMPASS\" Portal login. Crew Management Dashboard: {dash_link}"
+    )
+
+    if admin_emails:
+        try:
+            send_email(admin_emails, denial_subject, denial_body)
+        except Exception as e:
+            logger.warning("Failed to send denial email: %s", e)
 
     return {"message": "Denied"}
 

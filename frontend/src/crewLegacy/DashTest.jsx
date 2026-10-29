@@ -88,7 +88,72 @@ export default function DashTest({ demo = false }) {
   const [mutationError, setMutationError] = useState("");
   const [trainingReview, setTrainingReview] = useState("");
 
-  const refresh = useCallback(() => setRefreshKey(value => value + 1), []);
+  // Duty Notifications & Approvals State
+  const [dutyNotifs, setDutyNotifs] = useState([]);
+  const [dutyNotifsLoading, setDutyNotifsLoading] = useState(false);
+  const [denyDialogOpen, setDenyDialogOpen] = useState(false);
+  const [selectedNotifForDeny, setSelectedNotifForDeny] = useState(null);
+  const [denyReason, setDenyReason] = useState("");
+  const [denySubmitting, setDenySubmitting] = useState(false);
+  const [actionFeedback, setActionFeedback] = useState(null);
+
+  const loadDutyNotifs = useCallback(async () => {
+    try {
+      setDutyNotifsLoading(true);
+      const { data } = await api.get("/replacement/notifications");
+      setDutyNotifs(Array.isArray(data) ? data : []);
+    } catch {
+      setDutyNotifs([]);
+    } finally {
+      setDutyNotifsLoading(false);
+    }
+  }, []);
+
+  const handleAcceptDuty = async (notifId) => {
+    try {
+      await api.put(`/replacement/notifications/accept/${notifId}`);
+      setActionFeedback({ severity: "success", text: "Replacement duty accepted successfully!" });
+      loadDutyNotifs();
+      refresh();
+    } catch (err) {
+      setActionFeedback({ severity: "error", text: err.response?.data?.detail || "Failed to accept duty." });
+    }
+  };
+
+  const handleOpenDenyDialog = (notif) => {
+    setSelectedNotifForDeny(notif);
+    setDenyReason("");
+    setDenyDialogOpen(true);
+  };
+
+  const handleConfirmDeny = async () => {
+    if (!selectedNotifForDeny || !denyReason.trim()) return;
+    setDenySubmitting(true);
+    try {
+      await api.put(`/replacement/notifications/deny/${selectedNotifForDeny._id}`, {
+        reason: denyReason.trim(),
+      });
+      setActionFeedback({ severity: "info", text: "Replacement duty denied. Admin notified via mail." });
+      setDenyDialogOpen(false);
+      setSelectedNotifForDeny(null);
+      loadDutyNotifs();
+      refresh();
+    } catch (err) {
+      setActionFeedback({ severity: "error", text: err.response?.data?.detail || "Failed to deny duty." });
+    } finally {
+      setDenySubmitting(false);
+    }
+  };
+
+  const refresh = useCallback(() => {
+    setRefreshKey(value => value + 1);
+    loadDutyNotifs();
+  }, [loadDutyNotifs]);
+
+  useEffect(() => {
+    loadDutyNotifs();
+  }, [loadDutyNotifs]);
+
   useEffect(() => {
     if (demo) {
       const sample = createDashDemo(today);
@@ -207,8 +272,190 @@ export default function DashTest({ demo = false }) {
       <Stack spacing={2.2}>
         <Paper sx={card}><Heading number={6} title="Event Calendar" action={<IconButton aria-label="Open event calendar" onClick={() => navigate("/crew/calendar?view=events")}><ArrowUpRight size={16} /></IconButton>} /><Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 1.4 }}><IconButton size="small" aria-label="Previous month" onClick={() => setMonth(value => value.subtract(1, "month"))}><ChevronLeft size={16} /></IconButton><Typography sx={{ fontSize: 12, fontWeight: 800 }}>{month.format("MMMM YYYY")}</Typography><IconButton size="small" aria-label="Next month" onClick={() => setMonth(value => value.add(1, "month"))}><ChevronRight size={16} /></IconButton></Stack>{eventError && <Alert severity="warning" sx={{ fontSize: 10 }}>{eventError}</Alert>}<Box sx={{ display: "grid", gridTemplateColumns: "repeat(7,1fr)", gap: .5, opacity: eventLoading ? .5 : 1 }}>{["M", "T", "W", "T", "F", "S", "S"].map((day, index) => <Typography key={index} sx={{ textAlign: "center", fontSize: 9, color: "#A0A9B3", mb: .6 }}>{day}</Typography>)}{monthCells.map(date => {
           const key = date.format("YYYY-MM-DD"), dayEvents = events.filter(event => event.startDate <= key && (event.endDate || event.startDate) >= key), inMonth = date.month() === month.month();
-          return <Tooltip key={key} title={dayEvents.length ? <Box>{dayEvents.map((event, index) => <Typography key={index} sx={{ fontSize: 11 }}>{event.title} · {event.kind}{event.detail ? ` · ${event.detail}` : ""}</Typography>)}</Box> : date.format("DD MMM YYYY")}><Button onClick={() => navigate("/crew/calendar?view=events")} aria-label={`${date.format("DD MMM YYYY")}${dayEvents.length ? `, ${dayEvents.map(event => event.title).join(", ")}` : ""}`} sx={{ minWidth: 0, height: 31, p: 0, borderRadius: "10px", flexDirection: "column", fontSize: 11, color: key === today ? "#FFF" : dayEvents.length ? palette[dayEvents[0].kind] : "#536170", bgcolor: key === today ? "#188F7B" : dayEvents.length ? `${palette[dayEvents[0].kind] || "#8B5CF6"}12` : "transparent", opacity: inMonth ? 1 : .28, "&:hover": { bgcolor: "#DDEFE8", color: "#233442" } }}>{date.date()}<Box sx={{ display: "flex", gap: "2px" }}>{[...new Set(dayEvents.map(event => event.kind))].map(type => <Box key={type} sx={{ width: 3, height: 3, borderRadius: "50%", bgcolor: palette[type] }} />)}</Box></Button></Tooltip>;
+          return <Tooltip key={key} title={dayEvents.length ? <Box>{dayEvents.map((event, index) => <Typography key={index} sx={{ fontSize: 11 }}>{event.title} · {event.kind}{event.detail ? ` · ${event.detail}` : ""}</Typography>)}</Box> : date.format("DD-MMM-YYYY")}><Button onClick={() => navigate("/crew/calendar?view=events")} aria-label={`${date.format("DD-MMM-YYYY")}${dayEvents.length ? `, ${dayEvents.map(event => event.title).join(", ")}` : ""}`} sx={{ minWidth: 0, height: 31, p: 0, borderRadius: "10px", flexDirection: "column", fontSize: 11, color: key === today ? "#FFF" : dayEvents.length ? palette[dayEvents[0].kind] : "#536170", bgcolor: key === today ? "#188F7B" : dayEvents.length ? `${palette[dayEvents[0].kind] || "#8B5CF6"}12` : "transparent", opacity: inMonth ? 1 : .28, "&:hover": { bgcolor: "#DDEFE8", color: "#233442" } }}>{date.date()}<Box sx={{ display: "flex", gap: "2px" }}>{[...new Set(dayEvents.map(event => event.kind))].map(type => <Box key={type} sx={{ width: 3, height: 3, borderRadius: "50%", bgcolor: palette[type] }} />)}</Box></Button></Tooltip>;
         })}</Box><Stack direction="row" spacing={1.4} sx={{ mt: 2 }}>{Object.entries(palette).map(([label, color]) => <Stack key={label} direction="row" alignItems="center" spacing={.5}><Box sx={{ width: 5, height: 5, bgcolor: color, borderRadius: "50%" }} /><Typography sx={{ fontSize: 8.5, color: "#87929F", textTransform: "capitalize" }}>{label}</Typography></Stack>)}</Stack>{actions.specialEventRoster?.enabled && <Button fullWidth size="small" onClick={() => demo ? setDemoWorkspace("special-event") : navigate("/crew/special-events")} sx={{ mt: 1.5, textTransform: "none" }}>Special Event roster</Button>}</Paper>
+
+        {/* Small section below compact calendar: Duty Assignments & Approvals */}
+        <Paper
+          sx={{
+            ...card,
+            ...(dutyNotifs.some(n => n.isDenied || n.status === "Denied") ? {
+              border: "1.5px solid #EF4444",
+              boxShadow: "0 0 16px rgba(239, 68, 68, 0.4)",
+            } : {}),
+          }}
+        >
+          <Heading
+            number={7}
+            title="Duty Assignments & Approvals"
+            note="Accept or deny replacement duties"
+            action={
+              <IconButton size="small" onClick={loadDutyNotifs} disabled={dutyNotifsLoading}>
+                <RefreshCw size={14} className={dutyNotifsLoading ? "animate-spin" : ""} />
+              </IconButton>
+            }
+          />
+
+          {actionFeedback && (
+            <Alert
+              severity={actionFeedback.severity}
+              onClose={() => setActionFeedback(null)}
+              sx={{ mb: 1.5, fontSize: 11 }}
+            >
+              {actionFeedback.text}
+            </Alert>
+          )}
+
+          <Stack spacing={1.2}>
+            {/* 1. Denied Duties - Blinking Red for Admin in same section */}
+            {dutyNotifs.filter(n => n.isDenied || n.status === "Denied").map(n => (
+              <Box
+                key={`denied-${n._id}`}
+                sx={{
+                  p: 1.3,
+                  borderRadius: 2,
+                  border: "2px solid #DC2626",
+                  bgcolor: "#FEF2F2",
+                  animation: "adminDenialBlink 1.4s ease-in-out infinite",
+                  "@keyframes adminDenialBlink": {
+                    "0%, 100%": {
+                      opacity: 1,
+                      borderColor: "#DC2626",
+                      boxShadow: "0 0 16px rgba(220, 38, 38, 0.75)",
+                      backgroundColor: "#FEF2F2",
+                    },
+                    "50%": {
+                      opacity: 0.35,
+                      borderColor: "#EF4444",
+                      boxShadow: "0 0 4px rgba(220, 38, 38, 0.2)",
+                      backgroundColor: "#FFF",
+                    },
+                  },
+                  "@media (prefers-reduced-motion: reduce)": {
+                    animation: "none",
+                  },
+                }}
+              >
+                <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 0.6 }}>
+                  <Chip
+                    size="small"
+                    label="⚠️ DUTY DENIED"
+                    sx={{
+                      height: 20,
+                      fontSize: "0.65rem",
+                      fontWeight: 950,
+                      bgcolor: "#DC2626",
+                      color: "#FFF",
+                      letterSpacing: 0.5,
+                    }}
+                  />
+                  <Typography fontSize={10.5} color="#991B1B" fontWeight={850}>
+                    {dayjs(n.date).format("DD-MMM-YYYY")}
+                  </Typography>
+                </Stack>
+                <Typography fontSize={12.5} fontWeight={850} color="#991B1B">
+                  {n.assignedDuty} Shift — {n.employeeName} ({n.employeeId})
+                </Typography>
+                <Typography fontSize={11} color="#7F1D1D" sx={{ mt: 0.3 }}>
+                  <strong>Denied By:</strong> {n.deniedByRole || "Reporting/HOD Officer"} ({n.deniedBy})
+                </Typography>
+                {n.reason && (
+                  <Typography fontSize={11} color="#991B1B" sx={{ mt: 0.3, fontStyle: "italic", bgcolor: "rgba(254, 226, 226, 0.6)", p: 0.5, borderRadius: 1 }}>
+                    <strong>Reason:</strong> {n.reason}
+                  </Typography>
+                )}
+              </Box>
+            ))}
+
+            {/* 2. Pending Duty Assignments */}
+            {dutyNotifs.filter(n => n.status === "Pending" || n.status === "Accepted").map(n => (
+              <Box
+                key={`duty-${n._id}`}
+                sx={{
+                  p: 1.3,
+                  borderRadius: 2,
+                  border: "1px solid #E2E8F0",
+                  borderLeft: n.status === "Accepted" ? "4px solid #16A34A" : "4px solid #F59E0B",
+                  bgcolor: n.status === "Accepted" ? "#F0FDF4" : "#FFFBEB",
+                }}
+              >
+                <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 0.5 }}>
+                  <Chip
+                    size="small"
+                    label={n.status === "Accepted" ? "Accepted" : "Pending Response"}
+                    sx={{
+                      height: 18,
+                      fontSize: "0.62rem",
+                      fontWeight: 850,
+                      bgcolor: n.status === "Accepted" ? "#DCFCE7" : "#FEF3C7",
+                      color: n.status === "Accepted" ? "#166534" : "#92400E",
+                    }}
+                  />
+                  <Typography fontSize={11} fontWeight={800} color="#475569">
+                    {dayjs(n.date).format("DD-MMM-YYYY")}
+                  </Typography>
+                </Stack>
+
+                <Typography fontSize={12.5} fontWeight={850} color="#1E293B">
+                  {n.assignedDuty} Shift · {n.employeeName} ({n.employeeId})
+                </Typography>
+                <Typography fontSize={10.5} color="#64748B">
+                  Role: {n.viewerRole} {n.leaveId ? `· Replacement for leave` : ""}
+                </Typography>
+
+                {/* Accept / Deny Buttons */}
+                <Stack direction="row" spacing={1} sx={{ mt: 1 }}>
+                  {n.canAccept && (
+                    <Button
+                      size="small"
+                      variant="contained"
+                      onClick={() => handleAcceptDuty(n._id)}
+                      sx={{
+                        py: 0.4,
+                        px: 1.4,
+                        fontSize: 11,
+                        fontWeight: 850,
+                        bgcolor: "#16A34A",
+                        "&:hover": { bgcolor: "#15803D" },
+                        textTransform: "none",
+                      }}
+                    >
+                      Accept Duty
+                    </Button>
+                  )}
+
+                  {/* DENY OPTION ONLY TO REPORTING / HOD OFFICER */}
+                  {n.canDeny && (
+                    <Button
+                      size="small"
+                      variant="outlined"
+                      color="error"
+                      onClick={() => handleOpenDenyDialog(n)}
+                      sx={{
+                        py: 0.4,
+                        px: 1.4,
+                        fontSize: 11,
+                        fontWeight: 850,
+                        textTransform: "none",
+                        borderColor: "#DC2626",
+                        color: "#DC2626",
+                        "&:hover": { bgcolor: "#FEE2E2", borderColor: "#B91C1C" },
+                      }}
+                    >
+                      Deny Duty (HOD)
+                    </Button>
+                  )}
+                </Stack>
+              </Box>
+            ))}
+
+            {dutyNotifs.length === 0 && (
+              <Typography fontSize={11} color="#94A3B8" sx={{ py: 1, textAlign: "center" }}>
+                No pending replacement duty assignments.
+              </Typography>
+            )}
+          </Stack>
+        </Paper>
         <Paper sx={card}><Heading number={10} title="Upcoming shift" note="From tomorrow · next 5 days" /><Box sx={{ maxHeight: 560, overflowY: "auto", pr: .5 }}>{Array.from({ length: 5 }, (_, i) => dayjs(today).add(i + 1, "day").format("YYYY-MM-DD")).map(date => <Box key={date} sx={{ mb: 2.2 }}><Typography sx={{ fontSize: 14, fontWeight: 800, color: "#536170", mb: 1.5 }}>{dayjs(date).format("ddd, DD MMM")}</Typography>{["M", "E", "N"].map(code => {
           const people = upcomingShiftPeople(groups, date, code, shortShift);
           const shiftLeaders = people.filter(person => person.IsSIC);
@@ -237,6 +484,50 @@ export default function DashTest({ demo = false }) {
     <Dialog PaperProps={{ sx: { ...popupPaper, "& .MuiDialogTitle-root": { px: 3, py: 2.5, background: "linear-gradient(120deg,#EBF5FB,#EFF6FF)", fontWeight: 850 } } }} open={popup === "replacement-options"} onClose={() => setPopup("")} fullWidth maxWidth="sm"><DialogTitle sx={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>Replacement & Rostering<IconButton aria-label="Close replacement options" onClick={() => setPopup("")}><X size={18} /></IconButton></DialogTitle><DialogContent dividers><Box sx={{ textAlign: "center", mb: 3 }}><Box sx={{ width: 78, height: 78, mx: "auto", mb: 1.8, borderRadius: "50%", bgcolor: "#E0F2FE", color: "#0284C7", border: "4px solid #38BDF8", display: "grid", placeItems: "center", boxShadow: "0 0 0 10px #F0F9FF" }}><ArrowLeftRight size={38} /></Box><Typography sx={{ fontSize: 23, fontWeight: 850, color: "#0F172A" }}>Replacement & Rostering</Typography><Typography sx={{ color: "#64748B", mt: .7 }}>Choose the duty replacement, exchange, or special event rostering module.</Typography></Box><Stack spacing={1.3}>{replacementOptions.map(option => <Button key={option.path} variant="outlined" endIcon={<ArrowUpRight size={18} />} onClick={() => { setPopup(""); navigate(option.path); }} sx={{ justifyContent: "space-between", textTransform: "none", textAlign: "left", p: 1.8, borderRadius: "16px !important", color: "#0369A1", borderColor: "#BAE6FD", bgcolor: "#F0F9FF", "&:hover": { bgcolor: "#E0F2FE", borderColor: "#0284C7" } }}><Box><Stack direction="row" alignItems="center" spacing={1}><Typography fontSize={14.5} fontWeight={850}>{option.title}</Typography>{option.badge && <Chip size="small" label={option.badge} sx={{ height: 20, fontSize: 10.5, fontWeight: 800, bgcolor: "#E0F2FE", color: "#0369A1" }} />}</Stack>{option.subtitle && <Typography fontSize={11.5} color="#64748B" sx={{ mt: .3 }}>{option.subtitle}</Typography>}</Box></Button>)}</Stack></DialogContent></Dialog>
     <Dialog PaperProps={{ sx: popupPaper }} open={popup === "restricted"} onClose={() => setPopup("")}><DialogTitle>Access Restricted</DialogTitle><DialogContent><Typography>Approval is available to reporting officers and employees with delegated approval power.</Typography><Button onClick={() => setPopup("")} sx={{ mt: 2 }}>Close</Button></DialogContent></Dialog>
     <Dialog PaperProps={{ sx: popupPaper }} open={["tracking", "history"].includes(popup)} onClose={() => setPopup("")} fullWidth maxWidth="lg"><DialogTitle sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}><Box>{popup === "tracking" ? "Application Tracking" : "Application History"}<Typography sx={{ fontSize: 11, color: "#83909E" }}>{popup === "tracking" ? "From D−2 through all future applications. Pending rows are amber." : "Leave, training, sports, exchange and replacement records."}</Typography></Box><IconButton aria-label="Close applications" onClick={() => setPopup("")}><X size={18} /></IconButton></DialogTitle><DialogContent dividers><Tabs value={kind} onChange={(_, value) => setKind(value)} variant="scrollable" scrollButtons="auto">{["All", ...Object.keys(destinations)].map(value => <Tab key={value} value={value} label={value} sx={{ textTransform: "none" }} />)}</Tabs><Stack direction={{ xs: "column", sm: "row" }} spacing={1} sx={{ my: 2 }}><TextField label="Search applications" size="small" value={search} onChange={event => setSearch(event.target.value)} sx={{ flex: 1 }} /><TextField select label="Application status" size="small" value={recordStatus} onChange={event => setRecordStatus(event.target.value)} sx={{ minWidth: 160 }}>{["All", "Pending", "Approved", "Cancelled", "Rejected", "Withdrawn"].map(value => <MenuItem key={value} value={value}>{value === "All" ? "All statuses" : value}</MenuItem>)}</TextField><Button variant={recordStatus === "Approved" && kind === "Leave" ? "contained" : "outlined"} onClick={() => { setKind("Leave"); setRecordStatus("Approved"); }}>Approved leave</Button><Button variant={scope === "mine" ? "contained" : "outlined"} onClick={() => setScope("mine")}>My applications</Button><Button variant={scope === "all" ? "contained" : "outlined"} onClick={() => setScope("all")}>Authorised records</Button></Stack>{popup === "history" && <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5} sx={{ mb: 2, p: 2, bgcolor: "#FFF1F4", borderRadius: 3 }}><TextField label="History from" type="date" size="small" value={historyFrom} onChange={event => setHistoryFrom(event.target.value)} InputLabelProps={{ shrink: true }} /><TextField label="History to" type="date" size="small" value={historyTo} onChange={event => setHistoryTo(event.target.value)} InputLabelProps={{ shrink: true }} error={Boolean(historyFrom && historyTo && historyTo < historyFrom)} helperText={historyFrom && historyTo && historyTo < historyFrom ? "End date must follow start date" : ""} /><Button onClick={() => { setHistoryFrom(""); setHistoryTo(""); }}>All dates</Button><Typography sx={{ alignSelf: "center", fontSize: 12, color: "#786B74" }}>{visibleRecords.length} matching applications</Typography></Stack>}{errors.some(error => Object.keys(destinations).includes(error)) && <Alert severity="warning" sx={{ mb: 2 }}>Some application records could not be loaded. Use Refresh on the dashboard to retry.</Alert>}<Stack spacing={1}>{visibleRecords.map((row, index) => <Paper variant="outlined" key={`${row.kind}-${row.id || row._id || index}`} sx={{ p: 1.6, borderRadius: 2, background: isPending(statusOf(row)) ? "#FFF8E5" : "#FAFCFD", borderColor: isPending(statusOf(row)) ? "#EED28D" : "#E5EAF0" }}><Stack direction={{ xs: "column", sm: "row" }} spacing={1} alignItems={{ sm: "center" }}><Box sx={{ flex: 1 }}><Typography sx={{ fontSize: 13, fontWeight: 800 }}>{row.employeeName || row.name || row.employeeId || row.firstEmployee?.name || row.requesterName || "Application"} · {row.kind}</Typography><Typography sx={{ fontSize: 11, color: "#788493", mt: .4 }}>{row.leaveType || row.trainingName || row.sportsName || row.eventName || row.assignedDuty || "Duty application"} · {dateOf(row) || "Date unavailable"}{endOf(row) !== dateOf(row) ? ` → ${endOf(row)}` : ""}</Typography></Box><Chip size="small" label={statusOf(row)} color={isPending(statusOf(row)) ? "warning" : "default"} /><ApplicationActions row={row} saving={saving} selectedDatesOnly={popup === "tracking" && (recordStatus === "Approved" || row.finalStatus === "Approved")} allowReapply={popup === "history"} onReapply={record => demo ? setDemoWorkspace("apply") : navigate(`/crew/leave?${new URLSearchParams({ section: "apply", employeeId: record.employeeId, from: record.startDate || record.date, to: record.endDate || record.date, reviseLeaveId: (record.anchor || record).id })}`)} demo={demo} onUpdated={refresh} onDemoDelete={ids => setRecords(current => current.filter(item => !ids.includes(item.id)))} onDemoEdit={(leave, originals, applications, reason) => setRecords(current => [...current.filter(item => !originals.some(original => original.id === item.id)), ...applications.map((application, i) => ({ ...leave, ...application, reason, kind: "Leave", id: `demo-edit-${Date.now()}-${i}`, leaveGroupId: leave.leaveGroupId || `demo-group-${Date.now()}`, finalStatus: "Applied" }))])} onMutation={requestMutation} onTrainingReview={record => demo ? setDemoWorkspace(destinations.Training) : setTrainingReview(record.id)} /><Button size="small" onClick={() => navigate(destinations[row.kind])} endIcon={<ArrowUpRight size={13} />} sx={{ textTransform: "none" }}>{destinationLabels[row.kind]}</Button></Stack><Box sx={{ mt: 1.3, borderTop: "1px solid #E6E6EF", pt: .5 }}><LeaveProgress leave={row.kind === "Leave" ? row.anchor || row : { ...row, finalStatus: statusOf(row), approvalChain: [{ name: `${row.kind} review`, status: /^(approved|accepted|completed)$/i.test(statusOf(row)) ? "Approved" : "Pending" }] }} compact /></Box></Paper>)}</Stack>{!visibleRecords.length && <Empty loading={loading} text="No applications match this view." />}</DialogContent></Dialog>
+    {/* Deny Replacement Duty Dialog (Reporting/HOD Only) */}
+    <Dialog PaperProps={{ sx: popupPaper }} open={denyDialogOpen} onClose={() => !denySubmitting && setDenyDialogOpen(false)} maxWidth="xs" fullWidth>
+      <DialogTitle sx={{ fontSize: 16, fontWeight: 850, color: "#DC2626" }}>
+        Deny Replacement Duty (HOD Review)
+      </DialogTitle>
+      <DialogContent dividers>
+        {selectedNotifForDeny && (
+          <Stack spacing={1.5} sx={{ pt: 0.5 }}>
+            <Typography fontSize={13} color="#334155">
+              Denying <strong>{selectedNotifForDeny.assignedDuty}</strong> duty on{" "}
+              <strong>{dayjs(selectedNotifForDeny.date).format("DD-MMM-YYYY")}</strong> for employee{" "}
+              <strong>{selectedNotifForDeny.employeeName}</strong>.
+            </Typography>
+            <Typography fontSize={11} color="#64748B">
+              This action will email the Admin and highlight this duty as DENIED with a blinking alert on the Dashboard.
+            </Typography>
+            <TextField
+              label="Reason for Denial *"
+              multiline
+              rows={3}
+              fullWidth
+              size="small"
+              value={denyReason}
+              onChange={(e) => setDenyReason(e.target.value)}
+              placeholder="Provide reason for inability to perform assigned duty..."
+            />
+          </Stack>
+        )}
+      </DialogContent>
+      <Box sx={{ display: "flex", justifyContent: "flex-end", gap: 1, p: 2 }}>
+        <Button disabled={denySubmitting} onClick={() => setDenyDialogOpen(false)}>
+          Cancel
+        </Button>
+        <Button
+          variant="contained"
+          color="error"
+          disabled={denySubmitting || !denyReason.trim()}
+          onClick={handleConfirmDeny}
+          sx={{ fontWeight: 850 }}
+        >
+          {denySubmitting ? "Submitting..." : "Confirm Denial"}
+        </Button>
+      </Box>
+    </Dialog>
   </Box>;
 }
 

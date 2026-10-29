@@ -1,5 +1,7 @@
 """Department-scoped special-event announcements and separately enabled leave blocks."""
 from datetime import date, datetime, timedelta
+from typing import Optional
+import re
 from bson import ObjectId
 from fastapi import APIRouter, Depends, HTTPException, Query
 from crew_legacy.admin_logic.auth_utils import get_authenticated_user
@@ -15,6 +17,36 @@ from crew_legacy.database.database_mongo import (
 from crew_legacy.api.leave_api import is_admin, validate_block_dates, blocked_period_staffing, export_blocked_period_staffing
 
 router = APIRouter()
+
+
+def is_shift_or_control_room_employee(eid: str, group_name: str, assigned_duty: str, emp_to_group: dict = None) -> bool:
+    """
+    Identifies whether an employee is a Shift / Control Room person vs General shift person.
+    Shift/Control Room persons rotate through shift groups (Group-1, Group-2, Group-3, Group-4, etc.)
+    or are rostered on shift duties (Morning, Evening, Night).
+    General shift persons (groupName == 'General', assignedDuty == 'General') do not require replacement.
+    """
+    g_clean = str(group_name or "").strip()
+    d_clean = str(assigned_duty or "").strip().upper()
+
+    # Explicit General
+    if g_clean.lower() == "general" or g_clean.lower().startswith("gen") or d_clean in ["GENERAL", "GEN", "G"]:
+        return False
+
+    # Shift groups: Group-1, Group-2, Group-3, Group-4, Group-5, Group-6, etc.
+    if re.search(r"group[\s_-]*\d+", g_clean, re.I):
+        return True
+
+    from crew_legacy.api.replacement import SHIFT_DUTIES, normalized_duty
+    if normalized_duty(d_clean) in SHIFT_DUTIES:
+        return True
+
+    if emp_to_group and eid:
+        mapped_g = str(emp_to_group.get(str(eid).strip()) or "").strip()
+        if re.search(r"group[\s_-]*\d+", mapped_g, re.I):
+            return True
+
+    return False
 
 
 def department_ids(employee):
@@ -281,6 +313,17 @@ def get_special_roster_matrix(
     # Fetch daily duties
     daily_query = {"date": {"$gte": start_date, "$lte": end_date}}
     records = list(employee_daily_collection.find(daily_query))
+    daily_by_emp_date = {(str(r.get("employeeId") or "").strip(), str(r.get("date") or "").strip()): r for r in records}
+
+    # Map groups to their active shift on each date from records of active members
+    group_shift_on_date = {}
+    for r in records:
+        rdate = str(r.get("date") or "").strip()
+        rg = str(r.get("groupName") or "").strip()
+        rd = str(r.get("assignedDuty") or "").strip()
+        if rg and rd and normalized_duty(rd) in SHIFT_DUTIES:
+            if (rg, rdate) not in group_shift_on_date:
+                group_shift_on_date[(rg, rdate)] = rd
 
     # Fetch leaves
     leave_query = {
@@ -324,19 +367,50 @@ def get_special_roster_matrix(
         ldate = str(l.get("date") or "").strip()
         if ldate in grid:
             eid = str(l.get("employeeId") or "").strip()
-            assigned_duty = str(l.get("assignedDuty") or "Morning").strip()
-            req_flag = bool(l.get("replacementRequired") or l.get("sicReplacementRequired") or l.get("dicReplacementRequired"))
+            d_rec = daily_by_emp_date.get((eid, ldate)) or {}
+
+            # Resolve group name
+            emp_group = (
+                str(l.get("groupName") or "").strip()
+                or str(d_rec.get("groupName") or "").strip()
+                or emp_to_group.get(eid, "")
+            )
+            if not emp_group or emp_group.lower() == "none":
+                emp_group = "General"
+
+            # Resolve assigned duty
+            raw_duty = str(d_rec.get("assignedDuty") or l.get("assignedDuty") or "").strip()
+            if not raw_duty or raw_duty.lower() == "none":
+                raw_duty = group_shift_on_date.get((emp_group, ldate)) or ("Morning" if re.search(r"group[\s_-]*\d+", emp_group, re.I) else "General")
+
+            is_shift_person = is_shift_or_control_room_employee(eid, emp_group, raw_duty, emp_to_group)
+
+            norm_duty = normalized_duty(raw_duty)
+            if norm_duty in ["EVENING", "E1", "E2"]:
+                shift_bucket = "Evening"
+            elif norm_duty in ["NIGHT", "N1", "N2"]:
+                shift_bucket = "Night"
+            elif is_shift_person:
+                shift_bucket = "Morning"
+            else:
+                shift_bucket = "General"
+
             is_covered = bool(l.get("replacementAssigned") or l.get("replacement"))
+
+            # Only Shift/Control Room person need replacement. Remove cover for general shift persons.
+            req_flag = is_shift_person
+
             entry = {
                 "employeeId": eid,
                 "name": str(l.get("employeeName") or l.get("name") or eid),
-                "designation": str(l.get("designation") or "Staff"),
-                "department": str(l.get("department") or ""),
-                "groupName": str(l.get("groupName") or "").strip() or emp_to_group.get(eid, ""),
-                "assignedDuty": assigned_duty,
+                "designation": str(l.get("designation") or d_rec.get("designation") or "Staff"),
+                "department": str(l.get("department") or d_rec.get("department") or ""),
+                "groupName": emp_group,
+                "assignedDuty": shift_bucket,
                 "leaveType": str(l.get("leaveType") or "Leave"),
                 "leaveId": str(l.get("_id")),
                 "onLeave": True,
+                "isShiftPerson": is_shift_person,
                 "replacementRequired": req_flag,
                 "replacementAssigned": is_covered,
                 "replacement": l.get("replacement"),
@@ -345,9 +419,11 @@ def get_special_roster_matrix(
             if req_flag:
                 replacement_requirements.append({
                     "date": ldate,
-                    "shift": assigned_duty if assigned_duty in SHIFT_DUTIES else "Morning",
+                    "shift": shift_bucket,
+                    "assignedDuty": shift_bucket,
                     "employeeId": eid,
                     "name": entry["name"],
+                    "groupName": emp_group,
                     "leaveId": entry["leaveId"],
                     "leaveType": entry["leaveType"],
                     "status": "Covered" if is_covered else "Uncovered",
@@ -553,16 +629,30 @@ def sequential_allocate_department_manpower(
             ],
         }
         leaves = list(leave_request_collection.find(leave_query).sort("date", 1))
+        emp_to_group = resolve_employee_group_map()
         for leave in leaves:
-            s = str(leave.get("assignedDuty") or "Morning").strip()
-            if s not in target_shifts and s not in SHIFT_DUTIES:
-                s = target_shifts[0] if target_shifts else "Morning"
+            eid = str(leave.get("employeeId") or "").strip()
+            # Only shift / Control Room persons need replacement. Exclude general shift!
+            if not is_shift_or_control_room_employee(eid, leave.get("groupName"), leave.get("assignedDuty"), emp_to_group):
+                continue
+
+            # Determine actual shift:
+            s = str(leave.get("assignedDuty") or "").strip()
+            if s not in SHIFT_DUTIES:
+                daily = employee_daily_collection.find_one({"employeeId": eid, "date": str(leave.get("date"))})
+                if daily and str(daily.get("assignedDuty") or "").strip() in SHIFT_DUTIES:
+                    s = str(daily.get("assignedDuty")).strip()
+                else:
+                    s = target_shifts[0] if target_shifts else "Morning"
+            if target_shifts and s not in target_shifts:
+                continue
+
             slots_to_fill.append({
                 "type": "leave_replacement",
                 "date": str(leave.get("date")),
                 "shift": s,
                 "leave": leave,
-                "applicantId": str(leave.get("employeeId") or "").strip(),
+                "applicantId": eid,
                 "applicantName": str(leave.get("employeeName") or leave.get("name") or leave.get("employeeId")),
             })
 
@@ -654,6 +744,8 @@ def sequential_allocate_department_manpower(
                                 "replacementEmployeeId": cand_id,
                                 "mode": "double",
                                 "halfDuty": False,
+                                "assignedDuty": sshift,
+                                "autoApprove": True,
                                 "reason": f"Sequential roster allocation ({source_pool}) by {actor_id}",
                             },
                             user=user,
@@ -717,5 +809,93 @@ def sequential_allocate_department_manpower(
         "allocations": allocations,
         "unallocatedSlots": unallocated_slots,
     }
+
+
+@router.get("/candidates")
+def get_special_roster_candidates(
+    date: Optional[str] = Query(None),
+    department: Optional[str] = Query(None),
+    user=Depends(get_authenticated_user),
+):
+    """
+    Returns all active personnel across the organization, optionally filtered by department.
+    Each candidate includes designation, department, group, and dutyStatus for the given date.
+    Also returns the complete list of available departments for filtering in UI.
+    """
+    from crew_legacy.api.replacement import ACTIVE_LEAVE_STATUSES, SHIFT_DUTIES
+
+    emp_to_group = resolve_employee_group_map()
+
+    # Query all active employees
+    emp_query = {"isActive": {"$ne": False}}
+    if department and department.strip():
+        dept_str = department.strip()
+        emp_query["$or"] = [
+            {"department": dept_str},
+            {"departments": dept_str},
+        ]
+
+    all_employees = list(employee_collection.find(emp_query).sort([("name", 1), ("employeeId", 1)]))
+
+    # All available departments
+    dept_units = list(organization_unit_collection.find({"unitType": "department", "isActive": {"$ne": False}}, {"name": 1}))
+    all_depts = sorted({str(u.get("name")).strip() for u in dept_units if str(u.get("name") or "").strip()})
+    if not all_depts:
+        all_depts = sorted({str(e.get("department") or "").strip() for e in all_employees if str(e.get("department") or "").strip()})
+
+    # If date is provided, batch query leave and daily duty
+    leave_map = {}
+    daily_map = {}
+    if date:
+        leaves = leave_request_collection.find({
+            "date": date,
+            "finalStatus": {"$in": list(ACTIVE_LEAVE_STATUSES)},
+        })
+        for l in leaves:
+            lid = str(l.get("employeeId") or "").strip()
+            if lid:
+                leave_map[lid] = l.get("leaveType") or "Leave"
+
+        dailies = employee_daily_collection.find({"date": date})
+        for d in dailies:
+            did = str(d.get("employeeId") or "").strip()
+            if did:
+                daily_map[did] = d.get("assignedDuty")
+
+    candidates = []
+    for emp in all_employees:
+        eid = str(emp.get("userId") or emp.get("employeeId") or "").strip()
+        if not eid:
+            continue
+        ename = str(emp.get("name") or eid)
+        edesig = str(emp.get("designation") or "Staff")
+        edept = emp.get("department") or (emp.get("departments")[0] if emp.get("departments") else "")
+        egroup = str(emp.get("groupName") or "").strip() or emp_to_group.get(eid, "")
+
+        duty_status = "Available / Off Duty"
+        if date:
+            if eid in leave_map:
+                duty_status = f"On Leave ({leave_map[eid]})"
+            elif eid in daily_map:
+                ad = daily_map[eid]
+                duty_status = f"Rostered: {ad}" if ad else "Rostered"
+
+        candidates.append({
+            "employeeId": eid,
+            "userId": eid,
+            "name": ename,
+            "designation": edesig,
+            "department": edept,
+            "groupName": egroup,
+            "dutyStatus": duty_status,
+            "isShiftPerson": is_shift_or_control_room_employee(eid, egroup, daily_map.get(eid, ""), emp_to_group),
+        })
+
+    return {
+        "departments": all_depts,
+        "candidates": candidates,
+        "total": len(candidates),
+    }
+
 
 

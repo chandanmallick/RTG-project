@@ -304,6 +304,8 @@ export default function SpecialRosterMatrix({
   const [addSlot, setAddSlot] = useState({ date: "", shift: "Morning" });
   const [addEmployeeId, setAddEmployeeId] = useState("");
   const [addEmployeeName, setAddEmployeeName] = useState("");
+  const [addSelectedDept, setAddSelectedDept] = useState("");
+  const [addAvailableDepts, setAddAvailableDepts] = useState([]);
   const [addReason, setAddReason] = useState("");
   const [candidateOptions, setCandidateOptions] = useState([]);
   const [candidateLoading, setCandidateLoading] = useState(false);
@@ -556,10 +558,10 @@ export default function SpecialRosterMatrix({
     // Load available candidates for date
     setDeployCandidateLoading(true);
     try {
-      const { data } = await api.get("/replacement/duty-switch/options", {
+      const { data } = await api.get("/special-events/candidates", {
         params: { date: dateStr },
       });
-      setDeployCandidateOptions(Array.isArray(data) ? data : []);
+      setDeployCandidateOptions(data?.candidates || []);
     } catch {
       setDeployCandidateOptions([]);
     } finally {
@@ -585,6 +587,7 @@ export default function SpecialRosterMatrix({
         replacementEmployeeId: deployCandidate.employeeId,
         mode: deployMode,
         halfDuty: deployHalfDuty,
+        assignedDuty: deploySlot.shift,
         reason: deployReason || `Replacement duty for ${deployLeave.name} (${deploySlot.shift})`,
         autoApprove: true,
       });
@@ -645,14 +648,32 @@ export default function SpecialRosterMatrix({
     setAddSlot({ date, shift });
     setAddEmployeeId("");
     setAddEmployeeName("");
+    setAddSelectedDept("");
     setAddReason(`Special roster assignment: ${shift}`);
     setAddDialogOpen(true);
     setCandidateLoading(true);
     try {
-      const { data } = await api.get("/replacement/duty-switch/options", {
+      const { data } = await api.get("/special-events/candidates", {
         params: { date },
       });
-      setCandidateOptions(Array.isArray(data) ? data : []);
+      setCandidateOptions(data?.candidates || []);
+      setAddAvailableDepts(data?.departments || []);
+    } catch {
+      setCandidateOptions([]);
+      setAddAvailableDepts([]);
+    } finally {
+      setCandidateLoading(false);
+    }
+  };
+
+  const handleDeptFilterChange = async (dept) => {
+    setAddSelectedDept(dept);
+    setCandidateLoading(true);
+    try {
+      const { data } = await api.get("/special-events/candidates", {
+        params: { date: addSlot.date, department: dept || undefined },
+      });
+      setCandidateOptions(data?.candidates || []);
     } catch {
       setCandidateOptions([]);
     } finally {
@@ -1131,7 +1152,7 @@ export default function SpecialRosterMatrix({
                       <Stack spacing={0.3} alignItems="center">
                         <Stack direction="row" spacing={0.6} alignItems="center">
                           <Typography fontSize={13} fontWeight={900} color={isToday ? "#6D28D9" : "#0F172A"}>
-                            {dayjs(dateStr).format("DD MMM")}
+                            {dayjs(dateStr).format("DD-MMM-YYYY")}
                           </Typography>
                           {isToday && (
                             <Chip
@@ -1146,7 +1167,7 @@ export default function SpecialRosterMatrix({
                           fontWeight={850}
                           color={isWeekend ? "#EA580C" : isToday ? "#7C3AED" : "#64748B"}
                         >
-                          {dayName} · {dateStr}
+                          {dayName}
                         </Typography>
                       </Stack>
                     </TableCell>
@@ -1462,7 +1483,13 @@ export default function SpecialRosterMatrix({
                               {/* Replacement Place & Covered Slots for Shift Cells */}
                               {shiftKey !== "Leave" && shiftKey !== "Off" && (() => {
                                 const shiftLeaves = (matrixData.grid?.[dateStr]?.["Leave"] || []).filter((l) => {
-                                  const d = (l.assignedDuty || "Morning").toLowerCase();
+                                  // USER REQUIREMENT: Only shift/Control Room person need replacement. Remove cover for general shift persons.
+                                  if (l.isShiftPerson === false) return false;
+                                  const grp = (l.groupName || "").toLowerCase();
+                                  if (grp === "general" || grp.startsWith("gen")) return false;
+                                  const d = (l.assignedDuty || "").toLowerCase();
+                                  if (d === "general" || d === "gen") return false;
+
                                   const sk = shiftKey.toLowerCase();
                                   return d === sk || (sk === "morning" && !["evening", "night", "general"].includes(d));
                                 });
@@ -1651,17 +1678,37 @@ export default function SpecialRosterMatrix({
             </Typography>
           </Stack>
           <Typography variant="body2" color="#64748B">
-            Date: {addSlot.date} ({dayjs(addSlot.date).format("dddd")})
+            Date: {dayjs(addSlot.date).format("DD-MMM-YYYY")} ({dayjs(addSlot.date).format("dddd")})
           </Typography>
         </DialogTitle>
         <DialogContent>
           <Stack spacing={2} sx={{ pt: 1 }}>
+            {/* Department Filter for Candidate Pool */}
+            <FormControl size="small" fullWidth>
+              <InputLabel id="dept-filter-label">Filter by Department</InputLabel>
+              <Select
+                labelId="dept-filter-label"
+                value={addSelectedDept}
+                label="Filter by Department"
+                onChange={(e) => handleDeptFilterChange(e.target.value)}
+              >
+                <MenuItem value="">
+                  <em>All Departments ({candidateOptions.length} candidates)</em>
+                </MenuItem>
+                {addAvailableDepts.map((d) => (
+                  <MenuItem key={d} value={d}>
+                    {d}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+
             <Autocomplete
               options={candidateOptions}
               loading={candidateLoading}
               getOptionLabel={(option) => {
                 if (typeof option === "string") return option;
-                return `${option.name || option.employeeId} (${option.employeeId}) · ${option.assignedDuty || "Duty"}`;
+                return `${option.name || option.employeeId} (${option.employeeId}) · ${option.designation || "Staff"} · ${option.dutyStatus || option.assignedDuty || "Available"}`;
               }}
               value={
                 candidateOptions.find((c) => String(c.employeeId) === String(addEmployeeId)) ||
@@ -1681,13 +1728,16 @@ export default function SpecialRosterMatrix({
                 const optGrp = getGroupStyle(optGroup);
                 return (
                   <Box component="li" {...props} key={option.employeeId}>
-                    <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ width: "100%", py: 0.3 }}>
-                      <Box>
+                    <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ width: "100%", py: 0.4 }}>
+                      <Box sx={{ minWidth: 0, pr: 1 }}>
                         <Typography fontSize={13} fontWeight={800} color="#0F172A">
                           {option.name || option.employeeId}
                         </Typography>
                         <Typography fontSize={11} color="#64748B">
-                          ID: {option.employeeId} · Current: {option.assignedDuty || "Duty"}
+                          {option.designation || "Staff"} · {option.department || "General"}
+                        </Typography>
+                        <Typography fontSize={10.5} fontWeight={700} color={option.dutyStatus?.includes("On Leave") ? "#DC2626" : option.dutyStatus?.includes("Rostered") ? "#B45309" : "#16A34A"}>
+                          Status: {option.dutyStatus || "Available / Off Duty"}
                         </Typography>
                       </Box>
                       <Chip
@@ -1701,6 +1751,7 @@ export default function SpecialRosterMatrix({
                           color: optGrp.badgeText,
                           border: `1px solid ${optGrp.badgeBorder}`,
                           borderRadius: "4px",
+                          flexShrink: 0,
                         }}
                       />
                     </Stack>
@@ -1711,8 +1762,8 @@ export default function SpecialRosterMatrix({
                 <TextField
                   {...params}
                   label="Select Candidate"
-                  placeholder="Search crew members"
-                  helperText="Available personnel on this date"
+                  placeholder="Search crew members across departments"
+                  helperText={`All active personnel available (${candidateOptions.length} candidates)`}
                 />
               )}
             />
@@ -2274,7 +2325,7 @@ export default function SpecialRosterMatrix({
                       sx={{ bgcolor: "#FEE2E2", color: "#991B1B", fontWeight: 800 }}
                     />
                     <Typography fontSize={11} color="#64748B" sx={{ mt: 0.4 }}>
-                      Date: {deploySlot.date}
+                      Date: {dayjs(deploySlot.date).format("DD-MMM-YYYY")}
                     </Typography>
                   </Box>
                 </Stack>
