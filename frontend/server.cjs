@@ -52,6 +52,12 @@ const server = http.createServer((req, res) => {
 
   fs.stat(filePath, (err, stats) => {
     if (err || !stats.isFile()) {
+      // Do NOT serve index.html for missing script/style/font assets
+      if (req.url.startsWith('/assets/') || ['.js', '.css', '.map', '.png', '.jpg', '.jpeg', '.svg', '.woff', '.woff2'].includes(ext)) {
+        res.writeHead(404, { 'Content-Type': 'text/plain' });
+        res.end('Asset Not Found');
+        return;
+      }
       // Fallback for SPA routing
       filePath = path.join(DIST_DIR, 'index.html');
     }

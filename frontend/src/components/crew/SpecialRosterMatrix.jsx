@@ -305,6 +305,7 @@ export default function SpecialRosterMatrix({
   const [addEmployeeId, setAddEmployeeId] = useState("");
   const [addEmployeeName, setAddEmployeeName] = useState("");
   const [addReason, setAddReason] = useState("");
+  const [candidateOptions, setCandidateOptions] = useState([]);
   const [candidateLoading, setCandidateLoading] = useState(false);
   const [addSaving, setAddSaving] = useState(false);
 

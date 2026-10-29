@@ -945,8 +945,10 @@
     overflow: visible !important;
   }
 
-  /* Completely hide the interactive web UI during printing */
+  /* Completely hide the interactive web UI, taskbar, and navbar during printing */
+  .no-print,
   .crew-roster-screen-only,
+  .ui-kit-navbar,
   header,
   nav,
   aside,

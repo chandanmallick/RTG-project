@@ -15,6 +15,16 @@ import "bootstrap/dist/css/bootstrap.min.css";
 import "./index.css";
 import "./theme/theme.css";
 
+// Automatically handle stale chunk hashes after redeploy
+window.addEventListener("vite:preloadError", (event) => {
+  event.preventDefault();
+  const reloaded = sessionStorage.getItem("vite_preload_reload");
+  if (!reloaded) {
+    sessionStorage.setItem("vite_preload_reload", "true");
+    window.location.reload();
+  }
+});
+
 class AppErrorBoundary extends React.Component {
   constructor(props) {
     super(props);
@@ -27,6 +37,19 @@ class AppErrorBoundary extends React.Component {
 
   componentDidCatch(error, info) {
     console.error("App render failed:", error, info);
+    const msg = String(error?.message || error || "");
+    if (
+      msg.includes("Failed to fetch dynamically imported module") ||
+      msg.includes("dynamically imported module") ||
+      msg.includes("Loading chunk") ||
+      msg.includes("Importing a module script failed")
+    ) {
+      const reloaded = sessionStorage.getItem("chunk_reload_attempted");
+      if (!reloaded) {
+        sessionStorage.setItem("chunk_reload_attempted", "true");
+        window.location.reload();
+      }
+    }
   }
 
   render() {

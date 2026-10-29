@@ -234,6 +234,7 @@ export default function TopNavbar() {
 
   return (
     <Box
+      className="no-print crew-roster-screen-only"
       sx={{
         display: "flex",
         alignItems: "center",
@@ -250,6 +251,9 @@ export default function TopNavbar() {
         zIndex: 1000,
         width: "100%",
         boxSizing: "border-box",
+        "@media print": {
+          display: "none !important",
+        },
       }}
     >
       {/* LEFT BRAND SECTION */}

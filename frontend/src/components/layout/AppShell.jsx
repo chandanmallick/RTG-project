@@ -24,13 +24,27 @@ export default function AppShell({ children, viewportLocked = false }) {
         gap: viewportLocked ? 1.2 : 2.5,
       }}
     >
-      <CrewTableTools />
+      <Box className="no-print crew-roster-screen-only" sx={{ "@media print": { display: "none !important" } }}>
+        <CrewTableTools />
+      </Box>
       {/* Top Navigation Menu Bar */}
-      <Box sx={{ flexShrink: 0 }}>
+      <Box
+        className="no-print crew-roster-screen-only"
+        sx={{
+          flexShrink: 0,
+          "@media print": { display: "none !important" },
+        }}
+      >
         <TopNavbar />
       </Box>
       {pathname.startsWith("/crew/") && (
-        <Box sx={{ flexShrink: 0 }}>
+        <Box
+          className="no-print crew-roster-screen-only"
+          sx={{
+            flexShrink: 0,
+            "@media print": { display: "none !important" },
+          }}
+        >
           <SpecialEventNotice />
         </Box>
       )}
