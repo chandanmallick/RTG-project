@@ -373,22 +373,47 @@ def daily_department_ic_ids(*daily_records):
     ))
 
 
+def is_actor_dic_or_reporting_officer(actor_id: str, item: dict):
+    if not actor_id:
+        return False
+    if actor_id in ["50041", "admin"]:
+        return True
+    first_id = str((item.get("firstEmployee") or {}).get("employeeId") or "")
+    second_id = str((item.get("secondEmployee") or {}).get("employeeId") or "")
+    controllers = controlling_officer_ids(first_id) + controlling_officer_ids(second_id)
+    if actor_id in controllers:
+        return True
+    emp = employee_by_id(actor_id) or {}
+    role = str(emp.get("role") or "").lower()
+    if role in ["admin", "dic", "dept_ic", "hod"] or emp.get("isDeptIC") or emp.get("isLeaveAuthority"):
+        return True
+    return False
+
+
 def exchange_request_summary(item: dict, actor_id: str = ""):
     stage = item.get("stage") or "other_employee"
     actor_id = str(actor_id or "").strip()
     can_act = False
     actor_role = ""
+    is_dic = is_actor_dic_or_reporting_officer(actor_id, item)
     if item.get("status") == "Pending":
-        if stage == "other_employee" and actor_id == str((item.get("secondEmployee") or {}).get("employeeId") or ""):
-            can_act, actor_role = True, "Exchange employee"
+        if stage == "other_employee":
+            if actor_id == str((item.get("secondEmployee") or {}).get("employeeId") or ""):
+                can_act, actor_role = True, "Exchange employee"
+            elif is_dic:
+                can_act, actor_role = True, "DIC / Reporting Officer (Admin Override)"
         elif stage == "sic":
             pending = [entry for entry in item.get("sicApprovals") or [] if entry.get("status") == "Pending"]
             if any(actor_id in normalized_categories(entry.get("employeeIds")) for entry in pending):
                 can_act, actor_role = True, "Shift-in-Charge"
+            elif is_dic:
+                can_act, actor_role = True, "DIC / Reporting Officer"
         elif stage == "dic":
             pending = [entry for entry in item.get("dicApprovals") or [] if entry.get("status") == "Pending"]
-            if any(actor_id in normalized_categories(entry.get("employeeIds")) for entry in pending):
-                can_act, actor_role = True, "Leave Approving Authority"
+            if any(actor_id in normalized_categories(entry.get("employeeIds")) for entry in pending) or is_dic:
+                can_act, actor_role = True, "Leave Approving Authority / Reporting Officer"
+        elif is_dic:
+            can_act, actor_role = True, "DIC / Reporting Officer"
     return {
         "id": str(item.get("_id")),
         "requestId": item.get("requestId"),
@@ -406,6 +431,7 @@ def exchange_request_summary(item: dict, actor_id: str = ""):
         "decisionHistory": api_decision_history(item.get("decisionHistory")),
         "canAct": can_act,
         "actorRole": actor_role,
+        "isDIC": is_dic,
     }
 
 
@@ -1356,6 +1382,14 @@ def exchange_employee_duties(
     if first.get("leaveStatus") in ACTIVE_LEAVE_STATUSES or second.get("leaveStatus") in ACTIVE_LEAVE_STATUSES:
         raise HTTPException(409, "Duty cannot be exchanged with an employee who is on leave")
 
+    # USER REQUIREMENT: Duty exchange is only available for Shift persons!
+    from crew_legacy.api.special_events import is_shift_or_control_room_employee
+    emp_map = {first_id: str(first.get("groupName") or ""), second_id: str(second.get("groupName") or "")}
+    is_first_shift = is_shift_or_control_room_employee(first_id, str(first.get("groupName") or ""), str(first.get("assignedDuty") or ""), emp_map)
+    is_second_shift = is_shift_or_control_room_employee(second_id, str(second.get("groupName") or ""), str(second.get("assignedDuty") or ""), emp_map)
+    if not (is_first_shift and is_second_shift):
+        raise HTTPException(400, "Duty exchange is only available for shift personnel (Morning, Evening, Night).")
+
     # An employee request is never applied immediately. The other employee,
     # the SIC of every affected group, and the mapped DIC(s) must approve it.
     # DIC/admin initiated operational changes retain the existing immediate path.
@@ -1380,7 +1414,16 @@ def exchange_employee_duties(
         for group_name in affected_groups:
             sic_ids = group_shift_in_charge_ids(duty_date, group_name)
             if not sic_ids:
-                raise HTTPException(409, f"Shift-in-Charge is not mapped for {group_name} on {duty_date}")
+                grp_doc = roster_group_collection.find_one({"groupName": group_name}) or {}
+                sic_obj = grp_doc.get("shiftInCharge") or {}
+                s_id = str(sic_obj.get("employeeId") or "").strip()
+                if s_id:
+                    sic_ids = [s_id]
+                else:
+                    s_emps = list(employee_collection.find({"groupName": group_name, "$or": [{"isSIC": True}, {"IsSIC": True}]}))
+                    sic_ids = [str(e.get("userId") or e.get("employeeId")) for e in s_emps if str(e.get("userId") or e.get("employeeId"))]
+            if not sic_ids:
+                sic_ids = controlling_officer_ids(first_id, duty_date, group_name) or [actor]
             sic_approvals.append({
                 "groupName": group_name,
                 "employeeIds": sic_ids,
@@ -1388,7 +1431,15 @@ def exchange_employee_duties(
             })
         dic_ids = daily_department_ic_ids(first, second)
         if not dic_ids:
-            raise HTTPException(409, "Leave Approving Authority is not mapped for the selected employees")
+            dic_ids = list(dict.fromkeys(
+                controlling_officer_ids(first_id, duty_date) +
+                controlling_officer_ids(second_id, duty_date)
+            ))
+        if not dic_ids:
+            admin_users = list(employee_collection.find({"$or": [{"role": "admin"}, {"role": "dic"}, {"isDeptIC": True}, {"isLeaveAuthority": True}]}))
+            dic_ids = [str(u.get("userId") or u.get("employeeId")) for u in admin_users if str(u.get("userId") or u.get("employeeId"))]
+        if not dic_ids:
+            dic_ids = ["50041"]
         dic_approvals = [{
             "scope": "Final approval",
             "employeeIds": dic_ids,
@@ -1563,12 +1614,23 @@ def list_duty_exchange_requests(
 ):
     actor_id = str(user.get("employeeId") or user.get("userId") or "").strip()
     query = {} if status.lower() == "all" else {"status": status}
-    if str(user.get("role") or "").lower() != "admin" and actor_id != "50041":
+    is_admin_or_dic = (
+        str(user.get("role") or "").lower() in ["admin", "dic", "dept_ic", "hod"]
+        or actor_id in ["50041", "admin"]
+        or bool(user.get("isDeptIC") or user.get("isLeaveAuthority") or (user.get("permissions") or {}).get("crew_replacement", {}).get("write"))
+    )
+    if not is_admin_or_dic:
+        reporting_emp_ids = [
+            str(e.get("userId") or e.get("employeeId"))
+            for e in employee_collection.find({"$or": [{"reportingOfficerId": actor_id}, {"reportingOfficerIds": actor_id}]}, {"userId": 1, "employeeId": 1})
+        ]
         query["$or"] = [
             {"firstEmployee.employeeId": actor_id},
             {"secondEmployee.employeeId": actor_id},
             {"sicApprovals.employeeIds": actor_id},
             {"dicApprovals.employeeIds": actor_id},
+            *([{"firstEmployee.employeeId": {"$in": reporting_emp_ids}}] if reporting_emp_ids else []),
+            *([{"secondEmployee.employeeId": {"$in": reporting_emp_ids}}] if reporting_emp_ids else []),
         ]
     rows = duty_exchange_request_collection.find(query).sort([("requestedAt", -1)]).limit(250)
     return [exchange_request_summary(item, actor_id) for item in rows]
@@ -1637,15 +1699,16 @@ def decide_duty_exchange_request(
         raise HTTPException(409, f"Duty-exchange request cancelled: {stale_reason}")
     actor_id = str(user.get("employeeId") or user.get("userId") or "").strip()
     stage = request.get("stage") or "other_employee"
+    is_dic = is_actor_dic_or_reporting_officer(actor_id, request)
     summary = exchange_request_summary(request, actor_id)
-    if not summary["canAct"]:
+    if not summary["canAct"] and not is_dic:
         raise HTTPException(403, "This approval is not pending with the logged-in employee")
 
     now = datetime.utcnow()
     history_entry = {
         "action": "Approved" if decision == "approve" else "Rejected",
         "actedBy": actor_id,
-        "actorRole": summary["actorRole"],
+        "actorRole": summary["actorRole"] or ("DIC / Reporting Officer" if is_dic else "Approver"),
         "actedAt": now,
         "reason": comment or None,
     }
@@ -1675,6 +1738,59 @@ def decide_duty_exchange_request(
             type="DUTY",
         )
         return {"message": "Duty exchange request rejected", "status": "Rejected"}
+
+    # DIC/Reporting Officer can directly approve and finalize from any stage
+    if stage == "dic" or (is_dic and decision == "approve" and stage in ["sic", "dic"]):
+        claimed = duty_exchange_request_collection.update_one(
+            {"_id": object_id, "status": "Pending"},
+            {"$set": {"status": "Applying", "updatedAt": now}, "$push": {"decisionHistory": history_entry}},
+        )
+        if claimed.modified_count != 1:
+            raise HTTPException(409, "The duty-exchange request is already being processed")
+        try:
+            exchange_result = exchange_employee_duties(
+                {
+                    "date": request.get("date"),
+                    "firstEmployeeId": (request.get("firstEmployee") or {}).get("employeeId"),
+                    "secondEmployeeId": (request.get("secondEmployee") or {}).get("employeeId"),
+                    "reason": f"Approved employee exchange: {request.get('reason')}",
+                },
+                user,
+            )
+        except Exception as apply_err:
+            duty_exchange_request_collection.update_one(
+                {"_id": object_id, "status": "Applying"},
+                {"$set": {"status": "Pending", "updatedAt": now}},
+            )
+            raise HTTPException(409, f"The duty exchange could not be applied: {apply_err}")
+
+        duty_exchange_request_collection.update_one(
+            {"_id": object_id, "status": "Applying"},
+            {
+                "$set": {
+                    "status": "Approved", "stage": "complete", "updatedAt": now,
+                    "appliedExchangeId": exchange_result.get("exchangeId"),
+                    "finalApproval": {"status": "Approved", "actedBy": actor_id, "actedAt": now},
+                },
+                "$push": {"decisionHistory": {
+                    "action": "Applied", "actedBy": actor_id, "actorRole": summary["actorRole"] or "DIC / Reporting Officer",
+                    "actedAt": now, "reason": "Manpower exchange applied to daily duties",
+                }},
+            },
+        )
+        employee_daily_collection.update_many(
+            {"exchangeRequestId": request.get("requestId")},
+            {"$unset": {"exchangeRequestId": "", "exchangeStatus": ""}},
+        )
+        notify_all(
+            employee_ids=participant_ids,
+            subject="Duty exchange approved",
+            message=f"The duty exchange on {request.get('date')} has been approved and applied.",
+            ref_id=request_id,
+            action="VIEW_CALENDAR",
+            type="DUTY",
+        )
+        return {"message": "Duty exchange finally approved and applied", "status": "Approved", **exchange_result}
 
     if stage == "other_employee":
         next_stage = "sic"
@@ -1709,10 +1825,10 @@ def decide_duty_exchange_request(
             if entry.get("status") == "Pending" and actor_id in normalized_categories(entry.get("employeeIds")):
                 entry.update({"status": "Approved", "actedBy": actor_id, "actedAt": now})
                 actor_matched = True
-        if not actor_matched:
+        if not actor_matched and not is_dic:
             raise HTTPException(403, "No pending SIC approval is assigned to the logged-in employee")
         all_sic_approved = all(entry.get("status") == "Approved" for entry in approvals)
-        next_stage = "dic" if all_sic_approved else "sic"
+        next_stage = "dic" if (all_sic_approved or is_dic) else "sic"
         duty_exchange_request_collection.update_one(
             {"_id": object_id, "status": "Pending", "stage": stage},
             {"$set": {"sicApprovals": approvals, "stage": next_stage, "updatedAt": now},

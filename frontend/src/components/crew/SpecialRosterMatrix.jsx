@@ -1110,10 +1110,8 @@ export default function SpecialRosterMatrix({
   const renderUnifiedLeaveCard = (l, dateStr, shiftKey) => {
     const isCovered = Boolean(l.replacementAssigned || l.replacement?.name);
     const isMandatory = Boolean(
-      l.isSIC ||
-      l.replacementRequired ||
-      l.sicReplacementRequired ||
-      l.dicReplacementRequired
+      (l.isSIC || (l.replacementRequired && l.replacementMarked !== false)) &&
+      (l.replacementRequired || l.isSIC)
     );
     const repGroup = (l.replacement?.groupName && String(l.replacement.groupName).trim()) || "General";
     const repGroupStyle = getGroupStyle(repGroup);
@@ -1163,12 +1161,12 @@ export default function SpecialRosterMatrix({
               ? "4px solid #16A34A"
               : isMandatory
               ? "4px solid #DC2626"
-              : "4px solid #F59E0B",
+              : "4px solid #94A3B8",
             bgcolor: isCovered
               ? "#F0FDF4"
               : isMandatory
               ? "#FFF5F5"
-              : "#FFFBEB",
+              : "#F8FAFC",
             cursor: isCovered ? "default" : "pointer",
             transition: "all 0.15s ease",
             "&:hover": isCovered
@@ -1266,7 +1264,7 @@ export default function SpecialRosterMatrix({
                 />
               )}
 
-              {!isCovered && !isMandatory && l.replacementRequired !== false && (
+              {!isCovered && !isMandatory && (
                 <Chip
                   size="small"
                   label="+R"
@@ -1275,9 +1273,9 @@ export default function SpecialRosterMatrix({
                     minWidth: 18,
                     fontSize: "0.58rem",
                     fontWeight: 850,
-                    bgcolor: "#FEF3C7",
-                    color: "#92400E",
-                    border: "1px solid #FDE68A",
+                    bgcolor: "#F1F5F9",
+                    color: "#475569",
+                    border: "1px solid #CBD5E1",
                     borderRadius: "3px",
                     "& .MuiChip-label": { px: 0.3 },
                   }}
@@ -1623,10 +1621,10 @@ export default function SpecialRosterMatrix({
           boxShadow: "0 8px 30px rgba(15, 23, 42, 0.06)",
         }}
       >
-        <TableContainer sx={{ maxHeight: "calc(100vh - 270px)", overflowX: "auto" }}>
+        <TableContainer sx={{ maxHeight: "calc(100vh - 240px)", overflow: "auto" }}>
           <Table stickyHeader size="small" sx={{ minWidth: Math.max(900, (matrixData.dates || []).length * 190) }}>
-            <TableHead>
-              <TableRow>
+            <TableHead sx={{ position: "sticky", top: 0, zIndex: 12 }}>
+              <TableRow sx={{ position: "sticky", top: 0, zIndex: 12 }}>
                 {/* Fixed Y-Axis Header: Duty Type */}
                 <TableCell
                   sx={{
@@ -1636,9 +1634,11 @@ export default function SpecialRosterMatrix({
                     color: "#FFFFFF",
                     fontWeight: 900,
                     fontSize: 13,
-                    position: "sticky",
+                    position: "sticky !important",
                     left: 0,
-                    zIndex: 10,
+                    top: 0,
+                    zIndex: 25,
+                    borderBottom: "2px solid #334155",
                   }}
                 >
                   <Stack direction="row" alignItems="center" spacing={1}>
@@ -1647,7 +1647,7 @@ export default function SpecialRosterMatrix({
                   </Stack>
                 </TableCell>
 
-                {/* X-Axis Columns: Days */}
+                {/* X-Axis Columns: Days (Frozen as header) */}
                 {(matrixData.dates || []).map((dateStr) => {
                   const dayName = matrixData.dayNames?.[dateStr] || "";
                   const isWeekend = dayName === "Sun" || dayName === "Sat";
@@ -1660,9 +1660,14 @@ export default function SpecialRosterMatrix({
                       sx={{
                         width: 190,
                         minWidth: 190,
+                        position: "sticky !important",
+                        top: 0,
+                        zIndex: 15,
                         bgcolor: isToday ? "#EDE9FE" : isWeekend ? "#F8FAFC" : "#FFFFFF",
                         borderLeft: "1px solid #E2E8F0",
+                        borderBottom: "2px solid #CBD5E1",
                         py: 1,
+                        boxShadow: "0 2px 4px rgba(0,0,0,0.04)",
                       }}
                     >
                       <Stack spacing={0.3} alignItems="center">
@@ -1745,10 +1750,8 @@ export default function SpecialRosterMatrix({
 
                         const shiftLeaves = (shiftKey !== "Leave" && shiftKey !== "Off")
                           ? (matrixData.grid?.[dateStr]?.["Leave"] || []).filter((l) => {
-                              // USER REQUIREMENT: Only shift/Control Room person need replacement. Remove cover for general shift persons.
+                              // USER REQUIREMENT: Only shift/Control Room person. Remove cover for general shift persons.
                               if (l.isShiftPerson === false) return false;
-                              // USER REQUIREMENT: If no duty then no replacement required!
-                              if (l.replacementRequired === false) return false;
                               const grp = (l.groupName || "").toLowerCase();
                               if (grp === "general" || grp.startsWith("gen")) return false;
                               const d = (l.assignedDuty || "").toLowerCase();

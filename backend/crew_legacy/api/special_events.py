@@ -406,15 +406,24 @@ def get_special_roster_matrix(
                 "WEEKLY_OFF", "WEEKLY-OFF", "C-OFF", "COMP-OFF", "COMPENSATORY OFF", "NONE", ""
             }
 
+            is_leave_sic = bool(l.get("isSIC")) or (eid in sic_emp_ids) or bool(d_rec.get("isSIC"))
+            is_marked_for_rep = bool(
+                is_leave_sic
+                or l.get("replacementRequired")
+                or l.get("sicReplacementRequired")
+                or l.get("dicReplacementRequired")
+                or d_rec.get("replacementRequired")
+            )
+
             if norm_duty in ["MORNING", "M1", "M2"]:
                 shift_bucket = "Morning"
-                req_flag = is_shift_person
+                req_flag = is_shift_person and is_marked_for_rep
             elif norm_duty in ["EVENING", "E1", "E2"]:
                 shift_bucket = "Evening"
-                req_flag = is_shift_person
+                req_flag = is_shift_person and is_marked_for_rep
             elif norm_duty in ["NIGHT", "N1", "N2"]:
                 shift_bucket = "Night"
-                req_flag = is_shift_person
+                req_flag = is_shift_person and is_marked_for_rep
             elif norm_duty in OFF_DUTY_VALUES or norm_duty in OFF_DUTIES:
                 shift_bucket = "Off"
                 req_flag = False  # USER REQUIREMENT: If no duty then no replacement required!
@@ -423,7 +432,6 @@ def get_special_roster_matrix(
                 req_flag = False  # General shift persons do not require replacement
 
             is_covered = bool(l.get("replacementAssigned") or l.get("replacement"))
-            is_leave_sic = bool(l.get("isSIC")) or (eid in sic_emp_ids) or bool(d_rec.get("isSIC"))
 
             entry = {
                 "employeeId": eid,
@@ -439,6 +447,7 @@ def get_special_roster_matrix(
                 "actingSIC": l.get("actingSIC"),
                 "isShiftPerson": is_shift_person,
                 "replacementRequired": req_flag,
+                "replacementMarked": is_marked_for_rep,
                 "replacementAssigned": is_covered,
                 "replacement": l.get("replacement"),
             }

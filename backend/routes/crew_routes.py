@@ -503,6 +503,8 @@ def calendar_view(start_date: str = Query(...), end_date: str = Query(...)):
             "isActingSIC": 1,
             "actingSICFor": 1,
             "actingSICGroup": 1,
+            "exchangeRequestId": 1,
+            "exchangeStatus": 1,
         },
     ))
     # A replacement can be selected from employees who are not members of the
@@ -603,6 +605,8 @@ def calendar_view(start_date: str = Query(...), end_date: str = Query(...)):
                 "isActingSIC": bool(record.get("isActingSIC")),
                 "actingSICFor": record.get("actingSICFor"),
                 "actingSICGroup": record.get("actingSICGroup"),
+                "exchangeRequestId": record.get("exchangeRequestId"),
+                "exchangeStatus": record.get("exchangeStatus"),
             }
 
     # Leave requests are the workflow source of truth. Overlay them onto the
@@ -621,6 +625,7 @@ def calendar_view(start_date: str = Query(...), end_date: str = Query(...)):
             "finalStatus": 1,
             "replacementRequired": 1,
             "replacement": 1,
+            "actingSIC": 1,
         },
     )
     for leave in active_leave_requests:
@@ -633,12 +638,17 @@ def calendar_view(start_date: str = Query(...), end_date: str = Query(...)):
             "replacementFor": None,
         })
         replacement = leave.get("replacement") or replacement_map.get((emp_id, date))
+        if replacement and not replacement.get("isActingSIC"):
+            rep_mapped = replacement_map.get((emp_id, date))
+            if rep_mapped and rep_mapped.get("isActingSIC"):
+                replacement = {**replacement, "isActingSIC": True}
         duty.update({
             "leaveType": leave.get("leaveType"),
             "leaveStatus": leave.get("finalStatus") or "Applied",
             "leaveRequestId": str(leave["_id"]),
             "replacementRequired": bool(leave.get("replacementRequired")),
             "replacementEmployee": replacement,
+            "actingSIC": leave.get("actingSIC"),
         })
 
     # Pending nominations belong on their requested dates, without changing

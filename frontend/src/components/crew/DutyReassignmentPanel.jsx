@@ -5,8 +5,13 @@ import {
   Box,
   Button,
   Chip,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
   FormControl,
   Grid,
+  IconButton,
   MenuItem,
   Paper,
   Select,
@@ -19,7 +24,7 @@ import {
   TableRow,
   Typography,
 } from "@mui/material";
-import { ArrowLeftRight, CalendarRange, RefreshCw, Scale, UserCheck } from "lucide-react";
+import { ArrowLeftRight, CalendarRange, CheckCircle2, Clock, RefreshCw, Scale, UserCheck, X } from "lucide-react";
 import api from "../../crewLegacy/api";
 
 const Field = ({ label, children, helper }) => (
@@ -35,6 +40,15 @@ const employeeLabel = (item) => (
 );
 
 const SHIFT_OPTIONS = ["Morning", "Evening", "Night", "M1", "M2", "E1", "E2", "N1", "N2"];
+
+const isShiftPerson = (item) => {
+  if (!item) return false;
+  const grp = String(item.groupName || item.rosterGroup || "").toLowerCase();
+  const duty = String(item.assignedDuty || item.shift || "").toLowerCase();
+  if (/group[- ]?[1-4]/.test(grp)) return true;
+  if (["morning", "evening", "night", "m1", "m2", "e1", "e2", "n1", "n2", "off", "o1", "o2"].includes(duty)) return true;
+  return false;
+};
 
 export default function DutyReassignmentPanel({
   initialDate,
@@ -74,10 +88,14 @@ export default function DutyReassignmentPanel({
   const [notice, setNotice] = useState(null);
   const [loading, setLoading] = useState(false);
   const [requestsLoaded, setRequestsLoaded] = useState(false);
+  const [viewingExchange, setViewingExchange] = useState(null);
   const approvalsFocused = useRef(false);
   const focusApprovals = new URLSearchParams(window.location.search).get("focus") === "approvals";
 
-  const canManage = Boolean(role.isAdmin || role.isDeptIC || role.isLeaveAuthority);
+  const isDICOrReportingOfficer = Boolean(
+    role.isAdmin || role.isDeptIC || role.isLeaveAuthority || role.isReportingOfficer || role.isHOD
+  );
+  const canManage = Boolean(role.isAdmin || role.isDeptIC || role.isLeaveAuthority || role.isReportingOfficer || role.isHOD);
   const actorId = String(role.employeeId || "");
 
   const load = async () => {
@@ -85,7 +103,7 @@ export default function DutyReassignmentPanel({
     try {
       const roleResult = await api.get("/leave/my-role");
       const nextRole = roleResult.data || {};
-      const manager = Boolean(nextRole.isAdmin || nextRole.isDeptIC || nextRole.isLeaveAuthority);
+      const manager = Boolean(nextRole.isAdmin || nextRole.isDeptIC || nextRole.isLeaveAuthority || nextRole.isReportingOfficer || nextRole.isHOD);
       const requests = [
         api.get("/replacement/duty-switch/options", { params: { date } }),
         api.get("/replacement/duty-switch/exchange-requests", { params: { status: "Pending" } }),
@@ -186,7 +204,7 @@ export default function DutyReassignmentPanel({
     }
   }, [mode, leaveId, leaves, destinationDate]);
   const exchangeEmployees = useMemo(
-    () => employees.filter((item) => item.employeeId !== firstId && !item.onLeave),
+    () => employees.filter((item) => item.employeeId !== firstId && !item.onLeave && isShiftPerson(item)),
     [employees, firstId],
   );
   const vacancyEmployees = useMemo(
@@ -390,6 +408,11 @@ export default function DutyReassignmentPanel({
             Exchange manpower into <strong>{initialLeave.groupName}</strong>; acting-SIC selection will open after the exchange is saved.
           </Alert>
         )}
+        {!canManage && mode === "exchange" && first && !isShiftPerson(first) && (
+          <Alert severity="warning" sx={{ mb: 2 }}>
+            Duty exchange is available for Shift personnel only (Morning, Evening, Night duties / Shift Groups 1-4).
+          </Alert>
+        )}
 
         {canManage && <Box sx={{ mb: 2, p: 1.4, borderRadius: 2.2, border: "1px solid #D7E3F4", background: "#F8FBFF" }}>
           <Typography sx={{ mb: .7, color: "#334155", fontSize: 11, fontWeight: 950, letterSpacing: ".04em", textTransform: "uppercase" }}>What coverage action is required?</Typography>
@@ -427,9 +450,11 @@ export default function DutyReassignmentPanel({
                   <MenuItem value="" disabled>{mode === "additional" ? "Select additional manpower" : "Select employee"}</MenuItem>
                   {(mode === "vacancy"
                     ? vacantDuties
-                    : ["additional", "single"].includes(mode)
-                      ? allAvailableEmployees.filter((item) => !item.onLeave)
-                      : employees.filter((item) => !item.onLeave)
+                    : mode === "exchange"
+                      ? employees.filter((item) => !item.onLeave && isShiftPerson(item))
+                      : ["additional", "single"].includes(mode)
+                        ? allAvailableEmployees.filter((item) => !item.onLeave)
+                        : employees.filter((item) => !item.onLeave)
                   ).map((item) => (
                     <MenuItem key={item.employeeId} value={item.employeeId}>
                       {mode === "vacancy"
@@ -645,7 +670,9 @@ export default function DutyReassignmentPanel({
                   ? !leaveId
                   : mode === "additional"
                   ? !destinationDuty
-                  : mode === "exchange" || mode === "vacancy"
+                  : mode === "exchange"
+                  ? (!secondId || !isShiftPerson(first) || !isShiftPerson(second))
+                  : mode === "vacancy"
                   ? !secondId
                   : mode === "balance"
                   ? (balanceAction === "settle" && (!debitId || !destinationDuty))
@@ -757,19 +784,53 @@ export default function DutyReassignmentPanel({
                           <br /><Typography variant="caption">with {secondPerson.name || secondPerson.employeeId} ({secondPerson.assignedDuty || "-"}, {secondPerson.groupName || "-"})</Typography>
                           <br /><Typography variant="caption" color="text.secondary">{request.reason}</Typography>
                         </TableCell>
-                        <TableCell><Chip size="small" color={request.stage === "dic" ? "warning" : "info"} label={request.stage === "other_employee" ? "Other employee" : request.stage === "sic" ? "SIC approval" : "Final DIC"} /></TableCell>
+                        <TableCell><Chip size="small" color={request.stage === "dic" ? "warning" : "info"} label={request.stage === "other_employee" ? "Other employee" : request.stage === "sic" ? "SIC approval" : "Final DIC / RO"} /></TableCell>
                         <TableCell>
-                          <Typography variant="caption" display="block">Other employee: {request.stage === "other_employee" ? "Pending" : "Approved"}</Typography>
-                          <Typography variant="caption" display="block">SIC: {sicDone}/{sicTotal}</Typography>
-                          <Typography variant="caption" display="block">DIC: {request.stage === "dic" ? "Pending" : "Not reached"}</Typography>
+                          <Typography variant="caption" display="block" sx={{ fontWeight: 800 }}>
+                            1. Colleague: <span style={{ color: request.stage === "other_employee" ? "#D97706" : "#16A34A" }}>{request.stage === "other_employee" ? "Pending" : "Approved"}</span>
+                          </Typography>
+                          <Typography variant="caption" display="block" sx={{ fontWeight: 800 }}>
+                            2. SIC: <span style={{ color: request.stage === "sic" ? "#D97706" : (request.stage === "dic" || request.stage === "complete") ? "#16A34A" : "#64748B" }}>{request.stage === "sic" ? `Pending (${sicDone}/${sicTotal})` : (request.stage === "dic" || request.stage === "complete") ? `Approved (${sicDone}/${sicTotal})` : "Awaiting Colleague"}</span>
+                          </Typography>
+                          <Typography variant="caption" display="block" sx={{ fontWeight: 800 }}>
+                            3. DIC / RO: <span style={{ color: request.stage === "dic" ? "#D97706" : request.stage === "complete" ? "#16A34A" : "#64748B" }}>{request.stage === "dic" ? "Pending Approval" : request.stage === "complete" ? "Approved" : "Awaiting Stages"}</span>
+                          </Typography>
+                          <Button size="small" variant="text" onClick={() => setViewingExchange(request)} sx={{ textTransform: "none", fontSize: 10.5, fontWeight: 900, p: 0, mt: 0.3 }}>
+                            View Sections & Status →
+                          </Button>
                         </TableCell>
                         <TableCell align="right">
-                          {request.canAct ? (
+                          {(request.canAct || isDICOrReportingOfficer) ? (
                             <Box sx={{ display: "flex", justifyContent: "flex-end", gap: .75 }}>
-                              <Button size="small" color="success" variant="contained" onClick={() => decideExchange(request, "approve")}>Approve</Button>
-                              <Button size="small" color="error" variant="outlined" onClick={() => decideExchange(request, "reject")}>Reject</Button>
+                              <Button
+                                size="small"
+                                color="success"
+                                variant="contained"
+                                onClick={() => decideExchange(request, "approve")}
+                                sx={{ textTransform: "none", fontWeight: 900, whiteSpace: "nowrap" }}
+                              >
+                                {isDICOrReportingOfficer ? "Approve (as DIC / RO)" : "Approve"}
+                              </Button>
+                              <Button
+                                size="small"
+                                color="error"
+                                variant="outlined"
+                                onClick={() => decideExchange(request, "reject")}
+                                sx={{ textTransform: "none", fontWeight: 900 }}
+                              >
+                                Reject
+                              </Button>
                             </Box>
-                          ) : <Typography variant="caption" color="text.secondary">Awaiting concerned approver</Typography>}
+                          ) : (
+                            <Box sx={{ display: "flex", flexDirection: "column", alignItems: "flex-end" }}>
+                              <Typography variant="caption" color="text.secondary">
+                                Awaiting {request.stage === "other_employee" ? "colleague acceptance" : request.stage === "sic" ? "Shift In-Charge" : "DIC / RO approval"}
+                              </Typography>
+                              <Button size="small" variant="text" onClick={() => setViewingExchange(request)} sx={{ textTransform: "none", fontSize: 10.5, fontWeight: 900, p: 0 }}>
+                                View Details
+                              </Button>
+                            </Box>
+                          )}
                         </TableCell>
                       </TableRow>
                     );
@@ -812,6 +873,167 @@ export default function DutyReassignmentPanel({
           </>
         )}
       </Box>
+
+      {/* Duty Exchange Request Stage Breakdown Popup */}
+      <Dialog
+        open={Boolean(viewingExchange)}
+        onClose={() => setViewingExchange(null)}
+        fullWidth
+        maxWidth="sm"
+      >
+        <DialogTitle sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", color: "#0F172A", fontWeight: 900 }}>
+          Duty Exchange Approval Sections
+          <IconButton onClick={() => setViewingExchange(null)} size="small"><X size={18} /></IconButton>
+        </DialogTitle>
+        <DialogContent dividers sx={{ p: 2.5 }}>
+          {viewingExchange && (
+            <Stack spacing={2}>
+              <Box sx={{ p: 1.5, borderRadius: 2, background: "#F8FAFC", border: "1px solid #E2E8F0" }}>
+                <Typography sx={{ fontSize: 12, fontWeight: 900, color: "#64748B", textTransform: "uppercase" }}>
+                  Exchange Details · {dayjs(viewingExchange.date).format("DD MMM YYYY")}
+                </Typography>
+                <Typography sx={{ mt: 0.5, fontSize: 14, fontWeight: 900, color: "#0F172A" }}>
+                  {viewingExchange.firstEmployee?.name || viewingExchange.firstEmployee?.employeeId} ({viewingExchange.firstEmployee?.assignedDuty || "-"}, {viewingExchange.firstEmployee?.groupName || "-"})
+                  <br />
+                  <span style={{ color: "#0057B7" }}>⇄ Swapping with: </span>
+                  {viewingExchange.secondEmployee?.name || viewingExchange.secondEmployee?.employeeId} ({viewingExchange.secondEmployee?.assignedDuty || "-"}, {viewingExchange.secondEmployee?.groupName || "-"})
+                </Typography>
+                <Typography sx={{ mt: 0.5, fontSize: 12, color: "#475569" }}>
+                  <strong>Operational Reason:</strong> {viewingExchange.reason || "Mutual shift exchange"}
+                </Typography>
+              </Box>
+
+              <Typography sx={{ fontSize: 13, fontWeight: 950, color: "#0F172A", textTransform: "uppercase" }}>
+                Section-wise Approval Status
+              </Typography>
+
+              {/* Section 1: Colleague Acceptance */}
+              <Paper variant="outlined" sx={{ p: 1.5, borderRadius: 2, borderColor: viewingExchange.stage === "other_employee" ? "#FCD34D" : "#86EFAC", background: viewingExchange.stage === "other_employee" ? "#FFFBEB" : "#F0FDF4" }}>
+                <Stack direction="row" justifyContent="space-between" alignItems="center">
+                  <Box>
+                    <Typography sx={{ fontSize: 12, fontWeight: 900, color: "#0F172A" }}>
+                      Section 1: Colleague Acceptance
+                    </Typography>
+                    <Typography sx={{ fontSize: 11, color: "#64748B" }}>
+                      Colleague: {viewingExchange.secondEmployee?.name || viewingExchange.secondEmployee?.employeeId}
+                    </Typography>
+                  </Box>
+                  <Chip
+                    size="small"
+                    label={viewingExchange.stage === "other_employee" ? "Pending Acceptance" : "Approved"}
+                    color={viewingExchange.stage === "other_employee" ? "warning" : "success"}
+                    sx={{ fontWeight: 900 }}
+                  />
+                </Stack>
+                <Typography sx={{ mt: 0.5, fontSize: 11, color: viewingExchange.stage === "other_employee" ? "#B45309" : "#15803D" }}>
+                  {viewingExchange.stage === "other_employee"
+                    ? "⏳ Pending mutual confirmation from the exchange colleague."
+                    : "✓ Colleague has accepted the exchange request."}
+                </Typography>
+              </Paper>
+
+              {/* Section 2: Shift In-Charge (SIC) Approval */}
+              <Paper variant="outlined" sx={{ p: 1.5, borderRadius: 2, borderColor: viewingExchange.stage === "sic" ? "#FCD34D" : ["dic", "complete"].includes(viewingExchange.stage) ? "#86EFAC" : "#E2E8F0", background: viewingExchange.stage === "sic" ? "#FFFBEB" : ["dic", "complete"].includes(viewingExchange.stage) ? "#F0FDF4" : "#F8FAFC" }}>
+                <Stack direction="row" justifyContent="space-between" alignItems="center">
+                  <Box>
+                    <Typography sx={{ fontSize: 12, fontWeight: 900, color: "#0F172A" }}>
+                      Section 2: Shift In-Charge (SIC) Approval
+                    </Typography>
+                    <Typography sx={{ fontSize: 11, color: "#64748B" }}>
+                      Affected groups: {Array.from(new Set([viewingExchange.firstEmployee?.groupName, viewingExchange.secondEmployee?.groupName].filter(Boolean))).join(", ") || "Concerned Groups"}
+                    </Typography>
+                  </Box>
+                  <Chip
+                    size="small"
+                    label={viewingExchange.stage === "sic" ? "Pending SIC" : ["dic", "complete"].includes(viewingExchange.stage) ? "SIC Approved" : "Awaiting Colleague"}
+                    color={viewingExchange.stage === "sic" ? "warning" : ["dic", "complete"].includes(viewingExchange.stage) ? "success" : "default"}
+                    sx={{ fontWeight: 900 }}
+                  />
+                </Stack>
+                {(viewingExchange.sicApprovals || []).length > 0 && (
+                  <Stack spacing={0.5} sx={{ mt: 1 }}>
+                    {viewingExchange.sicApprovals.map((entry, idx) => (
+                      <Box key={idx} sx={{ p: 0.8, borderRadius: 1, bgcolor: "#FFFFFF", border: "1px solid #E2E8F0", display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 11 }}>
+                        <span>{entry.groupName || `Group ${idx + 1}`} SIC:</span>
+                        <Chip size="small" label={entry.status || "Pending"} color={entry.status === "Approved" ? "success" : "warning"} sx={{ height: 20, fontSize: 10, fontWeight: 800 }} />
+                      </Box>
+                    ))}
+                  </Stack>
+                )}
+                <Typography sx={{ mt: 0.5, fontSize: 11, color: viewingExchange.stage === "sic" ? "#B45309" : ["dic", "complete"].includes(viewingExchange.stage) ? "#15803D" : "#64748B" }}>
+                  {viewingExchange.stage === "sic"
+                    ? "⏳ Awaiting Shift In-Charge recommendation for shift staffing."
+                    : ["dic", "complete"].includes(viewingExchange.stage)
+                    ? "✓ Both Shift In-Charges have approved this exchange."
+                    : "Awaiting colleague acceptance prior to SIC review."}
+                </Typography>
+              </Paper>
+
+              {/* Section 3: DIC / Reporting Officer Approval */}
+              <Paper variant="outlined" sx={{ p: 1.5, borderRadius: 2, borderColor: viewingExchange.stage === "dic" ? "#FCD34D" : viewingExchange.stage === "complete" ? "#86EFAC" : "#E2E8F0", background: viewingExchange.stage === "dic" ? "#FFFBEB" : viewingExchange.stage === "complete" ? "#F0FDF4" : "#F8FAFC" }}>
+                <Stack direction="row" justifyContent="space-between" alignItems="center">
+                  <Box>
+                    <Typography sx={{ fontSize: 12, fontWeight: 900, color: "#0F172A" }}>
+                      Section 3: Department In-Charge (DIC) / Reporting Officer
+                    </Typography>
+                    <Typography sx={{ fontSize: 11, color: "#64748B" }}>
+                      Final approving authority & roster application
+                    </Typography>
+                  </Box>
+                  <Chip
+                    size="small"
+                    label={viewingExchange.stage === "dic" ? "Pending DIC / RO" : viewingExchange.stage === "complete" ? "Finally Approved" : "Awaiting Stages"}
+                    color={viewingExchange.stage === "dic" ? "warning" : viewingExchange.stage === "complete" ? "success" : "default"}
+                    sx={{ fontWeight: 900 }}
+                  />
+                </Stack>
+                <Typography sx={{ mt: 0.5, fontSize: 11, color: viewingExchange.stage === "dic" ? "#B45309" : viewingExchange.stage === "complete" ? "#15803D" : "#64748B" }}>
+                  {viewingExchange.stage === "dic"
+                    ? "⏳ Ready for DIC / Reporting Officer final approval and roster exchange."
+                    : viewingExchange.stage === "complete"
+                    ? "✓ Final approval granted by DIC / Reporting Officer."
+                    : "Will unlock once colleague and SIC approvals are recorded."}
+                </Typography>
+              </Paper>
+
+              {/* Action Buttons inside Popup */}
+              {(viewingExchange.canAct || isDICOrReportingOfficer) && (
+                <Stack direction="row" spacing={1} justifyContent="flex-end" sx={{ pt: 1 }}>
+                  <Button
+                    variant="contained"
+                    color="success"
+                    disabled={loading}
+                    onClick={async () => {
+                      const req = viewingExchange;
+                      setViewingExchange(null);
+                      await decideExchange(req, "approve");
+                    }}
+                    sx={{ textTransform: "none", fontWeight: 900 }}
+                  >
+                    {isDICOrReportingOfficer ? "Approve (as DIC / RO)" : "Approve Exchange"}
+                  </Button>
+                  <Button
+                    variant="outlined"
+                    color="error"
+                    disabled={loading}
+                    onClick={async () => {
+                      const req = viewingExchange;
+                      setViewingExchange(null);
+                      await decideExchange(req, "reject");
+                    }}
+                    sx={{ textTransform: "none", fontWeight: 900 }}
+                  >
+                    Reject
+                  </Button>
+                </Stack>
+              )}
+            </Stack>
+          )}
+        </DialogContent>
+        <DialogActions sx={{ px: 2.5, py: 1.5 }}>
+          <Button onClick={() => setViewingExchange(null)} sx={{ textTransform: "none", fontWeight: 800 }}>Close</Button>
+        </DialogActions>
+      </Dialog>
     </Paper>
   );
 }

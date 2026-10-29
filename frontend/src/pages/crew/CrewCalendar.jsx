@@ -252,9 +252,32 @@ const EmployeeRow = memo(({ person, groupName, active, dates, selectedColumn, on
             {duty.trainingAdjacentOffStatus && <Tooltip title={`${duty.trainingAdjacentOffPosition || "Training adjacent OFF"} · ${duty.trainingAdjacentOffStatus}${duty.trainingAdjacentOffCurrentApproverName ? ` · awaiting ${duty.trainingAdjacentOffCurrentApproverName}` : ""}`} arrow><Typography component="span" sx={{ width: "100%", fontSize: 9, fontWeight: 950, textAlign: "center", color: duty.trainingAdjacentOffStatus === "Approved" ? "#15803D" : "#C2410C" }}>{`OFF request · ${duty.trainingAdjacentOffStatus}`}</Typography></Tooltip>}
             {duty.sportsName && <Tooltip title={`Sports: ${duty.sportsName}`} arrow><Typography component="span" sx={{ width: "100%", fontSize: 9, fontWeight: 800, textAlign: "center" }}>{duty.sportsName}</Typography></Tooltip>}
             {replacementPending && <Tooltip title="Replacement required; assignment pending" arrow><Box sx={{ mt: .15, width: 17, height: 17, borderRadius: .7, display: "grid", placeItems: "center", alignSelf: "center", background: "#F59E0B", color: "#FFFFFF", fontSize: 9, fontWeight: 950, animation: "calendarReplacementPulse .9s ease-in-out infinite", "@keyframes calendarReplacementPulse": { "50%": { opacity: .3, transform: "scale(.84)" } } }}>R</Box></Tooltip>}
-            {duty.replacementEmployee?.name && <Tooltip title={`Replacement assigned: ${duty.replacementEmployee.name}${duty.replacementEmployee.employeeId ? ` (${duty.replacementEmployee.employeeId})` : ""}`} arrow><Box sx={replacementLabelSx}><Box sx={{ width: 15, height: 15, borderRadius: .6, display: "grid", placeItems: "center", background: "#2563EB", color: "#FFF", fontSize: 8.5, flex: "0 0 auto" }}>R</Box><Box>{duty.replacementEmployee.name}</Box></Box></Tooltip>}
-            {duty.replacementFor?.name && <Tooltip title={`Replacement duty for ${duty.replacementFor.name}${duty.replacementFor.employeeId ? ` (${duty.replacementFor.employeeId})` : ""}`} arrow><Box sx={replacementLabelSx}><Box sx={{ width: 15, height: 15, borderRadius: .6, display: "grid", placeItems: "center", background: "#2563EB", color: "#FFF", fontSize: 8.5, flex: "0 0 auto" }}>R</Box><Box>{duty.replacementFor.name}</Box></Box></Tooltip>}
-            {duty.isActingSIC && <Typography sx={{ fontSize: 9.5, fontWeight: 900, color: "#6A1B9A" }}>Acting SIC · {duty.actingSICGroup || groupName}</Typography>}
+            {duty.replacementEmployee?.name && (
+              <Tooltip title={`Replacement assigned: ${duty.replacementEmployee.name}${duty.replacementEmployee.employeeId ? ` (${duty.replacementEmployee.employeeId})` : ""}`} arrow>
+                <Stack spacing={0.2} sx={{ width: "100%", alignItems: "center" }}>
+                  <Box sx={replacementLabelSx}>
+                    <Box sx={{ width: 15, height: 15, borderRadius: .6, display: "grid", placeItems: "center", background: "#2563EB", color: "#FFF", fontSize: 8.5, flex: "0 0 auto" }}>R</Box>
+                    <Box>{duty.replacementEmployee.name}</Box>
+                  </Box>
+                  {(duty.replacementEmployee.isActingSIC || duty.actingSIC?.name || person.IsSIC) && (
+                    <Box sx={{ px: 0.5, py: 0.15, borderRadius: 0.8, bgcolor: "#FEF3C7", border: "1px solid #FCD34D", color: "#92400E", fontSize: 8.5, fontWeight: 900, lineHeight: 1.1, textAlign: "center" }}>
+                      Acting SIC: {duty.actingSIC?.name || duty.replacementEmployee.name}
+                    </Box>
+                  )}
+                </Stack>
+              </Tooltip>
+            )}
+            {/* If someone shifted to another group for a day, show ONLY duty on their row, not whom they replace or Acting SIC */}
+            {!duty.replacementFor && duty.isActingSIC && (
+              <Typography sx={{ fontSize: 9.5, fontWeight: 900, color: "#6A1B9A" }}>Acting SIC · {duty.actingSICGroup || groupName}</Typography>
+            )}
+            {(duty.exchangeRequestId || duty.exchangeStatus === "Pending") && (
+              <Tooltip title="Duty Exchange pending approval" arrow>
+                <Box sx={{ mt: .2, px: .5, py: .1, borderRadius: .6, display: "inline-flex", alignItems: "center", gap: .3, background: "#FEF3C7", border: "1px solid #F59E0B", color: "#B45309", fontSize: 8, fontWeight: 950 }}>
+                  ⇄ Exchange Pending
+                </Box>
+              </Tooltip>
+            )}
           </Box>
         </TableCell>;
       })}
@@ -319,6 +342,8 @@ export default function CrewCalendar({ publicView = false, applicationOnly = fal
   const [candidateSearch, setCandidateSearch] = useState("");
   const [calendarNotice, setCalendarNotice] = useState("");
   const [crewRole, setCrewRole] = useState({});
+  const [calendarExchangeRequest, setCalendarExchangeRequest] = useState(null);
+  const [exchangeActionLoading, setExchangeActionLoading] = useState(false);
   const loadIdRef = useRef(0);
 
   const dates = useMemo(() => {
@@ -433,6 +458,34 @@ export default function CrewCalendar({ publicView = false, applicationOnly = fal
     return result;
   }, [data]);
   const canManageReplacement = !publicView && Boolean(crewRole.isAdmin || crewRole.isSIC || crewRole.isDeptIC || crewRole.isLeaveAuthority || user?.role === "admin" || user?.permissions?.crew_replacement?.write || user?.permissions?.crew_leave?.write || user?.permissions?.crew_training?.write || user?.permissions?.crew_training?.approve);
+  const canApproveExchangeAsDIC = !publicView && Boolean(crewRole.isAdmin || crewRole.isDeptIC || crewRole.isLeaveAuthority || crewRole.isReportingOfficer || crewRole.isHOD || user?.role === "admin" || user?.role === "hod" || user?.role === "reporting_officer" || user?.permissions?.crew_replacement?.write);
+
+  useEffect(() => {
+    if (!selectedDuty?.duty) {
+      setCalendarExchangeRequest(null);
+      return;
+    }
+    const hasExchange = selectedDuty.duty.exchangeRequestId || selectedDuty.duty.exchangeStatus === "Pending";
+    if (!hasExchange) {
+      setCalendarExchangeRequest(null);
+      return;
+    }
+    api.get("/replacement/duty-switch/exchange-requests", { params: { status: "Pending" } })
+      .then((res) => {
+        const list = res.data || [];
+        const reqId = selectedDuty.duty.exchangeRequestId;
+        const matched = list.find((item) => (
+          (reqId && (String(item.id) === String(reqId) || String(item.requestId) === String(reqId)))
+          || (item.date === selectedDuty.date && (
+            item.firstEmployee?.employeeId === selectedDuty.person.employeeId ||
+            item.secondEmployee?.employeeId === selectedDuty.person.employeeId
+          ))
+        ));
+        setCalendarExchangeRequest(matched || null);
+      })
+      .catch(() => setCalendarExchangeRequest(null));
+  }, [selectedDuty]);
+
   const openLeaveWorkflow = () => {
     if (!selectedDuty) return;
     setLeaveApprovalPopup(selectedDuty);
@@ -812,7 +865,7 @@ export default function CrewCalendar({ publicView = false, applicationOnly = fal
         onOpenTraining={() => navigate("/crew/training?section=training")}
         onOpenSports={() => navigate("/crew/sports?section=events")}
       /> : calendarView === "matrix_alternate" ? (
-        <Box sx={{ flex: 1, minHeight: 0, overflow: "auto", display: "flex", flexDirection: "column" }}>
+        <Box sx={{ flex: 1, minHeight: 0, overflow: "hidden", display: "flex", flexDirection: "column" }}>
           <SpecialRosterMatrix
             key={`matrix-${startDate}-${endDate}`}
             initialStartDate={startDate}
@@ -982,6 +1035,133 @@ export default function CrewCalendar({ publicView = false, applicationOnly = fal
                 <Alert severity="warning" action={canManageReplacement && !selectedDuty.duty.replacementEmployee?.name ? <Button color="warning" size="small" onClick={() => { setReassignmentContext({ mode: "vacancy", date: selectedDuty.date, employeeId: selectedDuty.person.employeeId }); setSelectedDuty(null); setExchangeOpen(true); }} sx={{ fontWeight: 900, whiteSpace: "nowrap" }}>Fill vacancy</Button> : undefined}>
                   Vacant {selectedDuty.duty.vacatedDuty} duty{selectedDuty.duty.vacancyReason ? ` · ${selectedDuty.duty.vacancyReason}` : ""}
                 </Alert>
+              )}
+              {(calendarExchangeRequest || selectedDuty.duty.exchangeRequestId || selectedDuty.duty.exchangeStatus === "Pending") && (
+                <Paper variant="outlined" sx={{ p: 1.5, borderColor: "#FCD34D", background: "#FFFBEB", borderRadius: 2 }}>
+                  <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1 }}>
+                    <Typography sx={{ fontSize: 12, fontWeight: 950, color: "#92400E", textTransform: "uppercase" }}>
+                      ⇄ Duty Exchange Pending
+                    </Typography>
+                    {calendarExchangeRequest?.stage && (
+                      <Chip
+                        size="small"
+                        color={calendarExchangeRequest.stage === "dic" ? "warning" : "info"}
+                        label={
+                          calendarExchangeRequest.stage === "other_employee"
+                            ? "Colleague Approval"
+                            : calendarExchangeRequest.stage === "sic"
+                            ? "SIC Approval"
+                            : "Final DIC / RO Approval"
+                        }
+                        sx={{ height: 20, fontSize: 10, fontWeight: 900 }}
+                      />
+                    )}
+                  </Stack>
+                  {calendarExchangeRequest ? (
+                    <>
+                      <Typography sx={{ fontSize: 12, fontWeight: 800, color: "#1E293B", mb: 0.5 }}>
+                        Between <strong>{calendarExchangeRequest.firstEmployee?.name || calendarExchangeRequest.firstEmployee?.employeeId}</strong> ({calendarExchangeRequest.firstEmployee?.assignedDuty || "-"}) and <strong>{calendarExchangeRequest.secondEmployee?.name || calendarExchangeRequest.secondEmployee?.employeeId}</strong> ({calendarExchangeRequest.secondEmployee?.assignedDuty || "-"})
+                      </Typography>
+                      {calendarExchangeRequest.reason && (
+                        <Typography sx={{ fontSize: 11, color: "#64748B", mb: 1 }}>
+                          Reason: {calendarExchangeRequest.reason}
+                        </Typography>
+                      )}
+                      <Box sx={{ p: 1, borderRadius: 1.5, bgcolor: "#FFFFFF", border: "1px solid #E2E8F0", mb: 1 }}>
+                        <Typography sx={{ fontSize: 10.5, fontWeight: 900, color: "#475569", textTransform: "uppercase", mb: 0.6 }}>
+                          Approval Sections Breakdown
+                        </Typography>
+                        <Stack spacing={0.5}>
+                          <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 11 }}>
+                            <span>1. Colleague ({calendarExchangeRequest.secondEmployee?.name || "Other Employee"}):</span>
+                            <Chip size="small" label={calendarExchangeRequest.stage === "other_employee" ? "Pending" : "Approved"} color={calendarExchangeRequest.stage === "other_employee" ? "warning" : "success"} sx={{ height: 18, fontSize: 9.5, fontWeight: 800 }} />
+                          </Box>
+                          <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 11 }}>
+                            <span>2. Shift In-Charge (SIC):</span>
+                            <Chip size="small" label={calendarExchangeRequest.stage === "sic" ? "Pending" : (calendarExchangeRequest.stage === "dic" || calendarExchangeRequest.stage === "complete") ? "Approved" : "Awaiting Colleague"} color={calendarExchangeRequest.stage === "sic" ? "warning" : (calendarExchangeRequest.stage === "dic" || calendarExchangeRequest.stage === "complete") ? "success" : "default"} sx={{ height: 18, fontSize: 9.5, fontWeight: 800 }} />
+                          </Box>
+                          <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 11 }}>
+                            <span>3. DIC / Reporting Officer:</span>
+                            <Chip size="small" label={calendarExchangeRequest.stage === "dic" ? "Pending Approval" : (calendarExchangeRequest.stage === "complete") ? "Approved" : "Awaiting Stages"} color={calendarExchangeRequest.stage === "dic" ? "warning" : (calendarExchangeRequest.stage === "complete") ? "success" : "default"} sx={{ height: 18, fontSize: 9.5, fontWeight: 800 }} />
+                          </Box>
+                        </Stack>
+                      </Box>
+                      {(canApproveExchangeAsDIC || calendarExchangeRequest.canAct) && (
+                        <Stack direction="row" spacing={1} sx={{ mt: 1 }}>
+                          <Button
+                            size="small"
+                            variant="contained"
+                            color="success"
+                            disabled={exchangeActionLoading}
+                            onClick={async () => {
+                              setExchangeActionLoading(true);
+                              try {
+                                await api.put(`/replacement/duty-switch/exchange-requests/${calendarExchangeRequest.id}/decision`, {
+                                  decision: "approve",
+                                  comment: "Approved by DIC/Reporting Officer from Calendar",
+                                });
+                                setCalendarNotice("Duty exchange approved and applied successfully.");
+                                setSelectedDuty(null);
+                                setCalendarExchangeRequest(null);
+                                load({ quiet: true });
+                              } catch (err) {
+                                setError(err.response?.data?.detail || "Failed to approve duty exchange");
+                              } finally {
+                                setExchangeActionLoading(false);
+                              }
+                            }}
+                            sx={{ textTransform: "none", fontWeight: 900 }}
+                          >
+                            Approve Exchange (as DIC / RO)
+                          </Button>
+                          <Button
+                            size="small"
+                            variant="outlined"
+                            color="error"
+                            disabled={exchangeActionLoading}
+                            onClick={async () => {
+                              const comment = window.prompt("Enter rejection reason:");
+                              if (!comment?.trim()) return;
+                              setExchangeActionLoading(true);
+                              try {
+                                await api.put(`/replacement/duty-switch/exchange-requests/${calendarExchangeRequest.id}/decision`, {
+                                  decision: "reject",
+                                  comment: comment.trim(),
+                                });
+                                setCalendarNotice("Duty exchange rejected.");
+                                setSelectedDuty(null);
+                                setCalendarExchangeRequest(null);
+                                load({ quiet: true });
+                              } catch (err) {
+                                setError(err.response?.data?.detail || "Failed to reject duty exchange");
+                              } finally {
+                                setExchangeActionLoading(false);
+                              }
+                            }}
+                            sx={{ textTransform: "none", fontWeight: 900 }}
+                          >
+                            Reject
+                          </Button>
+                        </Stack>
+                      )}
+                    </>
+                  ) : (
+                    <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                      <Typography sx={{ fontSize: 11.5, color: "#64748B" }}>Exchange request is pending approval.</Typography>
+                      <Button
+                        size="small"
+                        onClick={() => {
+                          setReassignmentContext({ mode: "exchange", date: selectedDuty.date, employeeId: selectedDuty.person.employeeId });
+                          setSelectedDuty(null);
+                          setExchangeOpen(true);
+                        }}
+                        sx={{ fontWeight: 900, fontSize: 11, textTransform: "none" }}
+                      >
+                        Open Exchange Review
+                      </Button>
+                    </Box>
+                  )}
+                </Paper>
               )}
               {(selectedDuty.duty.leaveStatus || selectedDuty.duty.trainingName || selectedDuty.duty.trainingAdjacentOffStatus || selectedDuty.duty.sportsName) && (
                 <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
