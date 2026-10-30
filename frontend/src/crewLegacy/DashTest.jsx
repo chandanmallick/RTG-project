@@ -215,6 +215,28 @@ export default function DashTest({ demo = false }) {
     }
   };
 
+  const handleRevertAssignment = async (notif) => {
+    if (!notif?.leaveId) return;
+    const confirmMsg = `Revert replacement assignment for ${notif.employeeName || notif.employeeId} on ${dayjs(notif.date).format("DD-MMM-YYYY")} (${notif.assignedDuty})?\n\nThis restores the slot to open/unassigned so you can test sequential or manual allocation again.`;
+    if (!window.confirm(confirmMsg)) return;
+    try {
+      await api.delete(`/replacement/assign/${notif.leaveId}`, {
+        data: { reason: "Reverted by reporting officer / admin for re-testing" }
+      });
+      setActionFeedback({
+        severity: "success",
+        text: `Replacement assignment for ${notif.employeeName || notif.employeeId} successfully reverted! Slot is now open for test.`,
+      });
+      loadDutyNotifs();
+      refresh();
+    } catch (err) {
+      setActionFeedback({
+        severity: "error",
+        text: err.response?.data?.detail || "Failed to revert replacement assignment.",
+      });
+    }
+  };
+
   const refresh = useCallback(() => {
     setRefreshKey(value => value + 1);
     loadDutyNotifs();
@@ -319,6 +341,56 @@ export default function DashTest({ demo = false }) {
   return <Box sx={{ p: { xs: 1.5, md: 3 }, background: "#F5F7F9", minHeight: "100%", color: "#233442" }}>
     {demo && <Alert severity="info" sx={{ mb: 2 }}>Interactive sample preview · No login or database needed. All names, duties and counts are sample data.</Alert>}
     {errors.length > 0 && <Alert severity="warning" sx={{ mb: 2 }} action={<Button onClick={refresh}>Retry</Button>}>Could not load: {errors.join(", ")}. Other available sections remain usable.</Alert>}
+    {dutyNotifs.some(n => n.canAccept || n.canDeny) && (
+      <Paper
+        elevation={0}
+        sx={{
+          p: 1.5,
+          mb: 2,
+          borderRadius: 3,
+          bgcolor: "#FFFBEB",
+          border: "1px solid #FCD34D",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 2,
+          flexWrap: "wrap",
+          boxShadow: "0 4px 12px rgba(245, 158, 11, 0.12)",
+        }}
+      >
+        <Stack direction="row" alignItems="center" spacing={1.5}>
+          <Box sx={{ width: 38, height: 38, borderRadius: "50%", bgcolor: "#FEF3C7", color: "#B45309", display: "grid", placeItems: "center", border: "1px solid #FCD34D" }}>
+            <ArrowLeftRight size={20} />
+          </Box>
+          <Box>
+            <Typography fontSize={13.5} fontWeight={900} color="#92400E">
+              Duty Replacement Pending Your Review
+            </Typography>
+            <Typography fontSize={11.5} color="#78350F">
+              {dutyNotifs.filter(n => n.canAccept || n.canDeny).map(n => `${n.employeeName} (${dayjs(n.date).format("DD-MMM")} · ${n.assignedDuty})`).join(", ")}
+            </Typography>
+          </Box>
+        </Stack>
+        <Stack direction="row" spacing={1}>
+          <Button
+            size="small"
+            variant="contained"
+            onClick={() => setDutyFullListOpen(true)}
+            sx={{
+              bgcolor: "#D97706",
+              "&:hover": { bgcolor: "#B45309" },
+              textTransform: "none",
+              fontWeight: 900,
+              fontSize: 12,
+              borderRadius: 2,
+              px: 1.8,
+            }}
+          >
+            Review & Decide (Accept / Deny) ↗
+          </Button>
+        </Stack>
+      </Paper>
+    )}
     <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", xl: "minmax(0,1fr) 360px" }, gap: 2.2, alignItems: "start" }}>
       <Box sx={{ minWidth: 0 }}>
         <Box sx={{ display: "grid", gridTemplateColumns: { xs: "repeat(2,minmax(0,1fr))", md: "repeat(6,minmax(0,1fr))" }, gap: 1, mb: 1.8 }}>
@@ -566,6 +638,29 @@ export default function DashTest({ demo = false }) {
                         Accept Duty
                       </Button>
                     )}
+                    {dutyNotifs.find(n => n.canDeny) && (
+                      <Button
+                        size="small"
+                        variant="outlined"
+                        color="error"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleOpenDenyDialog(dutyNotifs.find(n => n.canDeny));
+                        }}
+                        sx={{
+                          py: 0.3,
+                          px: 1.2,
+                          fontSize: 10.5,
+                          fontWeight: 900,
+                          borderColor: "#DC2626",
+                          color: "#DC2626",
+                          "&:hover": { bgcolor: "#FEE2E2", borderColor: "#B91C1C" },
+                          textTransform: "none",
+                        }}
+                      >
+                        Deny Duty
+                      </Button>
+                    )}
                     <Button
                       size="small"
                       variant="outlined"
@@ -622,7 +717,14 @@ export default function DashTest({ demo = false }) {
                 key={option.path}
                 variant="outlined"
                 endIcon={<ArrowUpRight size={18} />}
-                onClick={() => { setPopup(""); navigate(option.path); }}
+                onClick={() => {
+                  setPopup("");
+                  if (option.key === "leaveReplacement") {
+                    setDutyFullListOpen(true);
+                  } else {
+                    navigate(option.path);
+                  }
+                }}
                 sx={{
                   justifyContent: "space-between",
                   textTransform: "none",
@@ -824,6 +926,27 @@ export default function DashTest({ demo = false }) {
                     }}
                   >
                     Deny Duty (HOD)
+                  </Button>
+                )}
+                {n.canRevert && (
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    color="warning"
+                    onClick={() => handleRevertAssignment(n)}
+                    sx={{
+                      py: 0.4,
+                      px: 1.4,
+                      fontSize: 11,
+                      fontWeight: 850,
+                      textTransform: "none",
+                      borderColor: "#D97706",
+                      color: "#B45309",
+                      bgcolor: "#FFFBEB",
+                      "&:hover": { bgcolor: "#FEF3C7", borderColor: "#B45309" },
+                    }}
+                  >
+                    Revert Assignment (Test)
                   </Button>
                 )}
               </Stack>

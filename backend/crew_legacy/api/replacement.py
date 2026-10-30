@@ -223,7 +223,21 @@ def normalized_categories(value):
 
 def category_matches(category_value, keyword: str) -> bool:
     target = str(keyword or "").strip().lower()
-    return any(target in item.lower() for item in normalized_categories(category_value))
+    for item in normalized_categories(category_value):
+        item_str = str(item or "").strip().lower()
+        if not item_str:
+            continue
+        if target == "sic":
+            tokens = [t.strip() for t in item_str.replace("&", " ").replace("/", " ").split()]
+            if "sic" in tokens or item_str == "sic":
+                return True
+        elif target in ("shift engineer", "shift_engineer", "se"):
+            if "shift engineer" in item_str or "shift_engineer" in item_str or item_str == "se":
+                return True
+        else:
+            if target in item_str:
+                return True
+    return False
 
 
 def employee_id_sort_key(value):
@@ -265,25 +279,43 @@ def api_decision_history(history):
 
 
 def controlling_officer_ids(employee_id: str, duty_date: str = "", group_name: str = ""):
+    employee_id = str(employee_id or "").strip()
+    if not employee_id:
+        return []
     employee = employee_collection.find_one(
-        {"userId": employee_id},
-        {"reportingOfficerIds": 1, "reportingOfficerId": 1, "functionIds": 1, "manualFunctionIds": 1},
+        {"$or": [{"userId": employee_id}, {"employeeId": employee_id}]},
+        {
+            "reportingOfficerIds": 1,
+            "reportingOfficerId": 1,
+            "intermediaryReportingId": 1,
+            "hodId": 1,
+            "functionIds": 1,
+            "manualFunctionIds": 1,
+        },
     ) or {}
+    values = []
     try:
         from crew_legacy.api.admin_api import resolve_employee_organization
         resolved = resolve_employee_organization(
             employee.get("manualFunctionIds", employee.get("functionIds")),
             employee_id,
         )
-        values = (
-            resolved.get("reportingOfficerIds")
-            or [resolved.get("intermediaryReportingId"), resolved.get("hodId")]
-        )
+        values.extend(resolved.get("reportingOfficerIds") or [])
+        if resolved.get("intermediaryReportingId"):
+            values.append(resolved.get("intermediaryReportingId"))
+        if resolved.get("hodId"):
+            values.append(resolved.get("hodId"))
     except Exception:
-        values = normalized_categories(
-            employee.get("reportingOfficerIds") or employee.get("reportingOfficerId")
-        )
-    values = [value for value in values if value]
+        pass
+    values.extend(normalized_categories(
+        employee.get("reportingOfficerIds") or employee.get("reportingOfficerId")
+    ))
+    if employee.get("intermediaryReportingId"):
+        values.append(employee.get("intermediaryReportingId"))
+    if employee.get("hodId"):
+        values.append(employee.get("hodId"))
+
+    values = [str(value).strip() for value in values if value]
     if duty_date and group_name:
         shift_controllers = employee_daily_collection.find({
             "date": duty_date,
@@ -294,11 +326,11 @@ def controlling_officer_ids(employee_id: str, duty_date: str = "", group_name: s
                     "$or": [{"groupName": group_name}, {"actingSICGroup": group_name}],
                 },
             ],
-        }, {"employeeId": 1})
-        values.extend(
-            record.get("employeeId") for record in shift_controllers
-            if record.get("employeeId")
-        )
+        }, {"employeeId": 1, "userId": 1})
+        for record in shift_controllers:
+            s_id = str(record.get("userId") or record.get("employeeId") or "").strip()
+            if s_id:
+                values.append(s_id)
     return [value for value in dict.fromkeys(values) if value and value != employee_id]
 
 
@@ -3205,18 +3237,11 @@ def replacement_candidates(
 
         # ==========================================
         # ROLE FILTER (SIC / SHIFT ENGINEER)
+        # USER REQUIREMENT: If employee is registered "SIC" under "Category" he will be placed for SIC leave,
+        # "Shift Engineer" then for other person in the shift.
         # ==========================================
-        is_sic_candidate = (
-            category_matches(category, "sic")
-            or bool(c.get("isIC"))
-            or "sic" in active_shift_roles
-            or "sic" in historical_roles
-        )
-        is_shift_engineer_candidate = (
-            category_matches(category, "shift engineer")
-            or "shift_engineer" in active_shift_roles
-            or "shift_engineer" in historical_roles
-        )
+        is_sic_candidate = category_matches(category, "sic")
+        is_shift_engineer_candidate = category_matches(category, "shift engineer")
         if effective_role_filter == "sic" and not is_sic_candidate:
             continue
         if effective_role_filter == "shift_engineer" and not is_shift_engineer_candidate:
@@ -3378,17 +3403,9 @@ def replacement_candidates(
             {"category": 1, "isIC": 1},
         ) or {}
         category = normalized_categories(employee_master.get("category"))
-        historical_roles = past_shift_roles.get(str(candidate_id), set())
-        if effective_role_filter == "sic" and not (
-            category_matches(category, "sic")
-            or bool(employee_master.get("isIC"))
-            or "sic" in historical_roles
-        ):
+        if effective_role_filter == "sic" and not category_matches(category, "sic"):
             continue
-        if effective_role_filter == "shift_engineer" and not (
-            category_matches(category, "shift engineer")
-            or "shift_engineer" in historical_roles
-        ):
+        if effective_role_filter == "shift_engineer" and not category_matches(category, "shift engineer"):
             continue
 
         next_day_record = employee_daily_collection.find_one({
@@ -3525,6 +3542,33 @@ def assign_replacement(leave_id: str, payload: dict, user=Depends(get_authentica
             "name": daily_emp["name"],
             "designation": daily_emp["designation"]
         }
+
+    # USER REQUIREMENT: Enforce registered Category eligibility
+    # If employee is registered "SIC" under "Category" he will be placed for SIC leave,
+    # "Shift Engineer" then for other person in the shift.
+    leave_is_sic = bool(leave.get("isSIC"))
+    if not leave_is_sic:
+        leave_daily_rec = employee_daily_collection.find_one({
+            "employeeId": leave.get("employeeId"),
+            "date": leave.get("date")
+        }) or {}
+        leave_is_sic = bool(leave_daily_rec.get("isSIC"))
+
+    rep_category = normalized_categories(replacement_emp.get("category"))
+    allow_override = bool(payload.get("force") or payload.get("overrideCategory"))
+    if not allow_override:
+        if leave_is_sic and not category_matches(rep_category, "sic"):
+            cat_disp = ", ".join(rep_category) if rep_category else "None"
+            raise HTTPException(
+                400,
+                f"Cannot assign {replacement_emp.get('name')}: Registered Category is '{cat_disp}'. Only employees registered as 'SIC' under Category can be placed for SIC leave."
+            )
+        if not leave_is_sic and not category_matches(rep_category, "shift engineer"):
+            cat_disp = ", ".join(rep_category) if rep_category else "None"
+            raise HTTPException(
+                400,
+                f"Cannot assign {replacement_emp.get('name')}: Registered Category is '{cat_disp}'. Only employees registered as 'Shift Engineer' under Category can be placed for this shift member."
+            )
 
     existing_replacement = leave.get("replacement") or {}
     if existing_replacement.get("employeeId"):
@@ -4364,7 +4408,8 @@ def pending_sic(user=Depends(get_current_user)):
 def get_notifications(user=Depends(get_current_user)):
 
     user_id = str(user.get("userId") or user.get("employeeId") or "")
-    user_is_admin = str(user.get("role") or "").lower() == "admin" or user_id == "50041"
+    user_role = str(user.get("role") or "").lower()
+    user_is_admin = user_role in ["admin", "hod", "dic", "dept_ic", "controller"] or user_id in ["50041", "admin"]
     auto_accept_pending_duty_notifications()
     now = datetime.utcnow()
 
@@ -4375,11 +4420,30 @@ def get_notifications(user=Depends(get_current_user)):
             "status": {"$ne": "Superseded"},
         }
     else:
-        query = {
+        # Resolve all subordinates where logged-in user is reporting officer, intermediary, or HOD
+        ro_subordinates = list(employee_collection.find({
             "$or": [
-                {"employeeId": user_id},
-                {"controllerIds": user_id},
-            ],
+                {"reportingOfficerId": user_id},
+                {"reportingOfficerIds": user_id},
+                {"intermediaryReportingId": user_id},
+                {"hodId": user_id},
+            ]
+        }, {"userId": 1, "employeeId": 1}))
+        ro_emp_ids = [
+            str(e.get("userId") or e.get("employeeId") or "").strip()
+            for e in ro_subordinates
+            if str(e.get("userId") or e.get("employeeId") or "").strip()
+        ]
+
+        or_conditions = [
+            {"employeeId": user_id},
+            {"controllerIds": user_id},
+        ]
+        if ro_emp_ids:
+            or_conditions.append({"employeeId": {"$in": ro_emp_ids}})
+
+        query = {
+            "$or": or_conditions,
             "leaveId": {"$exists": True},
             "assignedDuty": {"$exists": True},
             "status": {"$ne": "Superseded"},
@@ -4398,9 +4462,14 @@ def get_notifications(user=Depends(get_current_user)):
         n["createdAt"] = api_datetime(n.get("createdAt"))
         n["updatedAt"] = api_datetime(n.get("updatedAt"))
         n["decisionHistory"] = api_decision_history(n.get("decisionHistory"))
-        is_assignee = n.get("employeeId") == user_id
-        is_controller = user_id in normalized_categories(n.get("controllerIds"))
-        is_reporting_or_hod = bool(is_controller or user_is_admin or user.get("role") in ["admin", "hod", "controller"])
+        is_assignee = str(n.get("employeeId") or "").strip() == user_id
+        controller_ids = normalized_categories(n.get("controllerIds"))
+        if not is_assignee and user_id not in controller_ids:
+            computed_ctrls = controlling_officer_ids(n.get("employeeId"), n.get("date"), n.get("groupName"))
+            if user_id in computed_ctrls:
+                controller_ids.append(user_id)
+        is_controller = user_id in controller_ids
+        is_reporting_or_hod = bool(is_controller or user_is_admin or user_role in ["admin", "hod", "dic", "dept_ic", "controller"])
         before_cutoff = bool(cutoff and now <= cutoff)
         
         # Format date as DD-MMM-YYYY
@@ -4414,16 +4483,30 @@ def get_notifications(user=Depends(get_current_user)):
         n["notificationKind"] = "replacement"
         n["unread"] = user_id not in normalized_categories(n.get("readBy"))
         n["viewerRole"] = "Admin" if user_is_admin else ("Controlling Officer" if is_controller else "Employee")
-        n["canAccept"] = bool(is_assignee and n.get("status") == "Pending" and before_cutoff)
-        # Deny option ONLY to Reporting / HOD officer (or Admin/Controller)
+        
         raw_date = str(n.get("date") or "")
         today_kolkata = datetime.now(ZoneInfo("Asia/Kolkata")).date().isoformat()
         is_elapsed = bool(raw_date and raw_date < today_kolkata)
         n["isElapsed"] = is_elapsed
+        
+        # User requirement: Both employee AND reporting officer/HOD can accept or deny
+        n["canAccept"] = bool(
+            (is_assignee or is_reporting_or_hod)
+            and n.get("status") == "Pending"
+            and (before_cutoff or is_reporting_or_hod)
+            and not is_elapsed
+        )
+        # Deny option to Reporting / HOD officer (or Admin/Controller)
         n["canDeny"] = bool(
             is_reporting_or_hod
             and n.get("status") in {"Pending", "Accepted"}
-            and before_cutoff
+            and (before_cutoff or is_reporting_or_hod)
+            and not is_elapsed
+        )
+        # Can revert assignment: Admin or Reporting Officer / HOD can revert for test
+        n["canRevert"] = bool(
+            (user_is_admin or is_reporting_or_hod)
+            and n.get("leaveId")
             and not is_elapsed
         )
         # If date has elapsed, do not flag as active denial for blinking on Dashboard
@@ -4442,22 +4525,31 @@ def accept_duty(id: str, user=Depends(get_current_user)):
     if not notif:
         raise HTTPException(404, "Duty notification not found")
     user_id = str(user.get("userId") or user.get("employeeId") or "")
-    if notif.get("employeeId") != user_id:
-        raise HTTPException(403, "Only the assigned employee can accept this duty")
+    user_role = str(user.get("role") or "").lower()
+    user_is_admin = user_role in ["admin", "hod", "dic", "dept_ic", "controller"] or user_id in ["50041", "admin"]
+    controller_ids = normalized_categories(notif.get("controllerIds"))
+    if user_id not in controller_ids:
+        controller_ids.extend(controlling_officer_ids(notif.get("employeeId"), notif.get("date"), notif.get("groupName")))
+    is_controller = user_id in controller_ids
+    is_assignee = str(notif.get("employeeId") or "").strip() == user_id
+
+    if not is_assignee and not is_controller and not user_is_admin:
+        raise HTTPException(403, "Only the assigned employee, reporting officer, or administrator can accept this duty")
     if notif.get("status") != "Pending":
         raise HTTPException(409, f"Duty is already {notif.get('status')}")
     now = datetime.utcnow()
     cutoff = utc_naive(notif.get("cutoffTime"))
-    if cutoff and now > cutoff:
+    if cutoff and now > cutoff and is_assignee and not is_controller and not user_is_admin:
         auto_accept_pending_duty_notifications()
         return {"message": "Duty auto accepted at the 16:00 cutoff"}
 
+    actor_role = "Reporting/HOD Officer" if is_controller else ("Admin" if user_is_admin else "Employee")
     duty_notification_collection.update_one(
         {"_id": notif["_id"]},
         {
             "$set": {
                 "status": "Accepted",
-                "decision": "Accepted by employee",
+                "decision": f"Accepted by {actor_role}",
                 "acceptedBy": user_id,
                 "updatedAt": now,
             },
@@ -4465,7 +4557,7 @@ def accept_duty(id: str, user=Depends(get_current_user)):
                 "decisionHistory": {
                     "action": "Accepted",
                     "actedBy": user_id,
-                    "actorRole": "Employee",
+                    "actorRole": actor_role,
                     "actedAt": now,
                 }
             },
@@ -4473,7 +4565,7 @@ def accept_duty(id: str, user=Depends(get_current_user)):
         },
     )
 
-    return {"message": "Accepted"}
+    return {"message": "Accepted successfully"}
 
 
 
@@ -4490,8 +4582,12 @@ def deny_duty(id: str, payload: dict, user=Depends(get_current_user)):
         raise HTTPException(404, "Notification not found")
 
     user_id = str(user.get("userId") or user.get("employeeId") or "")
-    is_controller = user_id in normalized_categories(notif.get("controllerIds"))
-    user_is_admin = str(user.get("role") or "").lower() == "admin" or user_id == "50041" or user.get("role") in ["hod", "controller"]
+    controller_ids = normalized_categories(notif.get("controllerIds"))
+    if user_id not in controller_ids:
+        controller_ids.extend(controlling_officer_ids(notif.get("employeeId"), notif.get("date"), notif.get("groupName")))
+    is_controller = user_id in controller_ids
+    user_role = str(user.get("role") or "").lower()
+    user_is_admin = user_role in ["admin", "hod", "dic", "dept_ic", "controller"] or user_id in ["50041", "admin"]
 
     # USER REQUIREMENT: Deny option only to Reporting/ HOD officer.
     if not is_controller and not user_is_admin:

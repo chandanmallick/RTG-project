@@ -61,29 +61,37 @@ def init_default_pools() -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
             continue
 
         raw_cat = emp.get("category")
-        cat = " ".join(raw_cat).lower() if isinstance(raw_cat, list) else str(raw_cat or "").lower()
-        designation = str(emp.get("designation") or "").lower()
+        categories = [str(x).strip().lower() for x in (raw_cat if isinstance(raw_cat, list) else [raw_cat])]
+        cat_str = " ".join(categories)
 
-        is_sic_eligible = "sic" in cat or "in-charge" in designation or bool(emp.get("isIC")) or bool(emp.get("isSIC"))
-        if is_sic_eligible and eid not in seen_sic:
+        is_sic_registered = (
+            any(c == "sic" or c == "sic & shift engineer" or "sic" in c.split() or "sic" in c.split("&") for c in categories)
+            or "sic" in cat_str
+        )
+        is_se_registered = (
+            any("shift engineer" in c or "shift_engineer" in c or c == "se" for c in categories)
+            or "shift engineer" in cat_str
+        )
+
+        if is_sic_registered and eid not in seen_sic:
             seen_sic.add(eid)
             sic_pool.append({
                 "employeeId": eid,
                 "name": clean_id(emp.get("name") or eid),
                 "designation": clean_id(emp.get("designation") or "SIC"),
-                "category": "SIC & Shift Engineer" if "engineer" in cat else "SIC",
+                "category": "SIC & Shift Engineer" if is_se_registered else "SIC",
                 "isActive": True,
             })
-        else:
-            if eid not in seen_se and eid not in seen_sic:
-                seen_se.add(eid)
-                shift_eng_pool.append({
-                    "employeeId": eid,
-                    "name": clean_id(emp.get("name") or eid),
-                    "designation": clean_id(emp.get("designation") or "Shift Engineer"),
-                    "category": "Shift Engineer",
-                    "isActive": True,
-                })
+
+        if is_se_registered and eid not in seen_se:
+            seen_se.add(eid)
+            shift_eng_pool.append({
+                "employeeId": eid,
+                "name": clean_id(emp.get("name") or eid),
+                "designation": clean_id(emp.get("designation") or "Shift Engineer"),
+                "category": "SIC & Shift Engineer" if is_sic_registered else "Shift Engineer",
+                "isActive": True,
+            })
 
     # Sort deterministically by name
     sic_pool.sort(key=lambda x: x["name"].lower())
@@ -137,15 +145,34 @@ def get_replacement_roster_config() -> Dict[str, Any]:
             if updates:
                 replacement_roster_config_collection.update_one({"_id": CONFIG_ID}, {"$set": updates})
     elif marked_replacement_ids:
-        # Filter existing pools to strictly retain only those marked in Employee database
-        cleaned_sic = [x for x in (config.get("sicPool") or []) if clean_id(x.get("employeeId")) in marked_replacement_ids]
-        cleaned_se = [x for x in (config.get("shiftEngineerPool") or []) if clean_id(x.get("employeeId")) in marked_replacement_ids]
-        if len(cleaned_sic) != len(config.get("sicPool") or []) or len(cleaned_se) != len(config.get("shiftEngineerPool") or []):
-            config["sicPool"] = cleaned_sic
-            config["shiftEngineerPool"] = cleaned_se
+        # Verify pool members strictly match registered Category in Employee database
+        fresh_sic, fresh_se = init_default_pools()
+        fresh_sic_map = {x["employeeId"]: x for x in fresh_sic}
+        fresh_se_map = {x["employeeId"]: x for x in fresh_se}
+
+        current_sic_ids = [clean_id(x.get("employeeId")) for x in (config.get("sicPool") or [])]
+        current_se_ids = [clean_id(x.get("employeeId")) for x in (config.get("shiftEngineerPool") or [])]
+
+        if set(current_sic_ids) != set(fresh_sic_map.keys()) or set(current_se_ids) != set(fresh_se_map.keys()):
+            updated_sic = [fresh_sic_map[eid] for eid in current_sic_ids if eid in fresh_sic_map]
+            for eid, item in fresh_sic_map.items():
+                if eid not in current_sic_ids:
+                    updated_sic.append(item)
+            for i, item in enumerate(updated_sic):
+                item["seniorityOrder"] = i + 1
+
+            updated_se = [fresh_se_map[eid] for eid in current_se_ids if eid in fresh_se_map]
+            for eid, item in fresh_se_map.items():
+                if eid not in current_se_ids:
+                    updated_se.append(item)
+            for i, item in enumerate(updated_se):
+                item["seniorityOrder"] = i + 1
+
+            config["sicPool"] = updated_sic
+            config["shiftEngineerPool"] = updated_se
             replacement_roster_config_collection.update_one(
                 {"_id": CONFIG_ID},
-                {"$set": {"sicPool": cleaned_sic, "shiftEngineerPool": cleaned_se, "updatedAt": datetime.utcnow()}}
+                {"$set": {"sicPool": updated_sic, "shiftEngineerPool": updated_se, "updatedAt": datetime.utcnow()}}
             )
     return config
 

@@ -223,7 +223,7 @@ def _complete_login(user: dict, request: Request):
 def login(data: LoginRequest, request: Request):
     _check_login_lockout(data, request)
 
-    user = employee_collection.find_one({"userId": data.userId})
+    user = employee_collection.find_one({"$or": [{"userId": data.userId}, {"employeeId": data.userId}]})
 
     if not user:
         _record_login_failure(data.userId)

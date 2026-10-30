@@ -1461,9 +1461,7 @@ export default function SpecialRosterMatrix({
                               "&:hover": { bgcolor: "#FDE68A", textDecoration: "underline" },
                             }}
                           >
-                            {l.actingSIC?.name && String(l.actingSIC.name).trim().toLowerCase() !== String(l.replacement?.name || "").trim().toLowerCase()
-                              ? `(${l.actingSIC.name} · Acting SIC)`
-                              : "(Acting SIC)"}
+                            (Acting SIC)
                           </Box>
                         </Tooltip>
                       )}
