@@ -185,7 +185,7 @@ export default function App() {
 
         <Route
           path="/crew"
-          element={<Navigate to="/crew/operations" replace />}
+          element={<Navigate to="/crew/dashboard" replace />}
         />
 
         <Route
@@ -193,9 +193,10 @@ export default function App() {
           element={protectedPage("crew_calendar", <CrewCalendar />)}
         />
 
+        {/* USER REQUIREMENT: crew/operations page is not required anymore. (it should be part of admin) */}
         <Route
           path="/crew/operations"
-          element={protectedPage("crew_dashboard", <CrewOperations />)}
+          element={<Navigate to="/crew/dashboard" replace />}
         />
         <Route
           path="/crew/sports"

@@ -197,9 +197,12 @@ def has_replacement_authority(user: dict, leave: dict):
     actor_id = str(user.get("employeeId") or user.get("userId") or "").strip()
     if not actor_id:
         return False
-    if actor_id == "50041" or str(user.get("role") or "").lower() == "admin":
+    user_role = str(user.get("role") or "").lower()
+    # USER REQUIREMENT: Replacement approval will be like leave approval. DIC can approve or admin can.
+    if actor_id in ["50041", "admin"] or user_role in ["admin", "dic", "dept_ic", "hod"] or bool(user.get("isDeptIC")) or bool(user.get("isLeaveAuthority")):
         return True
     return actor_id in replacement_authority_ids(leave)
+
 
 
 def require_replacement_authority(user: dict, leave: dict):
@@ -4552,7 +4555,133 @@ def deny_duty(id: str, payload: dict, user=Depends(get_current_user)):
         except Exception as e:
             logger.warning("Failed to send denial email: %s", e)
 
-    return {"message": "Denied"}
+    # USER REQUIREMENT: If admin gets Duty denied, option to allocate another duty or auto corn job will allocate next person in roster (as per activate process - Manual or auto sequential)
+    auto_allocated_res = None
+    setting = system_settings_collection.find_one({"type": "duty_denial_activation_process"}) or {}
+    if setting.get("mode") == "auto_sequential":
+        try:
+            from crew_legacy.services.replacement_roster_service import auto_allocate_next_candidate_for_denied_duty
+            auto_allocated_res = auto_allocate_next_candidate_for_denied_duty(str(notif["_id"]), user)
+        except Exception as alloc_err:
+            logger.warning("Auto sequential allocation after denial failed: %s", alloc_err)
+
+    return {
+        "message": "Denied",
+        "autoAllocated": bool(auto_allocated_res),
+        "allocatedEmployee": (auto_allocated_res or {}).get("allocatedEmployee")
+    }
+
+
+@router.get("/denial-activation-process")
+def get_denial_activation_process(user=Depends(get_authenticated_user)):
+    setting = system_settings_collection.find_one({"type": "duty_denial_activation_process"}) or {}
+    return {"mode": setting.get("mode", "manual")}
+
+
+@router.put("/denial-activation-process")
+def update_denial_activation_process(payload: dict, user=Depends(get_authenticated_user)):
+    user_role = str(user.get("role") or "").lower()
+    actor_id = str(user.get("employeeId") or user.get("userId") or "")
+    if not (user.get("isAdmin") or user_role in ["admin", "dic", "dept_ic", "hod"] or actor_id == "50041" or bool(user.get("isDeptIC")) or bool(user.get("isLeaveAuthority"))):
+        raise HTTPException(403, "Only administrators or DIC can configure activation process")
+    mode = str(payload.get("mode") or "manual").strip().lower()
+    if mode not in {"manual", "auto_sequential"}:
+        raise HTTPException(400, "Mode must be 'manual' or 'auto_sequential'")
+    system_settings_collection.update_one(
+        {"type": "duty_denial_activation_process"},
+        {"$set": {"type": "duty_denial_activation_process", "mode": mode, "updatedBy": actor_id, "updatedAt": datetime.utcnow()}},
+        upsert=True
+    )
+    return {"mode": mode, "message": f"Activation process set to {mode}"}
+
+
+@router.post("/reallocate-denied/{notification_id}")
+def reallocate_denied_duty(notification_id: str, payload: dict = None, user=Depends(get_authenticated_user)):
+    """
+    Allocates another replacement duty after a duty denial.
+    Supports:
+    1. 'auto' mode: Automatically picks the next eligible candidate from the sequential roster pool.
+    2. 'manual' mode: Allocates the specified employee ID.
+    """
+    user_role = str(user.get("role") or "").lower()
+    actor_id = str(user.get("employeeId") or user.get("userId") or "")
+    if not (user.get("isAdmin") or user_role in ["admin", "dic", "dept_ic", "hod"] or actor_id == "50041" or bool(user.get("isDeptIC")) or bool(user.get("isLeaveAuthority"))):
+        raise HTTPException(403, "Only administrator or DIC can re-allocate denied duty")
+
+    req_data = payload or {}
+    mode = req_data.get("mode", "auto")
+
+    if mode == "auto":
+        from crew_legacy.services.replacement_roster_service import auto_allocate_next_candidate_for_denied_duty
+        return auto_allocate_next_candidate_for_denied_duty(notification_id, user)
+    else:
+        replacement_id = req_data.get("replacementEmployeeId")
+        if not replacement_id:
+            raise HTTPException(400, "Replacement employee ID required for manual allocation")
+        
+        notif = None
+        if ObjectId.is_valid(notification_id):
+            notif = duty_notification_collection.find_one({"_id": ObjectId(notification_id)})
+        if not notif:
+            notif = duty_notification_collection.find_one({"_id": notification_id})
+        if not notif:
+            raise HTTPException(404, "Notification not found")
+
+        leave_id = notif.get("leaveId")
+        if leave_id and ObjectId.is_valid(str(leave_id)):
+            return assign_replacement(str(leave_id), {
+                "replacementEmployeeId": replacement_id,
+                "mode": req_data.get("dutyMode", "normal"),
+                "autoApprove": True,
+                "reason": req_data.get("reason") or f"Manual re-allocation after duty denial ({notif.get('employeeName')})"
+            }, user)
+        else:
+            emp = employee_collection.find_one({"$or": [{"userId": replacement_id}, {"employeeId": replacement_id}]}) or {}
+            cname = emp.get("name") or replacement_id
+            duty_date = notif.get("date")
+            target_duty = notif.get("assignedDuty") or "Morning"
+            now = datetime.utcnow()
+            employee_daily_collection.update_one(
+                {"employeeId": replacement_id, "date": duty_date},
+                {
+                    "$set": {
+                        "employeeId": replacement_id,
+                        "name": cname,
+                        "date": duty_date,
+                        "assignedDuty": target_duty,
+                        "replacementDuty": True,
+                        "replacementFor": {
+                            "employeeId": notif.get("employeeId"),
+                            "name": notif.get("employeeName") or "Staff",
+                        },
+                        "updatedAt": now,
+                    }
+                },
+                upsert=True
+            )
+            duty_notification_collection.update_one(
+                {"_id": notif["_id"]},
+                {"$set": {"reallocatedTo": replacement_id, "reallocatedAt": now, "reallocationStatus": "Reallocated"}}
+            )
+            duty_notification_collection.insert_one({
+                "employeeId": replacement_id,
+                "employeeName": cname,
+                "date": duty_date,
+                "assignedDuty": target_duty,
+                "status": "Pending",
+                "isDenied": False,
+                "reallocatedFrom": notif.get("employeeId"),
+                "createdAt": now,
+                "updatedAt": now,
+                "decisionHistory": [{
+                    "action": "Assigned",
+                    "actedBy": actor_id,
+                    "actorRole": "Admin / DIC (Manual Re-allocation)",
+                    "actedAt": now,
+                    "reason": f"Manually allocated after denial by {notif.get('employeeName')}"
+                }]
+            })
+            return {"success": True, "message": f"Successfully allocated {cname} ({replacement_id}) for {target_duty} on {duty_date}"}
 
 
 # -------------------------------------------------------------

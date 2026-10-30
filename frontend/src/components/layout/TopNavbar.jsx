@@ -408,6 +408,17 @@ export default function TopNavbar() {
                     active={location.pathname === "/mis/schedule-data"}
                     onClick={handleNavigate}
                   />
+                  {/* USER REQUIREMENT: Crew notices to be placed under CR Assistant */}
+                  <DropdownItem
+                    title="Crew Notices"
+                    description="Team announcements, notices and file sharing"
+                    icon={MessageSquare}
+                    iconColor="#03624C"
+                    iconBg="#E8F5F1"
+                    path="/crew/threads"
+                    active={location.pathname === "/crew/threads"}
+                    onClick={handleNavigate}
+                  />
                 </Box>
               </motion.div>
             )}
@@ -657,187 +668,43 @@ export default function TopNavbar() {
                   top: "calc(100% + 12px)",
                   left: "50%",
                   transform: "translateX(-50%)",
-                  width: "min(720px, calc(100vw - 32px))",
+                  width: 320,
                   zIndex: 1000,
                 }}
               >
-                <Box
-                  sx={{
-                    backgroundColor: "#FFFFFF",
-                    borderRadius: "18px",
-                    boxShadow: "0 15px 45px rgba(15, 98, 76, 0.09)",
-                    border: "1px solid #E2E8F0",
-                    p: 2.5,
-                    position: "relative",
-                    maxHeight: "calc(100vh - 110px)",
-                    overflowY: "auto",
-                  }}
-                >
+                <Box sx={dropdownBoxStyles}>
                   {caretElement}
-                  <Box sx={{ display: "grid", gridTemplateColumns: "minmax(220px, .9fr) 1px minmax(320px, 1.35fr)", columnGap: 2.5, alignItems: "start" }}>
-                    {/* Left side: Crew user workflows */}
-                    <Box sx={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
-                      <Typography
-                        sx={{
-                          fontSize: 11,
-                          fontWeight: 800,
-                          color: "#03624C",
-                          letterSpacing: "0.06em",
-                          mb: 2,
-                          textTransform: "uppercase"
-                        }}
-                      >
-                        User Module
-                      </Typography>
-                      <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
-                        <DropdownItem
-                          title="Application, Approval & Replacement"
-                          description="Events, applications and approvals"
-                          icon={ClipboardList}
-                          iconColor="#0057B7"
-                          iconBg="#EAF2FF"
-                          path="/crew/operations"
-                          active={location.pathname === "/crew/operations"}
-                          onClick={handleNavigate}
-                        />
-                        <DropdownItem
-                          title="Dashboard"
-                          icon={LayoutGrid}
-                          iconColor="#03624C"
-                          iconBg="#E8F5F1"
-                          path="/crew/dashboard"
-                          active={location.pathname === "/crew/dashboard"}
-                          onClick={handleNavigate}
-                        />
-                        <DropdownItem
-                          title="Calendar"
-                          icon={Calendar}
-                          iconColor="#03624C"
-                          iconBg="#E8F5F1"
-                          path="/crew/calendar"
-                          active={location.pathname === "/crew/calendar"}
-                          onClick={handleNavigate}
-                        />
-                        <DropdownItem
-                    title="Crew Notices"
-                    description="Team announcements and file sharing"
-                    icon={MessageSquare}
+                  <DropdownItem
+                    title="Dashboard"
+                    description="Crew management dashboard and approvals"
+                    icon={LayoutGrid}
+                    iconColor="#03624C"
+                    iconBg="#E8F5F1"
+                    path="/crew/dashboard"
+                    active={location.pathname === "/crew/dashboard"}
+                    onClick={handleNavigate}
+                  />
+                  <DropdownItem
+                    title="Calendar"
+                    description="Shift schedule, duty and matrix views"
+                    icon={Calendar}
+                    iconColor="#03624C"
+                    iconBg="#E8F5F1"
+                    path="/crew/calendar"
+                    active={location.pathname === "/crew/calendar"}
+                    onClick={handleNavigate}
+                  />
+                  <DropdownItem
+                    title="Crew Reports"
+                    description="Leave, training, C-OFF and replacement duty"
+                    icon={FileText}
                     iconColor="#0057B7"
                     iconBg="#EAF2FF"
-                          path="/crew/threads"
-                          active={location.pathname === "/crew/threads"}
-                          onClick={handleNavigate}
-                        />
-                        <DropdownItem
-                          title="Crew Reports"
-                          description="Leave, training, C-OFF and replacement duty"
-                          icon={FileText}
-                          iconColor="#0057B7"
-                          iconBg="#EAF2FF"
-                          path="/crew/reports"
-                          alwaysVisible
-                          active={location.pathname === "/crew/reports"}
-                          onClick={handleNavigate}
-                        />
-                      </Box>
-                    </Box>
-
-                    {/* Divider */}
-                    <Divider orientation="vertical" flexItem sx={{ height: "100%", borderStyle: "dashed" }} />
-
-                    {/* Right side: Admin Module */}
-                    <Box sx={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
-                      <Typography
-                        sx={{
-                          fontSize: 11,
-                          fontWeight: 800,
-                          color: "#03624C",
-                          letterSpacing: "0.06em",
-                          mb: 2,
-                          textTransform: "uppercase"
-                        }}
-                      >
-                        Admin Module
-                      </Typography>
-                      <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
-                        <DropdownItem
-                          title="Employee Master"
-                          icon={Users}
-                          iconColor="#03624C"
-                          iconBg="#E8F5F1"
-                          path="/crew/employees"
-                          active={location.pathname === "/crew/employees"}
-                          onClick={handleNavigate}
-                        />
-                        <DropdownItem
-                          title="Departmental Chart"
-                          description="View vertical and reporting hierarchy"
-                          icon={Users}
-                          iconColor="#0057B7"
-                          iconBg="#EAF2FF"
-                          path="/crew/organization"
-                          active={location.pathname === "/crew/organization"}
-                          onClick={handleNavigate}
-                        />
-                        <DropdownItem
-                          title="Organization Master"
-                          description="Map departments, sections, functions and heads"
-                          icon={Settings2}
-                          iconColor="#0057B7"
-                          iconBg="#EAF2FF"
-                          path="/crew/organization-master"
-                          active={location.pathname === "/crew/organization-master"}
-                          onClick={handleNavigate}
-                        />
-                        {(user?.permissions?.crew_roster?.view !== false
-                          || user?.permissions?.crew_presentation?.view !== false) && (
-                          <Box sx={{ p: .65, border: "1px solid #D9E6F5", borderRadius: "12px", background: "#F8FBFF" }}>
-                            <Typography sx={{ px: 1, pt: .3, pb: .45, fontSize: 10, fontWeight: 900, color: "#0057B7", letterSpacing: ".06em", textTransform: "uppercase" }}>
-                              Roster
-                            </Typography>
-                            <DropdownItem
-                              title="Shift Duty Roster"
-                              icon={CalendarRange}
-                              iconColor="#E67E22"
-                              iconBg="#FEF4EA"
-                              path="/crew/roster"
-                              active={location.pathname === "/crew/roster"}
-                              onClick={handleNavigate}
-                            />
-                            <DropdownItem
-                              title="Morning Presentation"
-                              description="Monthly two-day presentation cycle"
-                              icon={CalendarRange}
-                              iconColor="#0057B7"
-                              iconBg="#EAF2FF"
-                              path="/crew/morning-presentation"
-                              active={location.pathname === "/crew/morning-presentation"}
-                              onClick={handleNavigate}
-                            />
-                          </Box>
-                        )}
-                        <DropdownItem
-                          title="Group Management"
-                          icon={Settings}
-                          iconColor="#7F8C8D"
-                          iconBg="#EAEDED"
-                          path="/crew/setup"
-                          active={location.pathname === "/crew/setup"}
-                          onClick={handleNavigate}
-                        />
-                        <DropdownItem
-                          title="Dropdown Management"
-                          description="Maintain crew dropdown master values"
-                          icon={CheckSquare}
-                          iconColor="#0057B7"
-                          iconBg="#EAF2FF"
-                          path="/crew/dropdowns"
-                          active={location.pathname === "/crew/dropdowns"}
-                          onClick={handleNavigate}
-                        />
-                      </Box>
-                    </Box>
-                  </Box>
+                    path="/crew/reports"
+                    alwaysVisible
+                    active={location.pathname === "/crew/reports"}
+                    onClick={handleNavigate}
+                  />
                 </Box>
               </motion.div>
             )}
@@ -865,118 +732,6 @@ export default function TopNavbar() {
           Old Logbook
         </Button>
 
-        {/* 6. Admin Module Dropdown */}
-        <Box ref={adminRef} sx={{ position: "relative" }}>
-          <Button
-            onClick={() => toggleDropdown("admin")}
-            endIcon={
-              <ChevronDown
-                size={14}
-                style={{
-                  transform: openMenu === "admin" ? "rotate(180deg)" : "rotate(0deg)",
-                  transition: "transform 0.2s ease-in-out",
-                  color: (openMenu === "admin" || isAdminActive) ? "#03624C" : "#64748B"
-                }}
-              />
-            }
-            sx={{
-              textTransform: "none",
-              fontSize: 14,
-              fontWeight: 700,
-              color: (openMenu === "admin" || isAdminActive) ? "#03624C" : "#475569",
-              px: 2.2,
-              py: 0.9,
-              borderRadius: "999px",
-              backgroundColor: openMenu === "admin" ? "#E6F0EE" : "transparent",
-              "&:hover": {
-                backgroundColor: "#F1F7F6",
-                color: "#03624C",
-              },
-            }}
-          >
-            Admin Module
-          </Button>
-
-          <AnimatePresence>
-            {openMenu === "admin" && (
-              <motion.div
-                {...dropdownMotionProps}
-                style={{
-                  position: "absolute",
-                  top: "calc(100% + 12px)",
-                  left: "50%",
-                  transform: "translateX(-50%)",
-                  width: 320,
-                  zIndex: 1000,
-                }}
-              >
-                <Box sx={dropdownBoxStyles}>
-                  {caretElement}
-                  <DropdownItem
-                    title="Database Sync (RTG)"
-                    description="Synchronize power stations detail"
-                    icon={Database}
-                    iconColor="#E67E22"
-                    iconBg="#FEF4EA"
-                    path="/database-sync"
-                    active={location.pathname === "/database-sync"}
-                    onClick={handleNavigate}
-                  />
-                  <DropdownItem
-                    title="PSP Settings"
-                    description="Configure daily peak capacities"
-                    icon={Settings2}
-                    iconColor="#9B59B6"
-                    iconBg="#F5EEF8"
-                    path="/psp-admin"
-                    active={location.pathname === "/psp-admin"}
-                    onClick={handleNavigate}
-                  />
-                  <DropdownItem
-                    title="User Access Control"
-                    description="Assign page View and Write access"
-                    icon={UserCheck}
-                    iconColor="#03624C"
-                    iconBg="#E8F5F1"
-                    path="/admin/user-access"
-                    active={location.pathname === "/admin/user-access"}
-                    onClick={handleNavigate}
-                  />
-                  <DropdownItem
-                    title="Mail, 2FA & CRMS Settings"
-                    description="Configure mail, sign-in security and CRMS access"
-                    icon={Mail}
-                    iconColor="#0057B7"
-                    iconBg="#EAF2FF"
-                    path="/admin/mail-settings"
-                    active={location.pathname === "/admin/mail-settings"}
-                    onClick={handleNavigate}
-                  />
-                  <DropdownItem
-                    title="Portal Audit Trail"
-                    description="Review user-wise approvals and data changes"
-                    icon={ClipboardList}
-                    iconColor="#7C3AED"
-                    iconBg="#F3E8FF"
-                    path="/admin/audit-trail"
-                    active={location.pathname === "/admin/audit-trail"}
-                    onClick={handleNavigate}
-                  />
-                  {(String(user?.role || "").toLowerCase() === "admin" || String(user?.employeeId || "") === "50041") && <DropdownItem
-                    title="Past C-OFF Credit"
-                    description="Add old C-OFF manually or through Excel"
-                    icon={CalendarPlus}
-                    iconColor="#B45309"
-                    iconBg="#FEF3C7"
-                    path="/admin/past-comp-off"
-                    active={location.pathname === "/admin/past-comp-off"}
-                    onClick={handleNavigate}
-                  />}
-                </Box>
-              </motion.div>
-            )}
-          </AnimatePresence>
-        </Box>
       </Box>
 
       {/* RIGHT UTILITIES SECTION */}

@@ -836,7 +836,9 @@ export default function CrewCalendar({ publicView = false, applicationOnly = fal
         {!publicView && <><Stack direction="row" spacing={.35} alignItems="center" sx={{ p: .3, border: "1px solid rgba(255,255,255,.4)", borderRadius: 2 }}>
           <Button size="small" onClick={() => { setCalendarView("duty"); window.history.replaceState(null, "", `${window.location.pathname}?view=duty`); }} sx={{ minHeight: 28, px: 1, color: calendarView === "duty" ? "#073B75" : "#FFF", background: calendarView === "duty" ? "#FFF" : "transparent", textTransform: "none", fontWeight: 900 }}>Duty view</Button>
           <Button size="small" onClick={() => { setCalendarView("events"); window.history.replaceState(null, "", `${window.location.pathname}?view=events`); }} sx={{ minHeight: 28, px: 1, color: calendarView === "events" ? "#073B75" : "#FFF", background: calendarView === "events" ? "#FFF" : "transparent", textTransform: "none", fontWeight: 900 }}>Event view</Button>
-          <Button size="small" onClick={() => { setCalendarView("matrix_alternate"); window.history.replaceState(null, "", `${window.location.pathname}?view=matrix_alternate`); }} sx={{ minHeight: 28, px: 1, color: calendarView === "matrix_alternate" ? "#073B75" : "#FFF", background: calendarView === "matrix_alternate" ? "#FFF" : "transparent", textTransform: "none", fontWeight: 900 }}>Compact Matrix View (Test)</Button>
+          {(!user?.permissions || user?.permissions?.crew_compact_matrix?.view !== false) && (
+            <Button size="small" onClick={() => { setCalendarView("matrix_alternate"); window.history.replaceState(null, "", `${window.location.pathname}?view=matrix_alternate`); }} sx={{ minHeight: 28, px: 1, color: calendarView === "matrix_alternate" ? "#073B75" : "#FFF", background: calendarView === "matrix_alternate" ? "#FFF" : "transparent", textTransform: "none", fontWeight: 900 }}>Compact Matrix View (Test)</Button>
+          )}
         </Stack><Stack direction="row" spacing={.35} alignItems="center">
           <Tooltip title={calendarView === "events" ? "Previous month" : "Previous 7 days"}><IconButton size="small" onClick={() => calendarView === "events" ? setEventMonth((value) => shiftMonth(value, -1)) : move(-7)} sx={{ color: "#FFF", border: "1px solid rgba(255,255,255,.35)" }}><ChevronLeft size={17} /></IconButton></Tooltip>
           <Button onClick={() => calendarView === "events" ? setEventMonth(today.slice(0, 7)) : (setStartDate(addDays(today, -7)), setEndDate(addDays(today, 7)))} startIcon={<CalendarDays size={15} />} size="small" sx={{ minHeight: 30, color: "#073B75", background: "#FFF", borderRadius: 2, textTransform: "none", fontWeight: 900, "&:hover": { background: "#F1F5F9" } }}>Today</Button>
@@ -865,7 +867,7 @@ export default function CrewCalendar({ publicView = false, applicationOnly = fal
         onOpenTraining={() => navigate("/crew/training?section=training")}
         onOpenSports={() => navigate("/crew/sports?section=events")}
       /> : calendarView === "matrix_alternate" ? (
-        <Box sx={{ flex: 1, minHeight: 0, overflow: "hidden", display: "flex", flexDirection: "column" }}>
+        <Box sx={{ flex: 1, minHeight: 0, width: "100%", overflow: "hidden", display: "flex", flexDirection: "column" }}>
           <SpecialRosterMatrix
             key={`matrix-${startDate}-${endDate}`}
             initialStartDate={startDate}

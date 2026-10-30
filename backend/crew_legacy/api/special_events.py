@@ -111,13 +111,22 @@ def get_access(user=Depends(get_authenticated_user)):
 
 
 @router.get("")
-def list_events(user=Depends(get_authenticated_user)):
+def list_events(include_past=Query(True), user=Depends(get_authenticated_user)):
+    if isinstance(include_past, dict):
+        user = include_past
+        include_past = True
+    elif user is None or hasattr(user, "dependency"):
+        user = {}
     access = event_access(user)
     employee = employee_collection.find_one({"userId": str(user.get("employeeId") or "")}) or {}
     own = department_ids(employee) if employee else set()
     managed = {item["id"] for item in access["departments"]}
+    today = datetime.utcnow().strftime("%Y-%m-%d")
     rows = []
     for item in system_settings_collection.find({"type": "leave_block", "active": True}).sort("startDate", 1):
+        # USER REQUIREMENT: Remove all past event for manpower management.
+        if not include_past and item.get("endDate") and str(item["endDate"]) < today:
+            continue
         scope = set(item.get("departmentIds") or [])
         if not access["allowAll"] and scope and not scope.intersection(own | managed):
             continue
@@ -1035,7 +1044,14 @@ def get_special_roster_candidates(
     # If date is provided, batch query leave and daily duty
     leave_map = {}
     daily_map = {}
+    next_daily_map = {}
+    next_date = None
     if date:
+        try:
+            next_date = (datetime.strptime(date, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
+        except Exception:
+            next_date = None
+
         leaves = leave_request_collection.find({
             "date": date,
             "finalStatus": {"$in": list(ACTIVE_LEAVE_STATUSES)},
@@ -1049,9 +1065,29 @@ def get_special_roster_candidates(
         for d in dailies:
             did = str(d.get("employeeId") or "").strip()
             if did:
-                daily_map[did] = d.get("assignedDuty")
+                daily_map[did] = d.get("assignedDuty") or ""
+
+        if next_date:
+            next_dailies = employee_daily_collection.find({"date": next_date})
+            for d in next_dailies:
+                did = str(d.get("employeeId") or "").strip()
+                if did:
+                    next_daily_map[did] = d.get("assignedDuty") or ""
+
+    from crew_legacy.database.database_mongo import duty_denial_collection
+    denial_counts = {}
+    try:
+        denial_records = duty_denial_collection.aggregate([
+            {"$group": {"_id": "$employeeId", "count": {"$sum": 1}}}
+        ])
+        for r in denial_records:
+            if r.get("_id"):
+                denial_counts[str(r["_id"]).strip()] = r.get("count", 0)
+    except Exception:
+        pass
 
     candidates = []
+    order_idx = 1
     for emp in all_employees:
         eid = str(emp.get("userId") or emp.get("employeeId") or "").strip()
         if not eid:
@@ -1062,14 +1098,39 @@ def get_special_roster_candidates(
         egroup = str(emp.get("groupName") or "").strip() or emp_to_group.get(eid, "")
 
         duty_status = "Available / Off Duty"
+        assigned_duty = "-"
         if date:
             if eid in leave_map:
                 duty_status = f"On Leave ({leave_map[eid]})"
+                assigned_duty = f"Leave ({leave_map[eid]})"
             elif eid in daily_map:
                 ad = daily_map[eid]
+                assigned_duty = ad or "-"
                 duty_status = f"Rostered: {ad}" if ad else "Rostered"
 
+        # Compute last duty before this date
+        last_duty_date = ""
+        last_duty_type = ""
+        days_since_last_duty = None
+        if date:
+            last_doc = employee_daily_collection.find_one({
+                "employeeId": eid,
+                "assignedDuty": {"$in": ["Morning", "Evening", "Night", "M1", "M2", "E1", "E2", "N1", "N2"]},
+                "date": {"$lt": date},
+            }, sort=[("date", -1)])
+            if last_doc:
+                last_duty_date = str(last_doc.get("date") or "")
+                last_duty_type = str(last_doc.get("assignedDuty") or "")
+                try:
+                    days_since_last_duty = (datetime.strptime(date, "%Y-%m-%d") - datetime.strptime(last_duty_date, "%Y-%m-%d")).days
+                except Exception:
+                    days_since_last_duty = None
+
+        cand_duty_type = str(emp.get("dutyType") or "").strip()
+        is_replacement_pool = cand_duty_type.lower() == "replacement"
+
         candidates.append({
+            "serialNo": order_idx,
             "employeeId": eid,
             "userId": eid,
             "name": ename,
@@ -1077,8 +1138,20 @@ def get_special_roster_candidates(
             "department": edept,
             "groupName": egroup,
             "dutyStatus": duty_status,
+            "assignedDuty": assigned_duty,
+            "nextDayDuty": next_daily_map.get(eid, "-"),
+            "lastDutyDate": last_duty_date,
+            "lastDutyType": last_duty_type,
+            "daysSinceLastDuty": days_since_last_duty,
+            "lastMatchingDutyDate": last_duty_date,
+            "daysSinceMatchingDuty": days_since_last_duty,
+            "denialCount": denial_counts.get(eid, 0),
+            "source": "replacement" if is_replacement_pool else "regular",
+            "candidatePool": "Replacement Pool" if is_replacement_pool else (egroup or "Regular Staff"),
+            "hasConflict": eid in leave_map,
             "isShiftPerson": is_shift_or_control_room_employee(eid, egroup, daily_map.get(eid, ""), emp_to_group),
         })
+        order_idx += 1
 
     return {
         "departments": all_depts,

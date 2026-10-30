@@ -60,7 +60,7 @@ export default function SpecialEventsPage() {
               Replacement Roster Matrix
             </Button>
             <Button
-              onClick={() => navigate("/crew/operations")}
+              onClick={() => navigate("/crew/dashboard")}
               startIcon={<Users size={14} />}
               size="small"
               sx={{

@@ -41,7 +41,7 @@ def get_frontend_base_url() -> str:
 
 def init_default_pools() -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
     """
-    Auto-discovers active employees to seed the SIC and Shift Engineer pools.
+    Seeds the SIC and Shift Engineer pools ONLY from active employees marked as Replacement in the Employee database.
     Pool 1: SIC Pool (SIC, SIC & Shift Engineer)
     Pool 2: Shift Engineer Pool (Shift Engineers)
     """
@@ -50,41 +50,18 @@ def init_default_pools() -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
     seen_sic = set()
     seen_se = set()
 
-    # Active group shift members
-    for group in roster_group_collection.find({"isActive": True}, {"members": 1, "shiftInCharge": 1, "groupName": 1}):
-        sic_person = group.get("shiftInCharge") or {}
-        sic_id = clean_id(sic_person.get("employeeId") or sic_person.get("userId"))
-        if sic_id and sic_id not in seen_sic:
-            seen_sic.add(sic_id)
-            emp = employee_collection.find_one({"$or": [{"userId": sic_id}, {"employeeId": sic_id}]}) or {}
-            sic_pool.append({
-                "employeeId": sic_id,
-                "name": clean_id(emp.get("name") or sic_person.get("name") or sic_id),
-                "designation": clean_id(emp.get("designation") or "Shift-in-Charge"),
-                "category": "SIC",
-                "isActive": True,
-            })
-
-        for member in group.get("members") or []:
-            mid = clean_id(member.get("employeeId") or member.get("userId"))
-            if mid and mid not in seen_se and mid not in seen_sic:
-                seen_se.add(mid)
-                emp = employee_collection.find_one({"$or": [{"userId": mid}, {"employeeId": mid}]}) or {}
-                shift_eng_pool.append({
-                    "employeeId": mid,
-                    "name": clean_id(emp.get("name") or member.get("name") or mid),
-                    "designation": clean_id(emp.get("designation") or "Shift Engineer"),
-                    "category": "Shift Engineer",
-                    "isActive": True,
-                })
-
-    # Also check employees collection for categories
+    # USER REQUIREMENT: Pool should include only persons having marked in the Employee database (dutyType == 'Replacement')
     active_employees = list(employee_collection.find({"isActive": {"$ne": False}}))
     for emp in active_employees:
         eid = clean_id(emp.get("userId") or emp.get("employeeId"))
         if not eid:
             continue
-        cat = str(emp.get("category") or "").lower()
+        duty_type = str(emp.get("dutyType") or "").strip().lower()
+        if duty_type != "replacement":
+            continue
+
+        raw_cat = emp.get("category")
+        cat = " ".join(raw_cat).lower() if isinstance(raw_cat, list) else str(raw_cat or "").lower()
         designation = str(emp.get("designation") or "").lower()
 
         is_sic_eligible = "sic" in cat or "in-charge" in designation or bool(emp.get("isIC")) or bool(emp.get("isSIC"))
@@ -97,15 +74,16 @@ def init_default_pools() -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
                 "category": "SIC & Shift Engineer" if "engineer" in cat else "SIC",
                 "isActive": True,
             })
-        elif ("engineer" in cat or "shift" in designation) and eid not in seen_se and eid not in seen_sic:
-            seen_se.add(eid)
-            shift_eng_pool.append({
-                "employeeId": eid,
-                "name": clean_id(emp.get("name") or eid),
-                "designation": clean_id(emp.get("designation") or "Shift Engineer"),
-                "category": "Shift Engineer",
-                "isActive": True,
-            })
+        else:
+            if eid not in seen_se and eid not in seen_sic:
+                seen_se.add(eid)
+                shift_eng_pool.append({
+                    "employeeId": eid,
+                    "name": clean_id(emp.get("name") or eid),
+                    "designation": clean_id(emp.get("designation") or "Shift Engineer"),
+                    "category": "Shift Engineer",
+                    "isActive": True,
+                })
 
     # Sort deterministically by name
     sic_pool.sort(key=lambda x: x["name"].lower())
@@ -122,6 +100,14 @@ def init_default_pools() -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
 def get_replacement_roster_config() -> Dict[str, Any]:
     """Retrieve replacement roster configuration or create default if not present."""
     config = replacement_roster_config_collection.find_one({"_id": CONFIG_ID})
+
+    # Verify existing pool members against Employee database
+    marked_replacement_ids = {
+        clean_id(e.get("userId") or e.get("employeeId"))
+        for e in employee_collection.find({"isActive": {"$ne": False}})
+        if str(e.get("dutyType") or "").strip().lower() == "replacement"
+    }
+
     if not config or not config.get("sicPool") or not config.get("shiftEngineerPool"):
         sic_pool, shift_eng_pool = init_default_pools()
         if not config:
@@ -150,6 +136,17 @@ def get_replacement_roster_config() -> Dict[str, Any]:
                 config["shiftEngineerPool"] = shift_eng_pool
             if updates:
                 replacement_roster_config_collection.update_one({"_id": CONFIG_ID}, {"$set": updates})
+    elif marked_replacement_ids:
+        # Filter existing pools to strictly retain only those marked in Employee database
+        cleaned_sic = [x for x in (config.get("sicPool") or []) if clean_id(x.get("employeeId")) in marked_replacement_ids]
+        cleaned_se = [x for x in (config.get("shiftEngineerPool") or []) if clean_id(x.get("employeeId")) in marked_replacement_ids]
+        if len(cleaned_sic) != len(config.get("sicPool") or []) or len(cleaned_se) != len(config.get("shiftEngineerPool") or []):
+            config["sicPool"] = cleaned_sic
+            config["shiftEngineerPool"] = cleaned_se
+            replacement_roster_config_collection.update_one(
+                {"_id": CONFIG_ID},
+                {"$set": {"sicPool": cleaned_sic, "shiftEngineerPool": cleaned_se, "updatedAt": datetime.utcnow()}}
+            )
     return config
 
 
@@ -790,3 +787,165 @@ def auto_allocate_d5_replacements(force: bool = False, test_mode: bool = None) -
     }
     logger.info(f"D-5 replacement allocation complete: {summary}")
     return summary
+
+
+def auto_allocate_next_candidate_for_denied_duty(notification_id: str, user: dict = None) -> Dict[str, Any]:
+    """
+    Allocates the next available candidate from the sequential roster pool for a denied replacement duty.
+    Respects sequential index / round-robin order, avoiding conflicts and previous denial applicant/candidate.
+    """
+    from bson import ObjectId
+    from crew_legacy.database.database_mongo import duty_notification_collection
+    
+    notif = None
+    if ObjectId.is_valid(str(notification_id)):
+        notif = duty_notification_collection.find_one({"_id": ObjectId(notification_id)})
+    if not notif:
+        notif = duty_notification_collection.find_one({"_id": notification_id})
+    if not notif:
+        raise HTTPException(404, "Duty notification not found")
+
+    duty_date = notif.get("date")
+    target_duty = notif.get("assignedDuty") or "Morning"
+    denied_emp_id = clean_id(notif.get("employeeId"))
+    leave_id = notif.get("leaveId")
+
+    leave = None
+    if leave_id and ObjectId.is_valid(str(leave_id)):
+        leave = leave_request_collection.find_one({"_id": ObjectId(leave_id)})
+    applicant_id = clean_id(leave.get("employeeId")) if leave else ""
+
+    config = get_replacement_roster_config()
+    is_sic_duty = bool(leave.get("isSIC")) if leave else False
+    if not is_sic_duty:
+        daily_app = employee_daily_collection.find_one({"employeeId": applicant_id or denied_emp_id, "date": duty_date}) or {}
+        is_sic_duty = bool(daily_app.get("isSIC"))
+
+    sic_pool = [x for x in (config.get("sicPool") or []) if x.get("isActive", True)]
+    shift_eng_pool = [x for x in (config.get("shiftEngineerPool") or []) if x.get("isActive", True)]
+    pool = sic_pool if is_sic_duty else shift_eng_pool
+    pool_name = "SIC Pool" if is_sic_duty else "Shift Engineer Pool"
+
+    if not pool:
+        raise HTTPException(400, f"Cannot allocate: {pool_name} is empty or has no active members")
+
+    next_idx = config.get("nextSicIndex", 0) if is_sic_duty else config.get("nextShiftEngineerIndex", 0)
+    pool_len = len(pool)
+
+    chosen_candidate = None
+    found_idx = None
+
+    for offset in range(pool_len):
+        cand_idx = (next_idx + offset) % pool_len
+        cand = pool[cand_idx]
+        cid = clean_id(cand.get("employeeId"))
+
+        if cid == denied_emp_id or cid == applicant_id:
+            continue
+
+        available, _ = is_candidate_available_on_date(cid, duty_date)
+        if available:
+            chosen_candidate = cand
+            found_idx = cand_idx
+            break
+
+    if not chosen_candidate or found_idx is None:
+        raise HTTPException(400, f"No available candidates in {pool_name} for {duty_date}")
+
+    cid = chosen_candidate["employeeId"]
+    cname = chosen_candidate["name"]
+
+    # Advance state pointer
+    if is_sic_duty:
+        replacement_roster_config_collection.update_one(
+            {"_id": CONFIG_ID},
+            {"$set": {"nextSicIndex": (found_idx + 1) % pool_len, "updatedAt": datetime.utcnow()}}
+        )
+    else:
+        replacement_roster_config_collection.update_one(
+            {"_id": CONFIG_ID},
+            {"$set": {"nextShiftEngineerIndex": (found_idx + 1) % pool_len, "updatedAt": datetime.utcnow()}}
+        )
+
+    now = datetime.utcnow()
+    actor_id = str((user or {}).get("employeeId") or "ADMIN")
+
+    if leave:
+        leave_request_collection.update_one(
+            {"_id": leave["_id"]},
+            {
+                "$set": {
+                    "replacement": {
+                        "employeeId": cid,
+                        "name": cname,
+                        "status": "Accepted",
+                        "assignedDuty": target_duty,
+                        "mode": "Sequential Roster",
+                        "allocatedAt": now,
+                    },
+                    "replacementAssigned": True,
+                    "updatedAt": now,
+                }
+            }
+        )
+
+    employee_daily_collection.update_one(
+        {"employeeId": cid, "date": duty_date},
+        {
+            "$set": {
+                "employeeId": cid,
+                "name": cname,
+                "date": duty_date,
+                "assignedDuty": target_duty,
+                "replacementDuty": True,
+                "replacementFor": {
+                    "employeeId": applicant_id or denied_emp_id,
+                    "name": (leave.get("name") if leave else notif.get("employeeName")) or "Staff",
+                },
+                "isActingSIC": is_sic_duty,
+                "updatedAt": now,
+            }
+        },
+        upsert=True
+    )
+
+    duty_notification_collection.update_one(
+        {"_id": notif["_id"]},
+        {"$set": {"reallocatedTo": cid, "reallocatedAt": now, "reallocationStatus": "Reallocated"}}
+    )
+
+    new_notif_doc = {
+        "employeeId": cid,
+        "employeeName": cname,
+        "date": duty_date,
+        "assignedDuty": target_duty,
+        "leaveId": str(leave["_id"]) if leave else None,
+        "leaveGroupId": leave.get("leaveGroupId") if leave else None,
+        "applicantId": applicant_id or denied_emp_id,
+        "applicantName": (leave.get("name") if leave else notif.get("employeeName")) or "Staff",
+        "status": "Pending",
+        "isDenied": False,
+        "reallocatedFrom": denied_emp_id,
+        "createdAt": now,
+        "updatedAt": now,
+        "decisionHistory": [{
+            "action": "Assigned",
+            "actedBy": actor_id,
+            "actorRole": "System / Admin (Sequential Re-allocation)",
+            "actedAt": now,
+            "reason": f"Sequentially allocated after duty was denied by {notif.get('employeeName')} ({denied_emp_id})"
+        }]
+    }
+    duty_notification_collection.insert_one(new_notif_doc)
+
+    return {
+        "success": True,
+        "message": f"Successfully allocated next sequential person: {cname} ({cid}) for {target_duty} on {duty_date}",
+        "allocatedEmployee": {
+            "employeeId": cid,
+            "name": cname,
+            "duty": target_duty,
+            "date": duty_date,
+            "pool": pool_name,
+        }
+    }

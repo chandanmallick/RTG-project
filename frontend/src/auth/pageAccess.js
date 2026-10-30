@@ -30,7 +30,7 @@ export const ROUTE_PAGE_KEYS = {
   "/crew/morning-presentation": "crew_presentation",
   "/crew/leave": "crew_leave",
   "/crew/replacement": "crew_replacement",
-  "/crew/special-events": "crew_roster",
+  "/crew/special-events": "crew_compact_matrix",
   "/crew/training": "crew_training",
   "/crew/threads": "crew_threads",
   "/crew/reports": "crew_reports",

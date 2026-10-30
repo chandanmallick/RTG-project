@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import dayjs from "dayjs";
 import { Alert, Avatar, Box, Button, Chip, CircularProgress, Dialog, DialogContent, DialogTitle, IconButton, Paper, Stack, Tab, Tabs, TextField, MenuItem, Tooltip, Typography } from "@mui/material";
-import { ArrowUpRight, ArrowLeftRight, CheckCheck, ChevronLeft, ChevronRight, ClipboardList, History, Plus, RefreshCw, Trophy, User, CalendarDays, Settings2, ShieldCheck, Presentation, Users, X } from "lucide-react";
+import { ArrowUpRight, ArrowLeftRight, CheckCheck, ChevronLeft, ChevronRight, ClipboardList, History, Plus, RefreshCw, Trophy, User, CalendarDays, Settings2, ShieldCheck, Presentation, Users, Sparkles, X } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import api from "./api";
 import crewApi from "../services/crewApi";
@@ -34,10 +34,28 @@ const isPending = (status) => /pending|applied|nominated|forwarded|requested/i.t
 const destinations = { Leave: "/crew/leave?section=tracking", Training: "/crew/reports?tab=training-history", Sports: "/crew/sports?section=approval", Exchange: "/crew/replacement?section=duty&focus=history", Replacement: "/crew/replacement?tab=duty" };
 const approvalOptions = [
   { title: "Leave approval", path: "/crew/leave?section=pending", subtitle: "Process pending leave applications" },
-  { title: "Replacement approval", path: "/crew/replacement?section=duty&focus=approvals", subtitle: "Review pending duty exchange approvals" },
+  { title: "Approval for Exchange request by shift", path: "/crew/replacement?section=duty&focus=approvals", subtitle: "Review and approve pending mutual duty exchanges" },
+  { title: "Replacement approval", path: "/crew/replacement?tab=duty", subtitle: "Review pending duty replacement assignments" },
   { title: "Training Assignment", path: "/crew/training?section=assign", subtitle: "Nominate & assign employee training" },
   { title: "Training approval", path: "/crew/training?section=pending", subtitle: "Review training approvals" },
   { title: "Sports approval", path: "/crew/sports?section=approval", subtitle: "Review sports participation requests" },
+];
+
+const adminModuleOptions = [
+  { title: "Shift Duty Roster", note: "Prepare, publish and review shift rosters", path: "/crew/roster", key: "crew_roster", icon: CalendarDays, badge: "Master" },
+  { title: "Morning Presentation", note: "Daily shift handover & presentation roster", path: "/crew/morning-presentation", key: "crew_presentation", icon: Presentation, badge: "Daily" },
+  { title: "Replacement Roster & Matrix", note: "Sequential D-5 roster & replacement matrix", path: "/crew/replacement?tab=roster", key: "crew_replacement", icon: ArrowLeftRight, badge: "Sequential" },
+  { title: "Interactive Duty Matrix", note: "Drag & drop matrix view with unified leave", path: "/crew/calendar?view=matrix_alternate", key: "crew_compact_matrix", icon: CalendarDays, badge: "Matrix" },
+  { title: "Roster Setup", note: "Groups, duty cycles & roster configurations", path: "/crew/setup", key: "crew_setup", icon: Settings2, badge: "Config" },
+  { title: "Employee Directory", note: "Personnel database & replacement pool designation", path: "/crew/employees", key: "crew_employees", icon: Users, badge: "Personnel" },
+  { title: "Organization Master", note: "Department, section & reporting hierarchy", path: "/crew/organization-master", key: "crew_admin", icon: ShieldCheck, badge: "Hierarchy" },
+  { title: "User Access Control", note: "Manage page permissions, rights & roles", path: "/admin/user-access", key: "user_access", icon: ShieldCheck, badge: "Security" },
+  { title: "Duty Operations & Approvals", note: "Shift duty & exchange approvals (DIC / Admin)", path: "/crew/replacement?section=duty&focus=approvals", key: "crew_operations", icon: CheckCheck, badge: "Approvals" },
+  { title: "Database Synchronization", note: "MongoDB sync & database health checks", path: "/admin/db-sync", key: "db_sync", icon: RefreshCw, badge: "System" },
+  { title: "PSP System Settings", note: "Power system parameters & telemetry settings", path: "/admin/psp-settings", key: "psp_settings", icon: Settings2, badge: "PSP" },
+  { title: "Mail & CRMS Settings", note: "Email notifications, templates & CRMS alerts", path: "/admin/mail-settings", key: "mail_settings", icon: ClipboardList, badge: "Alerts" },
+  { title: "System Audit Trail", note: "Audit logs of duty changes & administrative actions", path: "/admin/audit", key: "audit_trail", icon: History, badge: "Audit" },
+  { title: "Dropdown Management", note: "Lookup values & master configurations", path: "/crew/dropdown-master", key: "dropdown_master", icon: Settings2, badge: "Masters" },
 ];
 
 const replacementOptions = [
@@ -98,6 +116,53 @@ export default function DashTest({ demo = false }) {
   const [denySubmitting, setDenySubmitting] = useState(false);
   const [actionFeedback, setActionFeedback] = useState(null);
 
+  // Admin Modules Dialog & Denial Activation Process State
+  const [adminModalOpen, setAdminModalOpen] = useState(false);
+  const [activationProcessMode, setActivationProcessMode] = useState("manual");
+  const [reallocatingId, setReallocatingId] = useState("");
+
+  const loadActivationProcessMode = useCallback(async () => {
+    try {
+      const { data } = await api.get("/replacement/denial-activation-process");
+      if (data?.mode) setActivationProcessMode(data.mode);
+    } catch {
+      setActivationProcessMode("manual");
+    }
+  }, []);
+
+  const handleToggleActivationProcess = async (newMode) => {
+    try {
+      await api.put("/replacement/denial-activation-process", { mode: newMode });
+      setActivationProcessMode(newMode);
+      setActionFeedback({
+        severity: "success",
+        text: `Activation process updated to ${newMode === "auto_sequential" ? "Auto Sequential (Cron)" : "Manual Sequential"}.`,
+      });
+    } catch (err) {
+      setActionFeedback({ severity: "error", text: err.response?.data?.detail || "Failed to update activation mode." });
+    }
+  };
+
+  const handleAutoReallocate = async (notifId) => {
+    setReallocatingId(notifId);
+    try {
+      const res = await api.post(`/replacement/reallocate-denied/${notifId}`, { mode: "auto" });
+      setActionFeedback({
+        severity: "success",
+        text: res.data?.detail || "Duty reallocated to next candidate in sequential roster pool!",
+      });
+      loadDutyNotifs();
+      refresh();
+    } catch (err) {
+      setActionFeedback({
+        severity: "error",
+        text: err.response?.data?.detail || "Sequential reallocation failed.",
+      });
+    } finally {
+      setReallocatingId("");
+    }
+  };
+
   const loadDutyNotifs = useCallback(async () => {
     try {
       setDutyNotifsLoading(true);
@@ -153,7 +218,8 @@ export default function DashTest({ demo = false }) {
 
   useEffect(() => {
     loadDutyNotifs();
-  }, [loadDutyNotifs]);
+    loadActivationProcessMode();
+  }, [loadDutyNotifs, loadActivationProcessMode]);
 
   useEffect(() => {
     if (demo) {
@@ -169,7 +235,7 @@ export default function DashTest({ demo = false }) {
       ["Leader board", () => api.get("/dashboard/top-replacements").then(r => r.data), setLeaderboard],
       ["Leave statistics", () => api.get("/dashboard/analytics/group-wise", { params: { year: dayjs(today).year(), month: dayjs(today).month() + 1 } }).then(r => r.data), setLeaveStats],
       ...[
-        ["Leave", "/leave/list", { completedFrom: "2000-01-01" }],
+        ["Leave", "/leave/list", { completedFrom: dayjs(today).subtract(90, "day").format("YYYY-MM-DD") }],
         ["Training", "/training-assign/history"],
         ["Sports", "/sports/applications"],
         ["Exchange", "/replacement/duty-switch/exchange-requests", { status: "All" }],
@@ -243,7 +309,7 @@ export default function DashTest({ demo = false }) {
     { number: 3, title: "Tracking", subtitle: "(for all application)", icon: ClipboardList, color: "#7760CD", bg: "#F0EBFC", click: () => openRecords("tracking"), count: pendingMine, foot: "Your pending applications" },
     { number: 4, title: "History", subtitle: "(for all application)", icon: History, color: "#B46D83", bg: "#FAEDF2", click: () => openRecords("history"), foot: "Records & cancellation" },
     { number: 11, title: "Report", subtitle: "Employee & period analysis", icon: ClipboardList, color: "#426B8D", bg: "#EAF3F8", click: () => navigate("/crew/reports"), foot: "Open crew reports" },
-    { number: 5, title: "Replacement", subtitle: "Duty switching & assignment", icon: ArrowLeftRight, color: "#4775AB", bg: "#EAF2FB", click: () => setPopup("replacement-options"), foot: "Duty assignment, matrix & events" },
+    { number: 5, title: "Admin", subtitle: "(Master & System Settings)", icon: Settings2, color: "#3B4263", bg: "#ECEEF5", click: () => setAdminModalOpen(true), foot: "Admin modules & controls" },
   ];
 
   return <Box sx={{ p: { xs: 1.5, md: 3 }, background: "#F5F7F9", minHeight: "100%", color: "#233442" }}>
@@ -366,6 +432,72 @@ export default function DashTest({ demo = false }) {
                           </Typography>
                         </Box>
                       </Box>
+
+                      {/* Admin Allocation Options: Manual or Auto Sequential (Image 1) */}
+                      <Stack direction={{ xs: "column", sm: "row" }} alignItems={{ sm: "center" }} justifyContent="space-between" spacing={1} sx={{ mt: 1.2, pt: 1, borderTop: "1px dashed #FECACA" }}>
+                        <Stack direction="row" spacing={0.8} alignItems="center">
+                          <Typography fontSize={11} fontWeight={850} color="#7F1D1D">
+                            Activation Process:
+                          </Typography>
+                          <Chip
+                            size="small"
+                            label={activationProcessMode === "auto_sequential" ? "Auto Sequential (Cron Active)" : "Manual Sequential"}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleToggleActivationProcess(activationProcessMode === "auto_sequential" ? "manual" : "auto_sequential");
+                            }}
+                            sx={{
+                              height: 22,
+                              fontSize: "0.68rem",
+                              fontWeight: 900,
+                              cursor: "pointer",
+                              bgcolor: activationProcessMode === "auto_sequential" ? "#DCFCE7" : "#FEE2E2",
+                              color: activationProcessMode === "auto_sequential" ? "#166534" : "#991B1B",
+                              border: `1px solid ${activationProcessMode === "auto_sequential" ? "#86EFAC" : "#FCA5A5"}`,
+                            }}
+                          />
+                        </Stack>
+
+                        <Stack direction="row" spacing={1} alignItems="center">
+                          <Button
+                            size="small"
+                            variant="outlined"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              navigate(`/crew/replacement?tab=duty&date=${n.date}&shift=${n.assignedDuty}`);
+                            }}
+                            sx={{
+                              fontSize: 11,
+                              fontWeight: 850,
+                              textTransform: "none",
+                              color: "#1E3A8A",
+                              borderColor: "#93C5FD",
+                              bgcolor: "#EFF6FF",
+                              "&:hover": { bgcolor: "#DBEAFE" },
+                            }}
+                          >
+                            Allocate Another Duty ↗
+                          </Button>
+                          <Button
+                            size="small"
+                            variant="contained"
+                            disabled={reallocatingId === n._id}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleAutoReallocate(n._id);
+                            }}
+                            sx={{
+                              fontSize: 11,
+                              fontWeight: 900,
+                              textTransform: "none",
+                              bgcolor: "#DC2626",
+                              "&:hover": { bgcolor: "#B91C1C" },
+                            }}
+                          >
+                            {reallocatingId === n._id ? "Allocating..." : "Auto Sequential Allocate ⚡"}
+                          </Button>
+                        </Stack>
+                      </Stack>
                     </Box>
                   ))}
                 </Box>
@@ -473,16 +605,6 @@ export default function DashTest({ demo = false }) {
         })}</Box>)}</Box></Paper>
       </Stack>
     </Box>
-    <Box sx={{ mt: 3 }}><Typography sx={{ fontSize: 18, fontWeight: 850, mb: 1.5 }}>Crew services</Typography><Box sx={{ display: "grid", gridTemplateColumns: { xs: "repeat(2,minmax(0,1fr))", sm: "repeat(4,minmax(0,1fr))", md: "repeat(8,minmax(0,1fr))" }, gap: 1 }}>{[
-      { title: "Duty Roster", note: "Prepare, publish and review rosters", path: "/crew/roster", key: "crew_roster", icon: CalendarDays },
-      { title: "Morning presentation", note: "Daily presentation roster", path: "/crew/morning-presentation", key: "crew_presentation", icon: Presentation },
-      { title: "Replacement Roster", note: "Sequential D-5 & duty matrix", path: "/crew/replacement?tab=roster", key: "crew_replacement", icon: ArrowLeftRight },
-      { title: "Crew reports", note: "Activity and employee analysis", path: "/crew/reports", key: "crew_reports", icon: ClipboardList },
-      { title: "Roster setup", note: "Groups and duty cycles", path: "/crew/setup", key: "crew_setup", icon: Settings2 },
-      { title: "Employee directory", note: "Personnel and master records", path: "/crew/employees", key: "crew_employees", icon: Users },
-      { title: "Organization Master", note: "Reporting hierarchy", path: "/crew/organization-master", key: "crew_admin", icon: ShieldCheck },
-      { title: "User access", note: "Manage page permissions", path: "/admin/user-access", key: "user_access", icon: ShieldCheck },
-    ].filter(item => demo || isAdmin || user?.permissions?.[item.key]?.view).map((item,index) => <Button key={item.path} onClick={() => navigate(item.path)} sx={{ p: 1.3, minHeight: 76, bgcolor: ["#E5F3EF", "#EEE8FC", "#FFF1DB", "#EBF5FB"][index % 4], borderRadius: 4, textTransform: "none", textAlign: "left", alignItems: "start", flexDirection: "column", color: "#263746", "&:hover": { bgcolor: "#DDEEE7" } }}><item.icon size={18} /><Typography sx={{ fontWeight: 850, mt: .7, fontSize: 12, lineHeight: 1.4 }}>{item.title}</Typography></Button>)}</Box></Box>
     <Dialog PaperProps={{ sx: popupPaper }} open={Boolean(mutation)} onClose={() => !saving && setMutation(null)}><DialogTitle>{mutation?.action === "withdraw" ? "Withdraw application?" : "Cancel leave?"}</DialogTitle><DialogContent><Typography sx={{ mb: 2 }}>{mutation?.row.name || mutation?.row.employeeName} · {mutation?.row.date}{mutation?.dates.length > 0 ? ` · ${mutation.dates.length} date(s): ${mutation.dates.join(", ")}` : ""}</Typography>{mutationError && <Alert severity="error" sx={{ mb: 2 }}>{mutationError}</Alert>}<Stack direction="row" spacing={1}><Button disabled={saving} onClick={() => setMutation(null)}>Keep application</Button><Button disabled={saving} color="warning" variant="contained" onClick={performMutation}>{saving ? "Saving…" : "Confirm"}</Button></Stack></DialogContent></Dialog>
     <Dialog PaperProps={{ sx: popupPaper }} open={demo && (Boolean(demoWorkspace) || popup === "apply")} onClose={() => { setDemoWorkspace(""); if (popup === "apply") setPopup(""); }} fullWidth maxWidth="md"><DialogTitle sx={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>{demoWorkspace ? demoWorkspace.includes("operations") ? "Approval preview" : demoWorkspace.includes("view=events") ? "Event calendar preview" : "Crew workspace preview" : popup === "apply" ? "New crew application" : "Replacement"}<IconButton aria-label="Close sample workspace" onClick={() => { setDemoWorkspace(""); if (popup === "apply") setPopup(""); }}><X size={18} /></IconButton></DialogTitle><DialogContent dividers>{demo && (demoWorkspace || popup === "apply") && <DashDemoWorkspace key={demoWorkspace || popup} workspace={demoWorkspace || popup} groups={groups} records={records} events={events} onSubmit={row => setRecords(rows => [{ ...row, id: `demo-${Date.now()}`, employeeId: demoEmployeeId, employeeName: "Anil Sharma", status: "Pending", ...(row.kind === "Leave" ? { finalStatus: "Applied", sicApprovalStatus: "Pending", isOwner: true, canCancel: true } : {}) }, ...rows])} />}</DialogContent></Dialog>
     <Dialog PaperProps={{ sx: popupPaper }} open={!demo && Boolean(trainingReview)} onClose={() => setTrainingReview("")} fullWidth maxWidth="md"><DialogTitle sx={{ display: "flex", justifyContent: "space-between" }}>Training details & management<IconButton aria-label="Close training review" onClick={() => setTrainingReview("")}><X size={18} /></IconButton></DialogTitle><DialogContent dividers>{!demo && trainingReview && <TrainingCalendarReview requestId={trainingReview} onChanged={refresh} onReplacement={() => navigate("/crew/calendar?filter=coverage")} />}</DialogContent></Dialog>
@@ -520,7 +642,7 @@ export default function DashTest({ demo = false }) {
         )}
 
         <Stack spacing={1.5}>
-          {/* 1. Denied Duties - High Visibility with Blink */}
+          {/* 1. Denied Duties - High Visibility with Actions (Image 1) */}
           {dutyNotifs.filter(n => n.isDenied || n.status === "Denied").map(n => (
             <Box
               key={`pop-denied-${n._id}`}
@@ -549,6 +671,43 @@ export default function DashTest({ demo = false }) {
                   <strong>Reason:</strong> {n.reason}
                 </Typography>
               )}
+
+              <Stack direction="row" spacing={1} sx={{ mt: 1.2, pt: 1, borderTop: "1px dashed #FECACA" }}>
+                <Button
+                  size="small"
+                  variant="outlined"
+                  onClick={() => {
+                    setDutyFullListOpen(false);
+                    navigate(`/crew/replacement?tab=duty&date=${n.date}&shift=${n.assignedDuty}`);
+                  }}
+                  sx={{
+                    fontSize: 11,
+                    fontWeight: 850,
+                    textTransform: "none",
+                    color: "#1E3A8A",
+                    borderColor: "#93C5FD",
+                    bgcolor: "#EFF6FF",
+                    "&:hover": { bgcolor: "#DBEAFE" },
+                  }}
+                >
+                  Allocate Another Duty ↗
+                </Button>
+                <Button
+                  size="small"
+                  variant="contained"
+                  disabled={reallocatingId === n._id}
+                  onClick={() => handleAutoReallocate(n._id)}
+                  sx={{
+                    fontSize: 11,
+                    fontWeight: 900,
+                    textTransform: "none",
+                    bgcolor: "#DC2626",
+                    "&:hover": { bgcolor: "#B91C1C" },
+                  }}
+                >
+                  {reallocatingId === n._id ? "Allocating..." : "Auto Sequential Allocate ⚡"}
+                </Button>
+              </Stack>
             </Box>
           ))}
 
@@ -684,6 +843,162 @@ export default function DashTest({ demo = false }) {
           {denySubmitting ? "Submitting..." : "Confirm Denial"}
         </Button>
       </Box>
+    </Dialog>
+    {/* Admin Modules Dialog (Image 5 & 6 Styled 3D Glossy Tiles) */}
+    <Dialog
+      open={adminModalOpen}
+      onClose={() => setAdminModalOpen(false)}
+      fullWidth
+      maxWidth="md"
+      slotProps={{
+        paper: {
+          sx: {
+            borderRadius: "28px !important",
+            background: "#FAF9FD !important",
+            boxShadow: "0 30px 100px rgba(15, 23, 42, 0.25) !important",
+            overflow: "hidden",
+            border: "1px solid rgba(255, 255, 255, 0.8)",
+          },
+        },
+      }}
+    >
+      <DialogTitle
+        sx={{
+          px: 3,
+          py: 2.5,
+          background: "linear-gradient(120deg, #0F172A 0%, #1E293B 55%, #334155 100%)",
+          color: "#FFFFFF",
+        }}
+      >
+        <Stack direction="row" justifyContent="space-between" alignItems="center">
+          <Stack direction="row" alignItems="center" spacing={1.5}>
+            {/* Glossy 3D Orb Sparkle Header Avatar (Image 5 Style) */}
+            <Box
+              sx={{
+                width: 44,
+                height: 44,
+                borderRadius: "50%",
+                background: "radial-gradient(circle at 35% 25%, #64748B 0%, #1E293B 55%, #0F172A 100%)",
+                boxShadow: "inset 0 1.5px 2px rgba(255,255,255,0.6), 0 8px 24px rgba(0,0,0,0.35)",
+                display: "grid",
+                placeItems: "center",
+                color: "#FFFFFF",
+                position: "relative",
+              }}
+            >
+              <Sparkles size={20} color="#F8FAFC" />
+            </Box>
+            <Box>
+              <Typography fontSize={18} fontWeight={900} color="#FFFFFF">
+                System & Module Administration
+              </Typography>
+              <Typography fontSize={11} color="#94A3B8">
+                Master rosters, organization structure, access security & system configurations
+              </Typography>
+            </Box>
+          </Stack>
+
+          <IconButton onClick={() => setAdminModalOpen(false)} sx={{ color: "#94A3B8", "&:hover": { color: "#FFF" } }}>
+            <X size={20} />
+          </IconButton>
+        </Stack>
+      </DialogTitle>
+
+      <DialogContent sx={{ p: 3, bgcolor: "#F8FAFC" }}>
+        <Box
+          sx={{
+            display: "grid",
+            gridTemplateColumns: { xs: "1fr", sm: "repeat(2, 1fr)" },
+            gap: 1.8,
+          }}
+        >
+          {adminModuleOptions.map((item, idx) => {
+            const IconComp = item.icon;
+            const isDarkOrb = idx % 2 === 0;
+
+            return (
+              <Button
+                key={item.path}
+                onClick={() => {
+                  setAdminModalOpen(false);
+                  navigate(item.path);
+                }}
+                sx={{
+                  p: 2,
+                  borderRadius: "20px",
+                  bgcolor: "#FFFFFF",
+                  border: "1px solid #E2E8F0",
+                  boxShadow: "0 4px 18px rgba(15, 23, 42, 0.04)",
+                  textTransform: "none",
+                  textAlign: "left",
+                  alignItems: "stretch",
+                  display: "flex",
+                  flexDirection: "column",
+                  transition: "all 0.2s cubic-bezier(0.4, 0, 0.2, 1)",
+                  "&:hover": {
+                    bgcolor: "#FFFFFF",
+                    transform: "translateY(-3px)",
+                    boxShadow: "0 12px 30px rgba(15, 23, 42, 0.09)",
+                    borderColor: "#CBD5E1",
+                  },
+                }}
+              >
+                <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1.2 }}>
+                  {/* Glossy 3D Orb Icon (Image 5 & 6 Aesthetic) */}
+                  <Box
+                    sx={{
+                      width: 42,
+                      height: 42,
+                      borderRadius: "50%",
+                      background: isDarkOrb
+                        ? "radial-gradient(circle at 35% 25%, #475569 0%, #1E293B 55%, #0F172A 100%)"
+                        : "radial-gradient(circle at 35% 25%, #FFFFFF 0%, #F1F5F9 55%, #CBD5E1 100%)",
+                      boxShadow: isDarkOrb
+                        ? "inset 0 1.5px 2px rgba(255,255,255,0.45), 0 6px 16px rgba(15,23,42,0.22)"
+                        : "inset 0 1.5px 2px rgba(255,255,255,0.95), 0 6px 16px rgba(0,0,0,0.08)",
+                      display: "grid",
+                      placeItems: "center",
+                      color: isDarkOrb ? "#FFFFFF" : "#1E293B",
+                      border: isDarkOrb ? "1px solid rgba(255,255,255,0.12)" : "1px solid rgba(255,255,255,0.8)",
+                    }}
+                  >
+                    <IconComp size={18} strokeWidth={2.2} />
+                  </Box>
+
+                  <Stack direction="row" spacing={0.6} alignItems="center">
+                    <Chip
+                      size="small"
+                      label={item.badge}
+                      sx={{
+                        height: 20,
+                        fontSize: "0.68rem",
+                        fontWeight: 900,
+                        bgcolor: isDarkOrb ? "#EFF6FF" : "#F3E8FF",
+                        color: isDarkOrb ? "#1E40AF" : "#6B21A8",
+                        border: isDarkOrb ? "1px solid #BFDBFE" : "1px solid #E9D5FF",
+                      }}
+                    />
+                    <ArrowUpRight size={14} color="#94A3B8" />
+                  </Stack>
+                </Stack>
+
+                <Typography fontSize={14.5} fontWeight={900} color="#0F172A">
+                  {item.title}
+                </Typography>
+                <Typography fontSize={11} color="#64748B" sx={{ mt: 0.3, lineHeight: 1.4 }}>
+                  {item.note}
+                </Typography>
+              </Button>
+            );
+          })}
+        </Box>
+      </DialogContent>
+
+      <DialogActions sx={{ p: 2, bgcolor: "#F1F5F9", borderTop: "1px solid #E2E8F0" }}>
+        <Button onClick={() => setAdminModalOpen(false)} sx={{ fontWeight: 800 }}>
+          Close
+        </Button>
+      </DialogActions>
     </Dialog>
   </Box>;
 }

@@ -11,7 +11,7 @@ const ACCESS_GROUPS = [
   { key: "home", label: "Homepage & dashboards", note: "Landing dashboards and PSP operational views", pages: ["rtg_dashboard", "psp_dashboard", "psp_report_checking"] },
   { key: "analytics", label: "Analytics & data", note: "Analysis, validation, schedules and system data", pages: ["frequency_report", "data_validation", "outage_analysis", "mis_report", "nldc_plots", "schedule_data"] },
   { key: "reports", label: "Report preparation", note: "Operational, reliability and historical reports", pages: ["dso_evening_report", "sri_report", "dso_morning_report", "psp_highlights_report", "plant_deviation_report", "old_logbook"] },
-  { key: "crew", label: "Crew management", note: "Calendar, roster, leave, replacement and team workflows", pages: ["crew_dashboard", "crew_calendar", "crew_roster", "crew_presentation", "crew_leave", "crew_replacement", "crew_training", "crew_threads", "crew_reports"] },
+  { key: "crew", label: "Crew management", note: "Calendar, roster, leave, replacement and team workflows", pages: ["crew_dashboard", "crew_calendar", "crew_compact_matrix", "crew_roster", "crew_presentation", "crew_leave", "crew_replacement", "crew_training", "crew_threads", "crew_reports"] },
   { key: "crew_admin", label: "Crew administration", note: "Sensitive crew masters, setup and special permissions", pages: ["leave_calendar_all", "leave_master_delete", "crew_setup", "crew_employees", "crew_admin"] },
   { key: "portal_admin", label: "Portal administration", note: "Database, configuration, access and audit controls", pages: ["database_sync", "psp_admin", "user_access", "mail_settings", "audit_trail"] },
   { key: "account", label: "Personal account", note: "Employee self-service profile", pages: ["profile"] },

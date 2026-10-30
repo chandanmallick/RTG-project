@@ -31,12 +31,12 @@ export default function WorkflowHeader({
       <Stack direction={{ xs: "column", sm: "row" }} alignItems={{ sm: "center" }} justifyContent="space-between" spacing={1.2}>
         <Stack direction="row" alignItems="center" spacing={1.25} sx={{ minWidth: 0 }}>
           <Button
-            onClick={() => navigate("/crew/operations")}
+            onClick={() => navigate("/crew/dashboard")}
             startIcon={<ArrowLeft size={15} />}
             size="small"
             sx={{ flexShrink: 0, minWidth: 0, px: 1.15, color: "#334155", border: "1px solid #D6E0EB", background: "#FFF", textTransform: "none", fontWeight: 850 }}
           >
-            Operations
+            Dashboard
           </Button>
           <Box sx={{ minWidth: 0 }}>
             <Typography sx={{ color: accent, fontSize: 10, lineHeight: 1.2, fontWeight: 950, letterSpacing: ".09em", textTransform: "uppercase" }}>{eyebrow}</Typography>

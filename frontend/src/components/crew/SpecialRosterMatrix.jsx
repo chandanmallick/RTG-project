@@ -47,6 +47,7 @@ import {
   ChevronRight,
   Clock,
   Download,
+  ExternalLink,
   GripVertical,
   HelpCircle,
   Plus,
@@ -308,6 +309,7 @@ export default function SpecialRosterMatrix({
   const [addSelectedDept, setAddSelectedDept] = useState("");
   const [addAvailableDepts, setAddAvailableDepts] = useState([]);
   const [addReason, setAddReason] = useState("");
+  const [addSearchQuery, setAddSearchQuery] = useState("");
   const [candidateOptions, setCandidateOptions] = useState([]);
   const [candidateLoading, setCandidateLoading] = useState(false);
   const [addSaving, setAddSaving] = useState(false);
@@ -348,13 +350,15 @@ export default function SpecialRosterMatrix({
   const [seqRunning, setSeqRunning] = useState(false);
   const [seqResults, setSeqResults] = useState(null);
 
-  // Load events list
+  // Load events list (filter out past events for manpower management)
   useEffect(() => {
     api
       .get("/special-events")
       .then((res) => {
         const list = Array.isArray(res.data) ? res.data : [];
-        setEvents(list);
+        const todayStr = dayjs().format("YYYY-MM-DD");
+        const activeList = list.filter((ev) => !ev.endDate || ev.endDate >= todayStr);
+        setEvents(activeList);
         if (eventId && !selectedEventId) {
           setSelectedEventId(eventId);
         }
@@ -784,22 +788,24 @@ export default function SpecialRosterMatrix({
     }
   };
 
-  // Submit Quick Add Person
-  const handleAddPersonSubmit = async () => {
-    if (!addEmployeeId) return;
+  // Submit Quick Add Person / Deploy Candidate to Shift
+  const handleAddPersonSubmit = async (overrideId, overrideName) => {
+    const targetId = overrideId || addEmployeeId;
+    const targetName = overrideName || addEmployeeName || targetId;
+    if (!targetId) return;
     setAddSaving(true);
     try {
       await api.put("/replacement/duty-switch/additional-manpower", {
         date: addSlot.date,
-        employeeId: addEmployeeId,
+        employeeId: targetId,
         assignedDuty: addSlot.shift,
-        reason: addReason || `Added to ${addSlot.shift} via matrix view`,
+        reason: addReason || `Added to ${addSlot.shift} via candidate dashboard`,
         eventId: selectedEventId || undefined,
         mode: "double",
       });
       setNotice({
         severity: "success",
-        text: `Successfully added ${addEmployeeName || addEmployeeId} to ${addSlot.shift} on ${addSlot.date}!`,
+        text: `Successfully added ${targetName} to ${addSlot.shift} on ${addSlot.date}!`,
       });
       setAddDialogOpen(false);
       await loadMatrix();
@@ -1311,6 +1317,32 @@ export default function SpecialRosterMatrix({
                     />
                     <Typography fontSize={10.5} fontWeight={900} color="#166534" noWrap>
                       {l.replacement?.name || "Assigned"}
+                      {l.isSIC && (
+                        <Tooltip title={l.actingSIC?.name ? `Acting SIC: ${l.actingSIC.name}. Click to change.` : "Click to assign Acting SIC"}>
+                          <Box
+                            component="span"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openAssignSicDialog(l);
+                            }}
+                            sx={{
+                              ml: 0.5,
+                              color: "#92400E",
+                              fontWeight: 950,
+                              fontSize: "0.68rem",
+                              cursor: "pointer",
+                              bgcolor: "#FEF3C7",
+                              px: 0.4,
+                              py: 0.1,
+                              borderRadius: "3px",
+                              border: "1px solid #FCD34D",
+                              "&:hover": { bgcolor: "#FDE68A", textDecoration: "underline" },
+                            }}
+                          >
+                            ({l.actingSIC?.name || "Acting SIC"})
+                          </Box>
+                        </Tooltip>
+                      )}
                     </Typography>
                     <Chip
                       size="small"
@@ -1348,77 +1380,32 @@ export default function SpecialRosterMatrix({
               </Box>
             )}
 
-            {/* Option to Assign Acting SIC like manual module when SIC is on leave */}
-            {l.isSIC && (
+            {/* If SIC is on leave and no replacement assigned yet, show inline assign acting SIC in brackets without extra row */}
+            {l.isSIC && !l.replacement?.name && (
               <Box sx={{ mt: 0.2 }}>
-                {l.actingSIC?.name ? (
-                  <Stack
-                    direction="row"
-                    alignItems="center"
-                    justifyContent="space-between"
-                    spacing={0.3}
-                    sx={{
-                      bgcolor: "#FEF3C7",
-                      p: 0.25,
-                      borderRadius: 1,
-                      border: "1px solid #FCD34D",
-                    }}
-                  >
-                    <Stack direction="row" alignItems="center" spacing={0.3} sx={{ minWidth: 0 }}>
-                      <Shield size={10} color="#B45309" />
-                      <Typography fontSize={9.5} fontWeight={900} color="#92400E" noWrap>
-                        Acting SIC: {l.actingSIC.name}
-                      </Typography>
-                    </Stack>
-                    <Button
-                      size="small"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        openAssignSicDialog(l);
-                      }}
-                      sx={{
-                        fontSize: "0.56rem",
-                        py: 0,
-                        px: 0.35,
-                        minHeight: 0,
-                        textTransform: "none",
-                        fontWeight: 850,
-                        color: "#92400E",
-                        bgcolor: "#FFF",
-                        border: "1px solid #FCD34D",
-                        borderRadius: 1,
-                        "&:hover": { bgcolor: "#FDE68A" },
-                      }}
-                    >
-                      Change
-                    </Button>
-                  </Stack>
-                ) : (
-                  <Button
-                    size="small"
-                    fullWidth
-                    startIcon={<Shield size={10} />}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      openAssignSicDialog(l);
-                    }}
-                    sx={{
-                      fontSize: "0.62rem",
-                      py: 0.15,
-                      px: 0.5,
-                      minHeight: 0,
-                      bgcolor: "#FEF3C7",
-                      color: "#92400E",
-                      border: "1px solid #FCD34D",
-                      borderRadius: 1,
-                      fontWeight: 900,
-                      textTransform: "none",
-                      "&:hover": { bgcolor: "#FDE68A" },
-                    }}
-                  >
-                    👑 Assign Acting SIC
-                  </Button>
-                )}
+                <Button
+                  size="small"
+                  startIcon={<Shield size={10} />}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    openAssignSicDialog(l);
+                  }}
+                  sx={{
+                    fontSize: "0.62rem",
+                    py: 0.1,
+                    px: 0.5,
+                    minHeight: 0,
+                    bgcolor: "#FEF3C7",
+                    color: "#92400E",
+                    border: "1px solid #FCD34D",
+                    borderRadius: 1,
+                    fontWeight: 900,
+                    textTransform: "none",
+                    "&:hover": { bgcolor: "#FDE68A" },
+                  }}
+                >
+                  {l.actingSIC?.name ? `(${l.actingSIC.name} · Acting SIC)` : "(Assign Acting SIC)"}
+                </Button>
               </Box>
             )}
           </Stack>
@@ -1428,17 +1415,18 @@ export default function SpecialRosterMatrix({
   };
 
   return (
-    <Box sx={{ width: "100%" }}>
+    <Box sx={{ width: "100%", height: "100%", flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
       {/* TOP CONTROL BAR & PERIOD SELECTOR */}
       <Paper
         elevation={0}
         sx={{
-          p: 2,
-          mb: 2.5,
-          borderRadius: 3.5,
+          p: 1.5,
+          mb: 1.5,
+          borderRadius: 3,
           background: "#FFFFFF",
           border: "1px solid #E2E8F0",
-          boxShadow: "0 6px 22px rgba(15, 23, 42, 0.05)",
+          boxShadow: "0 4px 16px rgba(15, 23, 42, 0.04)",
+          flexShrink: 0,
         }}
       >
         <Stack
@@ -1461,11 +1449,13 @@ export default function SpecialRosterMatrix({
                 <MenuItem value="">
                   <em>Custom Date Period (No Event Lock)</em>
                 </MenuItem>
-                {events.map((ev) => (
-                  <MenuItem key={ev.id} value={ev.id}>
-                    {ev.title} ({ev.startDate} to {ev.endDate})
-                  </MenuItem>
-                ))}
+                {events
+                  .filter((ev) => !ev.endDate || ev.endDate >= dayjs().format("YYYY-MM-DD"))
+                  .map((ev) => (
+                    <MenuItem key={ev.id} value={ev.id}>
+                      {ev.title} ({ev.startDate} to {ev.endDate})
+                    </MenuItem>
+                  ))}
               </Select>
             </FormControl>
 
@@ -1611,29 +1601,44 @@ export default function SpecialRosterMatrix({
       </Paper>
 
       {/* INTERACTIVE DUTY TYPE VS DAYS MATRIX */}
+      {/* MAIN DUTY MATRIX TABLE WITH EXPLICIT HORIZONTAL & VERTICAL SCROLLBARS */}
       <Paper
         elevation={0}
         sx={{
-          borderRadius: 3.5,
+          flex: 1,
+          minHeight: 0,
+          display: "flex",
+          flexDirection: "column",
+          borderRadius: 3,
           border: "1.5px solid #CBD5E1",
           bgcolor: "#FFFFFF",
           overflow: "hidden",
-          boxShadow: "0 8px 30px rgba(15, 23, 42, 0.06)",
+          boxShadow: "0 6px 24px rgba(15, 23, 42, 0.06)",
         }}
       >
-        <TableContainer sx={{ maxHeight: "calc(100vh - 240px)", overflow: "auto" }}>
-          <Table stickyHeader size="small" sx={{ minWidth: Math.max(900, (matrixData.dates || []).length * 190) }}>
+        <TableContainer
+          sx={{
+            flex: 1,
+            minHeight: 0,
+            width: "100%",
+            overflow: "auto",
+            "&::-webkit-scrollbar": { width: 8, height: 10 },
+            "&::-webkit-scrollbar-track": { background: "#F1F5F9" },
+            "&::-webkit-scrollbar-thumb": { background: "#94A3B8", borderRadius: 4, "&:hover": { background: "#64748B" } },
+          }}
+        >
+          <Table stickyHeader size="small" sx={{ minWidth: Math.max(800, (matrixData.dates || []).length * 155) }}>
             <TableHead sx={{ position: "sticky", top: 0, zIndex: 12 }}>
               <TableRow sx={{ position: "sticky", top: 0, zIndex: 12 }}>
                 {/* Fixed Y-Axis Header: Duty Type */}
                 <TableCell
                   sx={{
-                    width: 170,
-                    minWidth: 170,
+                    width: 140,
+                    minWidth: 140,
                     bgcolor: "#0F172A",
                     color: "#FFFFFF",
                     fontWeight: 900,
-                    fontSize: 13,
+                    fontSize: 12.5,
                     position: "sticky !important",
                     left: 0,
                     top: 0,
@@ -1642,8 +1647,8 @@ export default function SpecialRosterMatrix({
                   }}
                 >
                   <Stack direction="row" alignItems="center" spacing={1}>
-                    <Briefcase size={16} />
-                    <span>Duty Shift / Days</span>
+                    <Briefcase size={15} />
+                    <span>Duty Shift</span>
                   </Stack>
                 </TableCell>
 
@@ -1658,15 +1663,15 @@ export default function SpecialRosterMatrix({
                       key={dateStr}
                       align="center"
                       sx={{
-                        width: 190,
-                        minWidth: 190,
+                        width: 155,
+                        minWidth: 155,
                         position: "sticky !important",
                         top: 0,
                         zIndex: 15,
                         bgcolor: isToday ? "#EDE9FE" : isWeekend ? "#F8FAFC" : "#FFFFFF",
                         borderLeft: "1px solid #E2E8F0",
                         borderBottom: "2px solid #CBD5E1",
-                        py: 1,
+                        py: 0.8,
                         boxShadow: "0 2px 4px rgba(0,0,0,0.04)",
                       }}
                     >
@@ -1802,7 +1807,9 @@ export default function SpecialRosterMatrix({
                               verticalAlign: "top",
                               borderLeft: "1px solid #E2E8F0",
                               borderBottom: "1px solid #CBD5E1",
-                              p: 1,
+                              p: 0.75,
+                              width: 155,
+                              minWidth: 155,
                               bgcolor: isDragTarget ? "#EDE9FE" : "transparent",
                               outline: isDragTarget ? "2px dashed #7C3AED" : "none",
                               transition: "background-color 0.15s, outline 0.15s",
@@ -1874,133 +1881,315 @@ export default function SpecialRosterMatrix({
         </TableContainer>
       </Paper>
 
-      {/* QUICK ADD PERSON TO SHIFT DIALOG */}
+      {/* REPLACEMENT & CANDIDATE SELECTION DASHBOARD DIALOG (Image 2) */}
       <Dialog
         open={addDialogOpen}
         onClose={() => !addSaving && setAddDialogOpen(false)}
         fullWidth
-        maxWidth="xs"
+        maxWidth="lg"
         slotProps={{
-          paper: { sx: { borderRadius: "20px !important", p: 1, background: "#FAF9FF !important" } },
+          paper: {
+            sx: {
+              borderRadius: "24px !important",
+              background: "#FAF9FF !important",
+              overflow: "hidden",
+              boxShadow: "0 24px 80px rgba(15, 23, 42, 0.18)",
+            },
+          },
         }}
       >
-        <DialogTitle sx={{ fontWeight: 900 }}>
-          <Stack direction="row" alignItems="center" spacing={1}>
-            <UserPlus size={18} color="#6D28D9" />
-            <Typography fontWeight={900} fontSize={17} color="#1E1B4B">
-              Add Person to {addSlot.shift}
-            </Typography>
-          </Stack>
-          <Typography variant="body2" color="#64748B">
-            Date: {dayjs(addSlot.date).format("DD-MMM-YYYY")} ({dayjs(addSlot.date).format("dddd")})
-          </Typography>
-        </DialogTitle>
-        <DialogContent>
-          <Stack spacing={2} sx={{ pt: 1 }}>
-            {/* Department Filter for Candidate Pool */}
-            <FormControl size="small" fullWidth>
-              <InputLabel id="dept-filter-label">Filter by Department</InputLabel>
-              <Select
-                labelId="dept-filter-label"
-                value={addSelectedDept}
-                label="Filter by Department"
-                onChange={(e) => handleDeptFilterChange(e.target.value)}
+        <DialogTitle
+          sx={{
+            background: "linear-gradient(105deg, #1E1B4B 0%, #4338CA 60%, #6D28D9 100%)",
+            color: "#FFF",
+            px: 3,
+            py: 2.2,
+          }}
+        >
+          <Stack direction={{ xs: "column", sm: "row" }} justifyContent="space-between" alignItems={{ sm: "center" }} spacing={1.5}>
+            <Stack direction="row" alignItems="center" spacing={1.5}>
+              <Box
+                sx={{
+                  width: 40,
+                  height: 40,
+                  borderRadius: "12px",
+                  bgcolor: "rgba(255, 255, 255, 0.15)",
+                  display: "grid",
+                  placeItems: "center",
+                }}
               >
-                <MenuItem value="">
-                  <em>All Departments ({candidateOptions.length} candidates)</em>
-                </MenuItem>
-                {addAvailableDepts.map((d) => (
-                  <MenuItem key={d} value={d}>
-                    {d}
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
+                <UserPlus size={22} color="#FFF" />
+              </Box>
+              <Box>
+                <Typography fontWeight={900} fontSize={17} color="#FFF">
+                  Replacement Candidate Dashboard — Add to {addSlot.shift}
+                </Typography>
+                <Typography variant="body2" sx={{ color: "rgba(255, 255, 255, 0.8)", fontSize: "0.8rem" }}>
+                  Date: {dayjs(addSlot.date).format("DD-MMM-YYYY")} ({dayjs(addSlot.date).format("dddd")}) · Last duty details & eligibility
+                </Typography>
+              </Box>
+            </Stack>
 
-            <Autocomplete
-              options={candidateOptions}
-              loading={candidateLoading}
-              getOptionLabel={(option) => {
-                if (typeof option === "string") return option;
-                return `${option.name || option.employeeId} (${option.employeeId}) · ${option.designation || "Staff"} · ${option.dutyStatus || option.assignedDuty || "Available"}`;
-              }}
-              value={
-                candidateOptions.find((c) => String(c.employeeId) === String(addEmployeeId)) ||
-                (addEmployeeId ? { employeeId: addEmployeeId, name: addEmployeeName } : null)
-              }
-              onChange={(e, val) => {
-                if (val) {
-                  setAddEmployeeId(val.employeeId);
-                  setAddEmployeeName(val.name);
-                } else {
-                  setAddEmployeeId("");
-                  setAddEmployeeName("");
-                }
-              }}
-              renderOption={(props, option) => {
-                const optGroup = (option.groupName && String(option.groupName).trim()) || "General";
-                const optGrp = getGroupStyle(optGroup);
-                return (
-                  <Box component="li" {...props} key={option.employeeId}>
-                    <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ width: "100%", py: 0.4 }}>
-                      <Box sx={{ minWidth: 0, pr: 1 }}>
-                        <Typography fontSize={13} fontWeight={800} color="#0F172A">
-                          {option.name || option.employeeId}
-                        </Typography>
-                        <Typography fontSize={11} color="#64748B">
-                          {option.designation || "Staff"} · {option.department || "General"}
-                        </Typography>
-                        <Typography fontSize={10.5} fontWeight={700} color={option.dutyStatus?.includes("On Leave") ? "#DC2626" : option.dutyStatus?.includes("Rostered") ? "#B45309" : "#16A34A"}>
-                          Status: {option.dutyStatus || "Available / Off Duty"}
-                        </Typography>
-                      </Box>
-                      <Chip
-                        size="small"
-                        label={optGroup}
-                        sx={{
-                          height: 18,
-                          fontSize: "0.64rem",
-                          fontWeight: 900,
-                          bgcolor: optGrp.badgeBg,
-                          color: optGrp.badgeText,
-                          border: `1px solid ${optGrp.badgeBorder}`,
-                          borderRadius: "4px",
-                          flexShrink: 0,
-                        }}
-                      />
-                    </Stack>
-                  </Box>
-                );
-              }}
-              renderInput={(params) => (
-                <TextField
-                  {...params}
-                  label="Select Candidate"
-                  placeholder="Search crew members across departments"
-                  helperText={`All active personnel available (${candidateOptions.length} candidates)`}
-                />
-              )}
-            />
-
-            <TextField
-              label="Assignment Reason"
+            <Button
               size="small"
-              value={addReason}
-              onChange={(e) => setAddReason(e.target.value)}
-            />
+              variant="outlined"
+              endIcon={<ExternalLink size={14} />}
+              onClick={() => window.open("/crew/replacement?tab=duty", "_blank")}
+              sx={{
+                bgcolor: "rgba(255, 255, 255, 0.12)",
+                color: "#FFF",
+                borderColor: "rgba(255, 255, 255, 0.35)",
+                textTransform: "none",
+                fontWeight: 800,
+                fontSize: "0.78rem",
+                borderRadius: 2,
+                "&:hover": { bgcolor: "rgba(255, 255, 255, 0.22)", borderColor: "#FFF" },
+              }}
+            >
+              Open Full Replacement Dashboard ↗
+            </Button>
           </Stack>
-        </DialogContent>
-        <DialogActions sx={{ p: 2 }}>
-          <Button disabled={addSaving} onClick={() => setAddDialogOpen(false)}>
-            Cancel
-          </Button>
-          <Button
-            variant="contained"
-            disabled={addSaving || !addEmployeeId}
-            onClick={handleAddPersonSubmit}
-            sx={{ bgcolor: "#6D28D9 !important", fontWeight: 850, textTransform: "none" }}
+        </DialogTitle>
+
+        <DialogContent sx={{ p: { xs: 1.5, md: 3 }, bgcolor: "#F8FAFC" }}>
+          {/* Controls: Department Filter, Candidate Search, Reason */}
+          <Paper
+            elevation={0}
+            sx={{
+              p: 2,
+              mb: 2.5,
+              borderRadius: 3,
+              border: "1px solid #E2E8F0",
+              bgcolor: "#FFFFFF",
+            }}
           >
-            {addSaving ? "Adding..." : "Add to Shift"}
+            <Grid container spacing={2} alignItems="center">
+              <Grid item xs={12} sm={4}>
+                <FormControl size="small" fullWidth>
+                  <InputLabel id="dept-filter-label">Filter by Department / Pool</InputLabel>
+                  <Select
+                    labelId="dept-filter-label"
+                    value={addSelectedDept}
+                    label="Filter by Department / Pool"
+                    onChange={(e) => handleDeptFilterChange(e.target.value)}
+                  >
+                    <MenuItem value="">
+                      <em>All Available ({candidateOptions.length} candidates)</em>
+                    </MenuItem>
+                    {addAvailableDepts.map((d) => (
+                      <MenuItem key={d} value={d}>
+                        {d}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              </Grid>
+
+              <Grid item xs={12} sm={4}>
+                <TextField
+                  size="small"
+                  fullWidth
+                  placeholder="Search by name, ID or designation..."
+                  value={addSearchQuery}
+                  onChange={(e) => setAddSearchQuery(e.target.value)}
+                  InputProps={{
+                    startAdornment: <Search size={16} color="#64748B" style={{ marginRight: 8 }} />,
+                  }}
+                />
+              </Grid>
+
+              <Grid item xs={12} sm={4}>
+                <TextField
+                  size="small"
+                  fullWidth
+                  label="Assignment Reason"
+                  value={addReason}
+                  onChange={(e) => setAddReason(e.target.value)}
+                />
+              </Grid>
+            </Grid>
+          </Paper>
+
+          {/* CANDIDATE TABLE (Matching Replacement Dashboard with Last Duty, Days Since, Denials) */}
+          <TableContainer
+            sx={{
+              border: "1px solid #CBD5E1",
+              borderRadius: 3,
+              maxHeight: "52vh",
+              bgcolor: "#FFFFFF",
+              "&::-webkit-scrollbar": { width: 8, height: 8 },
+              "&::-webkit-scrollbar-thumb": { background: "#CBD5E1", borderRadius: 4 },
+            }}
+          >
+            <Table size="small" stickyHeader sx={{ minWidth: 950 }}>
+              <TableHead>
+                <TableRow>
+                  <TableCell sx={{ fontWeight: 900, bgcolor: "#F1F5F9", width: 60 }}>Order</TableCell>
+                  <TableCell sx={{ fontWeight: 900, bgcolor: "#F1F5F9", minWidth: 180 }}>Employee</TableCell>
+                  <TableCell sx={{ fontWeight: 900, bgcolor: "#F1F5F9" }}>Pool / Department</TableCell>
+                  <TableCell sx={{ fontWeight: 900, bgcolor: "#F1F5F9" }}>Duty on Date</TableCell>
+                  <TableCell sx={{ fontWeight: 900, bgcolor: "#F1F5F9" }}>Next Day</TableCell>
+                  <TableCell sx={{ fontWeight: 900, bgcolor: "#F1F5F9" }}>Last Matching Duty</TableCell>
+                  <TableCell sx={{ fontWeight: 900, bgcolor: "#F1F5F9" }}>Days Since</TableCell>
+                  <TableCell sx={{ fontWeight: 900, bgcolor: "#F1F5F9" }}>Denials</TableCell>
+                  <TableCell sx={{ fontWeight: 900, bgcolor: "#F1F5F9", textAlign: "right" }}>Action</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {candidateLoading ? (
+                  <TableRow>
+                    <TableCell colSpan={9} align="center" sx={{ py: 6 }}>
+                      <CircularProgress size={28} />
+                      <Typography sx={{ mt: 1, fontSize: 13, color: "#64748B", fontWeight: 700 }}>
+                        Loading candidate roster & duty history...
+                      </Typography>
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  (() => {
+                    const filtered = candidateOptions.filter((c) => {
+                      if (!addSearchQuery) return true;
+                      const q = addSearchQuery.toLowerCase();
+                      return (
+                        (c.name || "").toLowerCase().includes(q) ||
+                        String(c.employeeId || "").toLowerCase().includes(q) ||
+                        (c.designation || "").toLowerCase().includes(q) ||
+                        (c.department || "").toLowerCase().includes(q)
+                      );
+                    });
+
+                    if (filtered.length === 0) {
+                      return (
+                        <TableRow>
+                          <TableCell colSpan={9} align="center" sx={{ py: 5, color: "#64748B" }}>
+                            No candidates found matching the selected filters.
+                          </TableCell>
+                        </TableRow>
+                      );
+                    }
+
+                    return filtered.map((candidate, idx) => {
+                      const displayedDate = candidate.lastMatchingDutyDate || candidate.lastDutyDate;
+                      const formattedDate = displayedDate ? dayjs(displayedDate).format("DD-MMM-YYYY") : "Never recorded";
+                      const isMatching = Boolean(candidate.lastMatchingDutyDate);
+                      const daysSince = isMatching ? candidate.daysSinceMatchingDuty : candidate.daysSinceLastDuty;
+                      const optGroup = (candidate.groupName && String(candidate.groupName).trim()) || "General";
+                      const optGrp = getGroupStyle(optGroup);
+
+                      return (
+                        <TableRow
+                          key={candidate.employeeId}
+                          hover
+                          sx={{
+                            "&:hover": { bgcolor: "#F8FAFC" },
+                            transition: "background-color 0.15s ease",
+                          }}
+                        >
+                          <TableCell>
+                            <Chip
+                              size="small"
+                              label={candidate.serialNo || idx + 1}
+                              sx={{
+                                fontWeight: 900,
+                                bgcolor: "#EEF2FF",
+                                color: "#4338CA",
+                                height: 22,
+                                fontSize: "0.72rem",
+                              }}
+                            />
+                          </TableCell>
+                          <TableCell>
+                            <Typography fontSize={13} fontWeight={850} color="#0F172A">
+                              {candidate.name || candidate.employeeId}
+                            </Typography>
+                            <Typography fontSize={11} color="#64748B">
+                              {candidate.designation || "Staff"} · Emp ID: {candidate.employeeId}
+                            </Typography>
+                          </TableCell>
+                          <TableCell>
+                            <Stack direction="row" spacing={0.6} alignItems="center">
+                              <Chip
+                                size="small"
+                                label={candidate.candidatePool || candidate.department || "General"}
+                                sx={{
+                                  height: 20,
+                                  fontSize: "0.68rem",
+                                  fontWeight: 800,
+                                  bgcolor: optGrp.badgeBg,
+                                  color: optGrp.badgeText,
+                                  border: `1px solid ${optGrp.badgeBorder}`,
+                                }}
+                              />
+                            </Stack>
+                          </TableCell>
+                          <TableCell sx={{ fontWeight: 800, color: candidate.assignedDuty === "Off" ? "#16A34A" : "#334155" }}>
+                            {candidate.assignedDuty || "Off"}
+                          </TableCell>
+                          <TableCell sx={{ fontWeight: 750, color: "#64748B" }}>
+                            {candidate.nextDayDuty || "Off"}
+                          </TableCell>
+                          <TableCell sx={{ whiteSpace: "nowrap" }}>
+                            <Typography fontSize={12} fontWeight={800} color="#0F172A">
+                              {formattedDate}
+                            </Typography>
+                            {displayedDate && (
+                              <Typography fontSize={10} fontWeight={750} color={isMatching ? "#16A34A" : "#D97706"}>
+                                {isMatching ? `${addSlot.shift} · matching` : `${candidate.lastDutyType || "Duty"} · latest`}
+                              </Typography>
+                            )}
+                          </TableCell>
+                          <TableCell>
+                            <Typography fontSize={12} fontWeight={800} color={daysSince > 10 ? "#16A34A" : "#64748B"}>
+                              {daysSince ?? "-"} {daysSince !== null && daysSince !== undefined ? "days" : ""}
+                            </Typography>
+                          </TableCell>
+                          <TableCell>
+                            <Chip
+                              size="small"
+                              label={candidate.denialCount || 0}
+                              sx={{
+                                height: 18,
+                                fontSize: "0.68rem",
+                                fontWeight: 850,
+                                bgcolor: (candidate.denialCount || 0) > 0 ? "#FEE2E2" : "#F1F5F9",
+                                color: (candidate.denialCount || 0) > 0 ? "#991B1B" : "#64748B",
+                              }}
+                            />
+                          </TableCell>
+                          <TableCell align="right">
+                            <Button
+                              size="small"
+                              variant="contained"
+                              disabled={addSaving}
+                              onClick={() => handleAddPersonSubmit(candidate.employeeId, candidate.name)}
+                              sx={{
+                                bgcolor: "#6D28D9",
+                                "&:hover": { bgcolor: "#5B21B6" },
+                                textTransform: "none",
+                                fontWeight: 850,
+                                fontSize: "0.75rem",
+                                py: 0.35,
+                                px: 1.2,
+                                borderRadius: 1.8,
+                                whiteSpace: "nowrap",
+                              }}
+                            >
+                              Add to Shift
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    });
+                  })()
+                )}
+              </TableBody>
+            </Table>
+          </TableContainer>
+        </DialogContent>
+
+        <DialogActions sx={{ p: 2, bgcolor: "#F1F5F9" }}>
+          <Button disabled={addSaving} onClick={() => setAddDialogOpen(false)} sx={{ fontWeight: 800 }}>
+            Close
           </Button>
         </DialogActions>
       </Dialog>

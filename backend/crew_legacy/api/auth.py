@@ -1,4 +1,4 @@
-﻿from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 from time import time
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -44,6 +44,7 @@ PAGE_CATALOG = [
     ("old_logbook", "Old Logbook", "/old-logbook"),
     ("crew_dashboard", "Crew Dashboard", "/crew/dashboard"),
     ("crew_calendar", "Crew Calendar", "/crew/calendar"),
+    ("crew_compact_matrix", "Compact Duty Matrix View", "/crew/calendar?view=matrix_alternate"),
     ("crew_roster", "Duty Roster", "/crew/roster"),
     ("crew_presentation", "Morning Presentation Roster", "/crew/morning-presentation"),
     ("crew_leave", "Leave", "/crew/leave"),
