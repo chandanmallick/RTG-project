@@ -2,6 +2,7 @@ from fastapi import APIRouter, HTTPException, Depends, Query
 from bson import ObjectId
 from crew_legacy.admin_logic.auth_utils import check_replacement_access, get_authenticated_user, get_current_user
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 from typing import Optional
 from crew_legacy.admin_logic.notification_service import notify_all, send_replacement_duty_email
 import re
@@ -4435,12 +4436,23 @@ def get_notifications(user=Depends(get_current_user)):
             if str(e.get("userId") or e.get("employeeId") or "").strip()
         ]
 
+        user_ids = [user_id]
+        if user_id.isdigit():
+            user_ids.append(str(int(user_id)))
+            user_ids.append(user_id.zfill(5))
+        user_ids = list(dict.fromkeys(user_ids))
+
         or_conditions = [
-            {"employeeId": user_id},
-            {"controllerIds": user_id},
+            {"employeeId": {"$in": user_ids}},
+            {"controllerIds": {"$in": user_ids}},
         ]
         if ro_emp_ids:
-            or_conditions.append({"employeeId": {"$in": ro_emp_ids}})
+            all_ro_ids = list(ro_emp_ids)
+            for eid in ro_emp_ids:
+                if eid.isdigit():
+                    all_ro_ids.append(str(int(eid)))
+                    all_ro_ids.append(eid.zfill(5))
+            or_conditions.append({"employeeId": {"$in": list(dict.fromkeys(all_ro_ids))}})
 
         query = {
             "$or": or_conditions,
@@ -4496,9 +4508,9 @@ def get_notifications(user=Depends(get_current_user)):
             and (before_cutoff or is_reporting_or_hod)
             and not is_elapsed
         )
-        # Deny option to Reporting / HOD officer (or Admin/Controller)
+        # Deny option to assigned employee AND Reporting / HOD officer (or Admin/Controller)
         n["canDeny"] = bool(
-            is_reporting_or_hod
+            (is_assignee or is_reporting_or_hod)
             and n.get("status") in {"Pending", "Accepted"}
             and (before_cutoff or is_reporting_or_hod)
             and not is_elapsed
@@ -4589,9 +4601,10 @@ def deny_duty(id: str, payload: dict, user=Depends(get_current_user)):
     user_role = str(user.get("role") or "").lower()
     user_is_admin = user_role in ["admin", "hod", "dic", "dept_ic", "controller"] or user_id in ["50041", "admin"]
 
-    # USER REQUIREMENT: Deny option only to Reporting/ HOD officer.
-    if not is_controller and not user_is_admin:
-        raise HTTPException(403, "Deny option is restricted to Reporting / HOD officers only")
+    # USER REQUIREMENT: Deny option available to assigned employee AND Reporting/ HOD officer.
+    is_assignee = str(notif.get("employeeId") or "").strip() == user_id
+    if not is_assignee and not is_controller and not user_is_admin:
+        raise HTTPException(403, "Deny option is restricted to assigned employee or Reporting / HOD officers only")
 
     if notif.get("status") not in {"Pending", "Accepted"}:
         raise HTTPException(409, f"Duty is already {notif.get('status')}")
@@ -4605,7 +4618,7 @@ def deny_duty(id: str, payload: dict, user=Depends(get_current_user)):
     reason = str(payload.get("reason") or "").strip()
     if not reason:
         raise HTTPException(400, "Denial reason is required")
-    actor_role = "Reporting/HOD Officer" if is_controller else ("Admin" if user_is_admin else "Controlling Officer")
+    actor_role = "Employee" if is_assignee else ("Reporting/HOD Officer" if is_controller else "Admin")
     leave = None
     if ObjectId.is_valid(str(notif.get("leaveId") or "")):
         leave = leave_request_collection.find_one({"_id": ObjectId(notif["leaveId"])})
