@@ -96,3 +96,10 @@ def operations_summary(user=Depends(get_authenticated_user)):
         counts["calendarCoverage"] += sports_application_collection.count_documents(coverage_query)
     actions = operation_actions(pages, role, nomination_access, counts, sports_manager, hr)
     return {"actions": actions, "totalPending": sum(item["pending"] for item in actions.values()), "updatedAt": datetime.utcnow().isoformat() + "Z"}
+
+
+@router.post("/reminders/send-pending-approvals")
+def trigger_pending_approvals_reminders(user=Depends(get_authenticated_user)):
+    from crew_legacy.services.approval_reminder_service import scan_and_send_all_pending_approval_reminders
+    res = scan_and_send_all_pending_approval_reminders(force=True)
+    return {"message": "Pending approval reminders processed successfully", "result": res}

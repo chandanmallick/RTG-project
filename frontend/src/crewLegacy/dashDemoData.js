@@ -20,7 +20,7 @@ export function createDashDemo(today) {
     { id: "demo-other", kind: "Leave", employeeId: "DEMO01", name: names[1], date: dayjs(today).add(1, "day").format("YYYY-MM-DD"), leaveType: "CL", finalStatus: "Applied", sicApprovalStatus: "Pending", canCancel: true }
   ];
   records.push({ ...records[0], id: "demo-leave-day-2", date: dayjs(today).add(3, "day").format("YYYY-MM-DD") });
-  return { groups, records, actions: { specialEventRoster: { enabled: true }, leaveApproval: { enabled: true, pending: 2 }, trainingApproval: { enabled: true, pending: 1 }, sportsApproval: { enabled: true, pending: 0 }, exchangeApproval: { enabled: true, pending: 1 }, delegate: { enabled: true } }, leaderboard: names.slice(0, 5).map((name, i) => ({ name, value: [16, 12, 9, 7, 5][i] })), leaveStats: [8, 5, 11, 4].map((count, i) => ({ group: `Group ${i + 1}`, count })) };
+  return { groups, records, actions: { specialEventRoster: { enabled: true }, leaveApproval: { enabled: true, pending: 2 }, leaveReplacement: { enabled: true, pending: 1 }, trainingApproval: { enabled: true, pending: 1 }, sportsApproval: { enabled: true, pending: 0 }, exchangeApproval: { enabled: true, pending: 1 }, delegate: { enabled: true } }, leaderboard: names.slice(0, 5).map((name, i) => ({ name, value: [16, 12, 9, 7, 5][i] })), leaveStats: [8, 5, 11, 4].map((count, i) => ({ group: `Group ${i + 1}`, count })) };
 }
 
 export function demoEvents(month) {

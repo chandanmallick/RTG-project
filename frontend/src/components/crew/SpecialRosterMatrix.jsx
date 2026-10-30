@@ -335,6 +335,87 @@ export default function SpecialRosterMatrix({
   const [sicScope, setSicScope] = useState("shift");
   const [sicSaving, setSicSaving] = useState(false);
 
+  // Temporary Acting SIC Assignment Modal state for SIC-less shift or after SIC dragged
+  const [shiftSicModalOpen, setShiftSicModalOpen] = useState(false);
+  const [shiftSicTarget, setShiftSicTarget] = useState({ date: "", shift: "", groupName: "", movedSIC: null });
+  const [shiftSicCandidates, setShiftSicCandidates] = useState([]);
+  const [shiftSicSelectedEmpId, setShiftSicSelectedEmpId] = useState("");
+  const [shiftSicReason, setShiftSicReason] = useState("");
+  const [shiftSicSaving, setShiftSicSaving] = useState(false);
+
+  const openShiftSicModal = (dateStr, shiftKey, candidates = [], movedSIC = null) => {
+    let list = Array.isArray(candidates) && candidates.length > 0 ? candidates : [];
+    if (list.length === 0) {
+      list = (matrixData.grid?.[dateStr]?.[shiftKey] || []).filter((p) => !p.onLeave);
+    }
+    const primaryGroup = list.find((c) => c.groupName)?.groupName || "";
+    setShiftSicTarget({ date: dateStr, shift: shiftKey, groupName: primaryGroup, movedSIC });
+    setShiftSicCandidates(list);
+    setShiftSicSelectedEmpId(list[0]?.employeeId || "");
+    setShiftSicReason(
+      movedSIC
+        ? `Acting SIC assigned because ${movedSIC.name || "regular SIC"} was moved to ${movedSIC.targetShift || "another shift"}`
+        : `Acting SIC assigned for ${shiftKey} Shift`
+    );
+    setShiftSicModalOpen(true);
+  };
+
+  const handleSaveShiftActingSic = async () => {
+    if (!shiftSicSelectedEmpId) {
+      setNotice({ severity: "warning", text: "Please select an employee to assign as Acting SIC." });
+      return;
+    }
+    setShiftSicSaving(true);
+    try {
+      await api.put("/replacement/duty-switch/acting-sic", {
+        date: shiftSicTarget.date,
+        shift: shiftSicTarget.shift,
+        groupName: shiftSicTarget.groupName,
+        movedSICEmployeeId: shiftSicTarget.movedSIC?.employeeId || "",
+        actingSICEmployeeId: shiftSicSelectedEmpId,
+        reason: shiftSicReason || `Designated Acting SIC for ${shiftSicTarget.shift} Shift`,
+      });
+      setNotice({
+        severity: "success",
+        text: `Acting Shift In-Charge assigned successfully for ${shiftSicTarget.shift} on ${dayjs(shiftSicTarget.date).format("DD-MMM-YYYY")}!`,
+      });
+      setShiftSicModalOpen(false);
+      await loadMatrix();
+    } catch (err) {
+      setNotice({
+        severity: "error",
+        text: err.response?.data?.detail || "Failed to assign Acting SIC.",
+      });
+    } finally {
+      setShiftSicSaving(false);
+    }
+  };
+
+  const handleClearActingSic = async (dateStr, employeeId, shiftKey) => {
+    if (!window.confirm("Remove Acting SIC designation for this shift?")) return;
+    setLoading(true);
+    try {
+      await api.put("/replacement/duty-switch/acting-sic", {
+        date: dateStr,
+        actingSICEmployeeId: employeeId,
+        shift: shiftKey,
+        clear: true,
+      });
+      setNotice({
+        severity: "success",
+        text: "Acting SIC removed successfully.",
+      });
+      await loadMatrix();
+    } catch (err) {
+      setNotice({
+        severity: "error",
+        text: err.response?.data?.detail || "Failed to remove Acting SIC.",
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
   // Sequential Allocation from Created Pools & Multi-Department Dialog state
   const [sequentialDialogOpen, setSequentialDialogOpen] = useState(false);
   const [seqStartDate, setSeqStartDate] = useState(startDate);
@@ -553,6 +634,9 @@ export default function SpecialRosterMatrix({
     }
 
     // Regular Drag & Drop between shifts on the same day
+    const isPayloadSIC = Boolean(payload.isSIC || payload.isActingSIC);
+    const sourceShift = payload.sourceDuty;
+
     setLoading(true);
     try {
       await api.put("/replacement/duty-switch", {
@@ -566,6 +650,14 @@ export default function SpecialRosterMatrix({
         text: `Moved ${payload.name} to ${targetShift} on ${targetDate}. Reflected in exchange module!`,
       });
       await loadMatrix();
+
+      // If SIC itself was dragged to another shift, offer to assign Acting SIC to previous shift
+      if (isPayloadSIC && sourceShift !== targetShift) {
+        const remainingInPrevShift = (matrixData.grid?.[targetDate]?.[sourceShift] || []).filter(
+          (p) => p.employeeId !== payload.employeeId && !p.onLeave
+        );
+        openShiftSicModal(targetDate, sourceShift, remainingInPrevShift, { ...payload, targetShift });
+      }
     } catch (err) {
       setNotice({
         severity: "error",
@@ -987,20 +1079,50 @@ export default function SpecialRosterMatrix({
                   />
                 )}
                 {person.isActingSIC && (
-                  <Chip
-                    size="small"
-                    label="Acting SIC"
-                    sx={{
-                      height: 15,
-                      fontSize: "0.58rem",
-                      fontWeight: 950,
-                      bgcolor: "#FEF3C7",
-                      color: "#92400E",
-                      border: "1px solid #FCD34D",
-                      px: 0.1,
-                      "& .MuiChip-label": { px: 0.4 },
-                    }}
-                  />
+                  <Tooltip title="Designated Acting SIC. Click to change or remove.">
+                    <Chip
+                      size="small"
+                      label="Acting SIC"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleClearActingSic(dateStr, person.employeeId, shiftKey);
+                      }}
+                      onDelete={(e) => {
+                        e.stopPropagation();
+                        handleClearActingSic(dateStr, person.employeeId, shiftKey);
+                      }}
+                      sx={{
+                        height: 15,
+                        fontSize: "0.58rem",
+                        fontWeight: 950,
+                        bgcolor: "#FEF3C7",
+                        color: "#92400E",
+                        border: "1px solid #FCD34D",
+                        cursor: "pointer",
+                        px: 0.1,
+                        "& .MuiChip-label": { px: 0.4 },
+                        "& .MuiChip-deleteIcon": { fontSize: 10, color: "#92400E", ml: -0.2, mr: 0.1 },
+                      }}
+                    />
+                  </Tooltip>
+                )}
+                {!person.isSIC && !person.isActingSIC && !person.onLeave && (
+                  <Tooltip title="Assign as Acting SIC for this shift">
+                    <IconButton
+                      size="small"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        openShiftSicModal(dateStr, shiftKey, [person], null);
+                      }}
+                      sx={{
+                        p: 0.1,
+                        color: "#94A3B8",
+                        "&:hover": { color: "#D97706", bgcolor: "#FEF3C7" },
+                      }}
+                    >
+                      <Shield size={11} />
+                    </IconButton>
+                  </Tooltip>
                 )}
                 <Tooltip title={`Group: ${personGroup}`}>
                   <Chip
@@ -1819,6 +1941,57 @@ export default function SpecialRosterMatrix({
                               {/* 1. Shift In-Charge at the very top (SIC on leave, Active SIC, or Acting SIC) */}
                               {sicLeaves.map((l) => renderUnifiedLeaveCard(l, dateStr, shiftKey))}
                               {activeSics.map((person) => renderPersonCard(person, dateStr, shiftKey))}
+
+                              {/* If shift is SIC-less (no active SIC and no SIC on leave), show banner at top */}
+                              {shiftKey !== "Leave" && shiftKey !== "Off" && activeSics.length === 0 && sicLeaves.length === 0 && eligibleActiveList.length > 0 && (
+                                <Box
+                                  onClick={() => openShiftSicModal(dateStr, shiftKey, eligibleActiveList, null)}
+                                  sx={{
+                                    p: 0.7,
+                                    border: "1.5px dashed #F59E0B",
+                                    borderRadius: "10px",
+                                    bgcolor: "#FFFBEB",
+                                    cursor: "pointer",
+                                    display: "flex",
+                                    alignItems: "center",
+                                    justifyContent: "space-between",
+                                    gap: 0.5,
+                                    transition: "all 0.15s ease",
+                                    "&:hover": {
+                                      bgcolor: "#FEF3C7",
+                                      borderColor: "#D97706",
+                                      transform: "translateY(-1px)",
+                                      boxShadow: "0 2px 8px rgba(245, 158, 11, 0.2)",
+                                    },
+                                  }}
+                                >
+                                  <Stack direction="row" alignItems="center" spacing={0.5} sx={{ minWidth: 0 }}>
+                                    <ShieldAlert size={14} color="#D97706" style={{ flexShrink: 0 }} />
+                                    <Box sx={{ minWidth: 0 }}>
+                                      <Typography fontSize={10} fontWeight={900} color="#92400E" sx={{ lineHeight: 1.1 }} noWrap>
+                                        No SIC Assigned
+                                      </Typography>
+                                      <Typography fontSize={8.5} color="#B45309" fontWeight={600} noWrap>
+                                        Click to assign SIC
+                                      </Typography>
+                                    </Box>
+                                  </Stack>
+                                  <Chip
+                                    size="small"
+                                    label="+ Assign"
+                                    sx={{
+                                      height: 18,
+                                      fontSize: "0.6rem",
+                                      fontWeight: 900,
+                                      bgcolor: "#F59E0B",
+                                      color: "#FFFFFF",
+                                      cursor: "pointer",
+                                      flexShrink: 0,
+                                      "& .MuiChip-label": { px: 0.4 },
+                                    }}
+                                  />
+                                </Box>
+                              )}
 
                               {/* 2. Regular Shift Members */}
                               {regularMembers.map((person) => renderPersonCard(person, dateStr, shiftKey))}
@@ -3129,6 +3302,130 @@ export default function SpecialRosterMatrix({
             }}
           >
             {sicSaving ? <CircularProgress size={18} color="inherit" /> : "Assign Acting SIC"}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* SHIFT ACTING SIC ASSIGNMENT MODAL (For SIC-less shift or after SIC dragged) */}
+      <Dialog
+        open={shiftSicModalOpen}
+        onClose={() => !shiftSicSaving && setShiftSicModalOpen(false)}
+        fullWidth
+        maxWidth="sm"
+        slotProps={{
+          paper: {
+            sx: {
+              borderRadius: "20px !important",
+              overflow: "hidden",
+              boxShadow: "0 24px 80px rgba(15, 23, 42, 0.2)",
+            },
+          },
+        }}
+      >
+        <DialogTitle
+          sx={{
+            background: "linear-gradient(105deg, #78350F 0%, #D97706 60%, #B45309 100%)",
+            color: "#FFF",
+            px: 3,
+            py: 2,
+          }}
+        >
+          <Stack direction="row" justifyContent="space-between" alignItems="center">
+            <Stack direction="row" spacing={1.5} alignItems="center">
+              <Box
+                sx={{
+                  width: 38,
+                  height: 38,
+                  borderRadius: "10px",
+                  bgcolor: "rgba(255, 255, 255, 0.18)",
+                  display: "grid",
+                  placeItems: "center",
+                }}
+              >
+                <Shield size={20} color="#FFF" />
+              </Box>
+              <Box>
+                <Typography fontSize={16} fontWeight={900} color="#FFF">
+                  Assign Shift In-Charge (Acting SIC)
+                </Typography>
+                <Typography fontSize={11} sx={{ color: "rgba(255, 255, 255, 0.85)", mt: 0.2 }}>
+                  {shiftSicTarget.shift} Shift &bull; {shiftSicTarget.date ? dayjs(shiftSicTarget.date).format("DD-MMM-YYYY (ddd)") : ""}
+                </Typography>
+              </Box>
+            </Stack>
+            <IconButton onClick={() => setShiftSicModalOpen(false)} sx={{ color: "#FFF" }}>
+              <X size={18} />
+            </IconButton>
+          </Stack>
+        </DialogTitle>
+
+        <DialogContent sx={{ p: 3, bgcolor: "#FAFAF9" }}>
+          <Stack spacing={2.2} sx={{ mt: 1 }}>
+            {shiftSicTarget.movedSIC && (
+              <Alert severity="warning" sx={{ fontSize: 12, borderRadius: 2 }}>
+                <strong>{shiftSicTarget.movedSIC.name}</strong> was moved to another shift. Please designate an Acting SIC for this {shiftSicTarget.shift} shift.
+              </Alert>
+            )}
+
+            <FormControl fullWidth size="small">
+              <InputLabel id="select-acting-sic-label">Select Employee for Acting SIC *</InputLabel>
+              <Select
+                labelId="select-acting-sic-label"
+                label="Select Employee for Acting SIC *"
+                value={shiftSicSelectedEmpId}
+                onChange={(e) => setShiftSicSelectedEmpId(e.target.value)}
+              >
+                {shiftSicCandidates.map((cand) => (
+                  <MenuItem key={cand.employeeId} value={cand.employeeId}>
+                    <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ width: "100%" }}>
+                      <Box>
+                        <Typography fontSize={13} fontWeight={800} color="#0F172A">
+                          {cand.name}
+                        </Typography>
+                        <Typography fontSize={10} color="#64748B">
+                          ID: {cand.employeeId} &bull; {cand.designation || "Staff"}
+                        </Typography>
+                      </Box>
+                      {cand.groupName && (
+                        <Chip
+                          size="small"
+                          label={cand.groupName}
+                          sx={{ height: 18, fontSize: "0.65rem", fontWeight: 800 }}
+                        />
+                      )}
+                    </Stack>
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+
+            <TextField
+              label="Reason / Notes"
+              fullWidth
+              size="small"
+              value={shiftSicReason}
+              onChange={(e) => setShiftSicReason(e.target.value)}
+              placeholder="e.g. Regular SIC moved to another shift"
+            />
+          </Stack>
+        </DialogContent>
+
+        <DialogActions sx={{ p: 2, bgcolor: "#F5F5F4", borderTop: "1px solid #E7E5E4" }}>
+          <Button onClick={() => setShiftSicModalOpen(false)} sx={{ color: "#64748B", fontWeight: 700 }}>
+            Cancel
+          </Button>
+          <Button
+            variant="contained"
+            disabled={!shiftSicSelectedEmpId || shiftSicSaving}
+            onClick={handleSaveShiftActingSic}
+            sx={{
+              bgcolor: "#D97706",
+              "&:hover": { bgcolor: "#B45309" },
+              fontWeight: 800,
+              px: 2.5,
+            }}
+          >
+            {shiftSicSaving ? "Assigning..." : "Confirm Acting SIC"}
           </Button>
         </DialogActions>
       </Dialog>

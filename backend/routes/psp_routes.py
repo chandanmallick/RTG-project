@@ -2914,6 +2914,8 @@ def get_hourly_demand_lookup(db, target_date_str):
 def build_report_checking_rows(db, target_date_str: str, curve_metrics: dict):
     target_dt = date.fromisoformat(target_date_str)
     target_values = get_operational_check_values(db, target_date_str)
+    yesterday_str = (target_dt - timedelta(days=1)).strftime("%Y-%m-%d")
+    yesterday_values = get_operational_check_values(db, yesterday_str)
     last_7_dates = [target_dt - timedelta(days=i) for i in range(1, 8)]
     last_week_str = (target_dt - timedelta(days=7)).strftime("%Y-%m-%d")
     last_year_str = target_dt.replace(year=target_dt.year - 1).strftime("%Y-%m-%d")
@@ -2933,6 +2935,7 @@ def build_report_checking_rows(db, target_date_str: str, curve_metrics: dict):
             rows.append({
                 "state": state,
                 "operational_day": target_values.get(state, {}).get(metric_key),
+                "yesterday": yesterday_values.get(state, {}).get(metric_key),
                 "average_last_7_days": average_metric_over_dates(db, last_7_dates, metric_key, state),
                 "same_day_last_week": last_week_values.get(state, {}).get(metric_key),
                 "same_day_last_year": last_year_values.get(state, {}).get(metric_key),
@@ -2980,6 +2983,7 @@ def build_report_checking_rows(db, target_date_str: str, curve_metrics: dict):
             if metric_key == "min_demand":
                 hourly_value = hourly_min_lookup.get(state)
             row[f"{metric_key}_operational"] = operational_value
+            row[f"{metric_key}_yesterday"] = yesterday_values.get(state, {}).get(metric_key)
             row[f"{metric_key}_time"] = time_value
             row[f"{metric_key}_average_last_7_days"] = average_metric_over_dates(db, last_7_dates, metric_key, state)
             row[f"{metric_key}_same_day_last_week"] = last_week_values.get(state, {}).get(metric_key)
@@ -3361,9 +3365,11 @@ async def get_psp_report_checking(date_str: str = None, include_curve: bool = Fa
                 {"_id": 0, "date": 1, "pspFrequencyProfile": 1, "pspFrequencyProfileMaxMin": 1}
             )),
             "tables": build_report_checking_rows(db, date_str, curve_metrics),
+            "yesterday_date": (date.fromisoformat(date_str) - timedelta(days=1)).strftime("%Y-%m-%d"),
             "columns": [
                 {"key": "state", "label": "Constituent"},
                 {"key": "operational_day", "label": "Operational Day"},
+                {"key": "yesterday", "label": "Yesterday"},
                 {"key": "average_last_7_days", "label": "Avg Last 7 Days"},
                 {"key": "same_day_last_week", "label": "Same Day Last Week"},
                 {"key": "same_day_last_year", "label": "Same Day Last Year"},

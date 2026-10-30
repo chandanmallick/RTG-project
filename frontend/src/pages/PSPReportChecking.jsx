@@ -61,6 +61,7 @@ const demandGroups = [
     columns: [
       ["time", "Time"],
       ["operational", "PSP"],
+      ["yesterday", "Yesterday"],
       ["average_last_7_days", "Avg 7D"],
       ["same_day_last_week", "Last Week"],
       ["same_day_last_year", "Last Year"],
@@ -76,6 +77,7 @@ const demandGroups = [
     border: "#D97706",
     columns: [
       ["operational", "PSP"],
+      ["yesterday", "Yesterday"],
       ["average_last_7_days", "Avg 7D"],
       ["same_day_last_week", "Last Week"],
       ["same_day_last_year", "Last Year"],
@@ -90,6 +92,7 @@ const demandGroups = [
     border: "#059669",
     columns: [
       ["operational", "PSP"],
+      ["yesterday", "Yesterday"],
       ["average_last_7_days", "Avg 7D"],
       ["same_day_last_week", "Last Week"],
       ["same_day_last_year", "Last Year"],
@@ -519,11 +522,12 @@ export default function PSPReportChecking() {
               <div className="row g-2 mt-1">
                 {[
                   ["Operational Day", formatDate(data?.date || dateStr)],
+                  ["Yesterday (D-2)", formatDate(addDays(data?.date || dateStr, -1))],
                   ["Average Window", "Previous 7 available days"],
                   ["Same Day Last Week", formatDate(addDays(data?.date || dateStr, -7))],
                   ["Same Day Last Year", formatDate(`${Number((data?.date || dateStr).slice(0, 4)) - 1}${(data?.date || dateStr).slice(4)}`)],
                 ].map(([label, value]) => (
-                  <div key={label} className="col-6 col-xl-3">
+                  <div key={label} className="col-6 col-md-4 col-xl">
                     <div className="p-2 rounded-3 bg-light border border-light-subtle h-100">
                       <span className="d-block text-muted small fw-bold">{label}</span>
                       <span className="d-block text-dark fw-bold" style={{ fontSize: "0.84rem" }}>{value}</span>
@@ -604,7 +608,7 @@ export default function PSPReportChecking() {
             <div className="text-center text-muted fw-semibold py-5">No report checking data loaded.</div>
           ) : (
             <div className="table-responsive" style={{ maxHeight: "62vh", overflow: "auto" }}>
-              <table className="table table-hover align-middle theme-table mb-0" style={{ minWidth: isShortageTable ? "820px" : isDemandTable ? "1900px" : isTransnationalTable ? "1280px" : "1080px" }}>
+              <table className="table table-hover align-middle theme-table mb-0" style={{ minWidth: isShortageTable ? "820px" : isDemandTable ? "2150px" : isTransnationalTable ? "1280px" : "1180px" }}>
                 <thead style={{ position: "sticky", top: 0, zIndex: 2 }}>
                   {isDemandTable ? (
                     <>
@@ -659,6 +663,7 @@ export default function PSPReportChecking() {
                     <tr>
                       <th style={{ width: "170px" }}>Constituent</th>
                       <th className="text-end">Operational Day</th>
+                      <th className="text-end" title={`1 day prior: ${formatDate(addDays(data?.date || dateStr, -1))}`}>Yesterday</th>
                       <th className="text-end">Avg Last 7 Days</th>
                       <th className="text-end">Same Day Last Week</th>
                       <th className="text-end">Same Day Last Year</th>
@@ -791,6 +796,7 @@ export default function PSPReportChecking() {
                       <tr key={row.state}>
                         <td className="fw-bold text-dark">{row.state}</td>
                         <td className="text-end fw-bold">{formatValue(row.operational_day, table.unit)}</td>
+                        <td className="text-end">{formatValue(row.yesterday, table.unit)}</td>
                         <td className="text-end">{formatValue(row.average_last_7_days, table.unit)}</td>
                         <td className="text-end">{formatValue(row.same_day_last_week, table.unit)}</td>
                         <td className="text-end">{formatValue(row.same_day_last_year, table.unit)}</td>

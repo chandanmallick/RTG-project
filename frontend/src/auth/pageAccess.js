@@ -17,6 +17,7 @@ export const ROUTE_PAGE_KEYS = {
   "/old-logbook": "old_logbook",
   "/database-sync": "database_sync",
   "/psp-admin": "psp_admin",
+  "/admin/psp-settings": "psp_admin",
   "/admin/user-access": "user_access",
   "/admin/mail-settings": "mail_settings",
   "/admin/audit-trail": "audit_trail",

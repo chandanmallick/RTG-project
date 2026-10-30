@@ -187,6 +187,7 @@ export default function TopNavbar() {
   const isAdminActive =
     location.pathname === "/database-sync" ||
     location.pathname === "/psp-admin" ||
+    location.pathname === "/admin/psp-settings" ||
     location.pathname === "/admin/user-access" ||
     location.pathname === "/admin/mail-settings" ||
     location.pathname === "/admin/audit-trail" ||
@@ -731,6 +732,121 @@ export default function TopNavbar() {
         >
           Old Logbook
         </Button>
+
+        {/* 6. Admin Module Dropdown */}
+        <Box ref={adminRef} sx={{ position: "relative" }}>
+          <Button
+            onClick={() => toggleDropdown("admin")}
+            endIcon={
+              <ChevronDown
+                size={14}
+                style={{
+                  transform: openMenu === "admin" ? "rotate(180deg)" : "rotate(0deg)",
+                  transition: "transform 0.2s ease-in-out",
+                  color: (openMenu === "admin" || isAdminActive) ? "#03624C" : "#64748B"
+                }}
+              />
+            }
+            sx={{
+              textTransform: "none",
+              fontSize: 14,
+              fontWeight: 700,
+              color: (openMenu === "admin" || isAdminActive) ? "#03624C" : "#475569",
+              px: 2.2,
+              py: 0.9,
+              borderRadius: "999px",
+              backgroundColor: openMenu === "admin" ? "#E6F0EE" : "transparent",
+              "&:hover": {
+                backgroundColor: "#F1F7F6",
+                color: "#03624C",
+              },
+            }}
+          >
+            Admin Module
+          </Button>
+
+          <AnimatePresence>
+            {openMenu === "admin" && (
+              <motion.div
+                {...dropdownMotionProps}
+                style={{
+                  position: "absolute",
+                  top: "calc(100% + 12px)",
+                  left: "50%",
+                  transform: "translateX(-50%)",
+                  width: 320,
+                  zIndex: 1000,
+                }}
+              >
+                <Box sx={dropdownBoxStyles}>
+                  {caretElement}
+                  <DropdownItem
+                    title="Database Sync (RTG)"
+                    description="Synchronize power stations detail"
+                    icon={Database}
+                    iconColor="#E67E22"
+                    iconBg="#FEF4EA"
+                    path="/database-sync"
+                    active={location.pathname === "/database-sync"}
+                    onClick={handleNavigate}
+                  />
+                  <DropdownItem
+                    title="PSP Settings"
+                    description="Configure daily peak capacities"
+                    icon={Settings2}
+                    iconColor="#9B59B6"
+                    iconBg="#F5EEF8"
+                    path="/psp-admin"
+                    active={location.pathname === "/psp-admin" || location.pathname === "/admin/psp-settings"}
+                    onClick={handleNavigate}
+                  />
+                  <DropdownItem
+                    title="User Access Control"
+                    description="Assign page View and Write access"
+                    icon={UserCheck}
+                    iconColor="#03624C"
+                    iconBg="#E8F5F1"
+                    path="/admin/user-access"
+                    active={location.pathname === "/admin/user-access"}
+                    onClick={handleNavigate}
+                  />
+                  <DropdownItem
+                    title="Mail & CRMS Settings"
+                    description="Configure mail, sign-in security and CRMS access"
+                    icon={Mail}
+                    iconColor="#0057B7"
+                    iconBg="#EAF2FF"
+                    path="/admin/mail-settings"
+                    active={location.pathname === "/admin/mail-settings"}
+                    onClick={handleNavigate}
+                  />
+                  <DropdownItem
+                    title="Portal Audit Trail"
+                    description="Review user-wise approvals and data changes"
+                    icon={ClipboardList}
+                    iconColor="#7C3AED"
+                    iconBg="#F3E8FF"
+                    path="/admin/audit-trail"
+                    active={location.pathname === "/admin/audit-trail"}
+                    onClick={handleNavigate}
+                  />
+                  {(String(user?.role || "").toLowerCase() === "admin" || String(user?.employeeId || "") === "50041") && (
+                    <DropdownItem
+                      title="Past C-OFF Credit"
+                      description="Add old C-OFF manually or through Excel"
+                      icon={CalendarPlus}
+                      iconColor="#B45309"
+                      iconBg="#FEF3C7"
+                      path="/admin/past-comp-off"
+                      active={location.pathname === "/admin/past-comp-off"}
+                      onClick={handleNavigate}
+                    />
+                  )}
+                </Box>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </Box>
 
       </Box>
 

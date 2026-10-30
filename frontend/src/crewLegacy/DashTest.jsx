@@ -33,29 +33,22 @@ const compactName = (name) => {
 const isPending = (status) => /pending|applied|nominated|forwarded|requested/i.test(String(status || ""));
 const destinations = { Leave: "/crew/leave?section=tracking", Training: "/crew/reports?tab=training-history", Sports: "/crew/sports?section=approval", Exchange: "/crew/replacement?section=duty&focus=history", Replacement: "/crew/replacement?tab=duty" };
 const approvalOptions = [
-  { title: "Leave approval", path: "/crew/leave?section=pending", subtitle: "Process pending leave applications" },
-  { title: "Approval for Exchange request by shift", path: "/crew/replacement?section=duty&focus=approvals", subtitle: "Review and approve pending mutual duty exchanges" },
-  { title: "Replacement approval", path: "/crew/replacement?tab=duty", subtitle: "Review pending duty replacement assignments" },
-  { title: "Training Assignment", path: "/crew/training?section=assign", subtitle: "Nominate & assign employee training" },
-  { title: "Training approval", path: "/crew/training?section=pending", subtitle: "Review training approvals" },
-  { title: "Sports approval", path: "/crew/sports?section=approval", subtitle: "Review sports participation requests" },
+  { title: "Leave approval", path: "/crew/leave?section=pending", subtitle: "Process pending leave applications", key: "leaveApproval" },
+  { title: "Approval for Exchange request by shift", path: "/crew/replacement?section=duty&focus=approvals", subtitle: "Review and approve pending mutual duty exchanges", key: "exchangeApproval" },
+  { title: "Replacement approval", path: "/crew/replacement?tab=duty", subtitle: "Review pending duty replacement assignments", key: "leaveReplacement" },
+  { title: "Training Assignment", path: "/crew/training?section=assign", subtitle: "Nominate & assign employee training", key: "trainingAssignment" },
+  { title: "Training approval", path: "/crew/training?section=pending", subtitle: "Review training approvals", key: "trainingApproval" },
+  { title: "Sports approval", path: "/crew/sports?section=approval", subtitle: "Review sports participation requests", key: "sportsApproval" },
 ];
 
 const adminModuleOptions = [
-  { title: "Shift Duty Roster", note: "Prepare, publish and review shift rosters", path: "/crew/roster", key: "crew_roster", icon: CalendarDays, badge: "Master" },
+  { title: "Duty Roster", note: "Prepare, publish and review shift rosters", path: "/crew/roster", key: "crew_roster", icon: CalendarDays, badge: "Master" },
+  { title: "Organizational Master", note: "Department, section & reporting hierarchy", path: "/crew/organization-master", key: "crew_admin", icon: ShieldCheck, badge: "Hierarchy" },
   { title: "Morning Presentation", note: "Daily shift handover & presentation roster", path: "/crew/morning-presentation", key: "crew_presentation", icon: Presentation, badge: "Daily" },
-  { title: "Replacement Roster & Matrix", note: "Sequential D-5 roster & replacement matrix", path: "/crew/replacement?tab=roster", key: "crew_replacement", icon: ArrowLeftRight, badge: "Sequential" },
-  { title: "Interactive Duty Matrix", note: "Drag & drop matrix view with unified leave", path: "/crew/calendar?view=matrix_alternate", key: "crew_compact_matrix", icon: CalendarDays, badge: "Matrix" },
-  { title: "Roster Setup", note: "Groups, duty cycles & roster configurations", path: "/crew/setup", key: "crew_setup", icon: Settings2, badge: "Config" },
-  { title: "Employee Directory", note: "Personnel database & replacement pool designation", path: "/crew/employees", key: "crew_employees", icon: Users, badge: "Personnel" },
-  { title: "Organization Master", note: "Department, section & reporting hierarchy", path: "/crew/organization-master", key: "crew_admin", icon: ShieldCheck, badge: "Hierarchy" },
-  { title: "User Access Control", note: "Manage page permissions, rights & roles", path: "/admin/user-access", key: "user_access", icon: ShieldCheck, badge: "Security" },
-  { title: "Duty Operations & Approvals", note: "Shift duty & exchange approvals (DIC / Admin)", path: "/crew/replacement?section=duty&focus=approvals", key: "crew_operations", icon: CheckCheck, badge: "Approvals" },
-  { title: "Database Synchronization", note: "MongoDB sync & database health checks", path: "/admin/db-sync", key: "db_sync", icon: RefreshCw, badge: "System" },
-  { title: "PSP System Settings", note: "Power system parameters & telemetry settings", path: "/admin/psp-settings", key: "psp_settings", icon: Settings2, badge: "PSP" },
-  { title: "Mail & CRMS Settings", note: "Email notifications, templates & CRMS alerts", path: "/admin/mail-settings", key: "mail_settings", icon: ClipboardList, badge: "Alerts" },
-  { title: "System Audit Trail", note: "Audit logs of duty changes & administrative actions", path: "/admin/audit", key: "audit_trail", icon: History, badge: "Audit" },
-  { title: "Dropdown Management", note: "Lookup values & master configurations", path: "/crew/dropdown-master", key: "dropdown_master", icon: Settings2, badge: "Masters" },
+  { title: "Personnel", note: "Personnel database & replacement pool designation", path: "/crew/employees", key: "crew_employees", icon: Users, badge: "Personnel" },
+  { title: "Dropdown Master", note: "Lookup values & master configurations", path: "/crew/dropdowns", key: "dropdown_master", icon: Settings2, badge: "Master" },
+  { title: "Group Setup", note: "Groups, duty cycles & roster configurations", path: "/crew/setup", key: "crew_setup", icon: Settings2, badge: "Config" },
+  { title: "System Audit Trail", note: "Audit logs of duty changes & administrative actions", path: "/admin/audit-trail", key: "audit_trail", icon: History, badge: "Audit" },
 ];
 
 const replacementOptions = [
@@ -120,6 +113,17 @@ export default function DashTest({ demo = false }) {
   const [adminModalOpen, setAdminModalOpen] = useState(false);
   const [activationProcessMode, setActivationProcessMode] = useState("manual");
   const [reallocatingId, setReallocatingId] = useState("");
+
+  const isDenialActive = useCallback((n) => {
+    if (!n) return false;
+    const isDenied = Boolean(n.isDenied || n.status === "Denied");
+    if (!isDenied) return false;
+    // If date has elapsed (prior to today), do not display denial on dashboard for blinking
+    if (n.date && dayjs(n.date).isBefore(dayjs(today), "day")) {
+      return false;
+    }
+    return true;
+  }, [today]);
 
   const loadActivationProcessMode = useCallback(async () => {
     try {
@@ -342,7 +346,7 @@ export default function DashTest({ demo = false }) {
                 cursor: "pointer",
                 transition: "all .18s ease",
                 "&:hover": { transform: "translateY(-2px)", boxShadow: "0 8px 24px rgba(0,0,0,0.08)" },
-                ...(dutyNotifs.some(n => n.isDenied || n.status === "Denied") ? {
+                ...(dutyNotifs.some(isDenialActive) ? {
                   border: "2px solid #DC2626",
                   bgcolor: "#FEF2F2",
                   animation: "adminDenialBlink 1.4s ease-in-out infinite",
@@ -368,10 +372,10 @@ export default function DashTest({ demo = false }) {
                 }),
               }}
             >
-              {dutyNotifs.some(n => n.isDenied || n.status === "Denied") ? (
+              {dutyNotifs.some(isDenialActive) ? (
                 // DENIAL DISPLAYED FULL (LANDSCAPE)
                 <Box>
-                  {dutyNotifs.filter(n => n.isDenied || n.status === "Denied").map(n => (
+                  {dutyNotifs.filter(isDenialActive).map(n => (
                     <Box key={`denied-bar-${n._id}`}>
                       <Stack direction={{ xs: "column", sm: "row" }} alignItems={{ sm: "center" }} justifyContent="space-between" spacing={1} sx={{ mb: 1 }}>
                         <Stack direction="row" alignItems="center" spacing={1}>
@@ -610,7 +614,45 @@ export default function DashTest({ demo = false }) {
     <Dialog PaperProps={{ sx: popupPaper }} open={!demo && Boolean(trainingReview)} onClose={() => setTrainingReview("")} fullWidth maxWidth="md"><DialogTitle sx={{ display: "flex", justifyContent: "space-between" }}>Training details & management<IconButton aria-label="Close training review" onClick={() => setTrainingReview("")}><X size={18} /></IconButton></DialogTitle><DialogContent dividers>{!demo && trainingReview && <TrainingCalendarReview requestId={trainingReview} onChanged={refresh} onReplacement={() => navigate("/crew/calendar?filter=coverage")} />}</DialogContent></Dialog>
     {!demo && popup === "apply" && <CrewCalendar applicationOnly onApplicationClose={() => { setPopup(""); refresh(); }} />}
     <Dialog PaperProps={{ sx: popupPaper }} open={popup === "replacement"} onClose={() => setPopup("")} fullWidth maxWidth="lg"><DialogTitle sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>Replacement<IconButton aria-label="Close replacement" onClick={() => setPopup("")}><X size={18} /></IconButton></DialogTitle><DialogContent dividers><Tabs aria-label="Replacement options" value={replacementTab} onChange={(_, value) => setReplacementTab(value)} variant="scrollable" scrollButtons="auto" sx={{ mb: 2 }}><Tab value="roster" label="Sequential Roster & Matrix" /><Tab value="duty" label="Exchange" /><Tab value="leave" label="Replacement by other employees" /></Tabs>{popup === "replacement" && (demo ? <DashDemoWorkspace key={replacementTab} workspace={replacementTab === "duty" ? "apply-exchange" : "replacement"} groups={groups} records={records} events={events} onSubmit={row => setRecords(rows => [{ ...row, id: `demo-${Date.now()}`, employeeId: demoEmployeeId, employeeName: "Anil Sharma", status: "Pending" }, ...rows])} /> : <ReplacementManagement key={replacementTab} initialWorkflow={replacementTab} />)}</DialogContent></Dialog>
-    <Dialog PaperProps={{ sx: popupPaper }} open={popup === "approval"} onClose={() => setPopup("")} fullWidth maxWidth="sm"><DialogTitle sx={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>Approval options<IconButton aria-label="Close approval options" onClick={() => setPopup("")}><X size={18} /></IconButton></DialogTitle><DialogContent dividers><Box sx={{ textAlign: "center", mb: 3 }}><Box sx={{ width: 78, height: 78, mx: "auto", mb: 1.8, borderRadius: "50%", bgcolor: "#FFF2A1", color: "#F63B78", border: "4px solid #FF5D89", display: "grid", placeItems: "center", boxShadow: "0 0 0 10px #FFF7D8" }}><CheckCheck size={40} /></Box><Typography sx={{ fontSize: 23, fontWeight: 850 }}>Ready for your review</Typography><Typography sx={{ color: "#7F7881", mt: .7 }}>Choose the approval or assignment you want to manage.</Typography></Box><Stack spacing={1.3}>{approvalOptions.map(option => <Button key={option.path} variant="outlined" endIcon={<ArrowUpRight size={18} />} onClick={() => { setPopup(""); navigate(option.path); }} sx={{ justifyContent: "space-between", textTransform: "none", fontSize: 15, p: 1.8, color: "#A82B58", borderColor: "#F5C9D6", bgcolor: "#FFF4F7", "&:hover": { bgcolor: "#FFE6EE", borderColor: "#F63B78" } }}>{option.title}</Button>)}</Stack></DialogContent></Dialog>
+    <Dialog PaperProps={{ sx: popupPaper }} open={popup === "approval"} onClose={() => setPopup("")} fullWidth maxWidth="sm"><DialogTitle sx={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>Approval options<IconButton aria-label="Close approval options" onClick={() => setPopup("")}><X size={18} /></IconButton></DialogTitle><DialogContent dividers><Box sx={{ textAlign: "center", mb: 3 }}><Box sx={{ width: 78, height: 78, mx: "auto", mb: 1.8, borderRadius: "50%", bgcolor: "#FFF2A1", color: "#F63B78", border: "4px solid #FF5D89", display: "grid", placeItems: "center", boxShadow: "0 0 0 10px #FFF7D8" }}><CheckCheck size={40} /></Box><Typography sx={{ fontSize: 23, fontWeight: 850 }}>Ready for your review</Typography><Typography sx={{ color: "#7F7881", mt: .7 }}>Choose the approval or assignment you want to manage.</Typography></Box><Stack spacing={1.3}>
+          {approvalOptions.map(option => {
+            const count = Number(actions[option.key]?.pending || 0);
+            return (
+              <Button
+                key={option.path}
+                variant="outlined"
+                endIcon={<ArrowUpRight size={18} />}
+                onClick={() => { setPopup(""); navigate(option.path); }}
+                sx={{
+                  justifyContent: "space-between",
+                  textTransform: "none",
+                  fontSize: 15,
+                  p: 1.8,
+                  color: "#A82B58",
+                  borderColor: count > 0 ? "#FF5D89" : "#F5C9D6",
+                  bgcolor: count > 0 ? "#FFF0F4" : "#FFF4F7",
+                  "&:hover": { bgcolor: "#FFE6EE", borderColor: "#F63B78" }
+                }}
+              >
+                <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                  <Typography sx={{ fontSize: 15, fontWeight: count > 0 ? 850 : 700 }}>
+                    {option.title}
+                  </Typography>
+                  <Typography
+                    component="span"
+                    sx={{
+                      fontSize: 14,
+                      fontWeight: 900,
+                      color: count > 0 ? "#DC2626" : "#64748B",
+                    }}
+                  >
+                    ({count})
+                  </Typography>
+                </Box>
+              </Button>
+            );
+          })}
+        </Stack></DialogContent></Dialog>
     <Dialog PaperProps={{ sx: { ...popupPaper, "& .MuiDialogTitle-root": { px: 3, py: 2.5, background: "linear-gradient(120deg,#EBF5FB,#EFF6FF)", fontWeight: 850 } } }} open={popup === "replacement-options"} onClose={() => setPopup("")} fullWidth maxWidth="sm"><DialogTitle sx={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>Replacement & Rostering<IconButton aria-label="Close replacement options" onClick={() => setPopup("")}><X size={18} /></IconButton></DialogTitle><DialogContent dividers><Box sx={{ textAlign: "center", mb: 3 }}><Box sx={{ width: 78, height: 78, mx: "auto", mb: 1.8, borderRadius: "50%", bgcolor: "#E0F2FE", color: "#0284C7", border: "4px solid #38BDF8", display: "grid", placeItems: "center", boxShadow: "0 0 0 10px #F0F9FF" }}><ArrowLeftRight size={38} /></Box><Typography sx={{ fontSize: 23, fontWeight: 850, color: "#0F172A" }}>Replacement & Rostering</Typography><Typography sx={{ color: "#64748B", mt: .7 }}>Choose the duty replacement, exchange, or special event rostering module.</Typography></Box><Stack spacing={1.3}>{replacementOptions.map(option => <Button key={option.path} variant="outlined" endIcon={<ArrowUpRight size={18} />} onClick={() => { setPopup(""); navigate(option.path); }} sx={{ justifyContent: "space-between", textTransform: "none", textAlign: "left", p: 1.8, borderRadius: "16px !important", color: "#0369A1", borderColor: "#BAE6FD", bgcolor: "#F0F9FF", "&:hover": { bgcolor: "#E0F2FE", borderColor: "#0284C7" } }}><Box><Stack direction="row" alignItems="center" spacing={1}><Typography fontSize={14.5} fontWeight={850}>{option.title}</Typography>{option.badge && <Chip size="small" label={option.badge} sx={{ height: 20, fontSize: 10.5, fontWeight: 800, bgcolor: "#E0F2FE", color: "#0369A1" }} />}</Stack>{option.subtitle && <Typography fontSize={11.5} color="#64748B" sx={{ mt: .3 }}>{option.subtitle}</Typography>}</Box></Button>)}</Stack></DialogContent></Dialog>
     <Dialog PaperProps={{ sx: popupPaper }} open={popup === "restricted"} onClose={() => setPopup("")}><DialogTitle>Access Restricted</DialogTitle><DialogContent><Typography>Approval is available to reporting officers and employees with delegated approval power.</Typography><Button onClick={() => setPopup("")} sx={{ mt: 2 }}>Close</Button></DialogContent></Dialog>
     <Dialog PaperProps={{ sx: popupPaper }} open={["tracking", "history"].includes(popup)} onClose={() => setPopup("")} fullWidth maxWidth="lg"><DialogTitle sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}><Box>{popup === "tracking" ? "Application Tracking" : "Application History"}<Typography sx={{ fontSize: 11, color: "#83909E" }}>{popup === "tracking" ? "From D−2 through all future applications. Pending rows are amber." : "Leave, training, sports, exchange and replacement records."}</Typography></Box><IconButton aria-label="Close applications" onClick={() => setPopup("")}><X size={18} /></IconButton></DialogTitle><DialogContent dividers><Tabs value={kind} onChange={(_, value) => setKind(value)} variant="scrollable" scrollButtons="auto">{["All", ...Object.keys(destinations)].map(value => <Tab key={value} value={value} label={value} sx={{ textTransform: "none" }} />)}</Tabs><Stack direction={{ xs: "column", sm: "row" }} spacing={1} sx={{ my: 2 }}><TextField label="Search applications" size="small" value={search} onChange={event => setSearch(event.target.value)} sx={{ flex: 1 }} /><TextField select label="Application status" size="small" value={recordStatus} onChange={event => setRecordStatus(event.target.value)} sx={{ minWidth: 160 }}>{["All", "Pending", "Approved", "Cancelled", "Rejected", "Withdrawn"].map(value => <MenuItem key={value} value={value}>{value === "All" ? "All statuses" : value}</MenuItem>)}</TextField><Button variant={recordStatus === "Approved" && kind === "Leave" ? "contained" : "outlined"} onClick={() => { setKind("Leave"); setRecordStatus("Approved"); }}>Approved leave</Button><Button variant={scope === "mine" ? "contained" : "outlined"} onClick={() => setScope("mine")}>My applications</Button><Button variant={scope === "all" ? "contained" : "outlined"} onClick={() => setScope("all")}>Authorised records</Button></Stack>{popup === "history" && <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5} sx={{ mb: 2, p: 2, bgcolor: "#FFF1F4", borderRadius: 3 }}><TextField label="History from" type="date" size="small" value={historyFrom} onChange={event => setHistoryFrom(event.target.value)} InputLabelProps={{ shrink: true }} /><TextField label="History to" type="date" size="small" value={historyTo} onChange={event => setHistoryTo(event.target.value)} InputLabelProps={{ shrink: true }} error={Boolean(historyFrom && historyTo && historyTo < historyFrom)} helperText={historyFrom && historyTo && historyTo < historyFrom ? "End date must follow start date" : ""} /><Button onClick={() => { setHistoryFrom(""); setHistoryTo(""); }}>All dates</Button><Typography sx={{ alignSelf: "center", fontSize: 12, color: "#786B74" }}>{visibleRecords.length} matching applications</Typography></Stack>}{errors.some(error => Object.keys(destinations).includes(error)) && <Alert severity="warning" sx={{ mb: 2 }}>Some application records could not be loaded. Use Refresh on the dashboard to retry.</Alert>}<Stack spacing={1}>{visibleRecords.map((row, index) => <Paper variant="outlined" key={`${row.kind}-${row.id || row._id || index}`} sx={{ p: 1.6, borderRadius: 2, background: isPending(statusOf(row)) ? "#FFF8E5" : "#FAFCFD", borderColor: isPending(statusOf(row)) ? "#EED28D" : "#E5EAF0" }}><Stack direction={{ xs: "column", sm: "row" }} spacing={1} alignItems={{ sm: "center" }}><Box sx={{ flex: 1 }}><Typography sx={{ fontSize: 13, fontWeight: 800 }}>{row.employeeName || row.name || row.employeeId || row.firstEmployee?.name || row.requesterName || "Application"} · {row.kind}</Typography><Typography sx={{ fontSize: 11, color: "#788493", mt: .4 }}>{row.leaveType || row.trainingName || row.sportsName || row.eventName || row.assignedDuty || "Duty application"} · {dateOf(row) || "Date unavailable"}{endOf(row) !== dateOf(row) ? ` → ${endOf(row)}` : ""}</Typography></Box><Chip size="small" label={statusOf(row)} color={isPending(statusOf(row)) ? "warning" : "default"} /><ApplicationActions row={row} saving={saving} selectedDatesOnly={popup === "tracking" && (recordStatus === "Approved" || row.finalStatus === "Approved")} allowReapply={popup === "history"} onReapply={record => demo ? setDemoWorkspace("apply") : navigate(`/crew/leave?${new URLSearchParams({ section: "apply", employeeId: record.employeeId, from: record.startDate || record.date, to: record.endDate || record.date, reviseLeaveId: (record.anchor || record).id })}`)} demo={demo} onUpdated={refresh} onDemoDelete={ids => setRecords(current => current.filter(item => !ids.includes(item.id)))} onDemoEdit={(leave, originals, applications, reason) => setRecords(current => [...current.filter(item => !originals.some(original => original.id === item.id)), ...applications.map((application, i) => ({ ...leave, ...application, reason, kind: "Leave", id: `demo-edit-${Date.now()}-${i}`, leaveGroupId: leave.leaveGroupId || `demo-group-${Date.now()}`, finalStatus: "Applied" }))])} onMutation={requestMutation} onTrainingReview={record => demo ? setDemoWorkspace(destinations.Training) : setTrainingReview(record.id)} /><Button size="small" onClick={() => navigate(destinations[row.kind])} endIcon={<ArrowUpRight size={13} />} sx={{ textTransform: "none" }}>{destinationLabels[row.kind]}</Button></Stack><Box sx={{ mt: 1.3, borderTop: "1px solid #E6E6EF", pt: .5 }}><LeaveProgress leave={row.kind === "Leave" ? row.anchor || row : { ...row, finalStatus: statusOf(row), approvalChain: [{ name: `${row.kind} review`, status: /^(approved|accepted|completed)$/i.test(statusOf(row)) ? "Approved" : "Pending" }] }} compact /></Box></Paper>)}</Stack>{!visibleRecords.length && <Empty loading={loading} text="No applications match this view." />}</DialogContent></Dialog>
@@ -643,7 +685,7 @@ export default function DashTest({ demo = false }) {
 
         <Stack spacing={1.5}>
           {/* 1. Denied Duties - High Visibility with Actions (Image 1) */}
-          {dutyNotifs.filter(n => n.isDenied || n.status === "Denied").map(n => (
+          {dutyNotifs.filter(isDenialActive).map(n => (
             <Box
               key={`pop-denied-${n._id}`}
               sx={{

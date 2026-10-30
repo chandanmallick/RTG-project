@@ -114,6 +114,11 @@ export default function App() {
         />
 
         <Route
+          path="/admin/psp-settings"
+          element={protectedPage("psp_admin", <PSPAdmin />)}
+        />
+
+        <Route
           path="/psp-report-checking"
           element={protectedPage("psp_report_checking", <PSPReportChecking />)}
         />

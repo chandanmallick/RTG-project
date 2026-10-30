@@ -746,37 +746,52 @@ def assign_acting_sic_for_duty_move(
     group_name = str(payload.get("groupName") or "").strip()
     moved_sic_id = str(payload.get("movedSICEmployeeId") or "").strip()
     acting_sic_id = str(payload.get("actingSICEmployeeId") or "").strip()
+    target_shift = str(payload.get("shift") or "").strip()
     reason = str(payload.get("reason") or "").strip()
+    clear = bool(payload.get("clear"))
+
     try:
         datetime.strptime(duty_date, "%Y-%m-%d")
     except ValueError as exc:
         raise HTTPException(400, "Date must use YYYY-MM-DD format") from exc
-    if not group_name or not moved_sic_id or not acting_sic_id or moved_sic_id == acting_sic_id:
-        raise HTTPException(400, "Moved SIC, replacement SIC, date and group are required")
+
     actor = require_duty_switch_authority(user, duty_date)
 
-    moved_daily = employee_daily_collection.find_one({
-        "employeeId": employee_id_filter(moved_sic_id), "date": duty_date,
-    }) or {}
-    memberships = active_shift_memberships()
-    moved_roles = memberships.get(moved_sic_id, {}).get("roles", set())
-    if not moved_daily or not (moved_daily.get("isSIC") or "sic" in moved_roles):
-        raise HTTPException(409, "The selected employee is not the Shift In-Charge")
+    if clear:
+        emp_filter = {"date": duty_date}
+        if acting_sic_id:
+            emp_filter["employeeId"] = employee_id_filter(acting_sic_id)
+        elif group_name:
+            emp_filter["groupName"] = group_name
+            emp_filter["isActingSIC"] = True
+        employee_daily_collection.update_many(
+            emp_filter,
+            {"$set": {
+                "isActingSIC": False,
+                "actingSICGroup": "",
+                "actingSICFor": None,
+                "actingSICAssignedBy": "",
+                "actingSICAssignedOn": None,
+            }}
+        )
+        return {"message": "Acting SIC designation removed successfully"}
+
+    if not acting_sic_id:
+        raise HTTPException(400, "Acting SIC employee ID is required")
 
     candidate_daily = employee_daily_collection.find_one({
         "employeeId": employee_id_filter(acting_sic_id), "date": duty_date,
     })
     if not candidate_daily:
         raise HTTPException(404, "Acting SIC must have a duty record on the selected date")
-    if str(candidate_daily.get("groupName") or "") != group_name:
-        raise HTTPException(409, "Acting SIC must be selected from the affected group")
     if candidate_daily.get("leaveStatus") in ACTIVE_LEAVE_STATUSES:
         raise HTTPException(409, "An employee on leave cannot be assigned as Acting SIC")
-    if normalized_duty(candidate_daily.get("assignedDuty")) not in SHIFT_DUTIES:
-        raise HTTPException(409, "Acting SIC must be rostered on an active shift duty")
+
+    if not group_name:
+        group_name = str(candidate_daily.get("groupName") or "").strip()
 
     candidate = employee_by_id(acting_sic_id) or candidate_daily
-    moved_employee = employee_by_id(moved_sic_id) or moved_daily
+    moved_employee = (employee_by_id(moved_sic_id) or {}) if moved_sic_id else {}
     now = datetime.utcnow()
     acting_sic = {
         "employeeId": acting_sic_id,
@@ -784,24 +799,47 @@ def assign_acting_sic_for_duty_move(
         "designation": candidate.get("designation") or candidate_daily.get("designation"),
         "type": "temporary",
     }
+
+    # Reset any previous acting SIC on this date and shift
+    shift_val = target_shift or candidate_daily.get("assignedDuty")
     employee_daily_collection.update_many(
-        {"date": duty_date, "groupName": group_name},
-        {"$set": {"sic": acting_sic}},
+        {
+            "date": duty_date,
+            "employeeId": {"$ne": employee_id_filter(acting_sic_id)},
+            "assignedDuty": shift_val,
+            "isActingSIC": True,
+        },
+        {"$set": {
+            "isActingSIC": False,
+            "actingSICGroup": "",
+            "actingSICFor": None,
+        }}
     )
+
+    if group_name:
+        employee_daily_collection.update_many(
+            {"date": duty_date, "groupName": group_name},
+            {"$set": {"sic": acting_sic}},
+        )
+
+    for_info = {
+        "employeeId": moved_sic_id or "",
+        "name": (moved_employee.get("name") if moved_employee else moved_sic_id) or "Shift Vacancy",
+        "reason": reason or "Designated Acting SIC for shift",
+    }
+
     employee_daily_collection.update_one(
         {"_id": candidate_daily["_id"]},
         {"$set": {
             "isActingSIC": True,
             "actingSICGroup": group_name,
-            "actingSICFor": {
-                "employeeId": moved_sic_id,
-                "name": moved_employee.get("name") or moved_daily.get("name"),
-                "reason": "SIC duty/date reassigned",
-            },
+            "actingSICShift": shift_val,
+            "actingSICFor": for_info,
             "actingSICAssignedBy": actor,
             "actingSICAssignedOn": now,
         }},
     )
+
     duty_switch_collection.insert_one({
         "date": duty_date,
         "employeeId": acting_sic_id,
@@ -817,30 +855,35 @@ def assign_acting_sic_for_duty_move(
             "groupName": group_name,
             "isActingSIC": True,
         },
-        "reason": reason or f"Acting SIC assigned because {moved_employee.get('name') or moved_sic_id} was moved",
+        "reason": reason or f"Acting SIC assigned for {shift_val or group_name}",
         "changedBy": actor,
         "changedOn": now,
-        "source": "Acting SIC after duty/date reassignment",
+        "source": "Acting SIC assignment",
         "movedSICEmployeeId": moved_sic_id,
     })
-    authority_ids = list(dict.fromkeys([
-        moved_sic_id,
-        acting_sic_id,
-        *replacement_authority_ids({"employeeId": moved_sic_id, "date": duty_date, "groupName": group_name}),
-    ]))
-    people = [employee_by_id(value) for value in authority_ids]
-    notify_all(
-        email_list=[mail_address(person) for person in people if mail_address(person)],
-        employee_ids=authority_ids,
-        subject="Acting SIC assigned after duty reassignment",
-        message=(
-            f"{acting_sic['name'] or acting_sic_id} has been assigned as Acting SIC for {group_name} "
-            f"on {duty_date} because {moved_employee.get('name') or moved_sic_id}'s duty/date was changed."
-        ),
-        ref_id=f"{duty_date}:{group_name}:{acting_sic_id}",
-        action="/crew/calendar",
-        type="ACTING_SIC",
-    )
+
+    try:
+        authority_ids = list(dict.fromkeys(filter(None, [
+            moved_sic_id,
+            acting_sic_id,
+            *replacement_authority_ids({"employeeId": moved_sic_id or acting_sic_id, "date": duty_date, "groupName": group_name}),
+        ])))
+        people = [employee_by_id(value) for value in authority_ids if value]
+        notify_all(
+            email_list=[mail_address(person) for person in people if mail_address(person)],
+            employee_ids=authority_ids,
+            subject="Acting SIC assigned",
+            message=(
+                f"{acting_sic['name'] or acting_sic_id} has been assigned as Acting SIC for {group_name or shift_val} "
+                f"on {duty_date}."
+            ),
+            ref_id=f"{duty_date}:{group_name}:{acting_sic_id}",
+            action="/crew/calendar",
+            type="ACTING_SIC",
+        )
+    except Exception as notify_err:
+        pass
+
     return {"message": "Acting SIC assigned successfully", "actingSIC": acting_sic}
 
 
@@ -4373,12 +4416,18 @@ def get_notifications(user=Depends(get_current_user)):
         n["viewerRole"] = "Admin" if user_is_admin else ("Controlling Officer" if is_controller else "Employee")
         n["canAccept"] = bool(is_assignee and n.get("status") == "Pending" and before_cutoff)
         # Deny option ONLY to Reporting / HOD officer (or Admin/Controller)
+        raw_date = str(n.get("date") or "")
+        today_kolkata = datetime.now(ZoneInfo("Asia/Kolkata")).date().isoformat()
+        is_elapsed = bool(raw_date and raw_date < today_kolkata)
+        n["isElapsed"] = is_elapsed
         n["canDeny"] = bool(
             is_reporting_or_hod
             and n.get("status") in {"Pending", "Accepted"}
             and before_cutoff
+            and not is_elapsed
         )
-        n["isDenied"] = bool(n.get("status") == "Denied")
+        # If date has elapsed, do not flag as active denial for blinking on Dashboard
+        n["isDenied"] = bool(n.get("status") == "Denied" and not is_elapsed)
 
         result.append(n)
 
