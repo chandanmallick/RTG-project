@@ -608,6 +608,17 @@ const API = {
     return res.data;
   },
 
+  getMobileBriefing: async (dateStr) => {
+    const params = dateStr ? `?date_str=${dateStr}` : "";
+    const res = await axios.get(`${BASE_URL}/reports/mobile-briefing${params}`);
+    return res.data;
+  },
+
+  sendMobileBriefing: async (payload) => {
+    const res = await axios.post(`${BASE_URL}/reports/mobile-briefing/send`, payload);
+    return res.data;
+  },
+
   getPspReportChecking: async (dateStr, includeCurve = false) => {
     const params = new URLSearchParams();
     if (dateStr) params.append("date_str", dateStr);

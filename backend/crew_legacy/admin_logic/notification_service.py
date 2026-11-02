@@ -57,6 +57,19 @@ WORKFLOW_MAIL_DEFAULTS = {
             "The report contains {issue_station_count} affected substation(s) and {issue_block_count} issue block(s)."
         ),
     },
+    "daily_mobile_briefing": {
+        "label": "Daily Mobile Briefing (Crew & PSP)",
+        "enabled": True,
+        "recipients": "",
+        "ccRecipients": "",
+        "subjectTemplate": "Daily Power System & Crew Briefing - {report_date}",
+        "bodyTemplate": (
+            "Dear Officers,<br><br>"
+            "Please find below the live Daily Power System & Crew Briefing for <strong>{report_date}</strong>, "
+            "including the 4-Day Crew Duty Schedule, Regional Energy & Demand Comparison Tiles, Energy Composition, "
+            "State-wise Generation & UI, and All-Time Record Comparisons."
+        ),
+    },
     "replacement_assigned": {
         "label": "Replacement duty assigned",
         "enabled": True,

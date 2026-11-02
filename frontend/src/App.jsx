@@ -54,6 +54,7 @@ const UserAccessControl = lazy(() => import("./pages/UserAccessControl"));
 const MailSettings = lazy(() => import("./pages/MailSettings"));
 const AuditTrail = lazy(() => import("./pages/AuditTrail"));
 const PastCompOffAdmin = lazy(() => import("./pages/PastCompOffAdmin"));
+const DailyMobileBriefing = lazy(() => import("./pages/DailyMobileBriefing"));
 
 const protectedPage = (pageKey, element) => <ProtectedRoute pageKey={pageKey}>{element}</ProtectedRoute>;
 
@@ -172,6 +173,11 @@ export default function App() {
         <Route
           path="/report-preparation/psp-highlights"
           element={protectedPage("psp_highlights_report", <PSPDashboard highlightsOnly />)}
+        />
+
+        <Route
+          path="/reports/mobile-briefing"
+          element={protectedPage("psp_report_checking", <DailyMobileBriefing />)}
         />
 
         <Route

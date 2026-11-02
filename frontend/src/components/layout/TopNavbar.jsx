@@ -47,6 +47,7 @@ import {
   LogOut,
   MessageSquare,
   ClipboardList,
+  Smartphone,
 } from "lucide-react";
 import crewApi from "../../crewLegacy/api";
 import { useAuth } from "../../auth/AuthContext";
@@ -182,7 +183,7 @@ export default function TopNavbar() {
     location.pathname === "/analytics/power-map" ||
     location.pathname.startsWith("/analytics/data-validation");
 
-  const isReportPreparationActive = location.pathname.startsWith("/report-preparation/");
+  const isReportPreparationActive = location.pathname.startsWith("/report-preparation/") || location.pathname.startsWith("/reports/");
   const isCrewActive = location.pathname.startsWith("/crew/") && location.pathname !== "/crew/user-context";
   const isOldLogbookActive = location.pathname === "/old-logbook";
   
@@ -632,6 +633,16 @@ export default function TopNavbar() {
                     iconBg="#EAF2FF"
                     path="/report-preparation/plant-deviation"
                     active={location.pathname === "/report-preparation/plant-deviation"}
+                    onClick={handleNavigate}
+                  />
+                  <DropdownItem
+                    title="Daily Mobile Briefing"
+                    description="Mobile HTML email report (Crew duties & PSP comparisons)"
+                    icon={Smartphone}
+                    iconColor="#0284C7"
+                    iconBg="#E0F2FE"
+                    path="/reports/mobile-briefing"
+                    active={location.pathname === "/reports/mobile-briefing"}
                     onClick={handleNavigate}
                   />
                 </Box>

@@ -478,7 +478,7 @@ export default function MailSettings() {
                       label={<Typography sx={{ fontWeight: 900, color: "#0F172A" }}>{template.label}</Typography>}
                     />
                     <Stack spacing={1.3} sx={{ mt: 1 }}>
-                      {template.key === "psp_voltage_discrepancy" && (
+                      {(template.key === "psp_voltage_discrepancy" || template.key === "daily_mobile_briefing") && (
                         <>
                           <TextField
                             size="small"
@@ -498,6 +498,22 @@ export default function MailSettings() {
                             placeholder="copy1@grid-india.in, copy2@grid-india.in"
                             helperText="Optional. Addresses already present in To will not be duplicated in CC."
                           />
+                          {template.key === "daily_mobile_briefing" && (
+                            <Box sx={{ pt: 0.5, pb: 0.5 }}>
+                              <Button
+                                size="small"
+                                variant="outlined"
+                                color="primary"
+                                href="/reports/mobile-briefing"
+                                target="_blank"
+                                rel="noreferrer"
+                                startIcon={<ExternalLink size={14} />}
+                                sx={{ textTransform: "none", fontWeight: 800, fontSize: 12 }}
+                              >
+                                Preview & Test Send Mobile HTML Briefing
+                              </Button>
+                            </Box>
+                          )}
                         </>
                       )}
                       <TextField size="small" fullWidth label="Subject template" value={template.subjectTemplate || ""} onChange={(event) => updateTemplate(template.key, "subjectTemplate", event.target.value)} />
