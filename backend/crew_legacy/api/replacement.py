@@ -4474,13 +4474,25 @@ def get_notifications(user=Depends(get_current_user)):
         n["createdAt"] = api_datetime(n.get("createdAt"))
         n["updatedAt"] = api_datetime(n.get("updatedAt"))
         n["decisionHistory"] = api_decision_history(n.get("decisionHistory"))
-        is_assignee = str(n.get("employeeId") or "").strip() == user_id
+        def id_matches(a, b):
+            s1 = str(a or "").strip()
+            s2 = str(b or "").strip()
+            if not s1 or not s2:
+                return False
+            if s1 == s2:
+                return True
+            if s1.isdigit() and s2.isdigit():
+                return int(s1) == int(s2)
+            return False
+
+        is_assignee = id_matches(n.get("employeeId"), user_id)
         controller_ids = normalized_categories(n.get("controllerIds"))
-        if not is_assignee and user_id not in controller_ids:
+        if not is_assignee and not any(id_matches(cid, user_id) for cid in controller_ids):
             computed_ctrls = controlling_officer_ids(n.get("employeeId"), n.get("date"), n.get("groupName"))
-            if user_id in computed_ctrls:
-                controller_ids.append(user_id)
-        is_controller = user_id in controller_ids
+            for c in computed_ctrls:
+                if c not in controller_ids:
+                    controller_ids.append(c)
+        is_controller = any(id_matches(cid, user_id) for cid in controller_ids)
         is_reporting_or_hod = bool(is_controller or user_is_admin or user_role in ["admin", "hod", "dic", "dept_ic", "controller"])
         before_cutoff = bool(cutoff and now <= cutoff)
         

@@ -10,7 +10,8 @@ from crew_legacy.api.sports_api import applications as sports_applications, can_
 from crew_legacy.api.training_assignment import get_training_nomination_access, is_training_hr, TRAINING_HR_POOL_ID
 from crew_legacy.database.database_mongo import (
     page_access_collection, leave_request_collection, training_nomination_history_collection,
-    sports_application_collection, duty_exchange_request_collection,
+    sports_application_collection, duty_exchange_request_collection, duty_notification_collection,
+    employee_collection, training_master_collection,
 )
 
 router = APIRouter()
@@ -61,7 +62,7 @@ def operations_summary(user=Depends(get_authenticated_user)):
     nomination_access = get_training_nomination_access(user=user)
     hr = is_training_hr(user)
     sports_manager = can_manage_events(user)
-    counts = {key: 0 for key in ("leaveApproval", "trainingApproval", "sportsApproval", "exchangeApproval", "leaveReplacement", "calendarCoverage")}
+    counts = {key: 0 for key in ("leaveApproval", "trainingApproval", "sportsApproval", "exchangeApproval", "leaveReplacement", "calendarCoverage", "trainingAssignment")}
 
     for leave in leave_request_collection.find({"finalStatus": "Applied"}):
         organization = is_organization_leave(leave)
@@ -86,6 +87,44 @@ def operations_summary(user=Depends(get_authenticated_user)):
     for leave in leave_request_collection.find({"finalStatus": "Approved", "replacementRequired": True, "replacement.employeeId": {"$in": [None, ""]}, "date": {"$gte": today}}):
         if has_replacement_authority(user, leave):
             counts["leaveReplacement"] += 1
+
+    user_ids = [actor]
+    if actor.isdigit():
+        user_ids.extend([str(int(actor)), actor.zfill(5)])
+    user_ids = list(dict.fromkeys(user_ids))
+
+    sub_ids = [
+        str(e.get("userId") or e.get("employeeId") or "").strip()
+        for e in employee_collection.find({
+            "$or": [
+                {"reportingOfficerId": {"$in": user_ids}},
+                {"reportingOfficerIds": {"$in": user_ids}},
+                {"intermediaryReportingId": {"$in": user_ids}},
+                {"hodId": {"$in": user_ids}},
+            ]
+        }, {"userId": 1, "employeeId": 1})
+        if str(e.get("userId") or e.get("employeeId") or "").strip()
+    ]
+    all_notif_ids = list(dict.fromkeys(user_ids + sub_ids))
+    for eid in list(all_notif_ids):
+        if eid.isdigit():
+            all_notif_ids.extend([str(int(eid)), eid.zfill(5)])
+    all_notif_ids = list(dict.fromkeys(all_notif_ids))
+
+    counts["leaveReplacement"] += duty_notification_collection.count_documents({
+        "$or": [
+            {"employeeId": {"$in": all_notif_ids}},
+            {"controllerIds": {"$in": user_ids}},
+        ],
+        "status": "Pending",
+        "date": {"$gte": today},
+    })
+
+    if nomination_access.get("canAssign"):
+        counts["trainingAssignment"] = training_master_collection.count_documents({
+            "status": {"$in": ["Scheduled", "Active", "Open"]},
+            "startDate": {"$gte": today},
+        })
     # Count required coverage only. Optional replacements are available from
     # the workflow but do not represent an outstanding task.
     training_manager = role.get("isAdmin") or hr or bool((pages.get("crew_training") or {}).get("write"))

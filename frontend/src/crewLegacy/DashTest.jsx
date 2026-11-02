@@ -303,10 +303,16 @@ export default function DashTest({ demo = false }) {
   const statusOf = row => row.finalStatus || row.status || "Recorded";
   const dateOf = row => row.startDate || row.date || row.sourceDate || "";
   const endOf = row => row.endDate || row.destinationDate || dateOf(row);
-  const approvalKeys = ["leaveApproval", "trainingApproval", "sportsApproval", "exchangeApproval", "specialEventRoster"];
+  const approvalKeys = ["leaveApproval", "trainingApproval", "sportsApproval", "exchangeApproval", "leaveReplacement", "trainingAssignment"];
   const isAdmin = String(user?.role || "").toLowerCase() === "admin" || user?.isAdmin === true || String(user?.employeeId || "") === "50041";
-  const approvalAccess = isAdmin || approvalKeys.slice(0, 3).some(key => actions[key]?.enabled) || actions.specialEventRoster?.enabled || actions.trainingAssignment?.enabled || actions.delegate?.enabled;
-  const pendingApprovals = approvalKeys.reduce((sum, key) => sum + Number(actions[key]?.pending || 0), 0);
+  const pendingDutyNotifsCount = dutyNotifs.filter(n => n.status === "Pending" && (n.canAccept || n.canDeny)).length;
+  const approvalAccess = isAdmin || approvalKeys.some(key => actions[key]?.enabled) || actions.delegate?.enabled || pendingDutyNotifsCount > 0;
+  const pendingApprovals = approvalKeys.reduce((sum, key) => {
+    if (key === "leaveReplacement") {
+      return sum + Math.max(Number(actions[key]?.pending || 0), pendingDutyNotifsCount);
+    }
+    return sum + Number(actions[key]?.pending || 0);
+  }, 0);
   const clubRecords = rows => [...groupLeaveApplications(rows.filter(row => row.kind === "Leave")).map(application => ({ ...application.anchor, ...application, kind: "Leave" })), ...rows.filter(row => row.kind !== "Leave")];
   const pendingMine = clubRecords(records.filter(row => owns(row) && isPending(statusOf(row)) && endOf(row) >= dayjs(today).subtract(2, "day").format("YYYY-MM-DD"))).length;
   const visibleRecords = clubRecords(records.filter(row => (kind === "All" || row.kind === kind) && (recordStatus === "All" || (recordStatus === "Pending" ? isPending(statusOf(row)) : statusOf(row) === recordStatus)) && (scope === "all" || owns(row)) && (popup !== "tracking" || endOf(row) >= dayjs(today).subtract(2, "day").format("YYYY-MM-DD")) && `${row.employeeName || row.name || ""} ${row.kind} ${row.trainingName || row.sportsName || row.eventName || row.leaveType || ""} ${dateOf(row)} ${statusOf(row)}`.toLowerCase().includes(search.toLowerCase()))).filter(row => popup !== "history" || ((!historyFrom || endOf(row) >= historyFrom) && (!historyTo || dateOf(row) <= historyTo))).sort((a, b) => dateOf(b).localeCompare(dateOf(a)));
@@ -713,7 +719,9 @@ export default function DashTest({ demo = false }) {
     <Dialog PaperProps={{ sx: popupPaper }} open={popup === "replacement"} onClose={() => setPopup("")} fullWidth maxWidth="lg"><DialogTitle sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>Replacement<IconButton aria-label="Close replacement" onClick={() => setPopup("")}><X size={18} /></IconButton></DialogTitle><DialogContent dividers><Tabs aria-label="Replacement options" value={replacementTab} onChange={(_, value) => setReplacementTab(value)} variant="scrollable" scrollButtons="auto" sx={{ mb: 2 }}><Tab value="roster" label="Sequential Roster & Matrix" /><Tab value="duty" label="Exchange" /><Tab value="leave" label="Replacement by other employees" /></Tabs>{popup === "replacement" && (demo ? <DashDemoWorkspace key={replacementTab} workspace={replacementTab === "duty" ? "apply-exchange" : "replacement"} groups={groups} records={records} events={events} onSubmit={row => setRecords(rows => [{ ...row, id: `demo-${Date.now()}`, employeeId: demoEmployeeId, employeeName: "Anil Sharma", status: "Pending" }, ...rows])} /> : <ReplacementManagement key={replacementTab} initialWorkflow={replacementTab} />)}</DialogContent></Dialog>
     <Dialog PaperProps={{ sx: popupPaper }} open={popup === "approval"} onClose={() => setPopup("")} fullWidth maxWidth="sm"><DialogTitle sx={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>Approval options<IconButton aria-label="Close approval options" onClick={() => setPopup("")}><X size={18} /></IconButton></DialogTitle><DialogContent dividers><Box sx={{ textAlign: "center", mb: 3 }}><Box sx={{ width: 78, height: 78, mx: "auto", mb: 1.8, borderRadius: "50%", bgcolor: "#FFF2A1", color: "#F63B78", border: "4px solid #FF5D89", display: "grid", placeItems: "center", boxShadow: "0 0 0 10px #FFF7D8" }}><CheckCheck size={40} /></Box><Typography sx={{ fontSize: 23, fontWeight: 850 }}>Ready for your review</Typography><Typography sx={{ color: "#7F7881", mt: .7 }}>Choose the approval or assignment you want to manage.</Typography></Box><Stack spacing={1.3}>
           {approvalOptions.map(option => {
-            const count = Number(actions[option.key]?.pending || 0);
+            const count = option.key === "leaveReplacement"
+              ? Math.max(Number(actions[option.key]?.pending || 0), dutyNotifs.filter(n => n.status === "Pending" && (n.canAccept || n.canDeny)).length)
+              : Number(actions[option.key]?.pending || 0);
             return (
               <Button
                 key={option.path}
