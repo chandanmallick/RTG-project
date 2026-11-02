@@ -48,3 +48,4 @@ for label, uid in test_roles:
         print(f"   canAccept: {m.get('canAccept')} | canDeny: {m.get('canDeny')} | canRevert: {m.get('canRevert')}")
     else:
         print(f"[{label} - {uid}] notification not in user's query scope.")
+

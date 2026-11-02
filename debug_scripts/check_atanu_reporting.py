@@ -46,3 +46,4 @@ notifs = list(duty_notification_collection.find({
 print(f"Found {len(notifs)} recent notification(s):")
 for n in notifs:
     print(f" - ID: {n.get('_id')} | Date: {n.get('date')} | Shift: {n.get('assignedDuty')} | Status: {n.get('status')} | ControllerIDs: {n.get('controllerIds')}")
+

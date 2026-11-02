@@ -52,6 +52,61 @@ const diffTone = (value) => {
     : { color: "#047857", background: "#D1FAE5" };
 };
 
+const renderValueWithDiff = (value, operationalValue, unit) => {
+  if (value === null || value === undefined || value === "") return "-";
+  const parsedVal = Number(value);
+  if (!Number.isFinite(parsedVal)) return "-";
+
+  const valStr = formatValue(parsedVal, unit);
+
+  const parsedOp = Number(operationalValue);
+  if (!Number.isFinite(parsedOp)) {
+    return valStr;
+  }
+
+  const diff = parsedOp - parsedVal;
+  const decimals = unit === "MU" ? 3 : 0;
+  const tolerance = unit === "MU" ? 0.0005 : 0.5;
+
+  let diffStr = "";
+  let diffColor = "#64748B";
+
+  if (Math.abs(diff) < tolerance) {
+    diffStr = decimals === 3 ? "0.000" : "0";
+    diffColor = "#64748B";
+  } else if (diff > 0) {
+    const formatted = Math.abs(diff).toLocaleString("en-IN", {
+      minimumFractionDigits: decimals,
+      maximumFractionDigits: decimals,
+    });
+    diffStr = `+${formatted}`;
+    diffColor = "#15803D"; // Green for increase
+  } else {
+    const formatted = Math.abs(diff).toLocaleString("en-IN", {
+      minimumFractionDigits: decimals,
+      maximumFractionDigits: decimals,
+    });
+    diffStr = `-${formatted}`;
+    diffColor = "#DC2626"; // Red for decrease
+  }
+
+  return (
+    <span className="text-nowrap">
+      <span>{valStr}</span>{" "}
+      <span
+        style={{
+          fontSize: "0.72rem",
+          fontWeight: 700,
+          color: diffColor,
+        }}
+        title={`Difference from today (Operational - Reference): ${diffStr} ${unit || ""}`}
+      >
+        ({diffStr})
+      </span>
+    </span>
+  );
+};
+
 const demandGroups = [
   {
     key: "max_demand",
@@ -736,6 +791,14 @@ export default function PSPReportChecking() {
                                   </td>
                                 );
                               }
+                              if (["yesterday", "average_last_7_days", "same_day_last_week", "same_day_last_year"].includes(suffix)) {
+                                const operationalValue = row[`${group.key}_operational`];
+                                return (
+                                  <td key={`${group.key}-${suffix}`} className="text-end">
+                                    {renderValueWithDiff(value, operationalValue, "MW")}
+                                  </td>
+                                );
+                              }
                               return (
                                 <td
                                   key={`${group.key}-${suffix}`}
@@ -796,10 +859,10 @@ export default function PSPReportChecking() {
                       <tr key={row.state}>
                         <td className="fw-bold text-dark">{row.state}</td>
                         <td className="text-end fw-bold">{formatValue(row.operational_day, table.unit)}</td>
-                        <td className="text-end">{formatValue(row.yesterday, table.unit)}</td>
-                        <td className="text-end">{formatValue(row.average_last_7_days, table.unit)}</td>
-                        <td className="text-end">{formatValue(row.same_day_last_week, table.unit)}</td>
-                        <td className="text-end">{formatValue(row.same_day_last_year, table.unit)}</td>
+                        <td className="text-end">{renderValueWithDiff(row.yesterday, row.operational_day, table.unit)}</td>
+                        <td className="text-end">{renderValueWithDiff(row.average_last_7_days, row.operational_day, table.unit)}</td>
+                        <td className="text-end">{renderValueWithDiff(row.same_day_last_week, row.operational_day, table.unit)}</td>
+                        <td className="text-end">{renderValueWithDiff(row.same_day_last_year, row.operational_day, table.unit)}</td>
                         {showCurveColumns && (
                           <td className="text-end fw-bold" style={{ color: "#03624C" }}>
                             {formatValue(row.curve_file, table.unit)}

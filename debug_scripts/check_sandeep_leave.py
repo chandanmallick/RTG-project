@@ -64,3 +64,4 @@ g1 = roster_group_collection.find_one({"groupName": "Group-1"})
 if g1:
     sic = g1.get("shiftInCharge") or {}
     print(f"Group-1 Designated SIC: {sic.get('name')} (ID: {sic.get('employeeId')})")
+

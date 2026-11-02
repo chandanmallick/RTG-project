@@ -140,3 +140,4 @@ Over the past week, the platform underwent major enhancements centered around:
 | [`frontend/src/pages/PSPReportChecking.jsx`](frontend/src/pages/PSPReportChecking.jsx) | Integrated Yesterday's Demand (D-2) column across Energy Consumption and Demand Check tables. |
 | [`frontend/dist/`](frontend/dist/) | Completely rebuilt Vite production bundle containing all updated components, stylesheets, and assets. |
 | [`debug_scripts/`](debug_scripts/) | Created dedicated directory housing all database diagnostic and verification utilities. |
+

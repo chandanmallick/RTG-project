@@ -22,3 +22,4 @@ for n in notifs:
     hist = n.get("decisionHistory") or []
     last_action = hist[-1].get("action") if hist else "None"
     print(f"ID: {nid} | {dt} | {duty} | {name} ({eid}) | Status: {status} | Last Action: {last_action}")
+
