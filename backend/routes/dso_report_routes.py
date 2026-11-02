@@ -1146,47 +1146,71 @@ async def update_report(report_type: str, report_date: str, payload: dict):
         }
         incoming_outages = payload.get("generation_outage_summary")
         if isinstance(incoming_outages, dict):
+            existing_outage = existing.get("generation_outage_summary") or {}
+            incoming_by_fuel = incoming_outages.get("by_fuel")
+            units_present = "units" in incoming_outages
             normalized_units = []
-            for source in (incoming_outages.get("units") or [])[:1000]:
-                if not isinstance(source, dict):
-                    continue
-                fuel = compact(source.get("fuel"))
-                fuel = "HYDRO" if "HYDRO" in fuel else "THERMAL"
-                outage_type = compact(source.get("outage_type"))
-                outage_type = "Forced" if "FORCED" in outage_type else "Planned"
-                capacity = max(0.0, numeric(source.get("capacity_mw")) or 0.0)
-                normalized_units.append({
-                    "unit": str(source.get("unit") or "Unnamed unit").strip()[:250],
-                    "station": str(source.get("station") or "").strip()[:250],
-                    "fuel": fuel,
-                    "outage_type": outage_type,
-                    "capacity_mw": round(capacity, 3),
-                    "reason": str(source.get("reason") or "").strip()[:1000],
-                    "outage_date": str(source.get("outage_date") or "").strip()[:100],
-                    "outage_time": str(source.get("outage_time") or "").strip()[:100],
-                    "expected_revival": str(source.get("expected_revival") or "").strip()[:200],
-                    "mapped": bool(source.get("mapped", True)),
-                    "manual": bool(source.get("manual", False)),
-                })
-            totals = {
-                "THERMAL": {"planned_mw": 0.0, "forced_mw": 0.0, "planned_units": 0, "forced_units": 0},
-                "HYDRO": {"planned_mw": 0.0, "forced_mw": 0.0, "planned_units": 0, "forced_units": 0},
-            }
-            for unit in normalized_units:
-                bucket = totals[unit["fuel"]]
-                prefix = unit["outage_type"].lower()
-                bucket[f"{prefix}_mw"] += unit["capacity_mw"]
-                bucket[f"{prefix}_units"] += 1
-            for bucket in totals.values():
-                bucket["planned_mw"] = round(bucket["planned_mw"], 3)
-                bucket["forced_mw"] = round(bucket["forced_mw"], 3)
-                bucket["total_mw"] = round(bucket["planned_mw"] + bucket["forced_mw"], 3)
-                bucket["total_units"] = bucket["planned_units"] + bucket["forced_units"]
+            if units_present:
+                for source in (incoming_outages.get("units") or [])[:1000]:
+                    if not isinstance(source, dict):
+                        continue
+                    fuel = compact(source.get("fuel"))
+                    fuel = "HYDRO" if "HYDRO" in fuel else "THERMAL"
+                    outage_type = compact(source.get("outage_type"))
+                    outage_type = "Forced" if "FORCED" in outage_type else "Planned"
+                    capacity = max(0.0, numeric(source.get("capacity_mw")) or 0.0)
+                    normalized_units.append({
+                        "unit": str(source.get("unit") or "Unnamed unit").strip()[:250],
+                        "station": str(source.get("station") or "").strip()[:250],
+                        "fuel": fuel,
+                        "outage_type": outage_type,
+                        "capacity_mw": round(capacity, 3),
+                        "reason": str(source.get("reason") or "").strip()[:1000],
+                        "outage_date": str(source.get("outage_date") or "").strip()[:100],
+                        "outage_time": str(source.get("outage_time") or "").strip()[:100],
+                        "expected_revival": str(source.get("expected_revival") or "").strip()[:200],
+                        "mapped": bool(source.get("mapped", True)),
+                        "manual": bool(source.get("manual", False)),
+                    })
+
+            if isinstance(incoming_by_fuel, dict) and incoming_by_fuel:
+                totals = {}
+                for fuel in ("THERMAL", "HYDRO"):
+                    fuel_data = incoming_by_fuel.get(fuel) or {}
+                    planned = max(0.0, numeric(fuel_data.get("planned_mw")) or 0.0)
+                    forced = max(0.0, numeric(fuel_data.get("forced_mw")) or 0.0)
+                    total = max(0.0, numeric(fuel_data.get("total_mw")) or (planned + forced))
+                    totals[fuel] = {
+                        "planned_mw": round(planned, 3),
+                        "forced_mw": round(forced, 3),
+                        "total_mw": round(total, 3),
+                        "planned_units": int(numeric(fuel_data.get("planned_units")) or 0),
+                        "forced_units": int(numeric(fuel_data.get("forced_units")) or 0),
+                        "total_units": int(numeric(fuel_data.get("total_units")) or 0),
+                    }
+            elif units_present:
+                totals = {
+                    "THERMAL": {"planned_mw": 0.0, "forced_mw": 0.0, "planned_units": 0, "forced_units": 0},
+                    "HYDRO": {"planned_mw": 0.0, "forced_mw": 0.0, "planned_units": 0, "forced_units": 0},
+                }
+                for unit in normalized_units:
+                    bucket = totals[unit["fuel"]]
+                    prefix = unit["outage_type"].lower()
+                    bucket[f"{prefix}_mw"] += unit["capacity_mw"]
+                    bucket[f"{prefix}_units"] += 1
+                for bucket in totals.values():
+                    bucket["planned_mw"] = round(bucket["planned_mw"], 3)
+                    bucket["forced_mw"] = round(bucket["forced_mw"], 3)
+                    bucket["total_mw"] = round(bucket["planned_mw"] + bucket["forced_mw"], 3)
+                    bucket["total_units"] = bucket["planned_units"] + bucket["forced_units"]
+            else:
+                totals = existing_outage.get("by_fuel") or {}
+
             updates["generation_outage_summary"] = {
-                **(existing.get("generation_outage_summary") or {}),
+                **existing_outage,
                 "by_fuel": totals,
-                "units": normalized_units,
-                "included_row_count": len(normalized_units),
+                "units": normalized_units if units_present else existing_outage.get("units", []),
+                "included_row_count": len(normalized_units) if units_present else existing_outage.get("included_row_count", 0),
                 "manually_edited": True,
                 "edited_at": now,
             }
@@ -1779,6 +1803,21 @@ def report_pdf_response(doc, report_type, report_date):
                 for name in ("BHUTAN", "NEPAL ISTS", "BANGLADESH", "NEPAL BIHAR")
             ],
             [65 * mm, 48 * mm, 48 * mm],
+        )
+
+        outage_summary = (doc.get("generation_outage_summary") or {}).get("by_fuel") or {}
+        add_section("Current Generation under Planned & Forced Outage (MW)")
+        add_table(
+            [["Fuel", "Planned outage (MW)", "Forced outage (MW)", "Total under outage (MW)"]] + [
+                [
+                    fuel.title(),
+                    value((outage_summary.get(fuel) or {}).get("planned_mw"), 0),
+                    value((outage_summary.get(fuel) or {}).get("forced_mw"), 0),
+                    value((outage_summary.get(fuel) or {}).get("total_mw"), 0),
+                ]
+                for fuel in ("THERMAL", "HYDRO")
+            ],
+            [55 * mm, 55 * mm, 55 * mm, 55 * mm],
         )
     else:
         results = doc.get("results") or {}

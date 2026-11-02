@@ -95,6 +95,12 @@ export default function DSOMorningReport() {
   const [outageDraft, setOutageDraft] = useState([]);
   const [outageFuelFilter, setOutageFuelFilter] = useState("ALL");
   const [outageTypeFilter, setOutageTypeFilter] = useState("ALL");
+  const [outageSummaryOpen, setOutageSummaryOpen] = useState(false);
+  const [outageSummaryDraft, setOutageSummaryDraft] = useState({
+    THERMAL: { planned_mw: 0, forced_mw: 0, total_mw: 0 },
+    HYDRO: { planned_mw: 0, forced_mw: 0, total_mw: 0 },
+  });
+  const [outageSummarySaving, setOutageSummarySaving] = useState(false);
 
   const load = async () => {
     try {
@@ -278,8 +284,73 @@ export default function DSOMorningReport() {
       important_events: report.important_events || "",
       signoff_regards: report.signoff_regards || "Regards",
       signoff_name: report.signoff_name || "Ashoke Kumar Basak, SIC ERLDC",
+      generation_outage_summary: structuredClone(report.generation_outage_summary || {}),
     });
     setEditOpen(true);
+  };
+
+  const openOutageSummaryEdit = () => {
+    const byFuel = report?.generation_outage_summary?.by_fuel || {};
+    setOutageSummaryDraft({
+      THERMAL: {
+        planned_mw: byFuel.THERMAL?.planned_mw ?? 0,
+        forced_mw: byFuel.THERMAL?.forced_mw ?? 0,
+        total_mw: byFuel.THERMAL?.total_mw ?? ((byFuel.THERMAL?.planned_mw ?? 0) + (byFuel.THERMAL?.forced_mw ?? 0)),
+      },
+      HYDRO: {
+        planned_mw: byFuel.HYDRO?.planned_mw ?? 0,
+        forced_mw: byFuel.HYDRO?.forced_mw ?? 0,
+        total_mw: byFuel.HYDRO?.total_mw ?? ((byFuel.HYDRO?.planned_mw ?? 0) + (byFuel.HYDRO?.forced_mw ?? 0)),
+      },
+    });
+    setOutageSummaryOpen(true);
+  };
+
+  const changeOutageSummaryField = (fuel, field, value) => {
+    const val = value === "" ? "" : (parseFloat(value) || 0);
+    setOutageSummaryDraft((prev) => {
+      const fuelData = { ...prev[fuel], [field]: val };
+      const planned = Number(field === "planned_mw" ? val : fuelData.planned_mw) || 0;
+      const forced = Number(field === "forced_mw" ? val : fuelData.forced_mw) || 0;
+      fuelData.total_mw = Math.round((planned + forced) * 1000) / 1000;
+      return { ...prev, [fuel]: fuelData };
+    });
+  };
+
+  const saveOutageSummary = async () => {
+    setOutageSummarySaving(true);
+    try {
+      const sanitized = {
+        THERMAL: {
+          planned_mw: Number(outageSummaryDraft.THERMAL.planned_mw) || 0,
+          forced_mw: Number(outageSummaryDraft.THERMAL.forced_mw) || 0,
+          total_mw: Math.round(((Number(outageSummaryDraft.THERMAL.planned_mw) || 0) + (Number(outageSummaryDraft.THERMAL.forced_mw) || 0)) * 1000) / 1000,
+        },
+        HYDRO: {
+          planned_mw: Number(outageSummaryDraft.HYDRO.planned_mw) || 0,
+          forced_mw: Number(outageSummaryDraft.HYDRO.forced_mw) || 0,
+          total_mw: Math.round(((Number(outageSummaryDraft.HYDRO.planned_mw) || 0) + (Number(outageSummaryDraft.HYDRO.forced_mw) || 0)) * 1000) / 1000,
+        },
+      };
+      const payload = {
+        morning_results: report.morning_results,
+        important_events: report.important_events || "",
+        signoff_regards: report.signoff_regards || "Regards",
+        signoff_name: report.signoff_name || "",
+        generation_outage_summary: {
+          ...(report.generation_outage_summary || {}),
+          by_fuel: sanitized,
+        },
+      };
+      const data = await API.saveDsoReport("morning", reportDate, payload);
+      setReport(data.report);
+      setOutageSummaryOpen(false);
+      setMessage({ type: "success", text: "Generation outage data updated successfully. Revised data is now active for Download (Excel, PDF, Image)." });
+    } catch (error) {
+      setMessage({ type: "error", text: error.response?.data?.detail || error.message || "Failed to save generation outages." });
+    } finally {
+      setOutageSummarySaving(false);
+    }
   };
   const save = async () => {
     try {
@@ -426,20 +497,60 @@ export default function DSOMorningReport() {
             <Card
               title="Current generation under planned & forced outage (MW)"
               action={
-                <Button
-                  size="small"
-                  variant="outlined"
-                  startIcon={<Eye size={14} />}
-                  onClick={() => openOutageUnits()}
-                  sx={{ minHeight: 29, bgcolor: "#FFFFFF", fontWeight: 900, textTransform: "none" }}
-                >
-                  Generator list ({report?.generation_outage_summary?.units?.length || 0})
-                </Button>
+                <Stack direction="row" spacing={1} alignItems="center">
+                  {canWrite && (
+                    <Button
+                      size="small"
+                      variant="contained"
+                      startIcon={<Pencil size={13} />}
+                      onClick={openOutageSummaryEdit}
+                      sx={{ minHeight: 28, bgcolor: "#0057B7", color: "#fff", fontWeight: 800, textTransform: "none", fontSize: 12 }}
+                    >
+                      Edit Outages
+                    </Button>
+                  )}
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    startIcon={<Eye size={13} />}
+                    onClick={() => openOutageUnits()}
+                    sx={{ minHeight: 28, bgcolor: "#FFFFFF", fontWeight: 800, textTransform: "none", fontSize: 12 }}
+                  >
+                    Generator list ({report?.generation_outage_summary?.units?.length || 0})
+                  </Button>
+                </Stack>
               }
             >
-              <Box sx={{ overflowX: "auto" }}><Box component="table" sx={{ ...tableSx, minWidth: { xs: 360, lg: 0 } }}><thead><tr><th>Fuel</th><th>Planned</th><th>Forced</th><th>Total</th></tr></thead><tbody>
-                {["THERMAL", "HYDRO"].map((fuel) => { const item = outageByFuel[fuel] || {}; return <tr key={fuel} onClick={() => openOutageUnits(fuel)} style={{ cursor: "pointer" }} title={`View ${fuel.toLowerCase()} generator outage list`}><td>{fuel}</td><td>{show(item.planned_mw, 0)}</td><td>{show(item.forced_mw, 0)}</td><td><b>{show(item.total_mw, 0)}</b></td></tr>; })}
-              </tbody></Box></Box>
+              <Box sx={{ overflowX: "auto" }}>
+                <Box component="table" sx={{ ...tableSx, minWidth: { xs: 360, lg: 0 } }}>
+                  <thead>
+                    <tr>
+                      <th>Fuel</th>
+                      <th>Planned</th>
+                      <th>Forced</th>
+                      <th>Total</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {["THERMAL", "HYDRO"].map((fuel) => {
+                      const item = outageByFuel[fuel] || {};
+                      return (
+                        <tr
+                          key={fuel}
+                          onClick={canWrite ? openOutageSummaryEdit : () => openOutageUnits(fuel)}
+                          style={{ cursor: "pointer" }}
+                          title={canWrite ? `Click to edit ${fuel.toLowerCase()} outage data` : `View ${fuel.toLowerCase()} generator outage list`}
+                        >
+                          <td>{fuel}</td>
+                          <td>{show(item.planned_mw, 0)}</td>
+                          <td>{show(item.forced_mw, 0)}</td>
+                          <td><b>{show(item.total_mw, 0)}</b></td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </Box>
+              </Box>
             </Card>
             <Card title={`International Exchange During Yesterday ${displayDate(reportDate)} (Import +ve / Export -ve)`}>
               <Box sx={{ overflowX: "auto" }}><Box component="table" sx={{ ...tableSx, minWidth: { xs: 360, lg: 0 } }}><thead><tr><th>Entity</th><th>Schedule (MU)</th><th>Actual (MU)</th></tr></thead><tbody>
@@ -533,6 +644,95 @@ export default function DSOMorningReport() {
         </DialogActions>
       </Dialog>
 
+      {/* Dedicated Generation Outage Summary Edit Dialog */}
+      <Dialog open={outageSummaryOpen} onClose={() => !outageSummarySaving && setOutageSummaryOpen(false)} maxWidth="sm" fullWidth>
+        <DialogTitle sx={{ fontWeight: 900, pb: 1, color: "#004DA8", display: "flex", alignItems: "center", gap: 1 }}>
+          <Pencil size={18} />
+          Edit Generation Outage Summary (MW)
+        </DialogTitle>
+        <DialogContent dividers sx={{ bgcolor: "#F8FAFC" }}>
+          <Typography sx={{ color: "#64748B", fontSize: 12, mb: 2 }}>
+            Report Date: <b>{displayDate(reportDate)}</b> · Revise planned and forced outage values below. Revised data is automatically updated in the database and immediately included in all download options (Excel, PDF, Image).
+          </Typography>
+
+          <Box sx={{ overflow: "hidden", border: "1px solid #D7E4F6", borderRadius: 2, bgcolor: "#FFFFFF", mb: 2 }}>
+            <Box component="table" sx={{ ...tableSx, minWidth: "100%", "& td": { p: 1 } }}>
+              <thead>
+                <tr>
+                  <th style={{ width: "25%" }}>Fuel</th>
+                  <th style={{ width: "25%" }}>Planned (MW)</th>
+                  <th style={{ width: "25%" }}>Forced (MW)</th>
+                  <th style={{ width: "25%" }}>Total (MW)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {["THERMAL", "HYDRO"].map((fuel) => {
+                  const fuelData = outageSummaryDraft[fuel] || {};
+                  return (
+                    <tr key={fuel}>
+                      <td><b>{fuel}</b></td>
+                      <td>
+                        <TextField
+                          type="number"
+                          size="small"
+                          fullWidth
+                          value={fuelData.planned_mw ?? ""}
+                          onChange={(e) => changeOutageSummaryField(fuel, "planned_mw", e.target.value)}
+                          inputProps={{ min: 0, step: 1 }}
+                        />
+                      </td>
+                      <td>
+                        <TextField
+                          type="number"
+                          size="small"
+                          fullWidth
+                          value={fuelData.forced_mw ?? ""}
+                          onChange={(e) => changeOutageSummaryField(fuel, "forced_mw", e.target.value)}
+                          inputProps={{ min: 0, step: 1 }}
+                        />
+                      </td>
+                      <td style={{ textAlign: "center", fontWeight: 900, color: "#0057B7", fontSize: 15 }}>
+                        {show(fuelData.total_mw, 0)}
+                      </td>
+                    </tr>
+                  );
+                })}
+                <tr style={{ backgroundColor: "#F1F5F9" }}>
+                  <td><b>TOTAL</b></td>
+                  <td style={{ textAlign: "center", fontWeight: 900 }}>
+                    {show((Number(outageSummaryDraft.THERMAL?.planned_mw) || 0) + (Number(outageSummaryDraft.HYDRO?.planned_mw) || 0), 0)}
+                  </td>
+                  <td style={{ textAlign: "center", fontWeight: 900 }}>
+                    {show((Number(outageSummaryDraft.THERMAL?.forced_mw) || 0) + (Number(outageSummaryDraft.HYDRO?.forced_mw) || 0), 0)}
+                  </td>
+                  <td style={{ textAlign: "center", fontWeight: 900, color: "#0057B7", fontSize: 16 }}>
+                    {show((Number(outageSummaryDraft.THERMAL?.total_mw) || 0) + (Number(outageSummaryDraft.HYDRO?.total_mw) || 0), 0)}
+                  </td>
+                </tr>
+              </tbody>
+            </Box>
+          </Box>
+
+          <Alert severity="info" sx={{ fontSize: 12 }}>
+            💡 <b>Download Integration:</b> When saved, the updated figures will be reflected directly in the Morning Report Excel spreadsheet (cells H21:J22), PDF export, and page views.
+          </Alert>
+        </DialogContent>
+        <DialogActions sx={{ px: 3, py: 1.5 }}>
+          <Button onClick={() => setOutageSummaryOpen(false)} disabled={outageSummarySaving}>
+            Cancel
+          </Button>
+          <Button
+            variant="contained"
+            startIcon={outageSummarySaving ? <CircularProgress size={15} color="inherit" /> : <Save size={16} />}
+            onClick={saveOutageSummary}
+            disabled={outageSummarySaving}
+            sx={{ bgcolor: "#0057B7", fontWeight: 900 }}
+          >
+            {outageSummarySaving ? "Saving…" : "Save Outages & Update Downloads"}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
       <Dialog open={editOpen} onClose={() => setEditOpen(false)} maxWidth="lg" fullWidth>
         <DialogTitle sx={{ fontWeight: 900 }}>Edit All Morning Report Sections</DialogTitle>
         <DialogContent dividers>
@@ -546,6 +746,39 @@ export default function DSOMorningReport() {
             <Typography sx={{ color: "#0057B7", fontWeight: 900 }}>HVDC and international exchange</Typography>
             {Object.entries(draft.morning_results.hvdc || {}).map(([key, item]) => <Box key={key} sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "2fr repeat(3,1fr)" }, gap: 1 }}><TextField label="Link" size="small" value={item.label ?? ""} onChange={(e) => change(["morning_results", "hvdc", key, "label"], e.target.value)} /><TextField label="MW" size="small" value={item.value_mw ?? ""} onChange={(e) => change(["morning_results", "hvdc", key, "value_mw"], e.target.value)} /><TextField label="Time" size="small" value={item.time ?? ""} onChange={(e) => change(["morning_results", "hvdc", key, "time"], e.target.value)} /><TextField label="Region" size="small" value={item.region ?? ""} onChange={(e) => change(["morning_results", "hvdc", key, "region"], e.target.value)} /></Box>)}
             {EXCHANGES.map((name) => <Box key={name} sx={{ display: "grid", gridTemplateColumns: "1.5fr 1fr 1fr", gap: 1 }}><Typography sx={{ alignSelf: "center", fontWeight: 800 }}>{name}</Typography><TextField label="Schedule MU" size="small" value={draft.morning_results.yesterday_psp?.international_exchange?.[name]?.schedule_mu ?? ""} onChange={(e) => change(["morning_results", "yesterday_psp", "international_exchange", name, "schedule_mu"], e.target.value)} /><TextField label="Actual MU" size="small" value={draft.morning_results.yesterday_psp?.international_exchange?.[name]?.actual_mu ?? ""} onChange={(e) => change(["morning_results", "yesterday_psp", "international_exchange", name, "actual_mu"], e.target.value)} /></Box>)}
+            <Typography sx={{ color: "#0057B7", fontWeight: 900 }}>Current generation under planned & forced outage (MW)</Typography>
+            {["THERMAL", "HYDRO"].map((fuel) => (
+              <Box key={fuel} sx={{ display: "grid", gridTemplateColumns: "1.5fr 1fr 1fr 1fr", gap: 1 }}>
+                <Typography sx={{ alignSelf: "center", fontWeight: 800 }}>{fuel}</Typography>
+                <TextField
+                  label="Planned MW"
+                  size="small"
+                  type="number"
+                  value={draft.generation_outage_summary?.by_fuel?.[fuel]?.planned_mw ?? ""}
+                  onChange={(e) => {
+                    const p = parseFloat(e.target.value) || 0;
+                    const f = Number(draft.generation_outage_summary?.by_fuel?.[fuel]?.forced_mw) || 0;
+                    change(["generation_outage_summary", "by_fuel", fuel, "planned_mw"], p);
+                    change(["generation_outage_summary", "by_fuel", fuel, "total_mw"], p + f);
+                  }}
+                />
+                <TextField
+                  label="Forced MW"
+                  size="small"
+                  type="number"
+                  value={draft.generation_outage_summary?.by_fuel?.[fuel]?.forced_mw ?? ""}
+                  onChange={(e) => {
+                    const f = parseFloat(e.target.value) || 0;
+                    const p = Number(draft.generation_outage_summary?.by_fuel?.[fuel]?.planned_mw) || 0;
+                    change(["generation_outage_summary", "by_fuel", fuel, "forced_mw"], f);
+                    change(["generation_outage_summary", "by_fuel", fuel, "total_mw"], p + f);
+                  }}
+                />
+                <Typography sx={{ alignSelf: "center", fontWeight: 900, color: "#0057B7" }}>
+                  Total: {show(draft.generation_outage_summary?.by_fuel?.[fuel]?.total_mw, 0)} MW
+                </Typography>
+              </Box>
+            ))}
             <TextField label="Important Events" multiline minRows={3} value={draft.important_events} onChange={(e) => change(["important_events"], e.target.value)} />
             <Stack direction={{ xs: "column", md: "row" }} spacing={1}><TextField fullWidth label="Regards / closing text" value={draft.signoff_regards} onChange={(e) => change(["signoff_regards"], e.target.value)} /><TextField fullWidth label="Name of SIC and designation" value={draft.signoff_name} onChange={(e) => change(["signoff_name"], e.target.value)} /></Stack>
           </Stack>}

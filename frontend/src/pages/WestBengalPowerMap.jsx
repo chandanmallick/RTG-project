@@ -20,6 +20,10 @@ import {
   Radio,
   Activity,
   Flame,
+  Key,
+  X,
+  HelpCircle,
+  AlertCircle,
 } from "lucide-react";
 import TopNavbar from "../components/layout/TopNavbar";
 
@@ -488,31 +492,69 @@ const WB_SUBSTATIONS_CATALOG = [
   },
 ];
 
-// Base map style options
-const BASEMAP_OPTIONS = [
-  {
-    id: "carto-light",
-    label: "Clean Light (Positron)",
-    attribution: "© OpenStreetMap contributors, © CARTO",
-    tiles: [
-      "https://a.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png",
-      "https://b.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png",
-      "https://c.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png",
-    ],
-  },
+// Base map style options (Watermark-free, zero-API-key defaults)
+export const BASEMAP_PROVIDERS = [
   {
     id: "osm",
     label: "OpenStreetMap Standard",
-    attribution: "© OpenStreetMap contributors",
-    tiles: ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],
+    shortLabel: "OSM",
+    attribution: '© <a href="https://www.openstreetmap.org/copyright" target="_blank">OpenStreetMap contributors</a>',
+    requiresKey: false,
+    badge: "Free • No Key",
+    tiles: [
+      "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+    ],
+    description: "Standard OpenStreetMap with towns, highways, and district boundaries.",
+  },
+  {
+    id: "esri-gray",
+    label: "Esri Light Gray Canvas",
+    shortLabel: "Light",
+    attribution: 'Tiles © <a href="https://www.esri.com/" target="_blank">Esri</a>, HERE, Garmin, © OpenStreetMap contributors',
+    requiresKey: false,
+    badge: "Free • No Key",
+    tiles: [
+      "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}",
+    ],
+    description: "Minimalist light gray canvas. Gives maximum contrast for power transmission lines and substation badges.",
   },
   {
     id: "satellite",
-    label: "Satellite Imagery",
-    attribution: "Tiles © Esri, Maxar, Earthstar Geographics",
+    label: "Esri Satellite Imagery",
+    shortLabel: "Satellite",
+    attribution: 'Tiles © <a href="https://www.esri.com/" target="_blank">Esri</a>, Maxar, Earthstar Geographics',
+    requiresKey: false,
+    badge: "Free • No Key",
     tiles: [
       "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
     ],
+    description: "High resolution aerial satellite imagery showing actual switchyards, terrain, and rivers.",
+  },
+  {
+    id: "esri-topo",
+    label: "Esri Topographic",
+    shortLabel: "Topo",
+    attribution: 'Tiles © <a href="https://www.esri.com/" target="_blank">Esri</a>, USGS',
+    requiresKey: false,
+    badge: "Free • No Key",
+    tiles: [
+      "https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}",
+    ],
+    description: "Topographic contours, terrain relief, and geographical landmarks.",
+  },
+  {
+    id: "carto-voyager",
+    label: "CARTO Voyager",
+    shortLabel: "CARTO",
+    attribution: '© <a href="https://carto.com/" target="_blank">CARTO</a>, © OpenStreetMap contributors',
+    requiresKey: true,
+    badge: "API Key Req.",
+    getTiles: (key) => [
+      `https://a.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png${key ? `?key=${key}` : ""}`,
+      `https://b.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png${key ? `?key=${key}` : ""}`,
+      `https://c.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png${key ? `?key=${key}` : ""}`,
+    ],
+    description: "CARTO Voyager raster basemap. Requires free CARTO API key from carto.com/basemaps/apikey.",
   },
 ];
 
@@ -521,8 +563,15 @@ export default function WestBengalPowerMap() {
   const mapRef = useRef(null);
   const markersRef = useRef([]);
 
-  // UI state
-  const [activeBaseMap, setActiveBaseMap] = useState("carto-light");
+  // API Key & Basemap state
+  const [cartoApiKey, setCartoApiKey] = useState(() => {
+    return localStorage.getItem("rtg_carto_api_key") || import.meta.env.VITE_CARTO_API_KEY || "";
+  });
+  const [keyModalOpen, setKeyModalOpen] = useState(false);
+  const [tempKeyInput, setTempKeyInput] = useState(cartoApiKey);
+
+  // UI state - Default to OpenStreetMap Standard (100% free, zero watermark, no API key required)
+  const [activeBaseMap, setActiveBaseMap] = useState("osm");
   const [selectedSubstation, setSelectedSubstation] = useState(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [voltageFilter, setVoltageFilter] = useState("all");
@@ -570,6 +619,9 @@ export default function WestBengalPowerMap() {
     const initialCenter = [87.641, 23.2];
     const initialZoom = 7.6;
 
+    const activeProvider = BASEMAP_PROVIDERS.find((b) => b.id === activeBaseMap) || BASEMAP_PROVIDERS[0];
+    const initialTiles = activeProvider.getTiles ? activeProvider.getTiles(cartoApiKey) : activeProvider.tiles;
+
     try {
       const map = new Map({
         container: mapContainerRef.current,
@@ -578,10 +630,9 @@ export default function WestBengalPowerMap() {
           sources: {
             "base-tiles": {
               type: "raster",
-              tiles: BASEMAP_OPTIONS[0].tiles,
+              tiles: initialTiles,
               tileSize: 256,
-              attribution:
-                '<a href="https://www.openstreetmap.org/copyright" target="_blank">© OpenStreetMap contributors</a>',
+              attribution: activeProvider.attribution,
             },
             openinframap: {
               type: "vector",
@@ -874,21 +925,57 @@ export default function WestBengalPowerMap() {
     };
   }, []);
 
-  // Update base map layer when changed
+  // Update base map layer when changed or when API key changes
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapLoaded) return;
 
-    const baseConfig = BASEMAP_OPTIONS.find((b) => b.id === activeBaseMap);
+    const baseConfig = BASEMAP_PROVIDERS.find((b) => b.id === activeBaseMap);
     if (!baseConfig) return;
+
+    const tiles = baseConfig.getTiles ? baseConfig.getTiles(cartoApiKey) : baseConfig.tiles;
 
     if (map.getSource("base-tiles")) {
       const source = map.getSource("base-tiles");
       if (source.setTiles) {
-        source.setTiles(baseConfig.tiles);
+        source.setTiles(tiles);
       }
     }
-  }, [activeBaseMap, mapLoaded]);
+  }, [activeBaseMap, cartoApiKey, mapLoaded]);
+
+  const handleSelectBaseMap = (id) => {
+    if (id === "carto-voyager" && !cartoApiKey) {
+      setTempKeyInput(cartoApiKey);
+      setKeyModalOpen(true);
+      return;
+    }
+    setActiveBaseMap(id);
+  };
+
+  const handleSaveCartoKey = () => {
+    const trimmed = tempKeyInput.trim();
+    if (trimmed) {
+      localStorage.setItem("rtg_carto_api_key", trimmed);
+      setCartoApiKey(trimmed);
+      setActiveBaseMap("carto-voyager");
+    } else {
+      localStorage.removeItem("rtg_carto_api_key");
+      setCartoApiKey("");
+      if (activeBaseMap === "carto-voyager") {
+        setActiveBaseMap("osm");
+      }
+    }
+    setKeyModalOpen(false);
+  };
+
+  const handleClearCartoKey = () => {
+    localStorage.removeItem("rtg_carto_api_key");
+    setCartoApiKey("");
+    setTempKeyInput("");
+    if (activeBaseMap === "carto-voyager") {
+      setActiveBaseMap("osm");
+    }
+  };
 
   // Update layer visibility
   useEffect(() => {
@@ -1067,6 +1154,19 @@ export default function WestBengalPowerMap() {
               <Shield size={14} />
               OSM License
             </a>
+            <button
+              onClick={() => {
+                setTempKeyInput(cartoApiKey);
+                setKeyModalOpen(true);
+              }}
+              className={`btn btn-sm d-flex align-items-center gap-1 ${
+                cartoApiKey ? "btn-outline-success" : "btn-outline-secondary"
+              }`}
+              title="Basemap Styles & API Key Settings"
+            >
+              <Key size={14} />
+              <span>{cartoApiKey ? "CARTO Key: Active" : "Basemap / Key Settings"}</span>
+            </button>
             <button
               onClick={() => setIsFullScreen(!isFullScreen)}
               className="btn btn-light border btn-sm d-flex align-items-center gap-1"
@@ -1264,20 +1364,38 @@ export default function WestBengalPowerMap() {
 
                 {/* Base Map Switcher */}
                 <div className="bg-white p-2 rounded-3 border shadow-sm">
-                  <div className="text-uppercase fw-bold text-muted mb-1" style={{ fontSize: "10px" }}>
-                    Base Map Style
+                  <div
+                    className="text-uppercase fw-bold text-muted mb-1 d-flex align-items-center justify-content-between"
+                    style={{ fontSize: "10px" }}
+                  >
+                    <span>Base Map Style</span>
+                    <span
+                      className={`badge ${
+                        activeBaseMap === "carto-voyager" && !cartoApiKey
+                          ? "bg-warning-subtle text-warning border"
+                          : "bg-success-subtle text-success"
+                      }`}
+                      style={{ fontSize: "9px" }}
+                    >
+                      {activeBaseMap === "carto-voyager"
+                        ? cartoApiKey
+                          ? "Key Active"
+                          : "Key Req."
+                        : "No Key Req."}
+                    </span>
                   </div>
-                  <div className="btn-group btn-group-sm w-100">
-                    {BASEMAP_OPTIONS.map((bm) => (
+                  <div className="btn-group btn-group-sm w-100 flex-wrap">
+                    {BASEMAP_PROVIDERS.map((bm) => (
                       <button
                         key={bm.id}
-                        onClick={() => setActiveBaseMap(bm.id)}
+                        onClick={() => handleSelectBaseMap(bm.id)}
                         className={`btn btn-sm ${
                           activeBaseMap === bm.id ? "btn-dark fw-bold" : "btn-light text-muted"
                         }`}
                         style={{ fontSize: "11px" }}
+                        title={`${bm.label} (${bm.badge})`}
                       >
-                        {bm.id === "carto-light" ? "Light" : bm.id === "osm" ? "OSM" : "Satellite"}
+                        {bm.shortLabel}
                       </button>
                     ))}
                   </div>
@@ -1452,6 +1570,149 @@ export default function WestBengalPowerMap() {
             </div>
           </div>
         </div>
+
+        {/* Basemap Settings & API Key Configuration Modal */}
+        {keyModalOpen && (
+          <div
+            className="modal show d-block"
+            tabIndex="-1"
+            style={{ backgroundColor: "rgba(15, 23, 42, 0.65)", zIndex: 1050 }}
+          >
+            <div className="modal-dialog modal-dialog-centered" style={{ maxWidth: "560px" }}>
+              <div className="modal-content shadow-lg border-0 rounded-3">
+                <div className="modal-header bg-light border-bottom px-4 py-3">
+                  <div className="d-flex align-items-center gap-2">
+                    <Key size={18} className="text-primary" />
+                    <h5 className="modal-title fw-bold text-dark m-0 fs-6">
+                      Basemap Styles & API Key Settings
+                    </h5>
+                  </div>
+                  <button
+                    type="button"
+                    className="btn-close"
+                    onClick={() => setKeyModalOpen(false)}
+                  />
+                </div>
+
+                <div className="modal-body p-4">
+                  <div className="alert alert-info border-0 rounded-2 p-3 mb-3" style={{ fontSize: "12.5px" }}>
+                    <div className="fw-bold mb-1 d-flex align-items-center gap-1 text-primary">
+                      <Info size={15} />
+                      Why did CARTO show "API KEY REQUIRED"?
+                    </div>
+                    <div>
+                      CARTO recently updated their policy to require an authentication key on direct tile requests (<code>basemaps.cartocdn.com</code>).
+                    </div>
+                    <div className="mt-2 text-dark">
+                      ✅ <b>Instant Solution (No Key Required):</b> The RTG Portal includes built-in <b>OpenStreetMap Standard</b>, <b>Esri Light Gray Canvas</b>, and <b>Satellite Imagery</b> which are 100% free and require <b>NO API KEY</b> and have <b>NO watermark</b>.
+                    </div>
+                  </div>
+
+                  <div className="mb-3">
+                    <label className="form-label fw-bold small text-dark d-flex align-items-center justify-content-between">
+                      <span>Optional CARTO Basemap API Key</span>
+                      <a
+                        href="https://carto.com/basemaps/apikey"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-decoration-none small d-flex align-items-center gap-1 text-primary"
+                      >
+                        <span>Get Free Key (5M req/mo)</span>
+                        <ExternalLink size={12} />
+                      </a>
+                    </label>
+                    <div className="input-group input-group-sm">
+                      <input
+                        type="text"
+                        className="form-control font-monospace"
+                        placeholder="Paste CARTO API key (e.g. carto-pub-...) or leave blank"
+                        value={tempKeyInput}
+                        onChange={(e) => setTempKeyInput(e.target.value)}
+                      />
+                      {tempKeyInput && (
+                        <button
+                          type="button"
+                          className="btn btn-outline-secondary"
+                          onClick={() => setTempKeyInput("")}
+                          title="Clear input"
+                        >
+                          <X size={14} />
+                        </button>
+                      )}
+                    </div>
+                    <div className="form-text text-muted" style={{ fontSize: "11px" }}>
+                      Key is securely saved in your local browser storage and automatically appended as <code>?key=YOUR_KEY</code>.
+                    </div>
+                  </div>
+
+                  <div className="border rounded-2 p-2 bg-light">
+                    <div className="fw-bold text-muted text-uppercase mb-2" style={{ fontSize: "10px" }}>
+                      Available Basemap Options
+                    </div>
+                    <div className="d-flex flex-column gap-1">
+                      {BASEMAP_PROVIDERS.map((bm) => (
+                        <div
+                          key={bm.id}
+                          className="d-flex align-items-center justify-content-between p-1 px-2 rounded bg-white border"
+                          style={{ fontSize: "11.5px" }}
+                        >
+                          <div>
+                            <span className="fw-bold text-dark">{bm.label}</span>
+                            <span className="text-muted ms-2 small">{bm.description}</span>
+                          </div>
+                          <span
+                            className={`badge ${
+                              bm.requiresKey
+                                ? cartoApiKey
+                                  ? "bg-success-subtle text-success"
+                                  : "bg-warning-subtle text-warning border"
+                                : "bg-success-subtle text-success"
+                            }`}
+                          >
+                            {bm.requiresKey ? (cartoApiKey ? "Key Ready" : "Key Req.") : "No Key Req."}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="modal-footer bg-light border-top px-4 py-2 d-flex justify-content-between">
+                  <div>
+                    {cartoApiKey && (
+                      <button
+                        type="button"
+                        className="btn btn-outline-danger btn-sm"
+                        onClick={handleClearCartoKey}
+                      >
+                        Remove Saved Key
+                      </button>
+                    )}
+                  </div>
+                  <div className="d-flex gap-2">
+                    <button
+                      type="button"
+                      className="btn btn-outline-secondary btn-sm"
+                      onClick={() => {
+                        setActiveBaseMap("osm");
+                        setKeyModalOpen(false);
+                      }}
+                    >
+                      Use Free OSM Basemap
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-primary btn-sm fw-bold px-3"
+                      onClick={handleSaveCartoKey}
+                    >
+                      {tempKeyInput.trim() ? "Save Key & Apply CARTO" : "Save Settings"}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Legal & Attribution Footer */}
         <div className="mt-2 p-2 bg-white rounded-3 border text-center text-muted" style={{ fontSize: "11px" }}>
