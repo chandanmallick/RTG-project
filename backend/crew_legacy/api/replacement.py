@@ -4508,16 +4508,17 @@ def get_notifications(user=Depends(get_current_user)):
             and (before_cutoff or is_reporting_or_hod)
             and not is_elapsed
         )
-        # Deny option to assigned employee AND Reporting / HOD officer (or Admin/Controller)
+        # Deny option: STRICTLY restricted to Reporting / HOD officer (or Admin) - Employee cannot deny
         n["canDeny"] = bool(
-            (is_assignee or is_reporting_or_hod)
+            is_reporting_or_hod
+            and not is_assignee
             and n.get("status") in {"Pending", "Accepted"}
             and (before_cutoff or is_reporting_or_hod)
             and not is_elapsed
         )
-        # Can revert assignment: Admin or Reporting Officer / HOD can revert for test
+        # Can revert assignment: Admin only for testing (reporting officer cannot reallocate/revert)
         n["canRevert"] = bool(
-            (user_is_admin or is_reporting_or_hod)
+            user_is_admin
             and n.get("leaveId")
             and not is_elapsed
         )
@@ -4601,10 +4602,13 @@ def deny_duty(id: str, payload: dict, user=Depends(get_current_user)):
     user_role = str(user.get("role") or "").lower()
     user_is_admin = user_role in ["admin", "hod", "dic", "dept_ic", "controller"] or user_id in ["50041", "admin"]
 
-    # USER REQUIREMENT: Deny option available to assigned employee AND Reporting/ HOD officer.
+    # USER REQUIREMENT: Employee should NOT have option to deny. Only His reporting officer/HOD/Admin can deny.
     is_assignee = str(notif.get("employeeId") or "").strip() == user_id
-    if not is_assignee and not is_controller and not user_is_admin:
-        raise HTTPException(403, "Deny option is restricted to assigned employee or Reporting / HOD officers only")
+    if is_assignee and not user_is_admin:
+        raise HTTPException(403, "Employees cannot deny replacement duties. Only the Reporting Officer or HOD can deny.")
+
+    if not is_controller and not user_is_admin:
+        raise HTTPException(403, "Deny option is restricted to Reporting / HOD officers only")
 
     if notif.get("status") not in {"Pending", "Accepted"}:
         raise HTTPException(409, f"Duty is already {notif.get('status')}")
@@ -4618,7 +4622,7 @@ def deny_duty(id: str, payload: dict, user=Depends(get_current_user)):
     reason = str(payload.get("reason") or "").strip()
     if not reason:
         raise HTTPException(400, "Denial reason is required")
-    actor_role = "Employee" if is_assignee else ("Reporting/HOD Officer" if is_controller else "Admin")
+    actor_role = "Reporting/HOD Officer" if is_controller else "Admin"
     leave = None
     if ObjectId.is_valid(str(notif.get("leaveId") or "")):
         leave = leave_request_collection.find_one({"_id": ObjectId(notif["leaveId"])})
@@ -4763,7 +4767,8 @@ def reallocate_denied_duty(notification_id: str, payload: dict = None, user=Depe
     """
     user_role = str(user.get("role") or "").lower()
     actor_id = str(user.get("employeeId") or user.get("userId") or "")
-    if not (user.get("isAdmin") or user_role in ["admin", "dic", "dept_ic", "hod"] or actor_id == "50041" or bool(user.get("isDeptIC")) or bool(user.get("isLeaveAuthority"))):
+    # USER REQUIREMENT: Reporting officer shouldn't have option to reallocate as of now. Only Administrator/DIC.
+    if not (user.get("isAdmin") or user_role in ["admin", "dic", "dept_ic"] or actor_id in ["50041", "admin"] or bool(user.get("isDeptIC"))):
         raise HTTPException(403, "Only administrator or DIC can re-allocate denied duty")
 
     req_data = payload or {}

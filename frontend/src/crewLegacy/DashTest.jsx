@@ -364,7 +364,7 @@ export default function DashTest({ demo = false }) {
           </Box>
           <Box>
             <Typography fontSize={13.5} fontWeight={900} color="#92400E">
-              Duty Replacement Pending Your Review
+              {dutyNotifs.some(n => n.canDeny) ? "Duty Replacement Pending Your Review" : "Duty Replacement Pending Your Acceptance"}
             </Typography>
             <Typography fontSize={11.5} color="#78350F">
               {dutyNotifs.filter(n => n.canAccept || n.canDeny).map(n => `${n.employeeName} (${dayjs(n.date).format("DD-MMM")} · ${n.assignedDuty})`).join(", ")}
@@ -386,7 +386,7 @@ export default function DashTest({ demo = false }) {
               px: 1.8,
             }}
           >
-            Review & Decide (Accept / Deny) ↗
+            {dutyNotifs.some(n => n.canDeny) ? "Review & Decide (Accept / Deny) ↗" : "Review & Accept Duty ↗"}
           </Button>
         </Stack>
       </Paper>
@@ -534,45 +534,47 @@ export default function DashTest({ demo = false }) {
                           />
                         </Stack>
 
-                        <Stack direction="row" spacing={1} alignItems="center">
-                          <Button
-                            size="small"
-                            variant="outlined"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              navigate(`/crew/replacement?tab=duty&date=${n.date}&shift=${n.assignedDuty}`);
-                            }}
-                            sx={{
-                              fontSize: 11,
-                              fontWeight: 850,
-                              textTransform: "none",
-                              color: "#1E3A8A",
-                              borderColor: "#93C5FD",
-                              bgcolor: "#EFF6FF",
-                              "&:hover": { bgcolor: "#DBEAFE" },
-                            }}
-                          >
-                            Allocate Another Duty ↗
-                          </Button>
-                          <Button
-                            size="small"
-                            variant="contained"
-                            disabled={reallocatingId === n._id}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleAutoReallocate(n._id);
-                            }}
-                            sx={{
-                              fontSize: 11,
-                              fontWeight: 900,
-                              textTransform: "none",
-                              bgcolor: "#DC2626",
-                              "&:hover": { bgcolor: "#B91C1C" },
-                            }}
-                          >
-                            {reallocatingId === n._id ? "Allocating..." : "Auto Sequential Allocate ⚡"}
-                          </Button>
-                        </Stack>
+                        {isAdmin && (
+                          <Stack direction="row" spacing={1} alignItems="center">
+                            <Button
+                              size="small"
+                              variant="outlined"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                navigate(`/crew/replacement?tab=duty&date=${n.date}&shift=${n.assignedDuty}`);
+                              }}
+                              sx={{
+                                fontSize: 11,
+                                fontWeight: 850,
+                                textTransform: "none",
+                                color: "#1E3A8A",
+                                borderColor: "#93C5FD",
+                                bgcolor: "#EFF6FF",
+                                "&:hover": { bgcolor: "#DBEAFE" },
+                              }}
+                            >
+                              Allocate Another Duty ↗
+                            </Button>
+                            <Button
+                              size="small"
+                              variant="contained"
+                              disabled={reallocatingId === n._id}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleAutoReallocate(n._id);
+                              }}
+                              sx={{
+                                fontSize: 11,
+                                fontWeight: 900,
+                                textTransform: "none",
+                                bgcolor: "#DC2626",
+                                "&:hover": { bgcolor: "#B91C1C" },
+                              }}
+                            >
+                              {reallocatingId === n._id ? "Allocating..." : "Auto Sequential Allocate ⚡"}
+                            </Button>
+                          </Stack>
+                        )}
                       </Stack>
                     </Box>
                   ))}
@@ -816,42 +818,44 @@ export default function DashTest({ demo = false }) {
                 </Typography>
               )}
 
-              <Stack direction="row" spacing={1} sx={{ mt: 1.2, pt: 1, borderTop: "1px dashed #FECACA" }}>
-                <Button
-                  size="small"
-                  variant="outlined"
-                  onClick={() => {
-                    setDutyFullListOpen(false);
-                    navigate(`/crew/replacement?tab=duty&date=${n.date}&shift=${n.assignedDuty}`);
-                  }}
-                  sx={{
-                    fontSize: 11,
-                    fontWeight: 850,
-                    textTransform: "none",
-                    color: "#1E3A8A",
-                    borderColor: "#93C5FD",
-                    bgcolor: "#EFF6FF",
-                    "&:hover": { bgcolor: "#DBEAFE" },
-                  }}
-                >
-                  Allocate Another Duty ↗
-                </Button>
-                <Button
-                  size="small"
-                  variant="contained"
-                  disabled={reallocatingId === n._id}
-                  onClick={() => handleAutoReallocate(n._id)}
-                  sx={{
-                    fontSize: 11,
-                    fontWeight: 900,
-                    textTransform: "none",
-                    bgcolor: "#DC2626",
-                    "&:hover": { bgcolor: "#B91C1C" },
-                  }}
-                >
-                  {reallocatingId === n._id ? "Allocating..." : "Auto Sequential Allocate ⚡"}
-                </Button>
-              </Stack>
+              {isAdmin && (
+                <Stack direction="row" spacing={1} sx={{ mt: 1.2, pt: 1, borderTop: "1px dashed #FECACA" }}>
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    onClick={() => {
+                      setDutyFullListOpen(false);
+                      navigate(`/crew/replacement?tab=duty&date=${n.date}&shift=${n.assignedDuty}`);
+                    }}
+                    sx={{
+                      fontSize: 11,
+                      fontWeight: 850,
+                      textTransform: "none",
+                      color: "#1E3A8A",
+                      borderColor: "#93C5FD",
+                      bgcolor: "#EFF6FF",
+                      "&:hover": { bgcolor: "#DBEAFE" },
+                    }}
+                  >
+                    Allocate Another Duty ↗
+                  </Button>
+                  <Button
+                    size="small"
+                    variant="contained"
+                    disabled={reallocatingId === n._id}
+                    onClick={() => handleAutoReallocate(n._id)}
+                    sx={{
+                      fontSize: 11,
+                      fontWeight: 900,
+                      textTransform: "none",
+                      bgcolor: "#DC2626",
+                      "&:hover": { bgcolor: "#B91C1C" },
+                    }}
+                  >
+                    {reallocatingId === n._id ? "Allocating..." : "Auto Sequential Allocate ⚡"}
+                  </Button>
+                </Stack>
+              )}
             </Box>
           ))}
 
@@ -928,7 +932,7 @@ export default function DashTest({ demo = false }) {
                     Deny Duty (HOD)
                   </Button>
                 )}
-                {n.canRevert && (
+                {n.canRevert && isAdmin && (
                   <Button
                     size="small"
                     variant="outlined"
