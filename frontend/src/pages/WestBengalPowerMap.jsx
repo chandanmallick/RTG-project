@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useMemo } from "react";
-import { Map, NavigationControl, Marker, Popup } from "maplibre-gl";
-import "maplibre-gl/dist/maplibre-gl.css";
+import { Map, NavigationControl, Marker, Popup } from "../vendor/maplibre-gl/maplibre-gl.mjs";
+import "../vendor/maplibre-gl/maplibre-gl.css";
 import {
   Zap,
   Layers,

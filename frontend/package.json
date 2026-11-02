@@ -27,7 +27,6 @@
     "html2canvas": "^1.4.1",
     "jspdf": "^4.2.1",
     "lucide-react": "^0.284.0",
-    "maplibre-gl": "^6.16.0",
     "primeicons": "^7.0.0",
     "primereact": "^10.9.8",
     "react": "^18.2.0",
