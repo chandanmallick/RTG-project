@@ -33,6 +33,7 @@ from routes.plant_deviation_routes import router as plant_deviation_router
 from routes.data_validation_routes import router as data_validation_router
 from routes.sri_routes import router as sri_router
 from routes.mobile_briefing_routes import router as mobile_briefing_router
+from routes.power_map_routes import router as power_map_router
 from crew_legacy.admin_logic.audit_service import record_audit_event
 
 import urllib3
@@ -184,6 +185,10 @@ app.include_router(
 
 app.include_router(
     mobile_briefing_router
+)
+
+app.include_router(
+    power_map_router
 )
 
 @app.on_event("startup")

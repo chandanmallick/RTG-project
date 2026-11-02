@@ -1376,6 +1376,43 @@ const API = {
     });
     return res.data;
   },
+
+  // Power System Grid Map APIs
+  getPowerGridData: async () => {
+    const res = await axios.get(`${BASE_URL}/power-map/data`);
+    return res.data;
+  },
+
+  getPowerGridStatus: async () => {
+    const res = await axios.get(`${BASE_URL}/power-map/status`);
+    return res.data;
+  },
+
+  syncPowerGridLive: async () => {
+    const res = await axios.post(`${BASE_URL}/power-map/sync-live`);
+    return res.data;
+  },
+
+  importPowerGridData: async (payload) => {
+    const res = await axios.post(`${BASE_URL}/power-map/import`, payload);
+    return res.data;
+  },
+
+  importPowerGridFile: async (file) => {
+    const form = new FormData();
+    form.append("file", file);
+    const res = await axios.post(`${BASE_URL}/power-map/import-file`, form, {
+      headers: { "Content-Type": "multipart/form-data" },
+    });
+    return res.data;
+  },
+
+  resetPowerGridData: async () => {
+    const res = await axios.post(`${BASE_URL}/power-map/reset`);
+    return res.data;
+  },
+
+  downloadPowerGridGeoJsonUrl: () => `${BASE_URL}/power-map/export`,
 };
 
 export default API;
