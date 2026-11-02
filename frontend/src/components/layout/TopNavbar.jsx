@@ -39,6 +39,7 @@ import {
   PhoneCall,
   MapPin,
   BrainCircuit,
+  Compass,
   UserCheck,
   Settings2,
   CalendarRange,
@@ -178,6 +179,7 @@ export default function TopNavbar() {
     location.pathname === "/outage-analysis" ||
     location.pathname === "/outage-analysis/ml-training" ||
     location.pathname === "/mis-report" ||
+    location.pathname === "/analytics/power-map" ||
     location.pathname.startsWith("/analytics/data-validation");
 
   const isReportPreparationActive = location.pathname.startsWith("/report-preparation/");
@@ -521,6 +523,16 @@ export default function TopNavbar() {
                     iconBg="#FEF9E7"
                     path="/mis-report"
                     active={location.pathname === "/mis-report"}
+                    onClick={handleNavigate}
+                  />
+                  <DropdownItem
+                    title="WB Power Grid Map"
+                    description="Substation & transmission line mapping (West Bengal)"
+                    icon={Compass}
+                    iconColor="#0D9488"
+                    iconBg="#F0FDFA"
+                    path="/analytics/power-map"
+                    active={location.pathname === "/analytics/power-map"}
                     onClick={handleNavigate}
                   />
                 </Box>

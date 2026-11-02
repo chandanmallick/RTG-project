@@ -26,6 +26,7 @@ const DSOMorningReport = lazy(() => import("./pages/DSOMorningReport"));
 const PlantDeviationMOP = lazy(() => import("./pages/PlantDeviationMOP"));
 const OutageAnalysis = lazy(() => import("./pages/OutageAnalysis"));
 const OutageMLTraining = lazy(() => import("./pages/OutageMLTraining"));
+const WestBengalPowerMap = lazy(() => import("./pages/WestBengalPowerMap"));
 const OldLogbook = lazy(() => import("./pages/OldLogbook"));
 const CrewCalendar = lazy(() => import("./pages/crew/CrewCalendar"));
 const CrewDutyRoster = lazy(() => import("./pages/crew/CrewDutyRoster"));
@@ -181,6 +182,11 @@ export default function App() {
         <Route
           path="/outage-analysis/ml-training"
           element={protectedPage("outage_analysis", <OutageMLTraining />)}
+        />
+
+        <Route
+          path="/analytics/power-map"
+          element={protectedPage("outage_analysis", <WestBengalPowerMap />)}
         />
 
         <Route
