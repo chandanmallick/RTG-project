@@ -45,6 +45,22 @@ import NasaWeatherModal from "../components/weather/NasaWeatherModal";
 // Base map style options (Watermark-free, zero-API-key defaults)
 export const BASEMAP_PROVIDERS = [
   {
+    id: "carto-light",
+    label: "Carto Light Canvas (High Contrast)",
+    shortLabel: "Light",
+    attribution: '© <a href="https://carto.com/" target="_blank">CARTO</a>, © OpenStreetMap contributors',
+    requiresKey: false,
+    badge: "Recommended • Live",
+    bgColor: "#F8FAFC",
+    tiles: [
+      "https://a.basemaps.cartocdn.com/rastertiles/light_all/{z}/{x}/{y}.png",
+      "https://b.basemaps.cartocdn.com/rastertiles/light_all/{z}/{x}/{y}.png",
+      "https://c.basemaps.cartocdn.com/rastertiles/light_all/{z}/{x}/{y}.png",
+      "https://d.basemaps.cartocdn.com/rastertiles/light_all/{z}/{x}/{y}.png",
+    ],
+    description: "Clean, muted light canvas with open CORS headers and high contrast for power transmission corridors.",
+  },
+  {
     id: "osm",
     label: "OpenStreetMap Standard",
     shortLabel: "OSM",
@@ -60,7 +76,7 @@ export const BASEMAP_PROVIDERS = [
   {
     id: "esri-gray",
     label: "Esri Light Gray Canvas",
-    shortLabel: "Light",
+    shortLabel: "Esri Gray",
     attribution: 'Tiles © <a href="https://www.esri.com/" target="_blank">Esri</a>, HERE, Garmin, © OpenStreetMap contributors',
     requiresKey: false,
     badge: "Clean Canvas",
@@ -163,7 +179,7 @@ export default function WestBengalPowerMap() {
   const fileInputRef = useRef(null);
 
   // UI state
-  const [activeBaseMap, setActiveBaseMap] = useState("osm");
+  const [activeBaseMap, setActiveBaseMap] = useState("carto-light");
   const [muteCivilInfra, setMuteCivilInfra] = useState(true);
   const [selectedEntity, setSelectedEntity] = useState(null);
   const [activeTab, setActiveTab] = useState("all"); // 'all', 'plants', 'substations', 'lines'
@@ -467,7 +483,12 @@ export default function WestBengalPowerMap() {
             },
             "base-tiles": {
               type: "raster",
-              tiles: initialTiles && initialTiles.length > 0 ? initialTiles : ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],
+              tiles: initialTiles && initialTiles.length > 0 ? initialTiles : [
+                "https://a.basemaps.cartocdn.com/rastertiles/light_all/{z}/{x}/{y}.png",
+                "https://b.basemaps.cartocdn.com/rastertiles/light_all/{z}/{x}/{y}.png",
+                "https://c.basemaps.cartocdn.com/rastertiles/light_all/{z}/{x}/{y}.png",
+                "https://d.basemaps.cartocdn.com/rastertiles/light_all/{z}/{x}/{y}.png",
+              ],
               tileSize: 256,
               attribution: activeProvider.attribution,
             },
@@ -929,23 +950,63 @@ export default function WestBengalPowerMap() {
     if (!map || !mapLoaded) return;
 
     const baseConfig = BASEMAP_PROVIDERS.find((b) => b.id === activeBaseMap) || BASEMAP_PROVIDERS[0];
+    const tiles = baseConfig.getTiles ? baseConfig.getTiles(cartoApiKey) : baseConfig.tiles;
 
     // 1. Update background canvas color
     if (map.getLayer("canvas-background")) {
       map.setPaintProperty("canvas-background", "background-color", baseConfig.bgColor || "#F8FAFC");
     }
 
-    // 2. Update base raster tiles layer
-    if (map.getLayer("base-tiles-layer")) {
-      const src = map.getSource("base-tiles");
-      const tiles = baseConfig.getTiles ? baseConfig.getTiles(cartoApiKey) : baseConfig.tiles;
-      if (src && src.setTiles && tiles && tiles.length > 0) {
-        src.setTiles(tiles);
+    // 2. Robust remove-layer -> remove-source -> re-add-source -> re-add-layer pattern
+    // (Bypasses src.setTiles which is unsupported in older MapLibre GL versions)
+    if (tiles && tiles.length > 0) {
+      try {
+        // Step A: Remove existing raster layer first (required by MapLibre before removing source)
+        if (map.getLayer("base-tiles-layer")) {
+          map.removeLayer("base-tiles-layer");
+        }
+
+        // Step B: Remove existing source
+        if (map.getSource("base-tiles")) {
+          map.removeSource("base-tiles");
+        }
+
+        // Step C: Re-add source with new tile URLs
+        map.addSource("base-tiles", {
+          type: "raster",
+          tiles: tiles,
+          tileSize: 256,
+          attribution: baseConfig.attribution,
+        });
+
+        // Step D: Re-add layer positioned before data layers so it stays firmly in the background
+        const beforeId = map.getLayer("er-state-outline")
+          ? "er-state-outline"
+          : map.getLayer("openinfra-line-casing")
+          ? "openinfra-line-casing"
+          : map.getLayer("wb-line-casing")
+          ? "wb-line-casing"
+          : undefined;
+
+        const isOsm = baseConfig.id === "osm";
+        map.addLayer(
+          {
+            id: "base-tiles-layer",
+            type: "raster",
+            source: "base-tiles",
+            minzoom: 0,
+            maxzoom: 20,
+            paint: {
+              "raster-saturation": isOsm && muteCivilInfra ? -0.7 : 0,
+              "raster-contrast": isOsm && muteCivilInfra ? -0.1 : 0,
+              "raster-opacity": isOsm && muteCivilInfra ? 0.75 : 1.0,
+            },
+          },
+          beforeId
+        );
+      } catch (err) {
+        console.warn("Base map layer switch error:", err);
       }
-      const isOsm = baseConfig.id === "osm";
-      map.setPaintProperty("base-tiles-layer", "raster-saturation", isOsm && muteCivilInfra ? -0.7 : 0);
-      map.setPaintProperty("base-tiles-layer", "raster-contrast", isOsm && muteCivilInfra ? -0.1 : 0);
-      map.setPaintProperty("base-tiles-layer", "raster-opacity", isOsm && muteCivilInfra ? 0.75 : 1.0);
     }
   }, [activeBaseMap, cartoApiKey, muteCivilInfra, mapLoaded]);
 

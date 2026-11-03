@@ -1,1 +1,0 @@
-import{r as a}from"./index-150f47bd.js";import{ak as t,a7 as o}from"./CartesianChart-976e6b81.js";var p=["axis"],s=a.forwardRef((r,e)=>a.createElement(t,{chartName:"AreaChart",defaultTooltipEventType:"axis",validateTooltipEventTypes:p,tooltipPayloadSearcher:o,categoricalChartProps:r,ref:e}));export{s as A};
