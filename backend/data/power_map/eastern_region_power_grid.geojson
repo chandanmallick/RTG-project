@@ -1,0 +1,5175 @@
+{
+  "type": "FeatureCollection",
+  "metadata": {
+    "title": "Eastern Region Power System Grid Map Dataset",
+    "region": "Eastern Region (West Bengal, Bihar, Jharkhand, Odisha, Sikkim)",
+    "version": "3.0.0",
+    "states": [
+      "West Bengal",
+      "Bihar",
+      "Jharkhand",
+      "Odisha",
+      "Sikkim"
+    ],
+    "total_power_plants": 37,
+    "total_substations": 53,
+    "total_power_lines": 80,
+    "total_features": 170,
+    "total_generation_capacity_mw": 41625,
+    "source": "erldc_master_grid_dataset"
+  },
+  "features": [
+    {
+      "type": "Feature",
+      "id": "plant-kolaghat_tps",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          87.8732,
+          22.4287
+        ]
+      },
+      "properties": {
+        "id": "kolaghat_tps",
+        "name": "Kolaghat TPS",
+        "short_name": "Kolaghat TPS",
+        "category": "power_plant",
+        "fuel": "coal",
+        "capacity_mw": 1260,
+        "capacity_label": "1,260 MW",
+        "units": "6x210 MW",
+        "operator": "WBPDCL",
+        "voltage": "400/220/132 kV",
+        "voltage_class": 400,
+        "district": "Purba Medinipur",
+        "color": "#DC2626",
+        "icon": "flame",
+        "state": "West Bengal"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "plant-bakreswar_tps",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          87.4522,
+          23.8284
+        ]
+      },
+      "properties": {
+        "id": "bakreswar_tps",
+        "name": "Bakreswar TPS",
+        "short_name": "Bakreswar TPS",
+        "category": "power_plant",
+        "fuel": "coal",
+        "capacity_mw": 1050,
+        "capacity_label": "1,050 MW",
+        "units": "5x210 MW",
+        "operator": "WBPDCL",
+        "voltage": "400/220 kV",
+        "voltage_class": 400,
+        "district": "Birbhum",
+        "color": "#DC2626",
+        "icon": "flame",
+        "state": "West Bengal"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "plant-sagardighi_tps",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          88.0962,
+          24.3644
+        ]
+      },
+      "properties": {
+        "id": "sagardighi_tps",
+        "name": "Sagardighi TPS",
+        "short_name": "Sagardighi TPS",
+        "category": "power_plant",
+        "fuel": "coal",
+        "capacity_mw": 1600,
+        "capacity_label": "1,600 MW",
+        "units": "2x300 MW + 2x500 MW",
+        "operator": "WBPDCL",
+        "voltage": "400/220 kV",
+        "voltage_class": 400,
+        "district": "Murshidabad",
+        "color": "#DC2626",
+        "icon": "flame",
+        "state": "West Bengal"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "plant-santaldih_tps",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          86.4674,
+          23.5982
+        ]
+      },
+      "properties": {
+        "id": "santaldih_tps",
+        "name": "Santaldih TPS",
+        "short_name": "Santaldih TPS",
+        "category": "power_plant",
+        "fuel": "coal",
+        "capacity_mw": 500,
+        "capacity_label": "500 MW",
+        "units": "2x250 MW",
+        "operator": "WBPDCL",
+        "voltage": "400/220 kV",
+        "voltage_class": 400,
+        "district": "Purulia",
+        "color": "#DC2626",
+        "icon": "flame",
+        "state": "West Bengal"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "plant-farakka_stps",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          87.9053,
+          24.7781
+        ]
+      },
+      "properties": {
+        "id": "farakka_stps",
+        "name": "Farakka STPS",
+        "short_name": "Farakka STPS",
+        "category": "power_plant",
+        "fuel": "coal",
+        "capacity_mw": 2100,
+        "capacity_label": "2,100 MW",
+        "units": "3x200 MW + 3x500 MW",
+        "operator": "NTPC",
+        "voltage": "400/220 kV",
+        "voltage_class": 400,
+        "district": "Murshidabad",
+        "color": "#DC2626",
+        "icon": "flame",
+        "state": "West Bengal"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "plant-bandel_tps",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          88.4052,
+          22.9961
+        ]
+      },
+      "properties": {
+        "id": "bandel_tps",
+        "name": "Bandel TPS",
+        "short_name": "Bandel TPS",
+        "category": "power_plant",
+        "fuel": "coal",
+        "capacity_mw": 215,
+        "capacity_label": "215 MW",
+        "units": "1x215 MW (Unit 5)",
+        "operator": "WBPDCL",
+        "voltage": "220/132 kV",
+        "voltage_class": 220,
+        "district": "Hooghly",
+        "color": "#DC2626",
+        "icon": "flame",
+        "state": "West Bengal"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "plant-mejia_mtps",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          87.1321,
+          23.4542
+        ]
+      },
+      "properties": {
+        "id": "mejia_mtps",
+        "name": "Mejia Thermal Power Station (MTPS)",
+        "short_name": "Mejia Thermal Power Station",
+        "category": "power_plant",
+        "fuel": "coal",
+        "capacity_mw": 2340,
+        "capacity_label": "2,340 MW",
+        "units": "4x210 MW + 2x250 MW + 2x500 MW",
+        "operator": "DVC",
+        "voltage": "400/220 kV",
+        "voltage_class": 400,
+        "district": "Bankura",
+        "color": "#DC2626",
+        "icon": "flame",
+        "state": "West Bengal"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "plant-dpl_durgapur",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          87.3242,
+          23.5186
+        ]
+      },
+      "properties": {
+        "id": "dpl_durgapur",
+        "name": "Durgapur Projects Ltd (DPL)",
+        "short_name": "Durgapur Projects Ltd",
+        "category": "power_plant",
+        "fuel": "coal",
+        "capacity_mw": 550,
+        "capacity_label": "550 MW",
+        "units": "1x300 MW + 1x250 MW",
+        "operator": "WBPDCL",
+        "voltage": "220/132 kV",
+        "voltage_class": 220,
+        "district": "Paschim Bardhaman",
+        "color": "#DC2626",
+        "icon": "flame",
+        "state": "West Bengal"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "plant-dstps_andal",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          87.3015,
+          23.4682
+        ]
+      },
+      "properties": {
+        "id": "dstps_andal",
+        "name": "Durgapur Steel TPS (DSTPS)",
+        "short_name": "Durgapur Steel TPS",
+        "category": "power_plant",
+        "fuel": "coal",
+        "capacity_mw": 1000,
+        "capacity_label": "1,000 MW",
+        "units": "2x500 MW",
+        "operator": "DVC",
+        "voltage": "400 kV",
+        "voltage_class": 400,
+        "district": "Paschim Bardhaman",
+        "color": "#DC2626",
+        "icon": "flame",
+        "state": "West Bengal"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "plant-budge_budge",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          88.175,
+          22.477
+        ]
+      },
+      "properties": {
+        "id": "budge_budge",
+        "name": "Budge Budge Generating Station",
+        "short_name": "Budge Budge Generating Station",
+        "category": "power_plant",
+        "fuel": "coal",
+        "capacity_mw": 750,
+        "capacity_label": "750 MW",
+        "units": "3x250 MW",
+        "operator": "CESC",
+        "voltage": "220 kV",
+        "voltage_class": 220,
+        "district": "South 24 Parganas",
+        "color": "#DC2626",
+        "icon": "flame",
+        "state": "West Bengal"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "plant-titagarh_gs",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          88.3752,
+          22.7381
+        ]
+      },
+      "properties": {
+        "id": "titagarh_gs",
+        "name": "Titagarh Generating Station",
+        "short_name": "Titagarh Generating Station",
+        "category": "power_plant",
+        "fuel": "coal",
+        "capacity_mw": 240,
+        "capacity_label": "240 MW",
+        "units": "4x60 MW",
+        "operator": "CESC",
+        "voltage": "220/132 kV",
+        "voltage_class": 220,
+        "district": "North 24 Parganas",
+        "color": "#DC2626",
+        "icon": "flame",
+        "state": "West Bengal"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "plant-southern_gs",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          88.3054,
+          22.5492
+        ]
+      },
+      "properties": {
+        "id": "southern_gs",
+        "name": "Southern Generating Station",
+        "short_name": "Southern Generating Station",
+        "category": "power_plant",
+        "fuel": "coal",
+        "capacity_mw": 135,
+        "capacity_label": "135 MW",
+        "units": "2x67.5 MW",
+        "operator": "CESC",
+        "voltage": "132 kV",
+        "voltage_class": 132,
+        "district": "Kolkata",
+        "color": "#DC2626",
+        "icon": "flame",
+        "state": "West Bengal"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "plant-purulia_ppsp",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          86.1774,
+          23.2012
+        ]
+      },
+      "properties": {
+        "id": "purulia_ppsp",
+        "name": "Purulia Pumped Storage Project (PPSP)",
+        "short_name": "Purulia Pumped Storage Project",
+        "category": "power_plant",
+        "fuel": "hydro",
+        "capacity_mw": 900,
+        "capacity_label": "900 MW",
+        "units": "4x225 MW Pumped Storage",
+        "operator": "WBSEDCL",
+        "voltage": "400 kV",
+        "voltage_class": 400,
+        "district": "Purulia",
+        "color": "#0284C7",
+        "icon": "droplet",
+        "state": "West Bengal"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "plant-tldp_hydro",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          88.435,
+          27.025
+        ]
+      },
+      "properties": {
+        "id": "tldp_hydro",
+        "name": "Teesta Low Dam III & IV Hydro",
+        "short_name": "Teesta Low Dam III & IV Hydro",
+        "category": "power_plant",
+        "fuel": "hydro",
+        "capacity_mw": 292,
+        "capacity_label": "292 MW",
+        "units": "4x33 MW + 4x40 MW",
+        "operator": "NHPC",
+        "voltage": "220/132 kV",
+        "voltage_class": 220,
+        "district": "Kalimpong / Darjeeling",
+        "color": "#0284C7",
+        "icon": "droplet",
+        "state": "West Bengal"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "plant-rammam_hydro",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          88.192,
+          27.126
+        ]
+      },
+      "properties": {
+        "id": "rammam_hydro",
+        "name": "Rammam Stage-II Hydro",
+        "short_name": "Rammam Stage-II Hydro",
+        "category": "power_plant",
+        "fuel": "hydro",
+        "capacity_mw": 51,
+        "capacity_label": "51 MW",
+        "units": "4x12.75 MW",
+        "operator": "WBSEDCL",
+        "voltage": "132 kV",
+        "voltage_class": 132,
+        "district": "Darjeeling",
+        "color": "#0284C7",
+        "icon": "droplet",
+        "state": "West Bengal"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "plant-jaldhaka_hydro",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          88.871,
+          27.012
+        ]
+      },
+      "properties": {
+        "id": "jaldhaka_hydro",
+        "name": "Jaldhaka Hydroelectric Project",
+        "short_name": "Jaldhaka Hydroelectric Project",
+        "category": "power_plant",
+        "fuel": "hydro",
+        "capacity_mw": 36,
+        "capacity_label": "36 MW",
+        "units": "Stages I & II",
+        "operator": "WBSEDCL",
+        "voltage": "66/132 kV",
+        "voltage_class": 132,
+        "district": "Kalimpong",
+        "color": "#0284C7",
+        "icon": "droplet",
+        "state": "West Bengal"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "plant-rtps_dvc",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          86.685,
+          23.635
+        ]
+      },
+      "properties": {
+        "id": "rtps_dvc",
+        "name": "Raghunathpur Thermal Power Station",
+        "short_name": "Raghunathpur Thermal Power Station",
+        "category": "power_plant",
+        "fuel": "coal",
+        "capacity_mw": 1200,
+        "capacity_label": "1,200 MW",
+        "units": "2x600 MW",
+        "operator": "DVC",
+        "voltage": "400 kV",
+        "voltage_class": 400,
+        "district": "Purulia",
+        "color": "#DC2626",
+        "icon": "flame",
+        "state": "West Bengal"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "plant-mpl_maithon",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          86.762,
+          23.774
+        ]
+      },
+      "properties": {
+        "id": "mpl_maithon",
+        "name": "Maithon Right Bank Power Plant (MPL)",
+        "short_name": "Maithon Right Bank Power Plant",
+        "category": "power_plant",
+        "fuel": "coal",
+        "capacity_mw": 1050,
+        "capacity_label": "1,050 MW",
+        "units": "2x525 MW",
+        "operator": "Tata Power / DVC",
+        "voltage": "400 kV",
+        "voltage_class": 400,
+        "district": "Inter-State Border",
+        "color": "#DC2626",
+        "icon": "flame",
+        "state": "West Bengal"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "sub-jeenat_sub",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          87.5,
+          23.9
+        ]
+      },
+      "properties": {
+        "id": "jeenat_sub",
+        "name": "Jeenat 400/220 kV Substation",
+        "short_name": "Jeenat 400/220 kV Substation",
+        "category": "power_substation",
+        "operator": "WBSETCL",
+        "voltage": "400/220 kV",
+        "voltage_class": 400,
+        "district": "Birbhum",
+        "color": "#EF4444",
+        "state": "West Bengal"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "sub-rajarhat_sub",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          88.487,
+          22.583
+        ]
+      },
+      "properties": {
+        "id": "rajarhat_sub",
+        "name": "Rajarhat 400/220 kV GIS Substation",
+        "short_name": "Rajarhat 400/220 kV GIS Substation",
+        "category": "power_substation",
+        "operator": "POWERGRID",
+        "voltage": "400/220 kV",
+        "voltage_class": 400,
+        "district": "North 24 Parganas",
+        "color": "#EF4444",
+        "state": "West Bengal"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "sub-subhasgram_sub",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          88.412,
+          22.418
+        ]
+      },
+      "properties": {
+        "id": "subhasgram_sub",
+        "name": "Subhasgram 400/220 kV Substation",
+        "short_name": "Subhasgram 400/220 kV Substation",
+        "category": "power_substation",
+        "operator": "POWERGRID",
+        "voltage": "400/220 kV",
+        "voltage_class": 400,
+        "district": "South 24 Parganas",
+        "color": "#EF4444",
+        "state": "West Bengal"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "sub-durgapur_pg",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          87.318,
+          23.505
+        ]
+      },
+      "properties": {
+        "id": "durgapur_pg",
+        "name": "Durgapur 400/220 kV Substation (PG)",
+        "short_name": "Durgapur 400/220 kV Substation",
+        "category": "power_substation",
+        "operator": "POWERGRID",
+        "voltage": "400/220 kV",
+        "voltage_class": 400,
+        "district": "Paschim Bardhaman",
+        "color": "#EF4444",
+        "state": "West Bengal"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "sub-gokarna_sub",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          88.179,
+          24.038
+        ]
+      },
+      "properties": {
+        "id": "gokarna_sub",
+        "name": "Gokarna 400/220 kV Substation",
+        "short_name": "Gokarna 400/220 kV Substation",
+        "category": "power_substation",
+        "operator": "WBSETCL",
+        "voltage": "400/220 kV",
+        "voltage_class": 400,
+        "district": "Murshidabad",
+        "color": "#EF4444",
+        "state": "West Bengal"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "sub-arambagh_sub",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          87.781,
+          22.885
+        ]
+      },
+      "properties": {
+        "id": "arambagh_sub",
+        "name": "Arambagh 400/220 kV Substation",
+        "short_name": "Arambagh 400/220 kV Substation",
+        "category": "power_substation",
+        "operator": "WBSETCL",
+        "voltage": "400/220 kV",
+        "voltage_class": 400,
+        "district": "Hooghly",
+        "color": "#EF4444",
+        "state": "West Bengal"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "sub-burdwan_paraj",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          87.652,
+          23.398
+        ]
+      },
+      "properties": {
+        "id": "burdwan_paraj",
+        "name": "Burdwan (Paraj) 400/220 kV Substation",
+        "short_name": "Burdwan",
+        "category": "power_substation",
+        "operator": "WBSETCL",
+        "voltage": "400/220 kV",
+        "voltage_class": 400,
+        "district": "Purba Bardhaman",
+        "color": "#EF4444",
+        "state": "West Bengal"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "sub-bishnupur_sub",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          87.32,
+          23.08
+        ]
+      },
+      "properties": {
+        "id": "bishnupur_sub",
+        "name": "Bishnupur 400/220 kV Substation",
+        "short_name": "Bishnupur 400/220 kV Substation",
+        "category": "power_substation",
+        "operator": "WBSETCL",
+        "voltage": "400/220 kV",
+        "voltage_class": 400,
+        "district": "Bankura",
+        "color": "#EF4444",
+        "state": "West Bengal"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "sub-midnapore_765",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          87.317,
+          22.404
+        ]
+      },
+      "properties": {
+        "id": "midnapore_765",
+        "name": "Midnapore (Kharagpur) 765/400 kV Substation",
+        "short_name": "Midnapore",
+        "category": "power_substation",
+        "operator": "POWERGRID",
+        "voltage": "765/400 kV",
+        "voltage_class": 765,
+        "district": "Paschim Medinipur",
+        "color": "#9333EA",
+        "state": "West Bengal"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "sub-malda_pg",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          88.138,
+          25.042
+        ]
+      },
+      "properties": {
+        "id": "malda_pg",
+        "name": "Malda 400/220/132 kV Substation",
+        "short_name": "Malda 400/220/132 kV Substation",
+        "category": "power_substation",
+        "operator": "POWERGRID",
+        "voltage": "400/220/132 kV",
+        "voltage_class": 400,
+        "district": "Malda",
+        "color": "#EF4444",
+        "state": "West Bengal"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "sub-siliguri_pg",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          88.389,
+          26.702
+        ]
+      },
+      "properties": {
+        "id": "siliguri_pg",
+        "name": "Siliguri 400/220 kV Substation",
+        "short_name": "Siliguri 400/220 kV Substation",
+        "category": "power_substation",
+        "operator": "POWERGRID",
+        "voltage": "400/220 kV",
+        "voltage_class": 400,
+        "district": "Jalpaiguri",
+        "color": "#EF4444",
+        "state": "West Bengal"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "sub-alipurduar_hvdc",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          89.531,
+          26.495
+        ]
+      },
+      "properties": {
+        "id": "alipurduar_hvdc",
+        "name": "Alipurduar 400/220 kV & \u00b1800kV HVDC Terminal",
+        "short_name": "Alipurduar 400/220 kV & \u00b1800kV HVDC Terminal",
+        "category": "power_substation",
+        "operator": "POWERGRID",
+        "voltage": "400/220 kV & \u00b1800kV HVDC",
+        "voltage_class": 765,
+        "district": "Alipurduar",
+        "color": "#9333EA",
+        "state": "West Bengal"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "sub-maithon_pg",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          86.804,
+          23.791
+        ]
+      },
+      "properties": {
+        "id": "maithon_pg",
+        "name": "Maithon 400/220 kV Substation",
+        "short_name": "Maithon 400/220 kV Substation",
+        "category": "power_substation",
+        "operator": "POWERGRID / DVC",
+        "voltage": "400/220 kV",
+        "voltage_class": 400,
+        "district": "Border Area",
+        "color": "#EF4444",
+        "state": "West Bengal"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "sub-jeerat_sub",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          88.42,
+          23.06
+        ]
+      },
+      "properties": {
+        "id": "jeerat_sub",
+        "name": "Jeerat 400/220 kV Substation",
+        "short_name": "Jeerat 400/220 kV Substation",
+        "category": "power_substation",
+        "operator": "WBSETCL",
+        "voltage": "400/220 kV",
+        "voltage_class": 400,
+        "district": "Hooghly",
+        "color": "#EF4444",
+        "state": "West Bengal"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "sub-haldia_sub",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          88.077,
+          22.064
+        ]
+      },
+      "properties": {
+        "id": "haldia_sub",
+        "name": "Haldia 220/132 kV Substation",
+        "short_name": "Haldia 220/132 kV Substation",
+        "category": "power_substation",
+        "operator": "WBSETCL",
+        "voltage": "220/132 kV",
+        "voltage_class": 220,
+        "district": "Purba Medinipur",
+        "color": "#F97316",
+        "state": "West Bengal"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "sub-kasba_sub",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          88.391,
+          22.511
+        ]
+      },
+      "properties": {
+        "id": "kasba_sub",
+        "name": "Kasba 220/132 kV Substation",
+        "short_name": "Kasba 220/132 kV Substation",
+        "category": "power_substation",
+        "operator": "WBSETCL",
+        "voltage": "220/132 kV",
+        "voltage_class": 220,
+        "district": "Kolkata",
+        "color": "#F97316",
+        "state": "West Bengal"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "sub-barasat_sub",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          88.483,
+          22.723
+        ]
+      },
+      "properties": {
+        "id": "barasat_sub",
+        "name": "Barasat 220/132 kV Substation",
+        "short_name": "Barasat 220/132 kV Substation",
+        "category": "power_substation",
+        "operator": "WBSETCL",
+        "voltage": "220/132 kV",
+        "voltage_class": 220,
+        "district": "North 24 Parganas",
+        "color": "#F97316",
+        "state": "West Bengal"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "sub-howrah_sub",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          88.267,
+          22.593
+        ]
+      },
+      "properties": {
+        "id": "howrah_sub",
+        "name": "Howrah 220/132 kV Substation",
+        "short_name": "Howrah 220/132 kV Substation",
+        "category": "power_substation",
+        "operator": "WBSETCL",
+        "voltage": "220/132 kV",
+        "voltage_class": 220,
+        "district": "Howrah",
+        "color": "#F97316",
+        "state": "West Bengal"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "sub-rishra_sub",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          88.341,
+          22.712
+        ]
+      },
+      "properties": {
+        "id": "rishra_sub",
+        "name": "Rishra 220/132 kV Substation",
+        "short_name": "Rishra 220/132 kV Substation",
+        "category": "power_substation",
+        "operator": "WBSETCL",
+        "voltage": "220/132 kV",
+        "voltage_class": 220,
+        "district": "Hooghly",
+        "color": "#F97316",
+        "state": "West Bengal"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "sub-berhampore_sub",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          88.25,
+          24.1
+        ]
+      },
+      "properties": {
+        "id": "berhampore_sub",
+        "name": "Berhampore 220/132 kV Substation",
+        "short_name": "Berhampore 220/132 kV Substation",
+        "category": "power_substation",
+        "operator": "WBSETCL",
+        "voltage": "220/132 kV",
+        "voltage_class": 220,
+        "district": "Murshidabad",
+        "color": "#F97316",
+        "state": "West Bengal"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "sub-asansol_sub",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          86.966,
+          23.688
+        ]
+      },
+      "properties": {
+        "id": "asansol_sub",
+        "name": "Asansol 220/132 kV Substation",
+        "short_name": "Asansol 220/132 kV Substation",
+        "category": "power_substation",
+        "operator": "DVC",
+        "voltage": "220/132 kV",
+        "voltage_class": 220,
+        "district": "Paschim Bardhaman",
+        "color": "#F97316",
+        "state": "West Bengal"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "sub-kharagpur_wb",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          87.32,
+          22.34
+        ]
+      },
+      "properties": {
+        "id": "kharagpur_wb",
+        "name": "Kharagpur 220/132 kV Substation (WB)",
+        "short_name": "Kharagpur 220/132 kV Substation",
+        "category": "power_substation",
+        "operator": "WBSETCL",
+        "voltage": "220/132 kV",
+        "voltage_class": 220,
+        "district": "Paschim Medinipur",
+        "color": "#F97316",
+        "state": "West Bengal"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "sub-purulia_town_sub",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          86.36,
+          23.33
+        ]
+      },
+      "properties": {
+        "id": "purulia_town_sub",
+        "name": "Purulia Town 220/132 kV Substation",
+        "short_name": "Purulia Town 220/132 kV Substation",
+        "category": "power_substation",
+        "operator": "WBSETCL",
+        "voltage": "220/132 kV",
+        "voltage_class": 220,
+        "district": "Purulia",
+        "color": "#F97316",
+        "state": "West Bengal"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "sub-fulbari_siliguri",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          88.42,
+          26.65
+        ]
+      },
+      "properties": {
+        "id": "fulbari_siliguri",
+        "name": "Siliguri (Fulbari) 220/132 kV Substation",
+        "short_name": "Siliguri",
+        "category": "power_substation",
+        "operator": "WBSETCL",
+        "voltage": "220/132 kV",
+        "voltage_class": 220,
+        "district": "Jalpaiguri",
+        "color": "#F97316",
+        "state": "West Bengal"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "sub-kurseong_sub",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          88.28,
+          26.88
+        ]
+      },
+      "properties": {
+        "id": "kurseong_sub",
+        "name": "Kurseong 132/66 kV Substation",
+        "short_name": "Kurseong 132/66 kV Substation",
+        "category": "power_substation",
+        "operator": "WBSETCL",
+        "voltage": "132/66 kV",
+        "voltage_class": 132,
+        "district": "Darjeeling",
+        "color": "#0284C7",
+        "state": "West Bengal"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "sub-ranchi_765",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.32,
+          23.34
+        ]
+      },
+      "properties": {
+        "id": "ranchi_765",
+        "name": "Ranchi 765/400 kV Substation (Jharkhand)",
+        "short_name": "Ranchi 765/400 kV Substation",
+        "category": "power_substation",
+        "operator": "POWERGRID",
+        "voltage": "765/400 kV",
+        "voltage_class": 765,
+        "district": "Inter-State (JH)",
+        "color": "#9333EA",
+        "state": "West Bengal"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "sub-chaibasa_765",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.81,
+          22.55
+        ]
+      },
+      "properties": {
+        "id": "chaibasa_765",
+        "name": "Chaibasa 765/400 kV Substation (Jharkhand)",
+        "short_name": "Chaibasa 765/400 kV Substation",
+        "category": "power_substation",
+        "operator": "POWERGRID",
+        "voltage": "765/400 kV",
+        "voltage_class": 765,
+        "district": "Inter-State (JH)",
+        "color": "#9333EA",
+        "state": "West Bengal"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "sub-baripada_400",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          86.72,
+          21.93
+        ]
+      },
+      "properties": {
+        "id": "baripada_400",
+        "name": "Baripada 400/220 kV Substation (Odisha)",
+        "short_name": "Baripada 400/220 kV Substation",
+        "category": "power_substation",
+        "operator": "POWERGRID / OPTCL",
+        "voltage": "400/220 kV",
+        "voltage_class": 400,
+        "district": "Inter-State (OD)",
+        "color": "#EF4444",
+        "state": "West Bengal"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "sub-rangpo_400",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          88.528,
+          27.175
+        ]
+      },
+      "properties": {
+        "id": "rangpo_400",
+        "name": "Rangpo 400/220 kV Substation (Sikkim)",
+        "short_name": "Rangpo 400/220 kV Substation",
+        "category": "power_substation",
+        "operator": "POWERGRID",
+        "voltage": "400/220 kV",
+        "voltage_class": 400,
+        "district": "Inter-State (SK)",
+        "color": "#EF4444",
+        "state": "West Bengal"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "sub-bongaigaon_400",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          90.56,
+          26.48
+        ]
+      },
+      "properties": {
+        "id": "bongaigaon_400",
+        "name": "Bongaigaon 400/220 kV Substation (Assam)",
+        "short_name": "Bongaigaon 400/220 kV Substation",
+        "category": "power_substation",
+        "operator": "POWERGRID",
+        "voltage": "400/220 kV",
+        "voltage_class": 400,
+        "district": "Inter-State (AS)",
+        "color": "#EF4444",
+        "state": "West Bengal"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "sub-kahalgaon_400",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          87.23,
+          25.26
+        ]
+      },
+      "properties": {
+        "id": "kahalgaon_400",
+        "name": "Kahalgaon 400 kV Switchyard (Bihar)",
+        "short_name": "Kahalgaon 400 kV Switchyard",
+        "category": "power_substation",
+        "operator": "NTPC",
+        "voltage": "400 kV",
+        "voltage_class": 400,
+        "district": "Inter-State (BR)",
+        "color": "#EF4444",
+        "state": "West Bengal"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "sub-bhutan_tala",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          89.87,
+          27.05
+        ]
+      },
+      "properties": {
+        "id": "bhutan_tala",
+        "name": "Tala Hydro Switchyard (Bhutan)",
+        "short_name": "Tala Hydro Switchyard",
+        "category": "power_substation",
+        "operator": "BPC / Bhutan",
+        "voltage": "400 kV",
+        "voltage_class": 400,
+        "district": "Cross-Border (Bhutan)",
+        "color": "#EF4444",
+        "state": "West Bengal"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "sub-bheramara_hvdc",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          88.99,
+          24.03
+        ]
+      },
+      "properties": {
+        "id": "bheramara_hvdc",
+        "name": "Bheramara 400 kV / HVDC Station (Bangladesh)",
+        "short_name": "Bheramara 400 kV / HVDC Station",
+        "category": "power_substation",
+        "operator": "PGCB / Bangladesh",
+        "voltage": "400 kV & HVDC",
+        "voltage_class": 400,
+        "district": "Cross-Border (BD)",
+        "color": "#EF4444",
+        "state": "West Bengal"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "line-1",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            87.317,
+            22.404
+          ],
+          [
+            86.3121,
+            22.8584
+          ],
+          [
+            85.32,
+            23.34
+          ]
+        ]
+      },
+      "properties": {
+        "id": "line-1",
+        "name": "Midnapore - Ranchi 765 kV D/C",
+        "category": "power_line",
+        "voltage": 765000,
+        "voltage_label": "765 kV",
+        "voltage_class": 765,
+        "operator": "POWERGRID",
+        "circuits": 2,
+        "line_type": "overhead",
+        "from_name": "Midnapore (Kharagpur) 765/400 kV Substation",
+        "to_name": "Ranchi 765/400 kV Substation (Jharkhand)",
+        "color": "#9333EA",
+        "casing_color": "#FFFFFF",
+        "state": "West Bengal"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "line-2",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            87.317,
+            22.404
+          ],
+          [
+            86.5635,
+            22.477
+          ],
+          [
+            85.81,
+            22.55
+          ]
+        ]
+      },
+      "properties": {
+        "id": "line-2",
+        "name": "Midnapore - Chaibasa 765 kV D/C",
+        "category": "power_line",
+        "voltage": 765000,
+        "voltage_label": "765 kV",
+        "voltage_class": 765,
+        "operator": "POWERGRID",
+        "circuits": 2,
+        "line_type": "overhead",
+        "from_name": "Midnapore (Kharagpur) 765/400 kV Substation",
+        "to_name": "Chaibasa 765/400 kV Substation (Jharkhand)",
+        "color": "#9333EA",
+        "casing_color": "#FFFFFF",
+        "state": "West Bengal"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "line-3",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            89.531,
+            26.495
+          ],
+          [
+            90.0453,
+            26.4725
+          ],
+          [
+            90.56,
+            26.48
+          ]
+        ]
+      },
+      "properties": {
+        "id": "line-3",
+        "name": "Alipurduar - Biswanath Chariali \u00b1800 kV HVDC Link",
+        "category": "power_line",
+        "voltage": 800000,
+        "voltage_label": "800 kV",
+        "voltage_class": 800,
+        "operator": "POWERGRID",
+        "circuits": 2,
+        "line_type": "hvdc",
+        "from_name": "Alipurduar 400/220 kV & \u00b1800kV HVDC Terminal",
+        "to_name": "Bongaigaon 400/220 kV Substation (Assam)",
+        "color": "#9333EA",
+        "casing_color": "#FFFFFF",
+        "state": "West Bengal"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "line-4",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            87.8732,
+            22.4287
+          ],
+          [
+            88.1353,
+            22.7542
+          ],
+          [
+            88.42,
+            23.06
+          ]
+        ]
+      },
+      "properties": {
+        "id": "line-4",
+        "name": "Kolaghat TPS - Jeerat 400 kV D/C",
+        "category": "power_line",
+        "voltage": 400000,
+        "voltage_label": "400 kV",
+        "voltage_class": 400,
+        "operator": "WBSETCL",
+        "circuits": 2,
+        "line_type": "overhead",
+        "from_name": "Kolaghat TPS",
+        "to_name": "Jeerat 400/220 kV Substation",
+        "color": "#EF4444",
+        "casing_color": "#FFFFFF",
+        "state": "West Bengal"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "line-5",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            87.8732,
+            22.4287
+          ],
+          [
+            87.2966,
+            22.1793
+          ],
+          [
+            86.72,
+            21.93
+          ]
+        ]
+      },
+      "properties": {
+        "id": "line-5",
+        "name": "Kolaghat TPS - Baripada 400 kV D/C",
+        "category": "power_line",
+        "voltage": 400000,
+        "voltage_label": "400 kV",
+        "voltage_class": 400,
+        "operator": "POWERGRID",
+        "circuits": 2,
+        "line_type": "overhead",
+        "from_name": "Kolaghat TPS",
+        "to_name": "Baripada 400/220 kV Substation (Odisha)",
+        "color": "#EF4444",
+        "casing_color": "#FFFFFF",
+        "state": "West Bengal"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "line-6",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            87.8732,
+            22.4287
+          ],
+          [
+            87.5944,
+            22.4313
+          ],
+          [
+            87.317,
+            22.404
+          ]
+        ]
+      },
+      "properties": {
+        "id": "line-6",
+        "name": "Kolaghat TPS - Midnapore 400 kV D/C",
+        "category": "power_line",
+        "voltage": 400000,
+        "voltage_label": "400 kV",
+        "voltage_class": 400,
+        "operator": "WBSETCL",
+        "circuits": 2,
+        "line_type": "overhead",
+        "from_name": "Kolaghat TPS",
+        "to_name": "Midnapore (Kharagpur) 765/400 kV Substation",
+        "color": "#EF4444",
+        "casing_color": "#FFFFFF",
+        "state": "West Bengal"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "line-7",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            87.8732,
+            22.4287
+          ],
+          [
+            87.8124,
+            22.6539
+          ],
+          [
+            87.781,
+            22.885
+          ]
+        ]
+      },
+      "properties": {
+        "id": "line-7",
+        "name": "Kolaghat TPS - Arambagh 400 kV Line",
+        "category": "power_line",
+        "voltage": 400000,
+        "voltage_label": "400 kV",
+        "voltage_class": 400,
+        "operator": "WBSETCL",
+        "circuits": 1,
+        "line_type": "overhead",
+        "from_name": "Kolaghat TPS",
+        "to_name": "Arambagh 400/220 kV Substation",
+        "color": "#EF4444",
+        "casing_color": "#FFFFFF",
+        "state": "West Bengal"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "line-8",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            87.8732,
+            22.4287
+          ],
+          [
+            88.1426,
+            22.4233
+          ],
+          [
+            88.412,
+            22.418
+          ]
+        ]
+      },
+      "properties": {
+        "id": "line-8",
+        "name": "Kolaghat - Subhasgram 400 kV Corridor",
+        "category": "power_line",
+        "voltage": 400000,
+        "voltage_label": "400 kV",
+        "voltage_class": 400,
+        "operator": "POWERGRID",
+        "circuits": 1,
+        "line_type": "overhead",
+        "from_name": "Kolaghat TPS",
+        "to_name": "Subhasgram 400/220 kV Substation",
+        "color": "#EF4444",
+        "casing_color": "#FFFFFF",
+        "state": "West Bengal"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "line-9",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            88.487,
+            22.583
+          ],
+          [
+            88.4358,
+            22.5067
+          ],
+          [
+            88.412,
+            22.418
+          ]
+        ]
+      },
+      "properties": {
+        "id": "line-9",
+        "name": "Rajarhat - Subhasgram 400 kV D/C",
+        "category": "power_line",
+        "voltage": 400000,
+        "voltage_label": "400 kV",
+        "voltage_class": 400,
+        "operator": "POWERGRID",
+        "circuits": 2,
+        "line_type": "overhead",
+        "from_name": "Rajarhat 400/220 kV GIS Substation",
+        "to_name": "Subhasgram 400/220 kV Substation",
+        "color": "#EF4444",
+        "casing_color": "#FFFFFF",
+        "state": "West Bengal"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "line-10",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            88.487,
+            22.583
+          ],
+          [
+            88.4386,
+            22.8194
+          ],
+          [
+            88.42,
+            23.06
+          ]
+        ]
+      },
+      "properties": {
+        "id": "line-10",
+        "name": "Rajarhat - Jeerat 400 kV D/C",
+        "category": "power_line",
+        "voltage": 400000,
+        "voltage_label": "400 kV",
+        "voltage_class": 400,
+        "operator": "POWERGRID",
+        "circuits": 2,
+        "line_type": "overhead",
+        "from_name": "Rajarhat 400/220 kV GIS Substation",
+        "to_name": "Jeerat 400/220 kV Substation",
+        "color": "#EF4444",
+        "casing_color": "#FFFFFF",
+        "state": "West Bengal"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "line-11",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            87.781,
+            22.885
+          ],
+          [
+            87.7165,
+            23.1415
+          ],
+          [
+            87.652,
+            23.398
+          ]
+        ]
+      },
+      "properties": {
+        "id": "line-11",
+        "name": "Arambagh - Burdwan (Paraj) 400 kV Line",
+        "category": "power_line",
+        "voltage": 400000,
+        "voltage_label": "400 kV",
+        "voltage_class": 400,
+        "operator": "WBSETCL",
+        "circuits": 1,
+        "line_type": "overhead",
+        "from_name": "Arambagh 400/220 kV Substation",
+        "to_name": "Burdwan (Paraj) 400/220 kV Substation",
+        "color": "#EF4444",
+        "casing_color": "#FFFFFF",
+        "state": "West Bengal"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "line-12",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            87.781,
+            22.885
+          ],
+          [
+            87.5563,
+            22.9963
+          ],
+          [
+            87.32,
+            23.08
+          ]
+        ]
+      },
+      "properties": {
+        "id": "line-12",
+        "name": "Arambagh - Bishnupur 400 kV Line",
+        "category": "power_line",
+        "voltage": 400000,
+        "voltage_label": "400 kV",
+        "voltage_class": 400,
+        "operator": "WBSETCL",
+        "circuits": 1,
+        "line_type": "overhead",
+        "from_name": "Arambagh 400/220 kV Substation",
+        "to_name": "Bishnupur 400/220 kV Substation",
+        "color": "#EF4444",
+        "casing_color": "#FFFFFF",
+        "state": "West Bengal"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "line-13",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            87.32,
+            23.08
+          ],
+          [
+            87.3335,
+            22.7419
+          ],
+          [
+            87.317,
+            22.404
+          ]
+        ]
+      },
+      "properties": {
+        "id": "line-13",
+        "name": "Bishnupur - Midnapore 400 kV Line",
+        "category": "power_line",
+        "voltage": 400000,
+        "voltage_label": "400 kV",
+        "voltage_class": 400,
+        "operator": "WBSETCL",
+        "circuits": 1,
+        "line_type": "overhead",
+        "from_name": "Bishnupur 400/220 kV Substation",
+        "to_name": "Midnapore (Kharagpur) 765/400 kV Substation",
+        "color": "#EF4444",
+        "casing_color": "#FFFFFF",
+        "state": "West Bengal"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "line-14",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            87.4522,
+            23.8284
+          ],
+          [
+            87.4761,
+            23.8642
+          ],
+          [
+            87.5,
+            23.9
+          ]
+        ]
+      },
+      "properties": {
+        "id": "line-14",
+        "name": "Bakreswar TPS - Jeenat 400 kV D/C",
+        "category": "power_line",
+        "voltage": 400000,
+        "voltage_label": "400 kV",
+        "voltage_class": 400,
+        "operator": "WBSETCL",
+        "circuits": 2,
+        "line_type": "overhead",
+        "from_name": "Bakreswar TPS",
+        "to_name": "Jeenat 400/220 kV Substation",
+        "color": "#EF4444",
+        "casing_color": "#FFFFFF",
+        "state": "West Bengal"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "line-15",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            87.4522,
+            23.8284
+          ],
+          [
+            87.3712,
+            23.6724
+          ],
+          [
+            87.318,
+            23.505
+          ]
+        ]
+      },
+      "properties": {
+        "id": "line-15",
+        "name": "Bakreswar TPS - Durgapur (PG) 400 kV",
+        "category": "power_line",
+        "voltage": 400000,
+        "voltage_label": "400 kV",
+        "voltage_class": 400,
+        "operator": "WBSETCL",
+        "circuits": 1,
+        "line_type": "overhead",
+        "from_name": "Bakreswar TPS",
+        "to_name": "Durgapur 400/220 kV Substation (PG)",
+        "color": "#EF4444",
+        "casing_color": "#FFFFFF",
+        "state": "West Bengal"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "line-16",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            87.4522,
+            23.8284
+          ],
+          [
+            87.5657,
+            23.6195
+          ],
+          [
+            87.652,
+            23.398
+          ]
+        ]
+      },
+      "properties": {
+        "id": "line-16",
+        "name": "Bakreswar TPS - Burdwan (Paraj) 400 kV",
+        "category": "power_line",
+        "voltage": 400000,
+        "voltage_label": "400 kV",
+        "voltage_class": 400,
+        "operator": "WBSETCL",
+        "circuits": 1,
+        "line_type": "overhead",
+        "from_name": "Bakreswar TPS",
+        "to_name": "Burdwan (Paraj) 400/220 kV Substation",
+        "color": "#EF4444",
+        "casing_color": "#FFFFFF",
+        "state": "West Bengal"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "line-17",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            87.5,
+            23.9
+          ],
+          [
+            87.8395,
+            23.969
+          ],
+          [
+            88.179,
+            24.038
+          ]
+        ]
+      },
+      "properties": {
+        "id": "line-17",
+        "name": "Jeenat - Gokarna 400 kV D/C",
+        "category": "power_line",
+        "voltage": 400000,
+        "voltage_label": "400 kV",
+        "voltage_class": 400,
+        "operator": "WBSETCL",
+        "circuits": 2,
+        "line_type": "overhead",
+        "from_name": "Jeenat 400/220 kV Substation",
+        "to_name": "Gokarna 400/220 kV Substation",
+        "color": "#EF4444",
+        "casing_color": "#FFFFFF",
+        "state": "West Bengal"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "line-18",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            87.5,
+            23.9
+          ],
+          [
+            87.3954,
+            23.7088
+          ],
+          [
+            87.318,
+            23.505
+          ]
+        ]
+      },
+      "properties": {
+        "id": "line-18",
+        "name": "Jeenat - Durgapur 400 kV Link",
+        "category": "power_line",
+        "voltage": 400000,
+        "voltage_label": "400 kV",
+        "voltage_class": 400,
+        "operator": "WBSETCL",
+        "circuits": 1,
+        "line_type": "overhead",
+        "from_name": "Jeenat 400/220 kV Substation",
+        "to_name": "Durgapur 400/220 kV Substation (PG)",
+        "color": "#EF4444",
+        "casing_color": "#FFFFFF",
+        "state": "West Bengal"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "line-19",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            87.5,
+            23.9
+          ],
+          [
+            87.5904,
+            23.6533
+          ],
+          [
+            87.652,
+            23.398
+          ]
+        ]
+      },
+      "properties": {
+        "id": "line-19",
+        "name": "Jeenat - Burdwan (Paraj) 400 kV",
+        "category": "power_line",
+        "voltage": 400000,
+        "voltage_label": "400 kV",
+        "voltage_class": 400,
+        "operator": "WBSETCL",
+        "circuits": 1,
+        "line_type": "overhead",
+        "from_name": "Jeenat 400/220 kV Substation",
+        "to_name": "Burdwan (Paraj) 400/220 kV Substation",
+        "color": "#EF4444",
+        "casing_color": "#FFFFFF",
+        "state": "West Bengal"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "line-20",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            88.0962,
+            24.3644
+          ],
+          [
+            88.1376,
+            24.2012
+          ],
+          [
+            88.179,
+            24.038
+          ]
+        ]
+      },
+      "properties": {
+        "id": "line-20",
+        "name": "Sagardighi TPS - Gokarna 400 kV D/C",
+        "category": "power_line",
+        "voltage": 400000,
+        "voltage_label": "400 kV",
+        "voltage_class": 400,
+        "operator": "WBSETCL",
+        "circuits": 2,
+        "line_type": "overhead",
+        "from_name": "Sagardighi TPS",
+        "to_name": "Gokarna 400/220 kV Substation",
+        "color": "#EF4444",
+        "casing_color": "#FFFFFF",
+        "state": "West Bengal"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "line-21",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            88.0962,
+            24.3644
+          ],
+          [
+            88.0144,
+            24.5775
+          ],
+          [
+            87.9053,
+            24.7781
+          ]
+        ]
+      },
+      "properties": {
+        "id": "line-21",
+        "name": "Sagardighi TPS - Farakka 400 kV Line",
+        "category": "power_line",
+        "voltage": 400000,
+        "voltage_label": "400 kV",
+        "voltage_class": 400,
+        "operator": "WBSETCL",
+        "circuits": 1,
+        "line_type": "overhead",
+        "from_name": "Sagardighi TPS",
+        "to_name": "Farakka STPS",
+        "color": "#EF4444",
+        "casing_color": "#FFFFFF",
+        "state": "West Bengal"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "line-22",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            88.0962,
+            24.3644
+          ],
+          [
+            87.8073,
+            24.1204
+          ],
+          [
+            87.5,
+            23.9
+          ]
+        ]
+      },
+      "properties": {
+        "id": "line-22",
+        "name": "Sagardighi TPS - Jeenat 400 kV Line",
+        "category": "power_line",
+        "voltage": 400000,
+        "voltage_label": "400 kV",
+        "voltage_class": 400,
+        "operator": "WBSETCL",
+        "circuits": 1,
+        "line_type": "overhead",
+        "from_name": "Sagardighi TPS",
+        "to_name": "Jeenat 400/220 kV Substation",
+        "color": "#EF4444",
+        "casing_color": "#FFFFFF",
+        "state": "West Bengal"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "line-23",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            87.9053,
+            24.7781
+          ],
+          [
+            88.0216,
+            24.91
+          ],
+          [
+            88.138,
+            25.042
+          ]
+        ]
+      },
+      "properties": {
+        "id": "line-23",
+        "name": "Farakka STPS - Malda 400 kV D/C (Ganges Crossing)",
+        "category": "power_line",
+        "voltage": 400000,
+        "voltage_label": "400 kV",
+        "voltage_class": 400,
+        "operator": "POWERGRID",
+        "circuits": 2,
+        "line_type": "overhead",
+        "from_name": "Farakka STPS",
+        "to_name": "Malda 400/220/132 kV Substation",
+        "color": "#EF4444",
+        "casing_color": "#FFFFFF",
+        "state": "West Bengal"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "line-24",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            87.9053,
+            24.7781
+          ],
+          [
+            87.5764,
+            25.0313
+          ],
+          [
+            87.23,
+            25.26
+          ]
+        ]
+      },
+      "properties": {
+        "id": "line-24",
+        "name": "Farakka STPS - Kahalgaon 400 kV Tie",
+        "category": "power_line",
+        "voltage": 400000,
+        "voltage_label": "400 kV",
+        "voltage_class": 400,
+        "operator": "NTPC",
+        "circuits": 1,
+        "line_type": "overhead",
+        "from_name": "Farakka STPS",
+        "to_name": "Kahalgaon 400 kV Switchyard (Bihar)",
+        "color": "#EF4444",
+        "casing_color": "#FFFFFF",
+        "state": "West Bengal"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "line-25",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            87.9053,
+            24.7781
+          ],
+          [
+            87.7163,
+            24.3328
+          ],
+          [
+            87.5,
+            23.9
+          ]
+        ]
+      },
+      "properties": {
+        "id": "line-25",
+        "name": "Farakka STPS - Jeenat 400 kV",
+        "category": "power_line",
+        "voltage": 400000,
+        "voltage_label": "400 kV",
+        "voltage_class": 400,
+        "operator": "POWERGRID",
+        "circuits": 1,
+        "line_type": "overhead",
+        "from_name": "Farakka STPS",
+        "to_name": "Jeenat 400/220 kV Substation",
+        "color": "#EF4444",
+        "casing_color": "#FFFFFF",
+        "state": "West Bengal"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "line-26",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            87.318,
+            23.505
+          ],
+          [
+            87.061,
+            23.648
+          ],
+          [
+            86.804,
+            23.791
+          ]
+        ]
+      },
+      "properties": {
+        "id": "line-26",
+        "name": "Durgapur (PG) - Maithon 400 kV D/C",
+        "category": "power_line",
+        "voltage": 400000,
+        "voltage_label": "400 kV",
+        "voltage_class": 400,
+        "operator": "POWERGRID",
+        "circuits": 2,
+        "line_type": "overhead",
+        "from_name": "Durgapur 400/220 kV Substation (PG)",
+        "to_name": "Maithon 400/220 kV Substation",
+        "color": "#EF4444",
+        "casing_color": "#FFFFFF",
+        "state": "West Bengal"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "line-27",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            87.1321,
+            23.4542
+          ],
+          [
+            86.9788,
+            23.6331
+          ],
+          [
+            86.804,
+            23.791
+          ]
+        ]
+      },
+      "properties": {
+        "id": "line-27",
+        "name": "Mejia MTPS - Maithon 400 kV D/C",
+        "category": "power_line",
+        "voltage": 400000,
+        "voltage_label": "400 kV",
+        "voltage_class": 400,
+        "operator": "DVC",
+        "circuits": 2,
+        "line_type": "overhead",
+        "from_name": "Mejia Thermal Power Station (MTPS)",
+        "to_name": "Maithon 400/220 kV Substation",
+        "color": "#EF4444",
+        "casing_color": "#FFFFFF",
+        "state": "West Bengal"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "line-28",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            87.1321,
+            23.4542
+          ],
+          [
+            87.4664,
+            23.1809
+          ],
+          [
+            87.781,
+            22.885
+          ]
+        ]
+      },
+      "properties": {
+        "id": "line-28",
+        "name": "Mejia MTPS - Arambagh 400 kV Line",
+        "category": "power_line",
+        "voltage": 400000,
+        "voltage_label": "400 kV",
+        "voltage_class": 400,
+        "operator": "DVC / WBSETCL",
+        "circuits": 1,
+        "line_type": "overhead",
+        "from_name": "Mejia Thermal Power Station (MTPS)",
+        "to_name": "Arambagh 400/220 kV Substation",
+        "color": "#EF4444",
+        "casing_color": "#FFFFFF",
+        "state": "West Bengal"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "line-29",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            87.3015,
+            23.4682
+          ],
+          [
+            87.3098,
+            23.4866
+          ],
+          [
+            87.318,
+            23.505
+          ]
+        ]
+      },
+      "properties": {
+        "id": "line-29",
+        "name": "DSTPS (Andal) - Durgapur (PG) 400 kV",
+        "category": "power_line",
+        "voltage": 400000,
+        "voltage_label": "400 kV",
+        "voltage_class": 400,
+        "operator": "DVC",
+        "circuits": 2,
+        "line_type": "overhead",
+        "from_name": "Durgapur Steel TPS (DSTPS)",
+        "to_name": "Durgapur 400/220 kV Substation (PG)",
+        "color": "#EF4444",
+        "casing_color": "#FFFFFF",
+        "state": "West Bengal"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "line-30",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            86.4674,
+            23.5982
+          ],
+          [
+            86.5787,
+            23.6018
+          ],
+          [
+            86.685,
+            23.635
+          ]
+        ]
+      },
+      "properties": {
+        "id": "line-30",
+        "name": "Santaldih TPS - Raghunathpur 400 kV",
+        "category": "power_line",
+        "voltage": 400000,
+        "voltage_label": "400 kV",
+        "voltage_class": 400,
+        "operator": "WBSETCL",
+        "circuits": 1,
+        "line_type": "overhead",
+        "from_name": "Santaldih TPS",
+        "to_name": "Raghunathpur Thermal Power Station",
+        "color": "#EF4444",
+        "casing_color": "#FFFFFF",
+        "state": "West Bengal"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "line-31",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            86.4674,
+            23.5982
+          ],
+          [
+            86.8943,
+            23.5665
+          ],
+          [
+            87.318,
+            23.505
+          ]
+        ]
+      },
+      "properties": {
+        "id": "line-31",
+        "name": "Santaldih TPS - Durgapur 400 kV",
+        "category": "power_line",
+        "voltage": 400000,
+        "voltage_label": "400 kV",
+        "voltage_class": 400,
+        "operator": "WBSETCL",
+        "circuits": 1,
+        "line_type": "overhead",
+        "from_name": "Santaldih TPS",
+        "to_name": "Durgapur 400/220 kV Substation (PG)",
+        "color": "#EF4444",
+        "casing_color": "#FFFFFF",
+        "state": "West Bengal"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "line-32",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            86.1774,
+            23.2012
+          ],
+          [
+            86.9792,
+            23.0431
+          ],
+          [
+            87.781,
+            22.885
+          ]
+        ]
+      },
+      "properties": {
+        "id": "line-32",
+        "name": "Purulia PPSP - Arambagh 400 kV D/C",
+        "category": "power_line",
+        "voltage": 400000,
+        "voltage_label": "400 kV",
+        "voltage_class": 400,
+        "operator": "WBSEDCL",
+        "circuits": 2,
+        "line_type": "overhead",
+        "from_name": "Purulia Pumped Storage Project (PPSP)",
+        "to_name": "Arambagh 400/220 kV Substation",
+        "color": "#EF4444",
+        "casing_color": "#FFFFFF",
+        "state": "West Bengal"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "line-33",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            86.1774,
+            23.2012
+          ],
+          [
+            86.8214,
+            23.5013
+          ],
+          [
+            87.4522,
+            23.8284
+          ]
+        ]
+      },
+      "properties": {
+        "id": "line-33",
+        "name": "Purulia PPSP - Bakreswar 400 kV Line",
+        "category": "power_line",
+        "voltage": 400000,
+        "voltage_label": "400 kV",
+        "voltage_class": 400,
+        "operator": "WBSEDCL",
+        "circuits": 1,
+        "line_type": "overhead",
+        "from_name": "Purulia Pumped Storage Project (PPSP)",
+        "to_name": "Bakreswar TPS",
+        "color": "#EF4444",
+        "casing_color": "#FFFFFF",
+        "state": "West Bengal"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "line-34",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            86.762,
+            23.774
+          ],
+          [
+            86.7774,
+            23.7964
+          ],
+          [
+            86.804,
+            23.791
+          ]
+        ]
+      },
+      "properties": {
+        "id": "line-34",
+        "name": "Maithon Right Bank (MPL) - Maithon 400 kV",
+        "category": "power_line",
+        "voltage": 400000,
+        "voltage_label": "400 kV",
+        "voltage_class": 400,
+        "operator": "MPL",
+        "circuits": 2,
+        "line_type": "overhead",
+        "from_name": "Maithon Right Bank Power Plant (MPL)",
+        "to_name": "Maithon 400/220 kV Substation",
+        "color": "#EF4444",
+        "casing_color": "#FFFFFF",
+        "state": "West Bengal"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "line-35",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            88.138,
+            25.042
+          ],
+          [
+            88.2635,
+            25.872
+          ],
+          [
+            88.389,
+            26.702
+          ]
+        ]
+      },
+      "properties": {
+        "id": "line-35",
+        "name": "Malda - Siliguri 400 kV D/C Arterial",
+        "category": "power_line",
+        "voltage": 400000,
+        "voltage_label": "400 kV",
+        "voltage_class": 400,
+        "operator": "POWERGRID",
+        "circuits": 2,
+        "line_type": "overhead",
+        "from_name": "Malda 400/220/132 kV Substation",
+        "to_name": "Siliguri 400/220 kV Substation",
+        "color": "#EF4444",
+        "casing_color": "#FFFFFF",
+        "state": "West Bengal"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "line-36",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            88.389,
+            26.702
+          ],
+          [
+            88.4729,
+            26.9343
+          ],
+          [
+            88.528,
+            27.175
+          ]
+        ]
+      },
+      "properties": {
+        "id": "line-36",
+        "name": "Siliguri - Rangpo (Teesta-V) 400 kV D/C",
+        "category": "power_line",
+        "voltage": 400000,
+        "voltage_label": "400 kV",
+        "voltage_class": 400,
+        "operator": "POWERGRID",
+        "circuits": 2,
+        "line_type": "overhead",
+        "from_name": "Siliguri 400/220 kV Substation",
+        "to_name": "Rangpo 400/220 kV Substation (Sikkim)",
+        "color": "#EF4444",
+        "casing_color": "#FFFFFF",
+        "state": "West Bengal"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "line-37",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            88.389,
+            26.702
+          ],
+          [
+            88.9627,
+            26.6133
+          ],
+          [
+            89.531,
+            26.495
+          ]
+        ]
+      },
+      "properties": {
+        "id": "line-37",
+        "name": "Siliguri - Alipurduar 400 kV D/C",
+        "category": "power_line",
+        "voltage": 400000,
+        "voltage_label": "400 kV",
+        "voltage_class": 400,
+        "operator": "POWERGRID",
+        "circuits": 2,
+        "line_type": "overhead",
+        "from_name": "Siliguri 400/220 kV Substation",
+        "to_name": "Alipurduar 400/220 kV & \u00b1800kV HVDC Terminal",
+        "color": "#EF4444",
+        "casing_color": "#FFFFFF",
+        "state": "West Bengal"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "line-38",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            89.531,
+            26.495
+          ],
+          [
+            90.0455,
+            26.4875
+          ],
+          [
+            90.56,
+            26.48
+          ]
+        ]
+      },
+      "properties": {
+        "id": "line-38",
+        "name": "Alipurduar - Bongaigaon 400 kV D/C",
+        "category": "power_line",
+        "voltage": 400000,
+        "voltage_label": "400 kV",
+        "voltage_class": 400,
+        "operator": "POWERGRID",
+        "circuits": 2,
+        "line_type": "overhead",
+        "from_name": "Alipurduar 400/220 kV & \u00b1800kV HVDC Terminal",
+        "to_name": "Bongaigaon 400/220 kV Substation (Assam)",
+        "color": "#EF4444",
+        "casing_color": "#FFFFFF",
+        "state": "West Bengal"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "line-39",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            89.531,
+            26.495
+          ],
+          [
+            89.7133,
+            26.7647
+          ],
+          [
+            89.87,
+            27.05
+          ]
+        ]
+      },
+      "properties": {
+        "id": "line-39",
+        "name": "Alipurduar - Tala (Bhutan Cross-Border) 400 kV D/C",
+        "category": "power_line",
+        "voltage": 400000,
+        "voltage_label": "400 kV",
+        "voltage_class": 400,
+        "operator": "POWERGRID / BPC",
+        "circuits": 2,
+        "line_type": "overhead",
+        "from_name": "Alipurduar 400/220 kV & \u00b1800kV HVDC Terminal",
+        "to_name": "Tala Hydro Switchyard (Bhutan)",
+        "color": "#EF4444",
+        "casing_color": "#FFFFFF",
+        "state": "West Bengal"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "line-40",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            88.25,
+            24.1
+          ],
+          [
+            88.6214,
+            24.0799
+          ],
+          [
+            88.99,
+            24.03
+          ]
+        ]
+      },
+      "properties": {
+        "id": "line-40",
+        "name": "Berhampore - Bheramara 400 kV Bangladesh Interconnection",
+        "category": "power_line",
+        "voltage": 400000,
+        "voltage_label": "400 kV",
+        "voltage_class": 400,
+        "operator": "POWERGRID / PGCB",
+        "circuits": 2,
+        "line_type": "overhead",
+        "from_name": "Berhampore 220/132 kV Substation",
+        "to_name": "Bheramara 400 kV / HVDC Station (Bangladesh)",
+        "color": "#EF4444",
+        "casing_color": "#FFFFFF",
+        "state": "West Bengal"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "line-41",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            87.8732,
+            22.4287
+          ],
+          [
+            87.9751,
+            22.2463
+          ],
+          [
+            88.077,
+            22.064
+          ]
+        ]
+      },
+      "properties": {
+        "id": "line-41",
+        "name": "Kolaghat TPS - Haldia 220 kV D/C",
+        "category": "power_line",
+        "voltage": 220000,
+        "voltage_label": "220 kV",
+        "voltage_class": 220,
+        "operator": "WBSETCL",
+        "circuits": 2,
+        "line_type": "overhead",
+        "from_name": "Kolaghat TPS",
+        "to_name": "Haldia 220/132 kV Substation",
+        "color": "#F97316",
+        "casing_color": "#FFFFFF",
+        "state": "West Bengal"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "line-42",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            87.8732,
+            22.4287
+          ],
+          [
+            88.0759,
+            22.497
+          ],
+          [
+            88.267,
+            22.593
+          ]
+        ]
+      },
+      "properties": {
+        "id": "line-42",
+        "name": "Kolaghat TPS - Howrah 220 kV D/C",
+        "category": "power_line",
+        "voltage": 220000,
+        "voltage_label": "220 kV",
+        "voltage_class": 220,
+        "operator": "WBSETCL",
+        "circuits": 2,
+        "line_type": "overhead",
+        "from_name": "Kolaghat TPS",
+        "to_name": "Howrah 220/132 kV Substation",
+        "color": "#F97316",
+        "casing_color": "#FFFFFF",
+        "state": "West Bengal"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "line-43",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            87.8732,
+            22.4287
+          ],
+          [
+            88.0993,
+            22.5832
+          ],
+          [
+            88.341,
+            22.712
+          ]
+        ]
+      },
+      "properties": {
+        "id": "line-43",
+        "name": "Kolaghat TPS - Rishra 220 kV Line",
+        "category": "power_line",
+        "voltage": 220000,
+        "voltage_label": "220 kV",
+        "voltage_class": 220,
+        "operator": "WBSETCL",
+        "circuits": 1,
+        "line_type": "overhead",
+        "from_name": "Kolaghat TPS",
+        "to_name": "Rishra 220/132 kV Substation",
+        "color": "#F97316",
+        "casing_color": "#FFFFFF",
+        "state": "West Bengal"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "line-44",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            88.175,
+            22.477
+          ],
+          [
+            88.283,
+            22.494
+          ],
+          [
+            88.391,
+            22.511
+          ]
+        ]
+      },
+      "properties": {
+        "id": "line-44",
+        "name": "Budge Budge - Kasba 220 kV D/C",
+        "category": "power_line",
+        "voltage": 220000,
+        "voltage_label": "220 kV",
+        "voltage_class": 220,
+        "operator": "CESC",
+        "circuits": 2,
+        "line_type": "overhead",
+        "from_name": "Budge Budge Generating Station",
+        "to_name": "Kasba 220/132 kV Substation",
+        "color": "#F97316",
+        "casing_color": "#FFFFFF",
+        "state": "West Bengal"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "line-45",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            88.175,
+            22.477
+          ],
+          [
+            88.2328,
+            22.5257
+          ],
+          [
+            88.267,
+            22.593
+          ]
+        ]
+      },
+      "properties": {
+        "id": "line-45",
+        "name": "Budge Budge - Howrah 220 kV Line",
+        "category": "power_line",
+        "voltage": 220000,
+        "voltage_label": "220 kV",
+        "voltage_class": 220,
+        "operator": "CESC",
+        "circuits": 1,
+        "line_type": "overhead",
+        "from_name": "Budge Budge Generating Station",
+        "to_name": "Howrah 220/132 kV Substation",
+        "color": "#F97316",
+        "casing_color": "#FFFFFF",
+        "state": "West Bengal"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "line-46",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            88.412,
+            22.418
+          ],
+          [
+            88.3869,
+            22.4612
+          ],
+          [
+            88.391,
+            22.511
+          ]
+        ]
+      },
+      "properties": {
+        "id": "line-46",
+        "name": "Subhasgram - Kasba 220 kV Feed",
+        "category": "power_line",
+        "voltage": 220000,
+        "voltage_label": "220 kV",
+        "voltage_class": 220,
+        "operator": "WBSETCL",
+        "circuits": 2,
+        "line_type": "overhead",
+        "from_name": "Subhasgram 400/220 kV Substation",
+        "to_name": "Kasba 220/132 kV Substation",
+        "color": "#F97316",
+        "casing_color": "#FFFFFF",
+        "state": "West Bengal"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "line-47",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            88.4052,
+            22.9961
+          ],
+          [
+            88.3731,
+            22.8541
+          ],
+          [
+            88.341,
+            22.712
+          ]
+        ]
+      },
+      "properties": {
+        "id": "line-47",
+        "name": "Bandel TPS - Rishra 220 kV Line",
+        "category": "power_line",
+        "voltage": 220000,
+        "voltage_label": "220 kV",
+        "voltage_class": 220,
+        "operator": "WBSETCL",
+        "circuits": 1,
+        "line_type": "overhead",
+        "from_name": "Bandel TPS",
+        "to_name": "Rishra 220/132 kV Substation",
+        "color": "#F97316",
+        "casing_color": "#FFFFFF",
+        "state": "West Bengal"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "line-48",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            88.3752,
+            22.7381
+          ],
+          [
+            88.427,
+            22.7157
+          ],
+          [
+            88.483,
+            22.723
+          ]
+        ]
+      },
+      "properties": {
+        "id": "line-48",
+        "name": "Titagarh - Barasat 220 kV Feed",
+        "category": "power_line",
+        "voltage": 220000,
+        "voltage_label": "220 kV",
+        "voltage_class": 220,
+        "operator": "CESC / WBSETCL",
+        "circuits": 1,
+        "line_type": "overhead",
+        "from_name": "Titagarh Generating Station",
+        "to_name": "Barasat 220/132 kV Substation",
+        "color": "#F97316",
+        "casing_color": "#FFFFFF",
+        "state": "West Bengal"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "line-49",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            88.483,
+            22.723
+          ],
+          [
+            88.5,
+            22.6534
+          ],
+          [
+            88.487,
+            22.583
+          ]
+        ]
+      },
+      "properties": {
+        "id": "line-49",
+        "name": "Barasat - Rajarhat 220 kV Tie",
+        "category": "power_line",
+        "voltage": 220000,
+        "voltage_label": "220 kV",
+        "voltage_class": 220,
+        "operator": "WBSETCL",
+        "circuits": 1,
+        "line_type": "overhead",
+        "from_name": "Barasat 220/132 kV Substation",
+        "to_name": "Rajarhat 400/220 kV GIS Substation",
+        "color": "#F97316",
+        "casing_color": "#FFFFFF",
+        "state": "West Bengal"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "line-50",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            87.3242,
+            23.5186
+          ],
+          [
+            87.3211,
+            23.5118
+          ],
+          [
+            87.318,
+            23.505
+          ]
+        ]
+      },
+      "properties": {
+        "id": "line-50",
+        "name": "DPL Durgapur - Durgapur (PG) 220 kV",
+        "category": "power_line",
+        "voltage": 220000,
+        "voltage_label": "220 kV",
+        "voltage_class": 220,
+        "operator": "WBSETCL",
+        "circuits": 2,
+        "line_type": "overhead",
+        "from_name": "Durgapur Projects Ltd (DPL)",
+        "to_name": "Durgapur 400/220 kV Substation (PG)",
+        "color": "#F97316",
+        "casing_color": "#FFFFFF",
+        "state": "West Bengal"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "line-51",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            87.318,
+            23.505
+          ],
+          [
+            87.1489,
+            23.6098
+          ],
+          [
+            86.966,
+            23.688
+          ]
+        ]
+      },
+      "properties": {
+        "id": "line-51",
+        "name": "Durgapur - Asansol 220 kV Line",
+        "category": "power_line",
+        "voltage": 220000,
+        "voltage_label": "220 kV",
+        "voltage_class": 220,
+        "operator": "DVC",
+        "circuits": 2,
+        "line_type": "overhead",
+        "from_name": "Durgapur 400/220 kV Substation (PG)",
+        "to_name": "Asansol 220/132 kV Substation",
+        "color": "#F97316",
+        "casing_color": "#FFFFFF",
+        "state": "West Bengal"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "line-52",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            87.317,
+            22.404
+          ],
+          [
+            87.3335,
+            22.3727
+          ],
+          [
+            87.32,
+            22.34
+          ]
+        ]
+      },
+      "properties": {
+        "id": "line-52",
+        "name": "Midnapore - Kharagpur (WB) 220 kV",
+        "category": "power_line",
+        "voltage": 220000,
+        "voltage_label": "220 kV",
+        "voltage_class": 220,
+        "operator": "WBSETCL",
+        "circuits": 2,
+        "line_type": "overhead",
+        "from_name": "Midnapore (Kharagpur) 765/400 kV Substation",
+        "to_name": "Kharagpur 220/132 kV Substation (WB)",
+        "color": "#F97316",
+        "casing_color": "#FFFFFF",
+        "state": "West Bengal"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "line-53",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            86.4674,
+            23.5982
+          ],
+          [
+            86.4137,
+            23.4641
+          ],
+          [
+            86.36,
+            23.33
+          ]
+        ]
+      },
+      "properties": {
+        "id": "line-53",
+        "name": "Santaldih - Purulia Town 220 kV Line",
+        "category": "power_line",
+        "voltage": 220000,
+        "voltage_label": "220 kV",
+        "voltage_class": 220,
+        "operator": "WBSETCL",
+        "circuits": 1,
+        "line_type": "overhead",
+        "from_name": "Santaldih TPS",
+        "to_name": "Purulia Town 220/132 kV Substation",
+        "color": "#F97316",
+        "casing_color": "#FFFFFF",
+        "state": "West Bengal"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "line-54",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            88.179,
+            24.038
+          ],
+          [
+            88.2244,
+            24.0577
+          ],
+          [
+            88.25,
+            24.1
+          ]
+        ]
+      },
+      "properties": {
+        "id": "line-54",
+        "name": "Gokarna - Berhampore 220 kV Line",
+        "category": "power_line",
+        "voltage": 220000,
+        "voltage_label": "220 kV",
+        "voltage_class": 220,
+        "operator": "WBSETCL",
+        "circuits": 1,
+        "line_type": "overhead",
+        "from_name": "Gokarna 400/220 kV Substation",
+        "to_name": "Berhampore 220/132 kV Substation",
+        "color": "#F97316",
+        "casing_color": "#FFFFFF",
+        "state": "West Bengal"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "line-55",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            88.389,
+            26.702
+          ],
+          [
+            88.4174,
+            26.6837
+          ],
+          [
+            88.42,
+            26.65
+          ]
+        ]
+      },
+      "properties": {
+        "id": "line-55",
+        "name": "Siliguri (PG) - Fulbari 220 kV Line",
+        "category": "power_line",
+        "voltage": 220000,
+        "voltage_label": "220 kV",
+        "voltage_class": 220,
+        "operator": "WBSETCL",
+        "circuits": 2,
+        "line_type": "overhead",
+        "from_name": "Siliguri 400/220 kV Substation",
+        "to_name": "Siliguri (Fulbari) 220/132 kV Substation",
+        "color": "#F97316",
+        "casing_color": "#FFFFFF",
+        "state": "West Bengal"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "line-56",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            88.435,
+            27.025
+          ],
+          [
+            88.412,
+            26.8635
+          ],
+          [
+            88.389,
+            26.702
+          ]
+        ]
+      },
+      "properties": {
+        "id": "line-56",
+        "name": "Teesta Low Dam - Siliguri 220 kV Evacuation",
+        "category": "power_line",
+        "voltage": 220000,
+        "voltage_label": "220 kV",
+        "voltage_class": 220,
+        "operator": "NHPC",
+        "circuits": 2,
+        "line_type": "overhead",
+        "from_name": "Teesta Low Dam III & IV Hydro",
+        "to_name": "Siliguri 400/220 kV Substation",
+        "color": "#F97316",
+        "casing_color": "#FFFFFF",
+        "state": "West Bengal"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "line-57",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            88.42,
+            26.65
+          ],
+          [
+            88.3628,
+            26.7728
+          ],
+          [
+            88.28,
+            26.88
+          ]
+        ]
+      },
+      "properties": {
+        "id": "line-57",
+        "name": "Fulbari - Kurseong 132 kV Hill Feeder",
+        "category": "power_line",
+        "voltage": 132000,
+        "voltage_label": "132 kV",
+        "voltage_class": 132,
+        "operator": "WBSETCL",
+        "circuits": 1,
+        "line_type": "overhead",
+        "from_name": "Siliguri (Fulbari) 220/132 kV Substation",
+        "to_name": "Kurseong 132/66 kV Substation",
+        "color": "#0284C7",
+        "casing_color": "#FFFFFF",
+        "state": "West Bengal"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "line-58",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            88.192,
+            27.126
+          ],
+          [
+            88.2501,
+            27.0081
+          ],
+          [
+            88.28,
+            26.88
+          ]
+        ]
+      },
+      "properties": {
+        "id": "line-58",
+        "name": "Rammam Hydro - Kurseong 132 kV Evacuation",
+        "category": "power_line",
+        "voltage": 132000,
+        "voltage_label": "132 kV",
+        "voltage_class": 132,
+        "operator": "WBSEDCL",
+        "circuits": 1,
+        "line_type": "overhead",
+        "from_name": "Rammam Stage-II Hydro",
+        "to_name": "Kurseong 132/66 kV Substation",
+        "color": "#0284C7",
+        "casing_color": "#FFFFFF",
+        "state": "West Bengal"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "line-59",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            88.871,
+            27.012
+          ],
+          [
+            88.63,
+            26.857
+          ],
+          [
+            88.389,
+            26.702
+          ]
+        ]
+      },
+      "properties": {
+        "id": "line-59",
+        "name": "Jaldhaka Hydro - Siliguri 132 kV Feed",
+        "category": "power_line",
+        "voltage": 132000,
+        "voltage_label": "132 kV",
+        "voltage_class": 132,
+        "operator": "WBSEDCL",
+        "circuits": 1,
+        "line_type": "overhead",
+        "from_name": "Jaldhaka Hydroelectric Project",
+        "to_name": "Siliguri 400/220 kV Substation",
+        "color": "#0284C7",
+        "casing_color": "#FFFFFF",
+        "state": "West Bengal"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "line-60",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            88.3054,
+            22.5492
+          ],
+          [
+            88.3421,
+            22.5164
+          ],
+          [
+            88.391,
+            22.511
+          ]
+        ]
+      },
+      "properties": {
+        "id": "line-60",
+        "name": "Southern GS - Kasba 132 kV Kolkata Ring",
+        "category": "power_line",
+        "voltage": 132000,
+        "voltage_label": "132 kV",
+        "voltage_class": 132,
+        "operator": "CESC",
+        "circuits": 2,
+        "line_type": "underground",
+        "from_name": "Southern Generating Station",
+        "to_name": "Kasba 220/132 kV Substation",
+        "color": "#0284C7",
+        "casing_color": "#FFFFFF",
+        "state": "West Bengal"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "line-61",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            88.4052,
+            22.9961
+          ],
+          [
+            88.3503,
+            22.7897
+          ],
+          [
+            88.267,
+            22.593
+          ]
+        ]
+      },
+      "properties": {
+        "id": "line-61",
+        "name": "Bandel - Howrah 132 kV Line",
+        "category": "power_line",
+        "voltage": 132000,
+        "voltage_label": "132 kV",
+        "voltage_class": 132,
+        "operator": "WBSETCL",
+        "circuits": 1,
+        "line_type": "overhead",
+        "from_name": "Bandel TPS",
+        "to_name": "Howrah 220/132 kV Substation",
+        "color": "#0284C7",
+        "casing_color": "#FFFFFF",
+        "state": "West Bengal"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "plant-barh_stps",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.7114,
+          25.4831
+        ]
+      },
+      "properties": {
+        "id": "barh_stps",
+        "name": "NTPC Barh Super Thermal Power Station (STPS)",
+        "short_name": "Barh STPS",
+        "category": "power_plant",
+        "fuel": "coal",
+        "capacity_mw": 3300,
+        "capacity_label": "3,300 MW",
+        "units": "5x660 MW",
+        "operator": "NTPC",
+        "voltage": "400 kV",
+        "voltage_class": 400,
+        "state": "Bihar",
+        "district": "Patna",
+        "color": "#EF4444",
+        "icon": "flame"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "plant-kahalgaon_stps",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          87.2345,
+          25.2612
+        ]
+      },
+      "properties": {
+        "id": "kahalgaon_stps",
+        "name": "NTPC Kahalgaon Super Thermal Power Station",
+        "short_name": "Kahalgaon STPS",
+        "category": "power_plant",
+        "fuel": "coal",
+        "capacity_mw": 2340,
+        "capacity_label": "2,340 MW",
+        "units": "4x210 MW + 3x500 MW",
+        "operator": "NTPC",
+        "voltage": "400 kV",
+        "voltage_class": 400,
+        "state": "Bihar",
+        "district": "Bhagalpur",
+        "color": "#EF4444",
+        "icon": "flame"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "plant-nabinagar_stps",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          84.1278,
+          24.6083
+        ]
+      },
+      "properties": {
+        "id": "nabinagar_stps",
+        "name": "Nabinagar Power Generating Company (NPGCL)",
+        "short_name": "Nabinagar STPS",
+        "category": "power_plant",
+        "fuel": "coal",
+        "capacity_mw": 1980,
+        "capacity_label": "1,980 MW",
+        "units": "3x660 MW",
+        "operator": "NTPC",
+        "voltage": "765/400 kV",
+        "voltage_class": 765,
+        "state": "Bihar",
+        "district": "Aurangabad",
+        "color": "#9333EA",
+        "icon": "flame"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "plant-brbcl_nabinagar",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          84.1852,
+          24.6291
+        ]
+      },
+      "properties": {
+        "id": "brbcl_nabinagar",
+        "name": "Bhartiya Rail Bijlee Company Limited (BRBCL)",
+        "short_name": "BRBCL Nabinagar",
+        "category": "power_plant",
+        "fuel": "coal",
+        "capacity_mw": 1000,
+        "capacity_label": "1,000 MW",
+        "units": "4x250 MW",
+        "operator": "NTPC / Railways",
+        "voltage": "400 kV",
+        "voltage_class": 400,
+        "state": "Bihar",
+        "district": "Aurangabad",
+        "color": "#EF4444",
+        "icon": "flame"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "sub-gaya_765",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          84.9782,
+          24.7541
+        ]
+      },
+      "properties": {
+        "id": "gaya_765",
+        "name": "Gaya 765/400 kV Substation",
+        "short_name": "Gaya 765 kV",
+        "category": "power_substation",
+        "operator": "POWERGRID",
+        "voltage": "765/400 kV",
+        "voltage_class": 765,
+        "state": "Bihar",
+        "district": "Gaya",
+        "color": "#9333EA",
+        "notes": "Major ER pooling hub connecting Nabinagar, Ranchi, and Varanasi (NR)."
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "sub-patna_400",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.1925,
+          25.5684
+        ]
+      },
+      "properties": {
+        "id": "patna_400",
+        "name": "Patna (Naubatpur) 400/220 kV Substation",
+        "short_name": "Patna 400 kV",
+        "category": "power_substation",
+        "operator": "POWERGRID",
+        "voltage": "400/220 kV",
+        "voltage_class": 400,
+        "state": "Bihar",
+        "district": "Patna",
+        "color": "#EF4444",
+        "notes": "Primary power feed into Bihar capital region."
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "sub-biharsharif_400",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.5184,
+          25.1952
+        ]
+      },
+      "properties": {
+        "id": "biharsharif_400",
+        "name": "Biharsharif 400/220 kV Substation",
+        "short_name": "Biharsharif 400 kV",
+        "category": "power_substation",
+        "operator": "POWERGRID",
+        "voltage": "400/220 kV",
+        "voltage_class": 400,
+        "state": "Bihar",
+        "district": "Nalanda",
+        "color": "#EF4444",
+        "notes": "Key backbone substation linking Kahalgaon, Barh, and Sasaram."
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "sub-muzaffarpur_400",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.3942,
+          26.1287
+        ]
+      },
+      "properties": {
+        "id": "muzaffarpur_400",
+        "name": "Muzaffarpur 400/220 kV Substation",
+        "short_name": "Muzaffarpur 400 kV",
+        "category": "power_substation",
+        "operator": "POWERGRID",
+        "voltage": "400/220 kV",
+        "voltage_class": 400,
+        "state": "Bihar",
+        "district": "Muzaffarpur",
+        "color": "#EF4444",
+        "notes": "Cross-border HVDC & AC interconnection gateway to Dhalkebar (Nepal)."
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "sub-sasaram_765",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          84.0152,
+          24.9542
+        ]
+      },
+      "properties": {
+        "id": "sasaram_765",
+        "name": "Sasaram 765/400 kV Substation & HVDC Back-to-Back",
+        "short_name": "Sasaram 765 kV",
+        "category": "power_substation",
+        "operator": "POWERGRID",
+        "voltage": "765/400 kV",
+        "voltage_class": 765,
+        "state": "Bihar",
+        "district": "Rohtas",
+        "color": "#9333EA",
+        "notes": "Historic 500 MW HVDC back-to-back & 765 kV synchronous link to Fatehpur (NR)."
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "sub-purnea_400",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          87.4789,
+          25.7784
+        ]
+      },
+      "properties": {
+        "id": "purnea_400",
+        "name": "Purnea 400/220 kV Substation",
+        "short_name": "Purnea 400 kV",
+        "category": "power_substation",
+        "operator": "POWERGRID",
+        "voltage": "400/220 kV",
+        "voltage_class": 400,
+        "state": "Bihar",
+        "district": "Purnia",
+        "color": "#EF4444",
+        "notes": "Critical corridor hub connecting Bihar with North Bengal (Siliguri/Malda)."
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "sub-banka_400",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          86.9241,
+          24.8875
+        ]
+      },
+      "properties": {
+        "id": "banka_400",
+        "name": "Banka 400/132 kV Substation",
+        "short_name": "Banka 400 kV",
+        "category": "power_substation",
+        "operator": "POWERGRID",
+        "voltage": "400/132 kV",
+        "voltage_class": 400,
+        "state": "Bihar",
+        "district": "Banka",
+        "color": "#EF4444"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "sub-kishanganj_400",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          87.9412,
+          26.0984
+        ]
+      },
+      "properties": {
+        "id": "kishanganj_400",
+        "name": "Kishanganj 400/220 kV Substation",
+        "short_name": "Kishanganj 400 kV",
+        "category": "power_substation",
+        "operator": "POWERGRID",
+        "voltage": "400/220 kV",
+        "voltage_class": 400,
+        "state": "Bihar",
+        "district": "Kishanganj",
+        "color": "#EF4444"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "plant-north_karanpura",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.0214,
+          23.8541
+        ]
+      },
+      "properties": {
+        "id": "north_karanpura",
+        "name": "NTPC North Karanpura Super Thermal Power Project",
+        "short_name": "North Karanpura STPS",
+        "category": "power_plant",
+        "fuel": "coal",
+        "capacity_mw": 1980,
+        "capacity_label": "1,980 MW",
+        "units": "3x660 MW",
+        "operator": "NTPC",
+        "voltage": "765/400 kV",
+        "voltage_class": 765,
+        "state": "Jharkhand",
+        "district": "Chatra",
+        "color": "#9333EA",
+        "icon": "flame"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "plant-patratu_stps",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.2981,
+          23.6421
+        ]
+      },
+      "properties": {
+        "id": "patratu_stps",
+        "name": "Patratu Vidyut Utpadan Nigam (PVUNL)",
+        "short_name": "Patratu STPS",
+        "category": "power_plant",
+        "fuel": "coal",
+        "capacity_mw": 2400,
+        "capacity_label": "2,400 MW (Phase-I)",
+        "units": "3x800 MW",
+        "operator": "NTPC / JUVNL",
+        "voltage": "400 kV",
+        "voltage_class": 400,
+        "state": "Jharkhand",
+        "district": "Ramgarh",
+        "color": "#EF4444",
+        "icon": "flame"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "plant-dvc_koderma",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.6451,
+          24.3687
+        ]
+      },
+      "properties": {
+        "id": "dvc_koderma",
+        "name": "DVC Koderma Thermal Power Station (KTPS)",
+        "short_name": "Koderma TPS",
+        "category": "power_plant",
+        "fuel": "coal",
+        "capacity_mw": 1000,
+        "capacity_label": "1,000 MW",
+        "units": "2x500 MW",
+        "operator": "DVC",
+        "voltage": "400 kV",
+        "voltage_class": 400,
+        "state": "Jharkhand",
+        "district": "Koderma",
+        "color": "#EF4444",
+        "icon": "flame"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "plant-dvc_bokaro_b",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.8841,
+          23.7821
+        ]
+      },
+      "properties": {
+        "id": "dvc_bokaro_b",
+        "name": "DVC Bokaro Thermal Power Station 'B'",
+        "short_name": "Bokaro TPS 'B'",
+        "category": "power_plant",
+        "fuel": "coal",
+        "capacity_mw": 500,
+        "capacity_label": "500 MW",
+        "units": "1x500 MW",
+        "operator": "DVC",
+        "voltage": "220 kV",
+        "voltage_class": 220,
+        "state": "Jharkhand",
+        "district": "Bokaro",
+        "color": "#F97316",
+        "icon": "flame"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "plant-dvc_chandrapura",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          86.1154,
+          23.7541
+        ]
+      },
+      "properties": {
+        "id": "dvc_chandrapura",
+        "name": "DVC Chandrapura Thermal Power Station (CTPS)",
+        "short_name": "Chandrapura TPS",
+        "category": "power_plant",
+        "fuel": "coal",
+        "capacity_mw": 500,
+        "capacity_label": "500 MW",
+        "units": "2x250 MW",
+        "operator": "DVC",
+        "voltage": "220 kV",
+        "voltage_class": 220,
+        "state": "Jharkhand",
+        "district": "Bokaro",
+        "color": "#F97316",
+        "icon": "flame"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "plant-maithon_rb",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          86.7721,
+          23.8184
+        ]
+      },
+      "properties": {
+        "id": "maithon_rb",
+        "name": "Maithon Power Limited (MPL - Tata Power / DVC)",
+        "short_name": "Maithon RB (MPL)",
+        "category": "power_plant",
+        "fuel": "coal",
+        "capacity_mw": 1050,
+        "capacity_label": "1,050 MW",
+        "units": "2x525 MW",
+        "operator": "Tata Power / DVC",
+        "voltage": "400 kV",
+        "voltage_class": 400,
+        "state": "Jharkhand",
+        "district": "Dhanbad",
+        "color": "#EF4444",
+        "icon": "flame"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "sub-chaibasa_400",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.8124,
+          22.5684
+        ]
+      },
+      "properties": {
+        "id": "chaibasa_400",
+        "name": "Chaibasa 400/220 kV Substation",
+        "short_name": "Chaibasa 400 kV",
+        "category": "power_substation",
+        "operator": "POWERGRID",
+        "voltage": "400/220 kV",
+        "voltage_class": 400,
+        "state": "Jharkhand",
+        "district": "West Singhbhum",
+        "color": "#EF4444",
+        "notes": "Backbone link connecting Jamshedpur with Rourkela/Odisha."
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "sub-jamshedpur_400",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          86.2084,
+          22.7841
+        ]
+      },
+      "properties": {
+        "id": "jamshedpur_400",
+        "name": "Jamshedpur 400/220 kV Substation",
+        "short_name": "Jamshedpur 400 kV",
+        "category": "power_substation",
+        "operator": "POWERGRID",
+        "voltage": "400/220 kV",
+        "voltage_class": 400,
+        "state": "Jharkhand",
+        "district": "East Singhbhum",
+        "color": "#EF4444",
+        "notes": "Heavy industrial steel corridor hub, linking Durgapur (WB) and Chaibasa."
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "sub-ramgarh_400",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.5214,
+          23.6321
+        ]
+      },
+      "properties": {
+        "id": "ramgarh_400",
+        "name": "Ramgarh 400/220 kV Substation",
+        "short_name": "Ramgarh 400 kV",
+        "category": "power_substation",
+        "operator": "POWERGRID",
+        "voltage": "400/220 kV",
+        "voltage_class": 400,
+        "state": "Jharkhand",
+        "district": "Ramgarh",
+        "color": "#EF4444"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "sub-dhanbad_400",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          86.4251,
+          23.8012
+        ]
+      },
+      "properties": {
+        "id": "dhanbad_400",
+        "name": "Dhanbad 400/220 kV Substation",
+        "short_name": "Dhanbad 400 kV",
+        "category": "power_substation",
+        "operator": "POWERGRID",
+        "voltage": "400/220 kV",
+        "voltage_class": 400,
+        "state": "Jharkhand",
+        "district": "Dhanbad",
+        "color": "#EF4444"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "plant-talcher_kaniha",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.0821,
+          21.0952
+        ]
+      },
+      "properties": {
+        "id": "talcher_kaniha",
+        "name": "NTPC Talcher Super Thermal Power Station (Kaniha)",
+        "short_name": "Talcher Kaniha STPS",
+        "category": "power_plant",
+        "fuel": "coal",
+        "capacity_mw": 3000,
+        "capacity_label": "3,000 MW",
+        "units": "2x500 MW + 4x500 MW",
+        "operator": "NTPC",
+        "voltage": "400 kV / HVDC \u00b1500 kV",
+        "voltage_class": 400,
+        "state": "Odisha",
+        "district": "Angul",
+        "color": "#EF4444",
+        "icon": "flame",
+        "notes": "Origin of 2,000 MW Talcher-Kolar HVDC bipole link to Southern Region (SR)."
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "plant-darlipali_stps",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          83.8241,
+          21.9841
+        ]
+      },
+      "properties": {
+        "id": "darlipali_stps",
+        "name": "NTPC Darlipali Super Thermal Power Station",
+        "short_name": "Darlipali STPS",
+        "category": "power_plant",
+        "fuel": "coal",
+        "capacity_mw": 1600,
+        "capacity_label": "1,600 MW",
+        "units": "2x800 MW",
+        "operator": "NTPC",
+        "voltage": "765 kV",
+        "voltage_class": 765,
+        "state": "Odisha",
+        "district": "Sundargarh",
+        "color": "#9333EA",
+        "icon": "flame"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "plant-ib_thermal",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          83.8541,
+          21.6841
+        ]
+      },
+      "properties": {
+        "id": "ib_thermal",
+        "name": "OPGC IB Thermal Power Station (Banharpali)",
+        "short_name": "IB Thermal TPS",
+        "category": "power_plant",
+        "fuel": "coal",
+        "capacity_mw": 1740,
+        "capacity_label": "1,740 MW",
+        "units": "2x210 MW + 2x660 MW",
+        "operator": "OPGC",
+        "voltage": "400 kV",
+        "voltage_class": 400,
+        "state": "Odisha",
+        "district": "Jharsuguda",
+        "color": "#EF4444",
+        "icon": "flame"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "plant-gmr_kamalanga",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.2841,
+          20.8951
+        ]
+      },
+      "properties": {
+        "id": "gmr_kamalanga",
+        "name": "GMR Kamalanga Energy Thermal Power Plant",
+        "short_name": "Kamalanga TPS",
+        "category": "power_plant",
+        "fuel": "coal",
+        "capacity_mw": 1050,
+        "capacity_label": "1,050 MW",
+        "units": "3x350 MW",
+        "operator": "GMR",
+        "voltage": "400 kV",
+        "voltage_class": 400,
+        "state": "Odisha",
+        "district": "Dhenkanal",
+        "color": "#EF4444",
+        "icon": "flame"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "plant-upper_indravati_hydro",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          82.8841,
+          19.4687
+        ]
+      },
+      "properties": {
+        "id": "upper_indravati_hydro",
+        "name": "Upper Indravati Hydro Electric Project (Mukhiguda)",
+        "short_name": "Upper Indravati HEP",
+        "category": "power_plant",
+        "fuel": "hydro",
+        "capacity_mw": 600,
+        "capacity_label": "600 MW",
+        "units": "4x150 MW",
+        "operator": "OHPC",
+        "voltage": "400 kV",
+        "voltage_class": 400,
+        "state": "Odisha",
+        "district": "Kalahandi",
+        "color": "#2563EB",
+        "icon": "droplet"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "plant-balimela_hydro",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          82.1154,
+          18.2541
+        ]
+      },
+      "properties": {
+        "id": "balimela_hydro",
+        "name": "Balimela Hydro Electric Power Station",
+        "short_name": "Balimela HEP",
+        "category": "power_plant",
+        "fuel": "hydro",
+        "capacity_mw": 510,
+        "capacity_label": "510 MW",
+        "units": "6x60 MW + 2x75 MW",
+        "operator": "OHPC",
+        "voltage": "220 kV",
+        "voltage_class": 220,
+        "state": "Odisha",
+        "district": "Malkangiri",
+        "color": "#2563EB",
+        "icon": "droplet"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "sub-jharsuguda_765",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          84.0541,
+          21.8451
+        ]
+      },
+      "properties": {
+        "id": "jharsuguda_765",
+        "name": "Jharsuguda (Sundargarh) 765/400 kV Pooling Station",
+        "short_name": "Jharsuguda 765 kV",
+        "category": "power_substation",
+        "operator": "POWERGRID",
+        "voltage": "765/400 kV",
+        "voltage_class": 765,
+        "state": "Odisha",
+        "district": "Jharsuguda",
+        "color": "#9333EA",
+        "notes": "Premier inter-regional hub between ER and Western Region (Raipur/Dharamjaygarh)."
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "sub-angul_765",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.1254,
+          20.8412
+        ]
+      },
+      "properties": {
+        "id": "angul_765",
+        "name": "Angul 765/400 kV Substation",
+        "short_name": "Angul 765 kV",
+        "category": "power_substation",
+        "operator": "POWERGRID",
+        "voltage": "765/400 kV",
+        "voltage_class": 765,
+        "state": "Odisha",
+        "district": "Angul",
+        "color": "#9333EA",
+        "notes": "Massive 765 kV generation pooling station for Talcher and Kamalanga complexes."
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "sub-meramundali_400",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.3451,
+          20.7841
+        ]
+      },
+      "properties": {
+        "id": "meramundali_400",
+        "name": "Meramundali 400/220 kV Substation",
+        "short_name": "Meramundali 400 kV",
+        "category": "power_substation",
+        "operator": "OPTCL",
+        "voltage": "400/220 kV",
+        "voltage_class": 400,
+        "state": "Odisha",
+        "district": "Dhenkanal",
+        "color": "#EF4444"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "sub-mendhasal_400",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.7254,
+          20.3124
+        ]
+      },
+      "properties": {
+        "id": "mendhasal_400",
+        "name": "Mendhasal (Bhubaneswar) 400/220 kV Substation",
+        "short_name": "Mendhasal 400 kV",
+        "category": "power_substation",
+        "operator": "OPTCL",
+        "voltage": "400/220 kV",
+        "voltage_class": 400,
+        "state": "Odisha",
+        "district": "Khurda",
+        "color": "#EF4444",
+        "notes": "Chief supply point for capital city Bhubaneswar and Cuttack urban zone."
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "sub-rourkela_400",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          84.8541,
+          22.2451
+        ]
+      },
+      "properties": {
+        "id": "rourkela_400",
+        "name": "Rourkela (Tarkera) 400/220 kV Substation",
+        "short_name": "Rourkela 400 kV",
+        "category": "power_substation",
+        "operator": "POWERGRID",
+        "voltage": "400/220 kV",
+        "voltage_class": 400,
+        "state": "Odisha",
+        "district": "Sundargarh",
+        "color": "#EF4444"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "sub-duburi_400",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          85.9841,
+          20.9841
+        ]
+      },
+      "properties": {
+        "id": "duburi_400",
+        "name": "New Duburi 400/220 kV Substation",
+        "short_name": "Duburi 400 kV",
+        "category": "power_substation",
+        "operator": "POWERGRID / OPTCL",
+        "voltage": "400/220 kV",
+        "voltage_class": 400,
+        "state": "Odisha",
+        "district": "Jajpur",
+        "color": "#EF4444",
+        "notes": "Steel hub Kalinganagar industrial grid gateway."
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "sub-jeypore_400",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          82.5684,
+          18.8541
+        ]
+      },
+      "properties": {
+        "id": "jeypore_400",
+        "name": "Jeypore 400/220 kV Substation",
+        "short_name": "Jeypore 400 kV",
+        "category": "power_substation",
+        "operator": "POWERGRID",
+        "voltage": "400/220 kV",
+        "voltage_class": 400,
+        "state": "Odisha",
+        "district": "Koraput",
+        "color": "#EF4444",
+        "notes": "Southern Odisha interchange link to Gazuwaka (Southern Region)."
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "plant-teesta_v",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          88.4841,
+          27.4251
+        ]
+      },
+      "properties": {
+        "id": "teesta_v",
+        "name": "NHPC Teesta-V Hydro Electric Project",
+        "short_name": "Teesta-V HEP",
+        "category": "power_plant",
+        "fuel": "hydro",
+        "capacity_mw": 510,
+        "capacity_label": "510 MW",
+        "units": "3x170 MW",
+        "operator": "NHPC",
+        "voltage": "400 kV",
+        "voltage_class": 400,
+        "state": "Sikkim",
+        "district": "East Sikkim",
+        "color": "#2563EB",
+        "icon": "droplet"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "plant-teesta_iii",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          88.5412,
+          27.5984
+        ]
+      },
+      "properties": {
+        "id": "teesta_iii",
+        "name": "Teesta Urja Teesta-III Hydro Electric Project (Chungthang)",
+        "short_name": "Teesta-III HEP",
+        "category": "power_plant",
+        "fuel": "hydro",
+        "capacity_mw": 1200,
+        "capacity_label": "1,200 MW",
+        "units": "6x200 MW",
+        "operator": "Teesta Urja",
+        "voltage": "400 kV",
+        "voltage_class": 400,
+        "state": "Sikkim",
+        "district": "North Sikkim",
+        "color": "#2563EB",
+        "icon": "droplet"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "plant-dikchu_hydro",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          88.5284,
+          27.3821
+        ]
+      },
+      "properties": {
+        "id": "dikchu_hydro",
+        "name": "Dikchu Hydro Electric Power Plant",
+        "short_name": "Dikchu HEP",
+        "category": "power_plant",
+        "fuel": "hydro",
+        "capacity_mw": 96,
+        "capacity_label": "96 MW",
+        "units": "2x48 MW",
+        "operator": "Sneha Kinetic",
+        "voltage": "220 kV",
+        "voltage_class": 220,
+        "state": "Sikkim",
+        "district": "East Sikkim",
+        "color": "#2563EB",
+        "icon": "droplet"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "sub-new_melli_400",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          88.4521,
+          27.0984
+        ]
+      },
+      "properties": {
+        "id": "new_melli_400",
+        "name": "New Melli 400/220 kV Substation",
+        "short_name": "New Melli 400 kV",
+        "category": "power_substation",
+        "operator": "POWERGRID",
+        "voltage": "400/220 kV",
+        "voltage_class": 400,
+        "state": "Sikkim",
+        "district": "South Sikkim",
+        "color": "#EF4444",
+        "notes": "Pools Jorethang, Tashiding and Chuzachen hydro into ER Siliguri corridor."
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "line-gaya_ranchi_765",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            84.9782,
+            24.7541
+          ],
+          [
+            85.1241,
+            24.0152
+          ],
+          [
+            85.3421,
+            23.3184
+          ]
+        ]
+      },
+      "properties": {
+        "id": "gaya_ranchi_765",
+        "name": "765 kV Gaya - Ranchi S/C",
+        "category": "power_line",
+        "voltage": "765 kV",
+        "voltage_class": 765,
+        "circuits": 1,
+        "crms_codebook": "765KV GAYA-RANCHI CKT-1",
+        "color": "#9333EA",
+        "operator": "POWERGRID",
+        "length_km": 178
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "line-gaya_varanasi_765",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            84.9782,
+            24.7541
+          ],
+          [
+            84.0152,
+            24.9542
+          ],
+          [
+            83.0124,
+            25.3214
+          ]
+        ]
+      },
+      "properties": {
+        "id": "gaya_varanasi_765",
+        "name": "765 kV Gaya - Varanasi D/C (ER to NR)",
+        "category": "power_line",
+        "voltage": "765 kV",
+        "voltage_class": 765,
+        "circuits": 2,
+        "crms_codebook": "765KV GAYA-VARANASI CKT-1",
+        "color": "#9333EA",
+        "operator": "POWERGRID",
+        "length_km": 215,
+        "inter_regional": "ER-NR"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "line-sasaram_fatehpur_765",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            84.0152,
+            24.9542
+          ],
+          [
+            82.5214,
+            25.4124
+          ],
+          [
+            80.8124,
+            25.9214
+          ]
+        ]
+      },
+      "properties": {
+        "id": "sasaram_fatehpur_765",
+        "name": "765 kV Sasaram - Fatehpur S/C (ER to NR)",
+        "category": "power_line",
+        "voltage": "765 kV",
+        "voltage_class": 765,
+        "circuits": 1,
+        "crms_codebook": "765KV SASARAM-FATEHPUR CKT-1",
+        "color": "#9333EA",
+        "operator": "POWERGRID",
+        "length_km": 340,
+        "inter_regional": "ER-NR"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "line-ranchi_dharamjaygarh_765",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            85.3421,
+            23.3184
+          ],
+          [
+            84.4521,
+            22.8451
+          ],
+          [
+            83.1841,
+            22.4841
+          ]
+        ]
+      },
+      "properties": {
+        "id": "ranchi_dharamjaygarh_765",
+        "name": "765 kV Ranchi - Dharamjaygarh D/C (ER to WR)",
+        "category": "power_line",
+        "voltage": "765 kV",
+        "voltage_class": 765,
+        "circuits": 2,
+        "crms_codebook": "765KV RANCHI-DHARAMJAYGARH CKT-1",
+        "color": "#9333EA",
+        "operator": "POWERGRID",
+        "length_km": 285,
+        "inter_regional": "ER-WR"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "line-jharsuguda_raipur_765",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            84.0541,
+            21.8451
+          ],
+          [
+            82.8541,
+            21.6541
+          ],
+          [
+            81.6541,
+            21.2541
+          ]
+        ]
+      },
+      "properties": {
+        "id": "jharsuguda_raipur_765",
+        "name": "765 kV Jharsuguda - Raipur D/C (ER to WR)",
+        "category": "power_line",
+        "voltage": "765 kV",
+        "voltage_class": 765,
+        "circuits": 2,
+        "crms_codebook": "765KV JHARSUGUDA-RAIPUR CKT-1",
+        "color": "#9333EA",
+        "operator": "POWERGRID",
+        "length_km": 310,
+        "inter_regional": "ER-WR"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "line-angul_jharsuguda_765",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            85.1254,
+            20.8412
+          ],
+          [
+            84.6124,
+            21.3412
+          ],
+          [
+            84.0541,
+            21.8451
+          ]
+        ]
+      },
+      "properties": {
+        "id": "angul_jharsuguda_765",
+        "name": "765 kV Angul - Jharsuguda D/C",
+        "category": "power_line",
+        "voltage": "765 kV",
+        "voltage_class": 765,
+        "circuits": 2,
+        "crms_codebook": "765KV ANGUL-JHARSUGUDA CKT-1",
+        "color": "#9333EA",
+        "operator": "POWERGRID",
+        "length_km": 190
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "line-durgapur_jamshedpur_400",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            87.3184,
+            23.5052
+          ],
+          [
+            86.7541,
+            23.1254
+          ],
+          [
+            86.2084,
+            22.7841
+          ]
+        ]
+      },
+      "properties": {
+        "id": "durgapur_jamshedpur_400",
+        "name": "400 kV Durgapur - Jamshedpur D/C (WB-JH)",
+        "category": "power_line",
+        "voltage": "400 kV",
+        "voltage_class": 400,
+        "circuits": 2,
+        "crms_codebook": "400KV DURGAPUR-JAMSHEDPUR CKT-1",
+        "color": "#EF4444",
+        "operator": "POWERGRID",
+        "length_km": 142
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "line-barh_patna_400",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            85.7114,
+            25.4831
+          ],
+          [
+            85.4521,
+            25.5251
+          ],
+          [
+            85.1925,
+            25.5684
+          ]
+        ]
+      },
+      "properties": {
+        "id": "barh_patna_400",
+        "name": "400 kV Barh - Patna D/C",
+        "category": "power_line",
+        "voltage": "400 kV",
+        "voltage_class": 400,
+        "circuits": 2,
+        "crms_codebook": "400KV BARH-PATNA CKT-1",
+        "color": "#EF4444",
+        "operator": "POWERGRID",
+        "length_km": 68
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "line-barh_biharsharif_400",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            85.7114,
+            25.4831
+          ],
+          [
+            85.5184,
+            25.1952
+          ]
+        ]
+      },
+      "properties": {
+        "id": "barh_biharsharif_400",
+        "name": "400 kV Barh - Biharsharif D/C",
+        "category": "power_line",
+        "voltage": "400 kV",
+        "voltage_class": 400,
+        "circuits": 2,
+        "crms_codebook": "400KV BARH-BIHARSHARIF CKT-1",
+        "color": "#EF4444",
+        "operator": "POWERGRID",
+        "length_km": 45
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "line-kahalgaon_biharsharif_400",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            87.2345,
+            25.2612
+          ],
+          [
+            86.3541,
+            25.2154
+          ],
+          [
+            85.5184,
+            25.1952
+          ]
+        ]
+      },
+      "properties": {
+        "id": "kahalgaon_biharsharif_400",
+        "name": "400 kV Kahalgaon - Biharsharif D/C",
+        "category": "power_line",
+        "voltage": "400 kV",
+        "voltage_class": 400,
+        "circuits": 2,
+        "crms_codebook": "400KV KAHALGAON-BIHARSHARIF CKT-1",
+        "color": "#EF4444",
+        "operator": "POWERGRID",
+        "length_km": 195
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "line-kahalgaon_maithon_400",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            87.2345,
+            25.2612
+          ],
+          [
+            87.0541,
+            24.5214
+          ],
+          [
+            86.7721,
+            23.8184
+          ]
+        ]
+      },
+      "properties": {
+        "id": "kahalgaon_maithon_400",
+        "name": "400 kV Kahalgaon - Maithon D/C (Bihar-JH)",
+        "category": "power_line",
+        "voltage": "400 kV",
+        "voltage_class": 400,
+        "circuits": 2,
+        "crms_codebook": "400KV KAHALGAON-MAITHON CKT-1",
+        "color": "#EF4444",
+        "operator": "POWERGRID",
+        "length_km": 182
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "line-maithon_ranchi_400",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            86.7721,
+            23.8184
+          ],
+          [
+            86.1154,
+            23.7541
+          ],
+          [
+            85.3421,
+            23.3184
+          ]
+        ]
+      },
+      "properties": {
+        "id": "maithon_ranchi_400",
+        "name": "400 kV Maithon - Ranchi D/C",
+        "category": "power_line",
+        "voltage": "400 kV",
+        "voltage_class": 400,
+        "circuits": 2,
+        "crms_codebook": "400KV MAITHON-RANCHI CKT-1",
+        "color": "#EF4444",
+        "operator": "POWERGRID",
+        "length_km": 165
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "line-chaibasa_rourkela_400",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            85.8124,
+            22.5684
+          ],
+          [
+            85.3124,
+            22.4124
+          ],
+          [
+            84.8541,
+            22.2451
+          ]
+        ]
+      },
+      "properties": {
+        "id": "chaibasa_rourkela_400",
+        "name": "400 kV Chaibasa - Rourkela D/C (JH-OD)",
+        "category": "power_line",
+        "voltage": "400 kV",
+        "voltage_class": 400,
+        "circuits": 2,
+        "crms_codebook": "400KV CHAIBASA-ROURKELA CKT-1",
+        "color": "#EF4444",
+        "operator": "POWERGRID",
+        "length_km": 128
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "line-talcher_meramundali_400",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            85.0821,
+            21.0952
+          ],
+          [
+            85.2154,
+            20.9412
+          ],
+          [
+            85.3451,
+            20.7841
+          ]
+        ]
+      },
+      "properties": {
+        "id": "talcher_meramundali_400",
+        "name": "400 kV Talcher - Meramundali D/C",
+        "category": "power_line",
+        "voltage": "400 kV",
+        "voltage_class": 400,
+        "circuits": 2,
+        "crms_codebook": "400KV TALCHER-MERAMUNDALI CKT-1",
+        "color": "#EF4444",
+        "operator": "OPTCL",
+        "length_km": 54
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "line-meramundali_mendhasal_400",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            85.3451,
+            20.7841
+          ],
+          [
+            85.5412,
+            20.5214
+          ],
+          [
+            85.7254,
+            20.3124
+          ]
+        ]
+      },
+      "properties": {
+        "id": "meramundali_mendhasal_400",
+        "name": "400 kV Meramundali - Mendhasal D/C",
+        "category": "power_line",
+        "voltage": "400 kV",
+        "voltage_class": 400,
+        "circuits": 2,
+        "crms_codebook": "400KV MERAMUNDALI-MENDHASAL CKT-1",
+        "color": "#EF4444",
+        "operator": "OPTCL",
+        "length_km": 72
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "line-muzaffarpur_dhalkebar_400",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            85.3942,
+            26.1287
+          ],
+          [
+            85.6541,
+            26.5412
+          ],
+          [
+            85.9521,
+            26.9124
+          ]
+        ]
+      },
+      "properties": {
+        "id": "muzaffarpur_dhalkebar_400",
+        "name": "400 kV Muzaffarpur - Dhalkebar D/C (India - Nepal Cross Border)",
+        "category": "power_line",
+        "voltage": "400 kV",
+        "voltage_class": 400,
+        "circuits": 2,
+        "crms_codebook": "400KV MUZAFFARPUR-DHALKEBAR CKT-1",
+        "color": "#EF4444",
+        "operator": "CPTC / POWERGRID",
+        "length_km": 140,
+        "cross_border": "India-Nepal"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "line-rangpo_siliguri_400",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            88.5254,
+            27.1784
+          ],
+          [
+            88.4521,
+            27.0984
+          ],
+          [
+            88.3541,
+            26.7412
+          ]
+        ]
+      },
+      "properties": {
+        "id": "rangpo_siliguri_400",
+        "name": "400 kV Rangpo - New Melli - Siliguri D/C (Sikkim-WB)",
+        "category": "power_line",
+        "voltage": "400 kV",
+        "voltage_class": 400,
+        "circuits": 2,
+        "crms_codebook": "400KV RANGPO-SILIGURI CKT-1",
+        "color": "#EF4444",
+        "operator": "POWERGRID",
+        "length_km": 96
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "line-teesta_v_rangpo_400",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            88.4841,
+            27.4251
+          ],
+          [
+            88.5254,
+            27.1784
+          ]
+        ]
+      },
+      "properties": {
+        "id": "teesta_v_rangpo_400",
+        "name": "400 kV Teesta-V - Rangpo D/C",
+        "category": "power_line",
+        "voltage": "400 kV",
+        "voltage_class": 400,
+        "circuits": 2,
+        "crms_codebook": "400KV TEESTA V-RANGPO CKT-1",
+        "color": "#EF4444",
+        "operator": "POWERGRID",
+        "length_km": 38
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "line-baharampur_bheramara_400",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            88.2541,
+            24.1084
+          ],
+          [
+            88.6541,
+            24.0841
+          ],
+          [
+            89.0124,
+            24.0541
+          ]
+        ]
+      },
+      "properties": {
+        "id": "baharampur_bheramara_400",
+        "name": "400 kV Baharampur - Bheramara D/C (India - Bangladesh Cross Border HVDC)",
+        "category": "power_line",
+        "voltage": "400 kV",
+        "voltage_class": 400,
+        "circuits": 2,
+        "crms_codebook": "400KV BAHARAMPUR-BHERAMARA CKT-1",
+        "color": "#EF4444",
+        "operator": "POWERGRID",
+        "length_km": 105,
+        "cross_border": "India-Bangladesh"
+      }
+    }
+  ]
+}

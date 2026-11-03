@@ -1413,6 +1413,31 @@ const API = {
   },
 
   downloadPowerGridGeoJsonUrl: () => `${BASE_URL}/power-map/export`,
+
+  // CRMS Codebook Master Data Mapping APIs
+  getCRMSCodebookElements: async (elementType = "AC_TRANSMISSION_LINE_CIRCUIT") => {
+    const res = await axios.get(`${BASE_URL}/power-map/crms-elements`, {
+      params: { elementType },
+    });
+    return res.data;
+  },
+
+  getCRMSMappings: async () => {
+    const res = await axios.get(`${BASE_URL}/power-map/crms-mappings`);
+    return res.data;
+  },
+
+  saveCRMSMappings: async (mappings) => {
+    const res = await axios.post(`${BASE_URL}/power-map/crms-mappings`, { mappings });
+    return res.data;
+  },
+
+  autoMatchCRMSElements: async (elementType = "AC_TRANSMISSION_LINE_CIRCUIT") => {
+    const res = await axios.post(`${BASE_URL}/power-map/crms-auto-match`, null, {
+      params: { elementType },
+    });
+    return res.data;
+  },
 };
 
 export default API;

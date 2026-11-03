@@ -36,7 +36,7 @@ import {
 } from "lucide-react";
 import TopNavbar from "../components/layout/TopNavbar";
 import API from "../services/api";
-import defaultGridGeoJson from "../data/power_map/west_bengal_power_grid.json";
+import defaultGridGeoJson from "../data/power_map/eastern_region_power_grid.json";
 
 // Base map style options (Watermark-free, zero-API-key defaults)
 export const BASEMAP_PROVIDERS = [
@@ -104,6 +104,16 @@ export const BASEMAP_PROVIDERS = [
   },
 ];
 
+// State bounds for Eastern Region navigation
+export const ER_STATE_BOUNDS = {
+  all: [[81.0, 17.8], [89.9, 28.2]],
+  "West Bengal": [[85.8, 21.5], [89.9, 27.3]],
+  "Bihar": [[83.2, 24.5], [88.3, 27.5]],
+  "Jharkhand": [[83.3, 21.9], [87.9, 25.3]],
+  "Odisha": [[81.3, 17.8], [87.5, 22.6]],
+  "Sikkim": [[88.0, 27.0], [88.9, 28.1]],
+};
+
 export default function WestBengalPowerMap() {
   const mapContainerRef = useRef(null);
   const mapRef = useRef(null);
@@ -122,6 +132,21 @@ export default function WestBengalPowerMap() {
   const [syncModalOpen, setSyncModalOpen] = useState(false);
   const [syncLoading, setSyncLoading] = useState(false);
   const [syncFeedback, setSyncFeedback] = useState(null);
+
+  // Active State Zoom Filter
+  const [activeState, setActiveState] = useState("all");
+
+  // CRMS Codebook Master Data Mapping state
+  const [crmsModalOpen, setCrmsModalOpen] = useState(false);
+  const [crmsLoading, setCrmsLoading] = useState(false);
+  const [crmsElements, setCrmsElements] = useState([]);
+  const [crmsIsLive, setCrmsIsLive] = useState(false);
+  const [crmsMappings, setCrmsMappings] = useState({});
+  const [crmsSearch, setCrmsSearch] = useState("");
+  const [crmsCategoryFilter, setCrmsCategoryFilter] = useState("all");
+  const [crmsStateFilter, setCrmsStateFilter] = useState("all");
+  const [crmsDirty, setCrmsDirty] = useState(false);
+  const [crmsSaveFeedback, setCrmsSaveFeedback] = useState(null);
 
   // Import file state
   const [importText, setImportText] = useState("");
@@ -245,13 +270,15 @@ export default function WestBengalPowerMap() {
     });
   }, [allLines, searchQuery, voltageFilter, operatorFilter]);
 
-  // Fetch live dataset and sync status on mount
+  // Fetch live dataset, sync status, and CRMS mappings on mount
   useEffect(() => {
     const fetchRemoteData = async () => {
       try {
-        const [dataRes, statusRes] = await Promise.allSettled([
+        const [dataRes, statusRes, crmsMapRes, crmsElemRes] = await Promise.allSettled([
           API.getPowerGridData(),
           API.getPowerGridStatus(),
+          API.getCRMSMappings(),
+          API.getCRMSCodebookElements("AC_TRANSMISSION_LINE_CIRCUIT"),
         ]);
         if (dataRes.status === "fulfilled" && dataRes.value?.features?.length > 0) {
           setGridData(dataRes.value);
@@ -259,12 +286,130 @@ export default function WestBengalPowerMap() {
         if (statusRes.status === "fulfilled") {
           setDatasetStatus(statusRes.value);
         }
+        if (crmsMapRes.status === "fulfilled" && crmsMapRes.value?.mappings) {
+          const mObj = {};
+          crmsMapRes.value.mappings.forEach((m) => {
+            mObj[m.map_entity_id] = m.crms_element_name;
+          });
+          setCrmsMappings(mObj);
+        }
+        if (crmsElemRes.status === "fulfilled") {
+          setCrmsElements(crmsElemRes.value?.elements || []);
+          setCrmsIsLive(Boolean(crmsElemRes.value?.is_live));
+        }
       } catch (err) {
-        console.warn("Using bundled West Bengal power grid dataset:", err);
+        console.warn("Using bundled Eastern Region power grid dataset:", err);
       }
     };
     fetchRemoteData();
   }, []);
+
+  // Fit map bounds to a state
+  const handleStateZoom = (stateName) => {
+    setActiveState(stateName);
+    const map = mapRef.current;
+    if (!map) return;
+    const bounds = ER_STATE_BOUNDS[stateName] || ER_STATE_BOUNDS.all;
+    map.fitBounds(bounds, { padding: 40, duration: 1200 });
+  };
+
+  // Open CRMS Modal & load fresh list if needed
+  const handleOpenCrmsModal = async () => {
+    setCrmsModalOpen(true);
+    setCrmsSaveFeedback(null);
+    if (!crmsElements || crmsElements.length === 0) {
+      setCrmsLoading(true);
+      try {
+        const res = await API.getCRMSCodebookElements("AC_TRANSMISSION_LINE_CIRCUIT");
+        setCrmsElements(res.elements || []);
+        setCrmsIsLive(Boolean(res.is_live));
+      } catch (e) {
+        console.error("Failed to fetch CRMS elements:", e);
+      } finally {
+        setCrmsLoading(false);
+      }
+    }
+  };
+
+  // Auto-match map features to CRMS elements
+  const handleAutoMatch = async () => {
+    setCrmsLoading(true);
+    try {
+      const res = await API.autoMatchCRMSElements("AC_TRANSMISSION_LINE_CIRCUIT");
+      if (res.matches) {
+        const updated = { ...crmsMappings };
+        let matchedCount = 0;
+        res.matches.forEach((m) => {
+          if (m.suggested_crms && !updated[m.map_entity_id]) {
+            updated[m.map_entity_id] = m.suggested_crms;
+            matchedCount++;
+          }
+        });
+        setCrmsMappings(updated);
+        setCrmsDirty(true);
+        setCrmsSaveFeedback({
+          type: "info",
+          message: `Auto-matched ${matchedCount} new element(s) with CRMS Codebook! Click "Save All Mappings" to persist.`,
+        });
+      }
+    } catch (e) {
+      console.error("Auto match failed:", e);
+    } finally {
+      setCrmsLoading(false);
+    }
+  };
+
+  // Save all mappings to DB
+  const handleSaveCrmsMappings = async () => {
+    setCrmsLoading(true);
+    try {
+      const payload = Object.entries(crmsMappings).map(([id, crmsName]) => {
+        const feat = gridData.features.find((f) => (f.id || f.properties?.id) === id);
+        return {
+          map_entity_id: id,
+          map_entity_name: feat?.properties?.name || id,
+          map_entity_type: feat?.properties?.category || "transmission_line",
+          voltage_class: feat?.properties?.voltage_class,
+          crms_element_name: crmsName,
+          crms_element_type: "AC_TRANSMISSION_LINE_CIRCUIT",
+          mapped_by: "Operator",
+        };
+      });
+
+      const res = await API.saveCRMSMappings(payload);
+      if (res.success) {
+        setCrmsDirty(false);
+        setCrmsSaveFeedback({
+          type: "success",
+          message: `Successfully saved ${res.count} CRMS Codebook mapping(s) to master database!`,
+        });
+
+        // Also update active gridData in memory
+        const updatedFeatures = gridData.features.map((f) => {
+          const fid = f.id || f.properties?.id;
+          if (crmsMappings[fid]) {
+            return {
+              ...f,
+              properties: {
+                ...f.properties,
+                crms_codebook: crmsMappings[fid],
+                crms_mapped: true,
+              },
+            };
+          }
+          return f;
+        });
+        setGridData({ ...gridData, features: updatedFeatures });
+      }
+    } catch (e) {
+      setCrmsSaveFeedback({
+        type: "danger",
+        message: `Failed to save mappings: ${e.message}`,
+      });
+    } finally {
+      setCrmsLoading(false);
+    }
+  };
 
   // Update GeoJSON source when gridData changes
   useEffect(() => {
@@ -280,9 +425,9 @@ export default function WestBengalPowerMap() {
   useEffect(() => {
     if (!mapContainerRef.current) return;
 
-    // West Bengal center
-    const initialCenter = [87.641, 23.2];
-    const initialZoom = 7.6;
+    // Eastern Region center (West Bengal, Bihar, Jharkhand, Odisha, Sikkim)
+    const initialCenter = [85.8, 23.5];
+    const initialZoom = 6.4;
 
     const activeProvider = BASEMAP_PROVIDERS.find((b) => b.id === activeBaseMap) || BASEMAP_PROVIDERS[0];
     const initialTiles = activeProvider.getTiles ? activeProvider.getTiles(cartoApiKey) : activeProvider.tiles;
@@ -378,32 +523,40 @@ export default function WestBengalPowerMap() {
                   "interpolate",
                   ["linear"],
                   ["zoom"],
-                  6,
+                  4,
                   [
                     "case",
-                    [">=", ["get", "voltage_class"], 765], 6.5,
-                    [">=", ["get", "voltage_class"], 400], 5.5,
-                    [">=", ["get", "voltage_class"], 220], 4.2,
-                    3.0,
+                    [">=", ["get", "voltage_class"], 765], 8.5,
+                    [">=", ["get", "voltage_class"], 400], 7.0,
+                    [">=", ["get", "voltage_class"], 220], 5.5,
+                    3.8,
+                  ],
+                  7,
+                  [
+                    "case",
+                    [">=", ["get", "voltage_class"], 765], 11.0,
+                    [">=", ["get", "voltage_class"], 400], 9.0,
+                    [">=", ["get", "voltage_class"], 220], 7.0,
+                    4.8,
                   ],
                   10,
                   [
                     "case",
-                    [">=", ["get", "voltage_class"], 765], 9.0,
-                    [">=", ["get", "voltage_class"], 400], 7.5,
-                    [">=", ["get", "voltage_class"], 220], 6.0,
-                    4.5,
+                    [">=", ["get", "voltage_class"], 765], 13.5,
+                    [">=", ["get", "voltage_class"], 400], 11.0,
+                    [">=", ["get", "voltage_class"], 220], 8.5,
+                    6.0,
                   ],
                   14,
                   [
                     "case",
-                    [">=", ["get", "voltage_class"], 765], 12.0,
-                    [">=", ["get", "voltage_class"], 400], 10.5,
-                    [">=", ["get", "voltage_class"], 220], 8.5,
-                    6.0,
+                    [">=", ["get", "voltage_class"], 765], 16.0,
+                    [">=", ["get", "voltage_class"], 400], 13.5,
+                    [">=", ["get", "voltage_class"], 220], 10.5,
+                    7.5,
                   ],
                 ],
-                "line-opacity": 0.85,
+                "line-opacity": 0.92,
               },
             },
 
@@ -423,32 +576,40 @@ export default function WestBengalPowerMap() {
                   "interpolate",
                   ["linear"],
                   ["zoom"],
-                  6,
+                  4,
                   [
                     "case",
-                    [">=", ["get", "voltage_class"], 765], 4.5,
-                    [">=", ["get", "voltage_class"], 400], 3.6,
-                    [">=", ["get", "voltage_class"], 220], 2.5,
-                    1.8,
+                    [">=", ["get", "voltage_class"], 765], 6.0,
+                    [">=", ["get", "voltage_class"], 400], 4.8,
+                    [">=", ["get", "voltage_class"], 220], 3.5,
+                    2.4,
+                  ],
+                  7,
+                  [
+                    "case",
+                    [">=", ["get", "voltage_class"], 765], 8.0,
+                    [">=", ["get", "voltage_class"], 400], 6.5,
+                    [">=", ["get", "voltage_class"], 220], 4.8,
+                    3.2,
                   ],
                   10,
                   [
                     "case",
-                    [">=", ["get", "voltage_class"], 765], 6.5,
-                    [">=", ["get", "voltage_class"], 400], 5.2,
-                    [">=", ["get", "voltage_class"], 220], 3.8,
-                    2.6,
+                    [">=", ["get", "voltage_class"], 765], 10.5,
+                    [">=", ["get", "voltage_class"], 400], 8.5,
+                    [">=", ["get", "voltage_class"], 220], 6.2,
+                    4.2,
                   ],
                   14,
                   [
                     "case",
-                    [">=", ["get", "voltage_class"], 765], 8.5,
-                    [">=", ["get", "voltage_class"], 400], 7.0,
-                    [">=", ["get", "voltage_class"], 220], 5.5,
-                    3.8,
+                    [">=", ["get", "voltage_class"], 765], 13.0,
+                    [">=", ["get", "voltage_class"], 400], 10.5,
+                    [">=", ["get", "voltage_class"], 220], 8.0,
+                    5.5,
                   ],
                 ],
-                "line-opacity": 0.98,
+                "line-opacity": 1.0,
               },
             },
 
@@ -484,12 +645,13 @@ export default function WestBengalPowerMap() {
                   "interpolate",
                   ["linear"],
                   ["zoom"],
-                  6, 4.0,
-                  10, 7.5,
-                  14, 11.0,
+                  4, 5.5,
+                  7, 8.5,
+                  10, 11.5,
+                  14, 15.0,
                 ],
                 "circle-color": ["get", "color"],
-                "circle-stroke-width": 2,
+                "circle-stroke-width": 2.5,
                 "circle-stroke-color": "#FFFFFF",
               },
             },
@@ -956,12 +1118,12 @@ export default function WestBengalPowerMap() {
         {/* Page Header with Live Sync & Reference Links */}
         <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2 p-3 bg-white rounded-3 border shadow-sm">
           <div>
-            <div className="d-flex align-items-center gap-2">
+            <div className="d-flex align-items-center gap-2 flex-wrap">
               <span className="badge rounded-pill bg-success-subtle text-success px-2 py-1 fw-bold">
                 Analytics Module
               </span>
               <span className="badge rounded-pill bg-primary-subtle text-primary px-2 py-1 fw-bold">
-                West Bengal Region
+                Eastern Region (WB, OD, BR, JH, SK)
               </span>
               <span className="badge rounded-pill bg-danger-subtle text-danger px-2 py-1 fw-bold">
                 OpenInfra High-Visibility
@@ -969,15 +1131,53 @@ export default function WestBengalPowerMap() {
             </div>
             <h4 className="fw-bold text-dark mt-1 mb-0 d-flex align-items-center gap-2">
               <Compass size={22} className="text-primary" />
-              West Bengal Power System Grid Map
+              Eastern Region Power System Grid Map
             </h4>
             <div className="text-muted small mt-1">
-              Visualizing <b>{allLines.length} Transmission Corridors</b>, <b>{allPlants.length} Generating Stations ({totalCapacityMW.toLocaleString()} MW)</b>, and <b>{allSubstations.length} Grid Substations</b>.
+              Visualizing <b>{allLines.length} Transmission Corridors</b>, <b>{allPlants.length} Generating Stations ({totalCapacityMW.toLocaleString()} MW)</b>, and <b>{allSubstations.length} Grid Substations</b> across West Bengal, Odisha, Bihar, Jharkhand & Sikkim.
+            </div>
+
+            {/* Quick State Zoom Pills */}
+            <div className="d-flex align-items-center gap-1 mt-2 flex-wrap">
+              <span className="text-secondary small fw-bold me-1">Focus State:</span>
+              {[
+                { id: "all", label: "All Eastern Region" },
+                { id: "West Bengal", label: "West Bengal" },
+                { id: "Bihar", label: "Bihar" },
+                { id: "Jharkhand", label: "Jharkhand" },
+                { id: "Odisha", label: "Odisha" },
+                { id: "Sikkim", label: "Sikkim" },
+              ].map((st) => (
+                <button
+                  key={st.id}
+                  onClick={() => handleStateZoom(st.id)}
+                  className={`btn btn-xs py-0.5 px-2 rounded-pill fw-bold ${
+                    activeState === st.id ? "btn-primary" : "btn-outline-secondary"
+                  }`}
+                  style={{ fontSize: "11px" }}
+                >
+                  {st.label}
+                </button>
+              ))}
             </div>
           </div>
 
           {/* Action & Data Sync Controls */}
           <div className="d-flex flex-wrap align-items-center gap-2">
+            {/* CRMS Master Data Mapping Popup Button */}
+            <button
+              onClick={handleOpenCrmsModal}
+              className="btn btn-sm d-flex align-items-center gap-1.5 fw-bold shadow-sm text-white"
+              style={{ backgroundColor: "#4F46E5", borderColor: "#4338CA" }}
+              title="Map Transmission Lines & Substations with CRMS Codebook Master Data"
+            >
+              <Database size={14} />
+              <span>CRMS Master Mapping</span>
+              <span className="badge bg-white text-dark rounded-pill ms-1" style={{ fontSize: "10px" }}>
+                {Object.keys(crmsMappings).length} Mapped
+              </span>
+            </button>
+
             {/* Live Sync / Update Data Button */}
             <button
               onClick={() => setSyncModalOpen(true)}
@@ -1517,6 +1717,31 @@ export default function WestBengalPowerMap() {
                     )}
                   </div>
 
+                                    {/* CRMS Codebook Mapping Info */}
+                  <div className="mb-2 p-2 rounded" style={{ backgroundColor: "#EEF2FF", border: "1px solid #C7D2FE" }}>
+                    <div className="d-flex align-items-center justify-content-between">
+                      <span className="small fw-bold text-primary d-flex align-items-center gap-1">
+                        <Database size={12} /> CRMS Codebook Master:
+                      </span>
+                      <button
+                        onClick={handleOpenCrmsModal}
+                        className="btn btn-link btn-xs p-0 text-decoration-none fw-bold"
+                        style={{ fontSize: "10.5px" }}
+                      >
+                        {crmsMappings[selectedEntity.id] ? "Edit" : "Map Now"}
+                      </button>
+                    </div>
+                    <div className="fw-bold mt-1 text-dark" style={{ fontSize: "11px" }}>
+                      {crmsMappings[selectedEntity.id] || selectedEntity.crms_codebook ? (
+                        <span className="fw-bold" style={{ color: "#4338CA" }}>
+                          🔗 {crmsMappings[selectedEntity.id] || selectedEntity.crms_codebook}
+                        </span>
+                      ) : (
+                        <span className="text-muted fst-italic">Not mapped yet with CRMS</span>
+                      )}
+                    </div>
+                  </div>
+
                   <div className="d-flex align-items-center gap-1.5 pt-2 border-top">
                     {selectedEntity.coords && (
                       <a
@@ -1749,6 +1974,300 @@ export default function WestBengalPowerMap() {
                   >
                     <RotateCcw size={14} />
                     Reset to Verified Master
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+            {/* CRMS Codebook Master Data Mapping Modal (Pop-up) */}
+      {crmsModalOpen && (
+        <div
+          className="modal show d-block"
+          style={{ backgroundColor: "rgba(0,0,0,0.6)", zIndex: 1060 }}
+          tabIndex="-1"
+        >
+          <div className="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable">
+            <div className="modal-content shadow-lg border-0 rounded-4">
+              {/* Header */}
+              <div
+                className="modal-header text-white border-bottom-0 rounded-top-4 py-3 px-4"
+                style={{ background: "linear-gradient(135deg, #1E1B4B 0%, #312E81 50%, #4338CA 100%)" }}
+              >
+                <div>
+                  <div className="d-flex align-items-center gap-2">
+                    <Database size={20} className="text-warning" />
+                    <h5 className="modal-title fw-bold text-white mb-0">
+                      CRMS Master Data Mapping • AC Transmission Line Circuits & Substations
+                    </h5>
+                  </div>
+                  <div className="small text-white-50 mt-1">
+                    Source: <span className="font-monospace text-warning">https://crms.erldc.in/Codebook/getElementNamesbyType?elementType=AC_TRANSMISSION_LINE_CIRCUIT</span>
+                  </div>
+                </div>
+
+                <div className="d-flex align-items-center gap-2">
+                  <span
+                    className={`badge ${
+                      crmsIsLive ? "bg-success" : "bg-warning text-dark"
+                    } px-2.5 py-1 fw-bold`}
+                  >
+                    {crmsIsLive ? "● Live CRMS API Connected" : "● Master Cache Active (Offline)"}
+                  </span>
+                  <button
+                    type="button"
+                    className="btn-close btn-close-white"
+                    onClick={() => setCrmsModalOpen(false)}
+                  />
+                </div>
+              </div>
+
+              {/* Body */}
+              <div className="modal-body p-4 bg-light">
+                {/* Feedback Banner */}
+                {crmsSaveFeedback && (
+                  <div className={`alert alert-${crmsSaveFeedback.type} py-2 px-3 small mb-3 d-flex align-items-center justify-content-between`}>
+                    <span>{crmsSaveFeedback.message}</span>
+                    <button
+                      type="button"
+                      className="btn-close btn-sm"
+                      onClick={() => setCrmsSaveFeedback(null)}
+                    />
+                  </div>
+                )}
+
+                {/* Top Action Toolbar */}
+                <div className="card border-0 shadow-sm rounded-3 p-3 mb-3 bg-white">
+                  <div className="d-flex flex-wrap align-items-center justify-content-between gap-3">
+                    <div className="d-flex align-items-center gap-2 flex-wrap">
+                      {/* Search box */}
+                      <div className="input-group input-group-sm" style={{ width: "260px" }}>
+                        <span className="input-group-text bg-light border-end-0">
+                          <Search size={14} className="text-muted" />
+                        </span>
+                        <input
+                          type="text"
+                          className="form-control border-start-0"
+                          placeholder="Search map element or CRMS..."
+                          value={crmsSearch}
+                          onChange={(e) => setCrmsSearch(e.target.value)}
+                        />
+                      </div>
+
+                      {/* State Filter */}
+                      <select
+                        className="form-select form-select-sm"
+                        style={{ width: "160px" }}
+                        value={crmsStateFilter}
+                        onChange={(e) => setCrmsStateFilter(e.target.value)}
+                      >
+                        <option value="all">All States (ER)</option>
+                        <option value="West Bengal">West Bengal</option>
+                        <option value="Bihar">Bihar</option>
+                        <option value="Jharkhand">Jharkhand</option>
+                        <option value="Odisha">Odisha</option>
+                        <option value="Sikkim">Sikkim</option>
+                      </select>
+
+                      {/* Category Filter */}
+                      <select
+                        className="form-select form-select-sm"
+                        style={{ width: "160px" }}
+                        value={crmsCategoryFilter}
+                        onChange={(e) => setCrmsCategoryFilter(e.target.value)}
+                      >
+                        <option value="all">All Categories</option>
+                        <option value="power_line">Transmission Lines ({allLines.length})</option>
+                        <option value="power_substation">Substations ({allSubstations.length})</option>
+                      </select>
+                    </div>
+
+                    {/* Auto-Match & Refresh Buttons */}
+                    <div className="d-flex align-items-center gap-2">
+                      <button
+                        onClick={handleAutoMatch}
+                        disabled={crmsLoading}
+                        className="btn btn-warning btn-sm fw-bold d-flex align-items-center gap-1 shadow-sm text-dark"
+                        title="Auto-match elements based on voltage, corridor name, and station tokens"
+                      >
+                        <Zap size={14} />
+                        Auto-Match Similar ({crmsElements.length} Circuits)
+                      </button>
+
+                      <button
+                        onClick={handleSaveCrmsMappings}
+                        disabled={crmsLoading || !crmsDirty}
+                        className="btn btn-success btn-sm fw-bold d-flex align-items-center gap-1 shadow-sm"
+                      >
+                        <Check size={14} />
+                        Save All Mappings
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Table of Elements */}
+                <div className="card border-0 shadow-sm rounded-3 overflow-hidden bg-white">
+                  <div className="table-responsive" style={{ maxHeight: "420px" }}>
+                    <table className="table table-hover table-sm align-middle mb-0" style={{ fontSize: "12px" }}>
+                      <thead className="table-dark sticky-top" style={{ fontSize: "11px", letterSpacing: "0.5px" }}>
+                        <tr>
+                          <th style={{ width: "50px" }} className="text-center">#</th>
+                          <th style={{ width: "90px" }}>Category</th>
+                          <th style={{ width: "80px" }}>Voltage</th>
+                          <th style={{ width: "120px" }}>State</th>
+                          <th>Map Element Name</th>
+                          <th style={{ minWidth: "320px" }}>CRMS Master Element (Codebook API)</th>
+                          <th style={{ width: "110px" }} className="text-center">Status</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {gridData.features
+                          .filter((f) => {
+                            const p = f.properties || {};
+                            if (crmsCategoryFilter !== "all" && p.category !== crmsCategoryFilter) return false;
+                            if (crmsStateFilter !== "all" && p.state !== crmsStateFilter) return false;
+                            if (crmsSearch) {
+                              const q = crmsSearch.toLowerCase();
+                              const nameMatch = (p.name || "").toLowerCase().includes(q);
+                              const crmsMatch = (crmsMappings[f.id || p.id] || "").toLowerCase().includes(q);
+                              if (!nameMatch && !crmsMatch) return false;
+                            }
+                            return true;
+                          })
+                          .map((feat, idx) => {
+                            const p = feat.properties || {};
+                            const fId = feat.id || p.id;
+                            const currentCrms = crmsMappings[fId] || p.crms_codebook || "";
+                            const isMapped = Boolean(currentCrms);
+
+                            return (
+                              <tr key={fId || idx}>
+                                <td className="text-center text-muted small">{idx + 1}</td>
+                                <td>
+                                  <span
+                                    className={`badge rounded-pill ${
+                                      p.category === "power_line"
+                                        ? "bg-primary-subtle text-primary"
+                                        : "bg-warning-subtle text-dark"
+                                    } fw-semibold`}
+                                    style={{ fontSize: "10px" }}
+                                  >
+                                    {p.category === "power_line" ? "Line" : "Substation"}
+                                  </span>
+                                </td>
+                                <td>
+                                  <span
+                                    className="badge fw-bold"
+                                    style={{ backgroundColor: p.color || "#0284C7", color: "#FFF", fontSize: "10px" }}
+                                  >
+                                    {p.voltage || `${p.voltage_class} kV`}
+                                  </span>
+                                </td>
+                                <td className="text-secondary small fw-semibold">
+                                  {p.state || "Eastern Region"}
+                                </td>
+                                <td>
+                                  <div className="fw-bold text-dark">{p.name}</div>
+                                  {p.operator && (
+                                    <div className="text-muted" style={{ fontSize: "10.5px" }}>
+                                      {p.operator}
+                                    </div>
+                                  )}
+                                </td>
+                                <td>
+                                  <div className="d-flex align-items-center gap-1.5">
+                                    <input
+                                      type="text"
+                                      list="crms-circuits-datalist"
+                                      className="form-control form-control-sm font-monospace"
+                                      placeholder="Select or enter CRMS Circuit name..."
+                                      style={{
+                                        fontSize: "11px",
+                                        backgroundColor: currentCrms ? "#F0FDF4" : "#FFFFFF",
+                                        borderColor: currentCrms ? "#86EFAC" : "#CBD5E1",
+                                      }}
+                                      value={currentCrms}
+                                      onChange={(e) => {
+                                        const val = e.target.value;
+                                        setCrmsMappings((prev) => ({
+                                          ...prev,
+                                          [fId]: val,
+                                        }));
+                                        setCrmsDirty(true);
+                                      }}
+                                    />
+                                    {currentCrms && (
+                                      <button
+                                        type="button"
+                                        className="btn btn-outline-danger btn-xs"
+                                        title="Clear mapping"
+                                        onClick={() => {
+                                          setCrmsMappings((prev) => {
+                                            const copy = { ...prev };
+                                            delete copy[fId];
+                                            return copy;
+                                          });
+                                          setCrmsDirty(true);
+                                        }}
+                                      >
+                                        <X size={12} />
+                                      </button>
+                                    )}
+                                  </div>
+                                </td>
+                                <td className="text-center">
+                                  {isMapped ? (
+                                    <span className="badge bg-success-subtle text-success border border-success-subtle px-2 py-1 fw-bold">
+                                      Mapped
+                                    </span>
+                                  ) : (
+                                    <span className="badge bg-secondary-subtle text-secondary px-2 py-1">
+                                      Unmapped
+                                    </span>
+                                  )}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {/* Datalist for fast autocomplete */}
+                  <datalist id="crms-circuits-datalist">
+                    {crmsElements.map((elem, i) => (
+                      <option key={i} value={elem} />
+                    ))}
+                  </datalist>
+                </div>
+              </div>
+
+              {/* Modal Footer */}
+              <div className="modal-footer bg-white border-top py-2.5 px-4 d-flex justify-content-between align-items-center">
+                <div className="text-muted small">
+                  Showing master elements for <b>AC Transmission Line Circuits</b> from ERLDC CRMS.
+                </div>
+
+                <div className="d-flex align-items-center gap-2">
+                  <button
+                    type="button"
+                    className="btn btn-outline-secondary btn-sm"
+                    onClick={() => setCrmsModalOpen(false)}
+                  >
+                    Close
+                  </button>
+
+                  <button
+                    type="button"
+                    className="btn btn-primary btn-sm fw-bold d-flex align-items-center gap-1.5"
+                    disabled={crmsLoading || !crmsDirty}
+                    onClick={handleSaveCrmsMappings}
+                  >
+                    <Check size={15} />
+                    Save & Update Map
                   </button>
                 </div>
               </div>

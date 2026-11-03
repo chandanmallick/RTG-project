@@ -527,8 +527,8 @@ export default function TopNavbar() {
                     onClick={handleNavigate}
                   />
                   <DropdownItem
-                    title="WB Power Grid Map"
-                    description="Substation & transmission line mapping (West Bengal)"
+                    title="ER Power Grid Map"
+                    description="Eastern Region lines, substations & CRMS master mapping"
                     icon={Compass}
                     iconColor="#0D9488"
                     iconBg="#F0FDFA"

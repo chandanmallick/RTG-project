@@ -9,7 +9,7 @@ from routes.psp_routes import (
     get_power_position,
     PSP_PEAK_BASELINES,
 )
-from crew_legacy.api.roster_api import get_calendar_view
+from crew_legacy.api.roster_api import get_calendar_view, DEFAULT_INSTRUCTIONS
 
 
 def _format_num(val, decimals=2, fallback="-"):
@@ -39,8 +39,48 @@ def _diff_badge(today_val, comp_val, unit=""):
         return ""
 
 
+def get_roster_shift_timings(db=None) -> dict:
+    """Dynamically extract shift timings from active roster instructions in database."""
+    timings = {
+        "Morning": "08:30 - 14:30",
+        "Evening": "14:30 - 20:30",
+        "Night": "20:30 - 08:30 [Next day]",
+        "General": "09:30 - 17:30",
+    }
+    try:
+        if db is None:
+            db = MongoService()
+        doc = db.db["roster_master_collection"].find_one(
+            {"instructions": {"$exists": True, "$ne": ""}},
+            {"instructions": 1},
+            sort=[("startDate", -1), ("_id", -1)]
+        )
+        instructions = (doc or {}).get("instructions") or DEFAULT_INSTRUCTIONS
+        
+        m_m = re.search(r"Morning Shift\s*\(([^)]+)\)", instructions, re.IGNORECASE)
+        m_e = re.search(r"Evening Shift\s*\(([^)]+)\)", instructions, re.IGNORECASE)
+        m_n = re.search(r"Night Shift\s*\(([^)]+)\)", instructions, re.IGNORECASE)
+        
+        def clean_timing(text):
+            if not text:
+                return ""
+            t = text.replace("hrs", "").replace("hours", "").strip()
+            t = re.sub(r"(\d{2}:\d{2})\s*-\s*(\d{2}:\d{2})", r"\1 - \2", t)
+            return t
+
+        if m_m:
+            timings["Morning"] = clean_timing(m_m.group(1))
+        if m_e:
+            timings["Evening"] = clean_timing(m_e.group(1))
+        if m_n:
+            timings["Night"] = clean_timing(m_n.group(1))
+    except Exception as e:
+        print(f"Error extracting shift timings from database: {e}")
+    return timings
+
+
 async def build_mobile_briefing_data(date_str: str = None) -> dict:
-    """Consolidate Crew duties (Next 4 days) and all 4 PSP datasets for mobile HTML briefing."""
+    """Consolidate Crew duties (Next 4 days) and all PSP datasets for mobile HTML briefing."""
     db = MongoService()
     
     # 1. Determine operational date
@@ -55,9 +95,12 @@ async def build_mobile_briefing_data(date_str: str = None) -> dict:
         target_date = date_str
 
     target_dt = datetime.strptime(target_date, "%Y-%m-%d")
+    yesterday_dt = target_dt - timedelta(days=1)
+    yesterday_str = yesterday_dt.strftime("%Y-%m-%d")
     
     # Dates for next 4 days
     date_list = [(target_dt + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(4)]
+    shift_timings = get_roster_shift_timings(db)
     
     # 2. Fetch Crew Duties for the Next 4 Days
     crew_days_data = []
@@ -87,28 +130,54 @@ async def build_mobile_briefing_data(date_str: str = None) -> dict:
                     acting_sic = bool(duty.get("tempSIC") and not emp.get("IsSIC"))
                     
                     emp_name = emp.get("name") or "Unknown"
+                    emp_id = emp.get("employeeId") or ""
                     designation = emp.get("designation") or ""
                     
                     # Check if on leave
                     leave_type = duty.get("leaveType")
-                    if leave_type and str(leave_type).upper() not in {"NONE", "NULL", "-"}:
+                    on_leave = bool(leave_type and str(leave_type).upper() not in {"NONE", "NULL", "-", ""})
+                    
+                    # Replacement details
+                    rep_obj = duty.get("replacementEmployee") or {}
+                    rep_name = ""
+                    if isinstance(rep_obj, dict):
+                        rep_name = rep_obj.get("name") or ""
+                    elif isinstance(rep_obj, str):
+                        rep_name = rep_obj.strip()
+                    
+                    rep_required = bool(
+                        duty.get("replacementRequired") or duty.get("vacancyReplacement")
+                    )
+                    has_flashing_r = on_leave and rep_required and not rep_name
+
+                    if on_leave:
                         leaves.append({
                             "name": emp_name,
+                            "employeeId": emp_id,
                             "leave_type": str(leave_type).upper(),
                             "group": group_name,
                             "designation": designation,
                             "is_sic": is_sic,
+                            "replacement_name": rep_name,
+                            "replacement_required": rep_required,
+                            "flashing_r": has_flashing_r,
                         })
                     
-                    # Map into shift if working
+                    # Map into shift
                     if shift_raw in shifts_map:
                         person_info = {
                             "name": emp_name,
+                            "employeeId": emp_id,
                             "designation": designation,
                             "group": group_name,
                             "is_sic": is_sic,
                             "acting_sic": acting_sic,
-                            "replacement": bool(duty.get("replacementDuty")),
+                            "on_leave": on_leave,
+                            "leave_type": str(leave_type).upper() if on_leave else None,
+                            "replacement_name": rep_name,
+                            "replacement_required": rep_required,
+                            "flashing_r": has_flashing_r,
+                            "is_replacement_duty": bool(duty.get("replacementDuty")),
                         }
                         if is_sic:
                             shifts_map[shift_raw]["sic"].append(person_info)
@@ -160,27 +229,155 @@ async def build_mobile_briefing_data(date_str: str = None) -> dict:
     except Exception as e:
         print(f"Error gathering power position data: {e}")
 
+    # 6. Fetch Yesterday All India Demand Contribution & NLDC Regional Demand
+    nldc_summary = {}
+    all_india_contribution = {}
+    try:
+        # Search NLDC demand for yesterday (or latest)
+        nldc_doc = db.nldc_psp_demand_collection.find_one(
+            {"date": yesterday_str},
+            {"_id": 0, "date": 1, "regions": 1}
+        )
+        if not nldc_doc:
+            nldc_doc = db.nldc_psp_demand_collection.find_one(
+                {"regions.ALL INDIA": {"$exists": True}},
+                {"_id": 0, "date": 1, "regions": 1},
+                sort=[("date", -1)]
+            )
+        
+        if nldc_doc:
+            nldc_date = nldc_doc.get("date") or yesterday_str
+            regions = nldc_doc.get("regions") or {}
+            
+            def parse_reg(r_key):
+                r = regions.get(r_key) or {}
+                return {
+                    "max_demand_met": r.get("max_demand_met"),
+                    "time": r.get("max_demand_met_time") or "",
+                    "solar": r.get("max_demand_met_solar"),
+                    "solar_time": r.get("max_demand_met_solar_time") or "",
+                    "non_solar": r.get("max_demand_met_non_solar"),
+                    "non_solar_time": r.get("max_demand_met_non_solar_time") or "",
+                }
+
+            all_india_reg = parse_reg("ALL INDIA")
+            nldc_summary = {
+                "date": nldc_date,
+                "date_formatted": datetime.strptime(nldc_date, "%Y-%m-%d").strftime("%d %b %Y") if nldc_date else "",
+                "all_india": all_india_reg,
+                "nr": parse_reg("NR"),
+                "wr": parse_reg("WR"),
+                "sr": parse_reg("SR"),
+                "er": parse_reg("ER"),
+                "ner": parse_reg("NER"),
+            }
+
+            # Fetch 15-min generation mix if available
+            fifteen_min_doc = db.db["India_15_Min_Demand"].find_one(
+                {"date": nldc_date},
+                {"_id": 0, "raw_rows": 1}
+            )
+            if not fifteen_min_doc:
+                fifteen_min_doc = db.db["India_15_Min_Demand"].find_one(
+                    {"raw_rows": {"$exists": True, "$ne": []}},
+                    {"_id": 0, "date": 1, "raw_rows": 1},
+                    sort=[("date", -1)]
+                )
+            
+            if fifteen_min_doc and fifteen_min_doc.get("raw_rows"):
+                raw_rows = fifteen_min_doc["raw_rows"]
+                tot_gen = 0.0
+                tot_solar = 0.0
+                max_gen = 0.0
+                max_gen_time = ""
+                for r in raw_rows:
+                    g = float(r.get("AI_GENERATION") or r.get("TOTAL_GENERATION") or 0.0)
+                    s = float(r.get("AI_SOLAR") or r.get("SOLAR_GENERATION") or 0.0)
+                    tot_gen += g
+                    tot_solar += s
+                    if g > max_gen:
+                        max_gen = g
+                        max_gen_time = r.get("TIMESTAMP") or r.get("timestamp") or ""
+
+                count = len(raw_rows)
+                avg_gen = tot_gen / count if count else 0.0
+                avg_solar = tot_solar / count if count else 0.0
+                solar_share = (tot_solar / tot_gen * 100) if tot_gen else 0.0
+
+                all_india_contribution = {
+                    "has_mix": True,
+                    "max_generation": max_gen,
+                    "max_generation_time": max_gen_time,
+                    "avg_generation": avg_gen,
+                    "avg_solar": avg_solar,
+                    "solar_share": solar_share,
+                    "non_solar_share": 100.0 - solar_share if tot_gen else 0.0,
+                }
+    except Exception as e:
+        print(f"Error gathering NLDC / All India demand data: {e}")
+
     return {
         "date": target_date,
         "date_formatted": target_dt.strftime("%d %b %Y"),
         "day_of_week": target_dt.strftime("%A"),
+        "yesterday_date": yesterday_str,
+        "yesterday_formatted": yesterday_dt.strftime("%d %b %Y"),
+        "shift_timings": shift_timings,
         "crew_days": crew_days_data,
         "psp_energy_rows": psp_energy_rows,
         "psp_demand_rows": psp_demand_rows,
         "gen_sources": gen_sources_data,
         "power_position": power_position_rows,
+        "nldc_summary": nldc_summary,
+        "all_india_contribution": all_india_contribution,
     }
+
+
+def _format_emp_badge(person: dict) -> str:
+    """Format employee name with leave strikethrough, replacement highlight or flashing R warning."""
+    name = person.get("name") or "Staff"
+    acting_sic = person.get("acting_sic", False)
+    on_leave = person.get("on_leave", False)
+    rep_name = person.get("replacement_name")
+    flashing_r = person.get("flashing_r", False)
+    is_rep_duty = person.get("is_replacement_duty", False)
+
+    if on_leave:
+        crossed_name = f'<s style="color:#94A3B8; text-decoration:line-through;">{name}</s>'
+        if rep_name:
+            rep_badge = f'<span style="background:#FEF3C7; color:#92400E; font-size:10px; font-weight:700; padding:1px 5px; border-radius:4px; border:1px solid #FCD34D; margin-left:3px;">[Rep: {rep_name}]</span>'
+            return f"{crossed_name} {rep_badge}"
+        elif flashing_r:
+            r_badge = f'<span style="background:#FEE2E2; color:#B91C1C; font-size:10px; font-weight:800; padding:1px 5px; border-radius:4px; border:1px solid #FCA5A5; margin-left:3px;">[⚠ Flashing R / Replacement Needed]</span>'
+            return f"{crossed_name} {r_badge}"
+        else:
+            return f'{crossed_name} <span style="font-size:10px; color:#DC2626;">(Leave)</span>'
+
+    # Normal working staff
+    extra = ""
+    if acting_sic:
+        extra = ' <span style="font-size:10px; color:#D97706; font-weight:700;">(Acting SIC)</span>'
+    elif is_rep_duty:
+        extra = ' <span style="background:#FEF3C7; color:#92400E; font-size:10px; font-weight:700; padding:1px 4px; border-radius:4px;">[Rep]</span>'
+    return f"{name}{extra}"
 
 
 def generate_mobile_briefing_html(data: dict) -> str:
     """Generate clean, responsive, mobile-first HTML email document."""
     rep_date = data.get("date_formatted") or data.get("date") or ""
     day_name = data.get("day_of_week") or ""
+    shift_timings = data.get("shift_timings") or {
+        "Morning": "08:30 - 14:30",
+        "Evening": "14:30 - 20:30",
+        "Night": "20:30 - 08:30 [Next day]",
+    }
     crew_days = data.get("crew_days") or []
     energy_rows = data.get("psp_energy_rows") or []
     demand_rows = data.get("psp_demand_rows") or []
     gen_sources = data.get("gen_sources") or {}
     power_pos = data.get("power_position") or []
+    nldc_summary = data.get("nldc_summary") or {}
+    all_india_contrib = data.get("all_india_contribution") or {}
     
     composition = gen_sources.get("composition") or []
     states_gen = gen_sources.get("states") or []
@@ -221,7 +418,7 @@ def generate_mobile_briefing_html(data: dict) -> str:
       -webkit-font-smoothing: antialiased;
     }}
     .mobile-container {{
-      max-width: 460px;
+      max-width: 480px;
       margin: 0 auto;
       background-color: #FFFFFF;
       min-height: 100vh;
@@ -234,13 +431,6 @@ def generate_mobile_briefing_html(data: dict) -> str:
       padding: 14px;
       margin-bottom: 12px;
       box-shadow: 0 2px 6px rgba(0,0,0,0.02);
-    }}
-    .pill-badge {{
-      display: inline-block;
-      padding: 2px 7px;
-      border-radius: 999px;
-      font-size: 11px;
-      font-weight: 700;
     }}
     @media only screen and (max-width: 480px) {{
       .mobile-container {{
@@ -278,10 +468,11 @@ def generate_mobile_briefing_html(data: dict) -> str:
 
     # ─────────────────────────────────────────────────────────────
     # PART 1: CREW MANAGEMENT - DUTY OF NEXT 4 DAYS (IMAGE 2 STYLE)
+    # Dynamic shift timings, leave strikethrough, replacement & flashing R
     # ─────────────────────────────────────────────────────────────
     html_parts.append("""
     <!-- SECTION 1: CREW ROSTER (NEXT 4 DAYS) -->
-    <div style="margin-bottom: 20px;">
+    <div style="margin-bottom: 22px;">
       <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom: 10px;">
         <div style="font-size: 15px; font-weight: 900; color: #0F172A; display:flex; align-items:center; gap: 6px;">
           <span>👥</span> Crew Duty Schedule (Next 4 Days)
@@ -312,9 +503,9 @@ def generate_mobile_briefing_html(data: dict) -> str:
         """)
 
         shift_configs = [
-            ("Morning", "🌅", "06:00 - 14:00", "#0284C7"),
-            ("Evening", "☀️", "14:00 - 22:00", "#D97706"),
-            ("Night", "🌙", "22:00 - 06:00", "#4F46E5"),
+            ("Morning", "🌅", shift_timings.get("Morning", "08:30 - 14:30"), "#0284C7"),
+            ("Evening", "☀️", shift_timings.get("Evening", "14:30 - 20:30"), "#D97706"),
+            ("Night", "🌙", shift_timings.get("Night", "20:30 - 08:30 [Next day]"), "#4F46E5"),
         ]
 
         for s_name, s_icon, s_time, s_color in shift_configs:
@@ -322,19 +513,16 @@ def generate_mobile_briefing_html(data: dict) -> str:
             sic_list = s_data.get("sic") or []
             eng_list = s_data.get("engineers") or []
 
-            sic_label = ", ".join(
-                [f"<b>{p['name']}</b> (Acting SIC)" if p.get("acting_sic") else f"<b>{p['name']}</b> (SIC)" for p in sic_list]
-            ) or "<i>Vacant</i>"
-
-            eng_label = ", ".join([p['name'] for p in eng_list]) or "-"
+            sic_label = ", ".join([_format_emp_badge(p) for p in sic_list]) or "<i>Vacant</i>"
+            eng_label = ", ".join([_format_emp_badge(p) for p in eng_list]) or "-"
 
             html_parts.append(f"""
           <div style="background:#FFFFFF; border-radius:10px; padding:7px 9px; border:1px solid rgba(0,0,0,0.05);">
             <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:3px;">
               <span style="font-weight:800; color:{s_color}; font-size:11.5px;">
-                {s_icon} {s_name} <span style="font-weight:400; font-size:10px; color:#64748B;">({s_time})</span>
+                {s_icon} {s_name} <span style="font-weight:600; font-size:10px; color:#64748B;">({s_time})</span>
               </span>
-              <span style="font-size:11px; color:#0F172A;">{sic_label}</span>
+              <span style="font-size:11px; color:#0F172A; text-align:right;">{sic_label}</span>
             </div>
             <div style="font-size:11px; color:#475569; padding-left: 2px;">
               Staff: {eng_label}
@@ -344,16 +532,38 @@ def generate_mobile_briefing_html(data: dict) -> str:
 
         # Personnel on Leave on this day
         if leaves:
-            leave_chips = " ".join([
-                f'<span style="display:inline-block; background:#FEE2E2; color:#B91C1C; border:1px solid #FCA5A5; font-size:10.5px; font-weight:700; padding:2px 7px; border-radius:6px; margin:2px 3px 2px 0;">🌴 {l["name"]} ({l["leave_type"]})</span>'
-                for l in leaves
-            ])
+            leave_chips = []
+            for l in leaves:
+                name_crossed = f'<s style="text-decoration:line-through;">{l["name"]}</s>'
+                ltype = l["leave_type"]
+                if l.get("replacement_name"):
+                    rep_str = f' → <span style="color:#92400E; font-weight:800;">[Rep: {l["replacement_name"]}]</span>'
+                    bg_col = "#FEF3C7"
+                    brd_col = "#FCD34D"
+                    txt_col = "#78350F"
+                elif l.get("flashing_r"):
+                    rep_str = ' → <span style="color:#B91C1C; font-weight:900;">[⚠ R Flashing / Replacement Needed]</span>'
+                    bg_col = "#FEE2E2"
+                    brd_col = "#FCA5A5"
+                    txt_col = "#991B1B"
+                else:
+                    rep_str = ""
+                    bg_col = "#FEE2E2"
+                    brd_col = "#FCA5A5"
+                    txt_col = "#B91C1C"
+
+                leave_chips.append(
+                    f'<div style="background:{bg_col}; color:{txt_col}; border:1px solid {brd_col}; font-size:10.5px; font-weight:700; padding:3px 7px; border-radius:6px; margin:2px 0;">'
+                    f'🌴 {name_crossed} ({ltype}){rep_str}'
+                    f'</div>'
+                )
+
             html_parts.append(f"""
           <div style="margin-top: 4px; padding-top: 5px; border-top: 1px dotted {theme['border']};">
             <div style="font-size:10.5px; font-weight:800; color:#B91C1C; margin-bottom:2px;">
-              ON LEAVE:
+              LEAVE STATUS & REPLACEMENTS:
             </div>
-            <div>{leave_chips}</div>
+            <div>{" ".join(leave_chips)}</div>
           </div>
             """)
 
@@ -365,17 +575,124 @@ def generate_mobile_briefing_html(data: dict) -> str:
     html_parts.append("</div>")
 
     # ─────────────────────────────────────────────────────────────
-    # PART 2: PSP DATA PART
-    # i. /psp-report-checking Demand & Energy Comparison Tiles (Image 1 Style)
+    # PART 2: ALL INDIA DEMAND CONTRIBUTION & NLDC REGION MAXIMUM DEMAND (YESTERDAY)
+    # Compact tiles & Regional comparison table
     # ─────────────────────────────────────────────────────────────
-    html_parts.append("""
-    <!-- SECTION 2: PSP DEMAND & ENERGY COMPARISON TILES -->
+    if nldc_summary:
+        y_label = nldc_summary.get("date_formatted") or data.get("yesterday_formatted") or "Yesterday"
+        ai = nldc_summary.get("all_india") or {}
+        
+        html_parts.append(f"""
+    <!-- SECTION 2: ALL INDIA DEMAND CONTRIBUTION & NLDC REGIONAL DEMAND -->
     <div style="margin-bottom: 22px;">
-      <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom: 10px;">
+      <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom: 6px;">
+        <div style="font-size: 15px; font-weight: 900; color: #0F172A; display:flex; align-items:center; gap: 6px;">
+          <span>🌐</span> All India Demand & NLDC Regions
+        </div>
+        <span style="font-size: 10.5px; font-weight: 800; color: #0057B7; background:#E0F2FE; padding:2px 7px; border-radius:999px;">
+          Yesterday: {y_label}
+        </span>
+      </div>
+      <div style="font-size: 11.5px; color:#64748B; margin-bottom: 10px;">
+        Yesterday peak demand met across India and all 5 electrical regions from NLDC.
+      </div>
+
+      <!-- All India Highlight Card -->
+      <div style="background: linear-gradient(135deg, #F0FDF4 0%, #DCFCE7 100%); border:1.5px solid #86EFAC; border-radius:14px; padding:12px; margin-bottom:10px;">
+        <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom: 4px;">
+          <span style="font-size:13px; font-weight:900; color:#14532D; text-transform:uppercase;">
+            🇮🇳 All India Demand Contribution
+          </span>
+          <span style="font-size:11px; font-weight:800; color:#15803D;">
+            {ai.get('time') or 'Peak'}
+          </span>
+        </div>
+        <div style="display:flex; align-items:baseline; gap:6px; margin-bottom:6px;">
+          <span style="font-size:26px; font-weight:950; color:#15803D; letter-spacing:-0.5px;">
+            {_format_num(ai.get('max_demand_met'), 0)}
+          </span>
+          <span style="font-size:13px; font-weight:800; color:#166534;">MW (Peak Demand Met)</span>
+        </div>
+
+        <div style="display:grid; grid-template-columns: 1fr 1fr; gap:6px; font-size:11px;">
+          <div style="background:rgba(255,255,255,0.7); border:1px solid #BBF7D0; border-radius:8px; padding:5px 7px;">
+            <div style="color:#166534; font-size:9.5px; font-weight:700;">☀️ Solar Period Peak</div>
+            <div style="font-weight:900; font-size:12px; color:#0F172A;">{_format_num(ai.get('solar'), 0)} MW</div>
+            <div style="color:#64748B; font-size:9px;">at {ai.get('solar_time') or '-'}</div>
+          </div>
+          <div style="background:rgba(255,255,255,0.7); border:1px solid #BBF7D0; border-radius:8px; padding:5px 7px;">
+            <div style="color:#166534; font-size:9.5px; font-weight:700;">🌙 Non-Solar Period Peak</div>
+            <div style="font-weight:900; font-size:12px; color:#0F172A;">{_format_num(ai.get('non_solar'), 0)} MW</div>
+            <div style="color:#64748B; font-size:9px;">at {ai.get('non_solar_time') or '-'}</div>
+          </div>
+        </div>
+        """)
+
+        if all_india_contrib.get("has_mix"):
+            s_sh = all_india_contrib.get("solar_share", 0.0)
+            ns_sh = all_india_contrib.get("non_solar_share", 0.0)
+            html_parts.append(f"""
+        <!-- Generation Mix Progress Bar -->
+        <div style="margin-top:8px; padding-top:6px; border-top:1px dashed #86EFAC;">
+          <div style="display:flex; justify-content:space-between; font-size:10.5px; font-weight:700; color:#166534; margin-bottom:3px;">
+            <span>Generation Mix: Solar {s_sh:.1f}%</span>
+            <span>Non-Solar {ns_sh:.1f}%</span>
+          </div>
+          <div style="width:100%; height:8px; background:#CBD5E1; border-radius:4px; overflow:hidden; display:flex;">
+            <div style="width:{s_sh:.1f}%; background:#FBBF24; height:100%;"></div>
+            <div style="width:{ns_sh:.1f}%; background:#2563EB; height:100%;"></div>
+          </div>
+        </div>
+            """)
+
+        html_parts.append("""
+      </div>
+
+      <!-- NLDC 5 Regional Maximum Demand Met Grid -->
+      <div style="display:grid; grid-template-columns: 1fr 1fr; gap:6px;">
+        """)
+
+        reg_configs = [
+            ("Northern (NR)", nldc_summary.get("nr") or {}, "#0284C7"),
+            ("Western (WR)", nldc_summary.get("wr") or {}, "#D97706"),
+            ("Southern (SR)", nldc_summary.get("sr") or {}, "#7C3AED"),
+            ("Eastern (ER)", nldc_summary.get("er") or {}, "#15803D"),
+            ("North Eastern (NER)", nldc_summary.get("ner") or {}, "#0D9488"),
+        ]
+
+        for reg_title, reg_data, border_c in reg_configs:
+            reg_val = reg_data.get("max_demand_met")
+            reg_time = reg_data.get("time") or "-"
+            html_parts.append(f"""
+        <div style="background:#F8FAFC; border:1px solid #E2E8F0; border-left:3.5px solid {border_c}; border-radius:10px; padding:6px 8px;">
+          <div style="display:flex; justify-content:space-between; align-items:center;">
+            <span style="font-size:11px; font-weight:800; color:#0F172A;">{reg_title}</span>
+            <span style="font-size:9.5px; color:#64748B;">{reg_time}</span>
+          </div>
+          <div style="font-size:14px; font-weight:950; color:{border_c}; margin-top:1px;">
+            {_format_num(reg_val, 0)} <span style="font-size:9.5px; font-weight:700; color:#64748B;">MW</span>
+          </div>
+        </div>
+            """)
+
+        html_parts.append("""
+      </div>
+    </div>
+        """)
+
+    # ─────────────────────────────────────────────────────────────
+    # PART 3: PSP DATA PART - REPORT CHECKING
+    # i. Energy Consumption Comparison (MU) (Image 1 Style)
+    # ii. Demand Met (Maximum Demand - MW) (Image 1 Style)
+    # ─────────────────────────────────────────────────────────────
+    html_parts.append(f"""
+    <!-- SECTION 3: PSP ENERGY CONSUMPTION COMPARISON -->
+    <div style="margin-bottom: 22px;">
+      <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom: 6px;">
         <div style="font-size: 15px; font-weight: 900; color: #0F172A; display:flex; align-items:center; gap: 6px;">
           <span>⚡</span> Energy Consumption Comparison (MU)
         </div>
-        <span style="font-size: 11px; font-weight: 700; color: #0057B7; background:#E0F2FE; padding:2px 7px; border-radius:999px;">
+        <span style="font-size: 10.5px; font-weight: 800; color: #0057B7; background:#E0F2FE; padding:2px 7px; border-radius:999px;">
           Report Checking
         </span>
       </div>
@@ -397,9 +714,9 @@ def generate_mobile_briefing_html(data: dict) -> str:
         border_color = "#CBD5E1" if not is_er else "#86EFAC"
 
         html_parts.append(f"""
-      <!-- Tile for {state_name} -->
-      <div style="background:{card_bg}; border:1.5px solid {border_color}; border-radius: 16px; padding: 13px 15px; margin-bottom: 10px; box-shadow:0 2px 6px rgba(0,0,0,0.02);">
-        <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom: 4px;">
+      <!-- Energy Tile for {state_name} -->
+      <div style="background:{card_bg}; border:1.5px solid {border_color}; border-radius: 16px; padding: 12px 14px; margin-bottom: 8px; box-shadow:0 2px 6px rgba(0,0,0,0.02);">
+        <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom: 2px;">
           <div style="font-size: 14px; font-weight: 900; color:{'#15803D' if is_er else '#0F172A'};">
             {state_name}
           </div>
@@ -409,32 +726,27 @@ def generate_mobile_briefing_html(data: dict) -> str:
         </div>
 
         <!-- Big Primary Number -->
-        <div style="display:flex; align-items:baseline; gap: 6px; margin-bottom: 8px;">
-          <span style="font-size: 26px; font-weight: 950; color:{'#15803D' if is_er else '#004DA8'}; letter-spacing:-0.5px;">
+        <div style="display:flex; align-items:baseline; gap: 6px; margin-bottom: 6px;">
+          <span style="font-size: 25px; font-weight: 950; color:{'#15803D' if is_er else '#004DA8'}; letter-spacing:-0.5px;">
             {_format_num(op_day, 2)}
           </span>
           <span style="font-size: 13px; font-weight: 800; color: #64748B;">MU</span>
         </div>
 
         <!-- 3 Comparison Metric Chips -->
-        <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; font-size: 11px;">
-          <!-- Yesterday -->
-          <div style="background:#FFFFFF; border:1px solid #E2E8F0; border-radius:10px; padding: 6px; text-align:center;">
-            <div style="color:#64748B; font-size:9.5px; font-weight:700; text-transform:uppercase;">Yesterday</div>
+        <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap: 5px; font-size: 11px;">
+          <div style="background:#FFFFFF; border:1px solid #E2E8F0; border-radius:9px; padding: 5px; text-align:center;">
+            <div style="color:#64748B; font-size:9px; font-weight:700; text-transform:uppercase;">Yesterday</div>
             <div style="font-weight:900; font-size:12px; color:#0F172A; margin:1px 0;">{_format_num(yesterday, 1)}</div>
             {_diff_badge(op_day, yesterday)}
           </div>
-
-          <!-- 7-Day Avg -->
-          <div style="background:#FFFFFF; border:1px solid #E2E8F0; border-radius:10px; padding: 6px; text-align:center;">
-            <div style="color:#64748B; font-size:9.5px; font-weight:700; text-transform:uppercase;">7-Day Avg</div>
+          <div style="background:#FFFFFF; border:1px solid #E2E8F0; border-radius:9px; padding: 5px; text-align:center;">
+            <div style="color:#64748B; font-size:9px; font-weight:700; text-transform:uppercase;">7-Day Avg</div>
             <div style="font-weight:900; font-size:12px; color:#0F172A; margin:1px 0;">{_format_num(avg7, 1)}</div>
             {_diff_badge(op_day, avg7)}
           </div>
-
-          <!-- Last Year -->
-          <div style="background:#FFFFFF; border:1px solid #E2E8F0; border-radius:10px; padding: 6px; text-align:center;">
-            <div style="color:#64748B; font-size:9.5px; font-weight:700; text-transform:uppercase;">Last Year</div>
+          <div style="background:#FFFFFF; border:1px solid #E2E8F0; border-radius:9px; padding: 5px; text-align:center;">
+            <div style="color:#64748B; font-size:9px; font-weight:700; text-transform:uppercase;">Last Year</div>
             <div style="font-weight:900; font-size:12px; color:#0F172A; margin:1px 0;">{_format_num(last_year, 1)}</div>
             {_diff_badge(op_day, last_year)}
           </div>
@@ -445,10 +757,88 @@ def generate_mobile_briefing_html(data: dict) -> str:
     html_parts.append("</div>")
 
     # ─────────────────────────────────────────────────────────────
-    # PART 2: ii. ENERGY COMPOSITION - REGIONAL SOURCE CONTRIBUTION BY MAGNITUDE
+    # PART 3: ii. DEMAND MET (MAXIMUM DEMAND - MW) COMPARISON TILES
+    # ─────────────────────────────────────────────────────────────
+    if demand_rows:
+        html_parts.append(f"""
+    <!-- SECTION 4: PSP DEMAND MET (MAXIMUM DEMAND - MW) -->
+    <div style="margin-bottom: 22px;">
+      <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom: 6px;">
+        <div style="font-size: 15px; font-weight: 900; color: #0F172A; display:flex; align-items:center; gap: 6px;">
+          <span>📈</span> Demand Met Comparison (MW)
+        </div>
+        <span style="font-size: 10.5px; font-weight: 800; color: #0284C7; background:#E0F2FE; padding:2px 7px; border-radius:999px;">
+          Maximum Demand
+        </span>
+      </div>
+      <div style="font-size: 11.5px; color:#64748B; margin-bottom: 10px;">
+        Constituent peak demand met on <b>{rep_date}</b> with difference vs Yesterday, 7-Day Avg, and Last Year.
+      </div>
+    """)
+
+        for row in demand_rows:
+            state_name = row.get("state") or "Constituent"
+            op_d = row.get("max_demand_operational")
+            time_d = row.get("max_demand_time") or ""
+            yest_d = row.get("max_demand_yesterday")
+            avg7_d = row.get("max_demand_average_last_7_days")
+            ly_d = row.get("max_demand_same_day_last_year")
+
+            is_er = (state_name.upper() == "ER")
+            card_bg = "#F8FAFC" if not is_er else "#F0FDF4"
+            border_color = "#CBD5E1" if not is_er else "#86EFAC"
+
+            time_badge = f'<span style="font-size:10px; color:#64748B; font-weight:700;">({time_d} hrs)</span>' if time_d else ""
+
+            html_parts.append(f"""
+      <!-- Demand Tile for {state_name} -->
+      <div style="background:{card_bg}; border:1.5px solid {border_color}; border-radius: 16px; padding: 12px 14px; margin-bottom: 8px; box-shadow:0 2px 6px rgba(0,0,0,0.02);">
+        <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom: 2px;">
+          <div style="font-size: 14px; font-weight: 900; color:{'#15803D' if is_er else '#0F172A'};">
+            {state_name}
+          </div>
+          <span style="font-size: 10px; font-weight: 800; color: #0284C7; text-transform:uppercase;">
+            Peak Demand Met
+          </span>
+        </div>
+
+        <!-- Big Primary Number -->
+        <div style="display:flex; align-items:baseline; gap: 6px; margin-bottom: 6px;">
+          <span style="font-size: 25px; font-weight: 950; color:{'#15803D' if is_er else '#0284C7'}; letter-spacing:-0.5px;">
+            {_format_num(op_d, 0)}
+          </span>
+          <span style="font-size: 13px; font-weight: 800; color: #64748B;">MW</span>
+          {time_badge}
+        </div>
+
+        <!-- 3 Comparison Metric Chips -->
+        <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap: 5px; font-size: 11px;">
+          <div style="background:#FFFFFF; border:1px solid #E2E8F0; border-radius:9px; padding: 5px; text-align:center;">
+            <div style="color:#64748B; font-size:9px; font-weight:700; text-transform:uppercase;">Yesterday</div>
+            <div style="font-weight:900; font-size:12px; color:#0F172A; margin:1px 0;">{_format_num(yest_d, 0)}</div>
+            {_diff_badge(op_d, yest_d, unit=" MW")}
+          </div>
+          <div style="background:#FFFFFF; border:1px solid #E2E8F0; border-radius:9px; padding: 5px; text-align:center;">
+            <div style="color:#64748B; font-size:9px; font-weight:700; text-transform:uppercase;">7-Day Avg</div>
+            <div style="font-weight:900; font-size:12px; color:#0F172A; margin:1px 0;">{_format_num(avg7_d, 0)}</div>
+            {_diff_badge(op_d, avg7_d, unit=" MW")}
+          </div>
+          <div style="background:#FFFFFF; border:1px solid #E2E8F0; border-radius:9px; padding: 5px; text-align:center;">
+            <div style="color:#64748B; font-size:9px; font-weight:700; text-transform:uppercase;">Last Year</div>
+            <div style="font-weight:900; font-size:12px; color:#0F172A; margin:1px 0;">{_format_num(ly_d, 0)}</div>
+            {_diff_badge(op_d, ly_d, unit=" MW")}
+          </div>
+        </div>
+      </div>
+            """)
+
+        html_parts.append("</div>")
+
+    # ─────────────────────────────────────────────────────────────
+    # PART 4: REGIONAL ENERGY COMPOSITION (BY MAGNITUDE)
     # ─────────────────────────────────────────────────────────────
     html_parts.append(f"""
-    <!-- SECTION 3: REGIONAL ENERGY COMPOSITION -->
+    <!-- SECTION 5: REGIONAL ENERGY COMPOSITION -->
     <div style="margin-bottom: 22px;">
       <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom: 6px;">
         <div style="font-size: 15px; font-weight: 900; color: #0F172A; display:flex; align-items:center; gap: 6px;">
@@ -506,10 +896,10 @@ def generate_mobile_briefing_html(data: dict) -> str:
     """)
 
     # ─────────────────────────────────────────────────────────────
-    # PART 2: iii. STATE WISE GENERATION SOURCE MIX, DRAWAL & UI
+    # PART 5: STATE WISE GENERATION SOURCE MIX, DRAWAL & UI
     # ─────────────────────────────────────────────────────────────
     html_parts.append(f"""
-    <!-- SECTION 4: STATE-WISE GENERATION SOURCES -->
+    <!-- SECTION 6: STATE-WISE GENERATION SOURCES -->
     <div style="margin-bottom: 22px;">
       <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom: 6px;">
         <div style="font-size: 15px; font-weight: 900; color: #0F172A; display:flex; align-items:center; gap: 6px;">
@@ -531,7 +921,6 @@ def generate_mobile_briefing_html(data: dict) -> str:
         ui_color = "#15803D" if ui_num >= 0 else "#DC2626"
         ui_bg = "#DCFCE7" if ui_num >= 0 else "#FEE2E2"
 
-        # mini breakdown
         breakdown_items = []
         for sk in ["thermal", "hydro", "wind", "solar", "small_hydro", "others"]:
             v = float(s.get(sk) or 0.0)
@@ -566,10 +955,10 @@ def generate_mobile_briefing_html(data: dict) -> str:
     html_parts.append("</div>")
 
     # ─────────────────────────────────────────────────────────────
-    # PART 2: iv. PSP STATE-WISE DEMAND & ENERGY COMPARISON (HIGHEST RECORD)
+    # PART 6: STATE-WISE DEMAND & ENERGY COMPARISON (HIGHEST RECORD)
     # ─────────────────────────────────────────────────────────────
     html_parts.append(f"""
-    <!-- SECTION 5: YESTERDAY VS HIGHEST RECORD COMPARISON -->
+    <!-- SECTION 7: YESTERDAY VS HIGHEST RECORD COMPARISON -->
     <div style="margin-bottom: 24px;">
       <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom: 6px;">
         <div style="font-size: 15px; font-weight: 900; color: #0F172A; display:flex; align-items:center; gap: 6px;">
@@ -582,7 +971,6 @@ def generate_mobile_briefing_html(data: dict) -> str:
       </div>
     """)
 
-    # Render Demand and Energy Comparison Bars
     for r in power_pos:
         c_name = r.get("constituent") or "Constituent"
         

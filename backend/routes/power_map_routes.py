@@ -1,7 +1,9 @@
-from fastapi import APIRouter, HTTPException, UploadFile, File
+from fastapi import APIRouter, HTTPException, UploadFile, File, Query, Body
 from fastapi.responses import JSONResponse, Response
 import json
 import logging
+from typing import Optional, List
+from pydantic import BaseModel
 from services.power_map_service import PowerMapService
 
 logger = logging.getLogger("power_map_routes")
@@ -10,9 +12,23 @@ router = APIRouter(prefix="/api/power-map", tags=["Power Grid Map"])
 service = PowerMapService()
 
 
+class MappingItem(BaseModel):
+    map_entity_id: str
+    map_entity_name: Optional[str] = None
+    map_entity_type: Optional[str] = "transmission_line"
+    voltage_class: Optional[int] = None
+    crms_element_name: str
+    crms_element_type: Optional[str] = "AC_TRANSMISSION_LINE_CIRCUIT"
+    mapped_by: Optional[str] = "Operator"
+
+
+class SaveMappingsRequest(BaseModel):
+    mappings: List[MappingItem]
+
+
 @router.get("/data")
 async def get_grid_data():
-    """Retrieve the current active power grid GeoJSON dataset."""
+    """Retrieve the current active power grid GeoJSON dataset for Eastern Region."""
     try:
         data = service.get_power_grid_data()
         return data
@@ -33,10 +49,7 @@ async def get_sync_status():
 
 @router.post("/sync-live")
 async def sync_live():
-    """
-    Attempt to sync latest power infrastructure from live OpenStreetMap / OpenInfra.
-    Gracefully handles offline/intranet environments with comprehensive feedback.
-    """
+    """Attempt to sync latest Eastern Region power infrastructure from live OpenStreetMap."""
     try:
         result = service.sync_live_from_osm()
         return result
@@ -47,10 +60,7 @@ async def sync_live():
 
 @router.post("/import")
 async def import_grid_dataset(payload: dict):
-    """
-    Import or update grid dataset via GeoJSON payload.
-    Enables manual update in air-gapped intranet environments.
-    """
+    """Import or update grid dataset via GeoJSON payload."""
     if not isinstance(payload, dict) or payload.get("type") != "FeatureCollection":
         raise HTTPException(status_code=400, detail="Invalid GeoJSON. Must be a FeatureCollection.")
 
@@ -90,7 +100,7 @@ async def import_grid_file(file: UploadFile = File(...)):
 
 @router.post("/reset")
 async def reset_dataset():
-    """Reset the grid dataset to the curated master West Bengal dataset."""
+    """Reset the grid dataset to the curated master Eastern Region dataset."""
     try:
         return service.reset_to_default()
     except Exception as e:
@@ -104,7 +114,7 @@ async def export_grid_dataset():
     try:
         data = service.get_power_grid_data()
         content = json.dumps(data, indent=2)
-        filename = f"West_Bengal_Power_Grid_{data.get('metadata', {}).get('last_updated', 'export').replace(' ', '_').replace(':', '-')}.geojson"
+        filename = f"Eastern_Region_Power_Grid_{data.get('metadata', {}).get('last_updated', 'export').replace(' ', '_').replace(':', '-')}.geojson"
         return Response(
             content=content,
             media_type="application/geo+json",
@@ -114,3 +124,62 @@ async def export_grid_dataset():
         logger.error(f"Error exporting GeoJSON dataset: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Export failed: {str(e)}")
 
+
+# ─────────────────────────────────────────────────────────────
+# CRMS CODEBOOK MASTER DATA MAPPING ENDPOINTS
+# ─────────────────────────────────────────────────────────────
+
+@router.get("/crms-elements")
+async def get_crms_elements(elementType: str = Query("AC_TRANSMISSION_LINE_CIRCUIT")):
+    """
+    Fetch official CRMS elements by elementType (e.g. AC_TRANSMISSION_LINE_CIRCUIT).
+    Uses live query to https://crms.erldc.in with offline fallback cache.
+    """
+    try:
+        res = service.fetch_crms_elements(element_type=elementType)
+        return res
+    except Exception as e:
+        logger.error(f"Error getting CRMS elements: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to fetch CRMS elements: {str(e)}")
+
+
+@router.get("/crms-mappings")
+async def get_crms_mappings():
+    """Get all saved map-to-CRMS element mappings."""
+    try:
+        mappings = service.get_crms_mappings()
+        return {
+            "success": True,
+            "count": len(mappings),
+            "mappings": mappings,
+        }
+    except Exception as e:
+        logger.error(f"Error getting CRMS mappings: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to fetch CRMS mappings: {str(e)}")
+
+
+@router.post("/crms-mappings")
+async def save_crms_mappings(req: SaveMappingsRequest):
+    """Save or update CRMS element mappings for map features."""
+    try:
+        payload = [m.model_dump() for m in req.mappings]
+        result = service.save_crms_mappings(payload)
+        return result
+    except Exception as e:
+        logger.error(f"Error saving CRMS mappings: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to save CRMS mappings: {str(e)}")
+
+
+@router.post("/crms-auto-match")
+async def auto_match_crms_elements(elementType: str = Query("AC_TRANSMISSION_LINE_CIRCUIT")):
+    """Perform fuzzy matching between map elements and CRMS codebook master elements."""
+    try:
+        matches = service.auto_match_elements(element_type=elementType)
+        return {
+            "success": True,
+            "count": len(matches),
+            "matches": matches,
+        }
+    except Exception as e:
+        logger.error(f"Error performing auto-match: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Auto-match failed: {str(e)}")

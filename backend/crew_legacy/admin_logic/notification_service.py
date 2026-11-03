@@ -3,6 +3,8 @@ from pathlib import Path
 import logging
 from datetime import datetime
 
+import urllib.parse
+import time
 import requests
 
 from crew_legacy.database.database_mongo import (
@@ -374,18 +376,49 @@ def send_email(to_list, subject, body, *, html=False, sender=None, enabled=None,
                 for email in cc_recipients
             ]
         if graph_attachments:
-            message["attachments"] = graph_attachments
+            message["attachments"] = graph_attachments        encoded_sender = urllib.parse.quote(sender_address)
+        endpoint = f"https://graph.microsoft.com/v1.0/users/{encoded_sender}/sendMail"
+        req_headers = {"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"}
+        payload = {
+            "message": message,
+            "saveToSentItems": True,
+        }
 
-        message_response = requests.post(
-            f"https://graph.microsoft.com/v1.0/users/{sender_address}/sendMail",
-            headers={"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"},
-            json={
-                "message": message,
-                "saveToSentItems": True,
-            },
-            timeout=30,
-        )
-        if message_response.status_code != 202:
+        # Send with retry for timeouts (payloads like mobile briefing can be 70KB+)
+        message_response = None
+        for attempt in range(2):
+            try:
+                message_response = requests.post(
+                    endpoint,
+                    headers=req_headers,
+                    json=payload,
+                    timeout=60,
+                )
+                break
+            except requests.exceptions.Timeout:
+                if attempt == 0:
+                    time.sleep(1.5)
+                    continue
+                raise
+            except requests.RequestException:
+                raise
+
+        if message_response is not None and message_response.status_code != 202:
+            # Fallback attempt without saveToSentItems if 400 or 403 occurred on save
+            if message_response.status_code in {400, 403}:
+                try:
+                    payload["saveToSentItems"] = False
+                    retry_resp = requests.post(
+                        endpoint,
+                        headers=req_headers,
+                        json=payload,
+                        timeout=60,
+                    )
+                    if retry_resp.status_code == 202:
+                        return {"status": "sent", "recipientCount": len(recipients), "ccRecipientCount": len(cc_recipients)}
+                except Exception:
+                    pass
+
             try:
                 graph_error = (message_response.json().get("error") or {})
             except (ValueError, AttributeError):
@@ -395,6 +428,7 @@ def send_email(to_list, subject, body, *, html=False, sender=None, enabled=None,
             detail = f", {safe_code}"
             if safe_message:
                 detail += f": {safe_message}"
+            logger.error(f"Graph sendMail error: status={message_response.status_code}, code={safe_code}, msg={safe_message}")
             return {
                 "status": "failed",
                 "recipientCount": len(recipients),
@@ -402,10 +436,23 @@ def send_email(to_list, subject, body, *, html=False, sender=None, enabled=None,
             }
         return {"status": "sent", "recipientCount": len(recipients), "ccRecipientCount": len(cc_recipients)}
     except requests.RequestException as exc:
+        logger.error(f"Microsoft Graph sendMail RequestException: {exc}", exc_info=True)
         status_code = getattr(getattr(exc, "response", None), "status_code", None)
-        suffix = f" (HTTP {status_code})" if status_code else ""
-        return {"status": "failed", "recipientCount": len(recipients), "error": f"Microsoft Graph request failed{suffix}"}
+        resp_text = ""
+        if getattr(exc, "response", None) is not None:
+            try:
+                resp_text = f" - {exc.response.text[:140]}"
+            except Exception:
+                pass
+        if isinstance(exc, requests.exceptions.Timeout):
+            err_detail = "Request timed out after 60s connecting to Microsoft Graph."
+        elif status_code:
+            err_detail = f"HTTP {status_code}{resp_text}"
+        else:
+            err_detail = f"{type(exc).__name__}: {str(exc)[:140]}"
+        return {"status": "failed", "recipientCount": len(recipients), "error": f"Microsoft Graph request failed: {err_detail}"}
     except Exception as exc:
+        logger.error(f"Unexpected send_email exception: {exc}", exc_info=True)
         return {"status": "failed", "recipientCount": len(recipients), "error": str(exc)[:180]}
 
 

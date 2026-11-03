@@ -177,11 +177,19 @@ export default function DailyMobileBriefing() {
 
   const crewDays = data?.crew_days || [];
   const energyRows = data?.psp_energy_rows || [];
+  const demandRows = data?.psp_demand_rows || [];
   const genSources = data?.gen_sources || {};
   const composition = genSources?.composition || [];
   const statesGen = genSources?.states || [];
   const totalsGen = genSources?.totals || {};
   const powerPos = data?.power_position || [];
+  const nldcSummary = data?.nldc_summary || {};
+  const allIndiaContrib = data?.all_india_contribution || {};
+  const shiftTimings = data?.shift_timings || {
+    Morning: "08:30 - 14:30",
+    Evening: "14:30 - 20:30",
+    Night: "20:30 - 08:30 [Next day]",
+  };
 
   return (
     <AppShell
@@ -659,9 +667,9 @@ export default function DailyMobileBriefing() {
 
                       <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
                         {[
-                          { name: "Morning", icon: "🌅", time: "06:00 - 14:00", color: "#0284C7" },
-                          { name: "Evening", icon: "☀️", time: "14:00 - 22:00", color: "#D97706" },
-                          { name: "Night", icon: "🌙", time: "22:00 - 06:00", color: "#4F46E5" },
+                          { name: "Morning", icon: "🌅", time: shiftTimings.Morning || "08:30 - 14:30", color: "#0284C7" },
+                          { name: "Evening", icon: "☀️", time: shiftTimings.Evening || "14:30 - 20:30", color: "#D97706" },
+                          { name: "Night", icon: "🌙", time: shiftTimings.Night || "20:30 - 08:30 [Next day]", color: "#4F46E5" },
                         ].map((s) => {
                           const sData = shifts[s.name] || {};
                           const sicList = sData.sic || [];
@@ -694,11 +702,26 @@ export default function DailyMobileBriefing() {
                                 <span style={{ fontSize: "11px", fontWeight: 800, color: "#0F172A" }}>
                                   {sicList.length > 0 ? (
                                     sicList.map((p, i) => (
-                                      <span key={i}>
-                                        {p.name}{" "}
-                                        {p.acting_sic ? (
-                                          <span style={{ color: "#D97706", fontSize: "10px" }}>(Acting SIC)</span>
+                                      <span key={i} style={{ marginLeft: "4px" }}>
+                                        {p.on_leave ? (
+                                          <s style={{ color: "#94A3B8" }}>{p.name}</s>
                                         ) : (
+                                          p.name
+                                        )}{" "}
+                                        {p.on_leave && p.replacement_name && (
+                                          <span style={{ background: "#FEF3C7", color: "#92400E", fontSize: "10px", padding: "1px 5px", borderRadius: "4px", border: "1px solid #FCD34D" }}>
+                                            [Rep: {p.replacement_name}]
+                                          </span>
+                                        )}
+                                        {p.on_leave && p.flashing_r && (
+                                          <span style={{ background: "#FEE2E2", color: "#B91C1C", fontSize: "10px", padding: "1px 5px", borderRadius: "4px", border: "1px solid #FCA5A5" }}>
+                                            [⚠ Flashing R / Replacement Needed]
+                                          </span>
+                                        )}
+                                        {!p.on_leave && p.acting_sic && (
+                                          <span style={{ color: "#D97706", fontSize: "10px" }}>(Acting SIC)</span>
+                                        )}
+                                        {!p.on_leave && !p.acting_sic && (
                                           <span style={{ color: "#0057B7", fontSize: "10px" }}>(SIC)</span>
                                         )}
                                       </span>
@@ -709,7 +732,28 @@ export default function DailyMobileBriefing() {
                                 </span>
                               </div>
                               <div style={{ fontSize: "11px", color: "#475569" }}>
-                                Staff: {engList.length > 0 ? engList.map((e) => e.name).join(", ") : "-"}
+                                Staff: {engList.length > 0 ? (
+                                  engList.map((e, ei) => (
+                                    <span key={ei} style={{ marginRight: "6px" }}>
+                                      {e.on_leave ? (
+                                        <s style={{ color: "#94A3B8" }}>{e.name}</s>
+                                      ) : (
+                                        e.name
+                                      )}
+                                      {e.on_leave && e.replacement_name && (
+                                        <span style={{ background: "#FEF3C7", color: "#92400E", fontSize: "10px", padding: "1px 5px", borderRadius: "4px", border: "1px solid #FCD34D", marginLeft: "3px" }}>
+                                          [Rep: {e.replacement_name}]
+                                        </span>
+                                      )}
+                                      {e.on_leave && e.flashing_r && (
+                                        <span style={{ background: "#FEE2E2", color: "#B91C1C", fontSize: "10px", padding: "1px 5px", borderRadius: "4px", border: "1px solid #FCA5A5", marginLeft: "3px" }}>
+                                          [⚠ Flashing R / Replacement Needed]
+                                        </span>
+                                      )}
+                                      {ei < engList.length - 1 ? "," : ""}
+                                    </span>
+                                  ))
+                                ) : "-"}
                               </div>
                             </div>
                           );
@@ -725,16 +769,26 @@ export default function DailyMobileBriefing() {
                                 <span
                                   key={i}
                                   style={{
-                                    background: "#FEE2E2",
-                                    color: "#B91C1C",
-                                    border: "1px solid #FCA5A5",
+                                    background: l.replacement_name ? "#FEF3C7" : "#FEE2E2",
+                                    color: l.replacement_name ? "#92400E" : "#B91C1C",
+                                    border: `1px solid ${l.replacement_name ? "#FCD34D" : "#FCA5A5"}`,
                                     fontSize: "10.5px",
                                     fontWeight: 700,
                                     padding: "2px 6px",
                                     borderRadius: "6px",
                                   }}
                                 >
-                                  🌴 {l.name} ({l.leave_type})
+                                  🌴 <s style={{ textDecoration: "line-through" }}>{l.name}</s> ({l.leave_type})
+                                  {l.replacement_name && (
+                                    <span style={{ fontWeight: 800, marginLeft: "4px" }}>
+                                      → [Rep: {l.replacement_name}]
+                                    </span>
+                                  )}
+                                  {l.flashing_r && (
+                                    <span style={{ fontWeight: 800, marginLeft: "4px", color: "#B91C1C" }}>
+                                      → [⚠ Flashing R: Unreplaced]
+                                    </span>
+                                  )}
                                 </span>
                               ))}
                             </div>
@@ -941,6 +995,217 @@ export default function DailyMobileBriefing() {
                 })}
               </div>
             </div>
+
+                        {/* SECTION 2B: PSP DEMAND MET (MAXIMUM DEMAND - MW) TILES */}
+            {demandRows.length > 0 && (
+              <div
+                style={{
+                  background: "#FFFFFF",
+                  borderRadius: "16px",
+                  border: "1px solid #E2E8F0",
+                  padding: "20px",
+                  boxShadow: "0 2px 6px rgba(0,0,0,0.02)",
+                }}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    marginBottom: "16px",
+                    borderBottom: "1px solid #F1F5F9",
+                    paddingBottom: "12px",
+                    flexWrap: "wrap",
+                    gap: "10px",
+                  }}
+                >
+                  <div>
+                    <div style={{ fontSize: "16px", fontWeight: 900, color: "#0F172A", display: "flex", alignItems: "center", gap: "8px" }}>
+                      <TrendingUp size={18} color="#0284C7" />
+                      <span>PSP Report Checking • Demand Met Comparison (Maximum Demand - MW)</span>
+                    </div>
+                    <div style={{ fontSize: "12px", color: "#64748B", marginTop: "2px" }}>
+                      Peak demand met by state with bracketed differences (+/- MW & %) vs Yesterday, 7-Day Avg, and Last Year.
+                    </div>
+                  </div>
+                </div>
+
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
+                    gap: "14px",
+                  }}
+                >
+                  {demandRows.map((row, idx) => {
+                    const stateName = row.state || "Constituent";
+                    const opD = row.max_demand_operational;
+                    const timeD = row.max_demand_time;
+                    const yestD = row.max_demand_yesterday;
+                    const avg7D = row.max_demand_average_last_7_days;
+                    const lastYearD = row.max_demand_same_day_last_year;
+
+                    const isEr = stateName.toUpperCase() === "ER";
+                    const cardBg = isEr ? "#F0FDF4" : "#F8FAFC";
+                    const borderColor = isEr ? "#86EFAC" : "#CBD5E1";
+
+                    return (
+                      <div
+                        key={idx}
+                        style={{
+                          background: cardBg,
+                          border: `1.5px solid ${borderColor}`,
+                          borderRadius: "16px",
+                          padding: "16px",
+                          boxShadow: "0 2px 6px rgba(0,0,0,0.02)",
+                        }}
+                      >
+                        <div
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "space-between",
+                            marginBottom: "6px",
+                          }}
+                        >
+                          <span style={{ fontSize: "15px", fontWeight: 900, color: isEr ? "#15803D" : "#0F172A" }}>
+                            {stateName}
+                          </span>
+                          <span style={{ fontSize: "10.5px", fontWeight: 800, color: "#0284C7", textTransform: "uppercase" }}>
+                            Peak Demand Met
+                          </span>
+                        </div>
+
+                        <div style={{ display: "flex", alignItems: "baseline", gap: "6px", marginBottom: "12px" }}>
+                          <span
+                            style={{
+                              fontSize: "28px",
+                              fontWeight: 950,
+                              color: isEr ? "#15803D" : "#0284C7",
+                              letterSpacing: "-0.5px",
+                            }}
+                          >
+                            {formatNum(opD, 0)}
+                          </span>
+                          <span style={{ fontSize: "13px", fontWeight: 800, color: "#64748B" }}>MW</span>
+                          {timeD && (
+                            <span style={{ fontSize: "11px", fontWeight: 700, color: "#64748B" }}>
+                              ({timeD} hrs)
+                            </span>
+                          )}
+                        </div>
+
+                        <div
+                          style={{
+                            display: "grid",
+                            gridTemplateColumns: selectedMetric === "all" ? "1fr 1fr 1fr" : "1fr",
+                            gap: "8px",
+                          }}
+                        >
+                          {(selectedMetric === "all" || selectedMetric === "yesterday") && (
+                            <div style={{ background: "#FFFFFF", border: "1px solid #E2E8F0", borderRadius: "10px", padding: "8px", textAlign: "center" }}>
+                              <div style={{ color: "#64748B", fontSize: "9.5px", fontWeight: 700, textTransform: "uppercase" }}>Yesterday</div>
+                              <div style={{ fontWeight: 900, fontSize: "13px", color: "#0F172A", margin: "2px 0" }}>{formatNum(yestD, 0)}</div>
+                              <DiffBadge todayVal={opD} compVal={yestD} unit=" MW" />
+                            </div>
+                          )}
+                          {(selectedMetric === "all" || selectedMetric === "avg7") && (
+                            <div style={{ background: "#FFFFFF", border: "1px solid #E2E8F0", borderRadius: "10px", padding: "8px", textAlign: "center" }}>
+                              <div style={{ color: "#64748B", fontSize: "9.5px", fontWeight: 700, textTransform: "uppercase" }}>7-Day Avg</div>
+                              <div style={{ fontWeight: 900, fontSize: "13px", color: "#0F172A", margin: "2px 0" }}>{formatNum(avg7D, 0)}</div>
+                              <DiffBadge todayVal={opD} compVal={avg7D} unit=" MW" />
+                            </div>
+                          )}
+                          {(selectedMetric === "all" || selectedMetric === "last_year") && (
+                            <div style={{ background: "#FFFFFF", border: "1px solid #E2E8F0", borderRadius: "10px", padding: "8px", textAlign: "center" }}>
+                              <div style={{ color: "#64748B", fontSize: "9.5px", fontWeight: 700, textTransform: "uppercase" }}>Last Year</div>
+                              <div style={{ fontWeight: 900, fontSize: "13px", color: "#0F172A", margin: "2px 0" }}>{formatNum(lastYearD, 0)}</div>
+                              <DiffBadge todayVal={opD} compVal={lastYearD} unit=" MW" />
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* SECTION 2C: ALL INDIA DEMAND CONTRIBUTION & NLDC REGIONAL DEMAND */}
+            {nldcSummary?.all_india && (
+              <div
+                style={{
+                  background: "#FFFFFF",
+                  borderRadius: "16px",
+                  border: "1px solid #E2E8F0",
+                  padding: "20px",
+                  boxShadow: "0 2px 6px rgba(0,0,0,0.02)",
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "14px", borderBottom: "1px solid #F1F5F9", paddingBottom: "10px" }}>
+                  <div>
+                    <div style={{ fontSize: "16px", fontWeight: 900, color: "#0F172A", display: "flex", alignItems: "center", gap: "8px" }}>
+                      <Activity size={18} color="#0057B7" />
+                      <span>All India Demand Contribution & NLDC Regional Demand</span>
+                    </div>
+                    <div style={{ fontSize: "12px", color: "#64748B", marginTop: "2px" }}>
+                      Yesterday peak demand met across India and all 5 electrical regions ({nldcSummary.date_formatted || "Yesterday"}).
+                    </div>
+                  </div>
+                </div>
+
+                {/* All India Card */}
+                <div style={{ background: "linear-gradient(135deg, #F0FDF4 0%, #DCFCE7 100%)", border: "1.5px solid #86EFAC", borderRadius: "14px", padding: "16px", marginBottom: "14px" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "6px" }}>
+                    <span style={{ fontSize: "14px", fontWeight: 900, color: "#14532D" }}>
+                      🇮🇳 ALL INDIA MAXIMUM DEMAND MET
+                    </span>
+                    <span style={{ fontSize: "12px", fontWeight: 800, color: "#15803D" }}>
+                      Time: {nldcSummary.all_india?.time || "-"}
+                    </span>
+                  </div>
+                  <div style={{ display: "flex", alignItems: "baseline", gap: "8px", marginBottom: "8px" }}>
+                    <span style={{ fontSize: "32px", fontWeight: 950, color: "#15803D" }}>
+                      {formatNum(nldcSummary.all_india?.max_demand_met, 0)}
+                    </span>
+                    <span style={{ fontSize: "15px", fontWeight: 800, color: "#166534" }}>MW</span>
+                  </div>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
+                    <div style={{ background: "rgba(255,255,255,0.8)", border: "1px solid #BBF7D0", borderRadius: "10px", padding: "8px 12px" }}>
+                      <div style={{ color: "#166534", fontSize: "11px", fontWeight: 700 }}>☀️ Solar Period Peak</div>
+                      <div style={{ fontWeight: 900, fontSize: "15px", color: "#0F172A" }}>{formatNum(nldcSummary.all_india?.solar, 0)} MW</div>
+                      <div style={{ color: "#64748B", fontSize: "10px" }}>at {nldcSummary.all_india?.solar_time || "-"}</div>
+                    </div>
+                    <div style={{ background: "rgba(255,255,255,0.8)", border: "1px solid #BBF7D0", borderRadius: "10px", padding: "8px 12px" }}>
+                      <div style={{ color: "#166534", fontSize: "11px", fontWeight: 700 }}>🌙 Non-Solar Period Peak</div>
+                      <div style={{ fontWeight: 900, fontSize: "15px", color: "#0F172A" }}>{formatNum(nldcSummary.all_india?.non_solar, 0)} MW</div>
+                      <div style={{ color: "#64748B", fontSize: "10px" }}>at {nldcSummary.all_india?.non_solar_time || "-"}</div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* NLDC 5 Regions Grid */}
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "10px" }}>
+                  {[
+                    { label: "Northern (NR)", data: nldcSummary.nr, color: "#0284C7" },
+                    { label: "Western (WR)", data: nldcSummary.wr, color: "#D97706" },
+                    { label: "Southern (SR)", data: nldcSummary.sr, color: "#7C3AED" },
+                    { label: "Eastern (ER)", data: nldcSummary.er, color: "#15803D" },
+                    { label: "North Eastern (NER)", data: nldcSummary.ner, color: "#0D9488" },
+                  ].map((rg, rIdx) => (
+                    <div key={rIdx} style={{ background: "#F8FAFC", border: "1px solid #E2E8F0", borderLeft: `4px solid ${rg.color}`, borderRadius: "12px", padding: "10px 14px" }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                        <span style={{ fontSize: "12px", fontWeight: 800, color: "#0F172A" }}>{rg.label}</span>
+                        <span style={{ fontSize: "10px", color: "#64748B" }}>{rg.data?.time || "-"}</span>
+                      </div>
+                      <div style={{ fontSize: "18px", fontWeight: 950, color: rg.color, marginTop: "4px" }}>
+                        {formatNum(rg.data?.max_demand_met, 0)} <span style={{ fontSize: "11px", fontWeight: 700, color: "#64748B" }}>MW</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* SECTION 3: REGIONAL ENERGY COMPOSITION */}
             <div
