@@ -42,15 +42,50 @@ import defaultGridGeoJson from "../data/power_map/eastern_region_power_grid.json
 import easternRegionBoundaries from "../data/power_map/eastern_region_boundaries.json";
 import NasaWeatherModal from "../components/weather/NasaWeatherModal";
 
+// Safe coordinate extraction helper (supports Points [lon, lat] and LineStrings [[lon, lat], ...])
+export function getEntityCoordinates(entity) {
+  if (!entity || !entity.coords) return { lon: 85.8, lat: 23.5 };
+  const c = entity.coords;
+  if (Array.isArray(c)) {
+    if (Array.isArray(c[0])) {
+      const midIdx = Math.floor(c.length / 2);
+      const pt = c[midIdx] || c[0];
+      const lon = typeof pt[0] === "number" ? pt[0] : parseFloat(pt[0]) || 85.8;
+      const lat = typeof pt[1] === "number" ? pt[1] : parseFloat(pt[1]) || 23.5;
+      return { lon, lat };
+    }
+    const lon = typeof c[0] === "number" ? c[0] : parseFloat(c[0]) || 85.8;
+    const lat = typeof c[1] === "number" ? c[1] : parseFloat(c[1]) || 23.5;
+    return { lon, lat };
+  }
+  return { lon: 85.8, lat: 23.5 };
+}
+
 // Base map style options (Watermark-free, zero-API-key defaults)
 export const BASEMAP_PROVIDERS = [
+  {
+    id: "osm",
+    label: "OpenStreetMap Standard (Lower Base)",
+    shortLabel: "OSM",
+    attribution: '© <a href="https://www.openstreetmap.org/copyright" target="_blank">OpenStreetMap contributors</a>',
+    requiresKey: false,
+    badge: "Base Map • Live",
+    bgColor: "#F1F5F9",
+    tiles: [
+      "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+      "https://a.tile.openstreetmap.org/{z}/{x}/{y}.png",
+      "https://b.tile.openstreetmap.org/{z}/{x}/{y}.png",
+      "https://c.tile.openstreetmap.org/{z}/{x}/{y}.png",
+    ],
+    description: "Standard live OpenStreetMap with highways, towns, rivers, and civil boundaries as the primary lower base map.",
+  },
   {
     id: "carto-light",
     label: "Carto Light Canvas (High Contrast)",
     shortLabel: "Light",
     attribution: '© <a href="https://carto.com/" target="_blank">CARTO</a>, © OpenStreetMap contributors',
     requiresKey: false,
-    badge: "Recommended • Live",
+    badge: "High Contrast",
     bgColor: "#F8FAFC",
     tiles: [
       "https://a.basemaps.cartocdn.com/rastertiles/light_all/{z}/{x}/{y}.png",
@@ -58,20 +93,7 @@ export const BASEMAP_PROVIDERS = [
       "https://c.basemaps.cartocdn.com/rastertiles/light_all/{z}/{x}/{y}.png",
       "https://d.basemaps.cartocdn.com/rastertiles/light_all/{z}/{x}/{y}.png",
     ],
-    description: "Clean, muted light canvas with open CORS headers and high contrast for power transmission corridors.",
-  },
-  {
-    id: "osm",
-    label: "OpenStreetMap Standard",
-    shortLabel: "OSM",
-    attribution: '© <a href="https://www.openstreetmap.org/copyright" target="_blank">OpenStreetMap contributors</a>',
-    requiresKey: false,
-    badge: "Free • Live",
-    bgColor: "#F1F5F9",
-    tiles: [
-      "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
-    ],
-    description: "Standard live OpenStreetMap with highways, towns, rivers, and civil boundaries.",
+    description: "Clean, muted light canvas with open CORS headers.",
   },
   {
     id: "esri-gray",
@@ -179,8 +201,8 @@ export default function WestBengalPowerMap() {
   const fileInputRef = useRef(null);
 
   // UI state
-  const [activeBaseMap, setActiveBaseMap] = useState("carto-light");
-  const [muteCivilInfra, setMuteCivilInfra] = useState(true);
+  const [activeBaseMap, setActiveBaseMap] = useState("osm");
+  const [muteCivilInfra, setMuteCivilInfra] = useState(false);
   const [selectedEntity, setSelectedEntity] = useState(null);
   const [activeTab, setActiveTab] = useState("all"); // 'all', 'plants', 'substations', 'lines'
   const [searchQuery, setSearchQuery] = useState("");
@@ -196,13 +218,13 @@ export default function WestBengalPowerMap() {
   const [weatherLocationTarget, setWeatherLocationTarget] = useState(null);
   const [weatherCities, setWeatherCities] = useState([]);
 
-  // Layer toggles
+  // Layer toggles (OpenInfra vector tiles superimposed on top of OSM by default)
   const [layersVisibility, setLayersVisibility] = useState({
     powerLines: true,
     powerPlants: true,
     substations: true,
     labels: true,
-    liveOpenInfraTiles: false,
+    liveOpenInfraTiles: true,
     cityWeather: true,
   });
 
@@ -566,21 +588,29 @@ export default function WestBengalPowerMap() {
               },
             },
 
-            // 5. OpenInfra Vector Tiles Overlay (Optional, toggled by user)
+            // 5. OpenInfra Vector Tiles Overlay (Superimposed on top of OSM)
             {
               id: "openinfra-line-casing",
               type: "line",
               source: "openinframap",
               "source-layer": "power_line",
               layout: {
-                visibility: "none",
+                visibility: "visible",
                 "line-join": "round",
                 "line-cap": "round",
               },
               paint: {
                 "line-color": "#0F172A",
-                "line-width": ["interpolate", ["linear"], ["zoom"], 6, 3, 10, 5.5, 14, 8],
-                "line-opacity": 0.75,
+                "line-width": [
+                  "interpolate",
+                  ["linear"],
+                  ["zoom"],
+                  4, 6.0,
+                  7, 9.5,
+                  10, 13.5,
+                  14, 18.0,
+                ],
+                "line-opacity": 0.95,
               },
             },
             {
@@ -589,7 +619,7 @@ export default function WestBengalPowerMap() {
               source: "openinframap",
               "source-layer": "power_line",
               layout: {
-                visibility: "none",
+                visibility: "visible",
                 "line-join": "round",
                 "line-cap": "round",
               },
@@ -602,12 +632,20 @@ export default function WestBengalPowerMap() {
                   [">=", ["to-number", ["get", "voltage"], 0], 100000], "#0284C7",
                   "#0284C7",
                 ],
-                "line-width": 2.5,
-                "line-opacity": 0.9,
+                "line-width": [
+                  "interpolate",
+                  ["linear"],
+                  ["zoom"],
+                  4, 3.8,
+                  7, 6.5,
+                  10, 9.5,
+                  14, 13.0,
+                ],
+                "line-opacity": 1.0,
               },
             },
 
-            // 6. Power Transmission Lines - Dark High-Contrast Casing
+            // 6. Power Transmission Lines - Bold Dark High-Contrast Casing
             {
               id: "wb-line-casing",
               type: "line",
@@ -627,31 +665,31 @@ export default function WestBengalPowerMap() {
                   [
                     "match",
                     ["get", "voltage_class"],
-                    765, 8.5,
-                    400, 7.0,
-                    220, 5.0,
-                    3.8
+                    765, 11.0,
+                    400, 9.5,
+                    220, 7.5,
+                    6.0
                   ],
                   8,
                   [
                     "match",
                     ["get", "voltage_class"],
-                    765, 11.0,
-                    400, 9.2,
-                    220, 6.8,
-                    5.0
+                    765, 15.0,
+                    400, 13.0,
+                    220, 10.5,
+                    8.5
                   ],
                   12,
                   [
                     "match",
                     ["get", "voltage_class"],
-                    765, 15.0,
-                    400, 12.5,
-                    220, 9.5,
-                    7.0
+                    765, 20.0,
+                    400, 17.0,
+                    220, 13.5,
+                    11.0
                   ]
                 ],
-                "line-opacity": 0.88,
+                "line-opacity": 0.95,
               },
             },
 
@@ -675,28 +713,28 @@ export default function WestBengalPowerMap() {
                   [
                     "match",
                     ["get", "voltage_class"],
-                    765, 5.5,
-                    400, 4.4,
-                    220, 3.2,
-                    2.2
+                    765, 7.5,
+                    400, 6.5,
+                    220, 5.0,
+                    3.8
                   ],
                   8,
                   [
                     "match",
                     ["get", "voltage_class"],
-                    765, 8.0,
-                    400, 6.5,
-                    220, 4.8,
-                    3.2
+                    765, 11.0,
+                    400, 9.5,
+                    220, 7.5,
+                    5.5
                   ],
                   12,
                   [
                     "match",
                     ["get", "voltage_class"],
-                    765, 11.5,
-                    400, 9.5,
-                    220, 7.0,
-                    4.8
+                    765, 15.0,
+                    400, 13.0,
+                    220, 10.0,
+                    7.5
                   ]
                 ],
                 "line-opacity": 1.0,
@@ -709,22 +747,45 @@ export default function WestBengalPowerMap() {
               type: "symbol",
               source: "wb-power-grid",
               filter: ["==", ["get", "category"], "power_line"],
-              minzoom: 8.8,
+              minzoom: 8.5,
               layout: {
                 "symbol-placement": "line",
                 "text-field": ["get", "name"],
-                "text-size": 10.5,
+                "text-size": 11,
                 "text-font": ["Open Sans Semibold", "Arial Unicode MS Bold"],
                 "text-letter-spacing": 0.04,
               },
               paint: {
                 "text-color": "#0F172A",
                 "text-halo-color": "#FFFFFF",
-                "text-halo-width": 2.5,
+                "text-halo-width": 3.0,
               },
             },
 
-            // 9. Substation Circles (Standard Voltage Coded)
+            // 9. Substation Outer Radar Halo / Demarcation Beacon (Loud Demarcation)
+            {
+              id: "wb-substation-beacon",
+              type: "circle",
+              source: "wb-power-grid",
+              filter: ["==", ["get", "category"], "power_substation"],
+              paint: {
+                "circle-radius": [
+                  "interpolate",
+                  ["linear"],
+                  ["zoom"],
+                  4, 12.0,
+                  7, 17.0,
+                  10, 23.0,
+                  14, 30.0,
+                ],
+                "circle-color": ["get", "color"],
+                "circle-opacity": 0.38,
+                "circle-stroke-width": 2.5,
+                "circle-stroke-color": ["get", "color"],
+              },
+            },
+
+            // 10. Substation Circles (Standard Voltage Coded, Loud High-Contrast Border)
             {
               id: "wb-substation-circle",
               type: "circle",
@@ -735,14 +796,42 @@ export default function WestBengalPowerMap() {
                   "interpolate",
                   ["linear"],
                   ["zoom"],
-                  4, 6.0,
-                  7, 9.5,
-                  10, 13.0,
-                  14, 17.0,
+                  4, 7.5,
+                  7, 11.5,
+                  10, 15.5,
+                  14, 20.0,
                 ],
                 "circle-color": ["get", "color"],
-                "circle-stroke-width": 3.0,
+                "circle-stroke-width": 3.5,
                 "circle-stroke-color": "#FFFFFF",
+              },
+            },
+
+            // 11. Substation Text Labels (Directly Demarcated on Map)
+            {
+              id: "wb-substation-label",
+              type: "symbol",
+              source: "wb-power-grid",
+              filter: ["==", ["get", "category"], "power_substation"],
+              minzoom: 7.5,
+              layout: {
+                "text-field": [
+                  "concat",
+                  ["get", "short_name"],
+                  " (",
+                  ["get", "voltage_class"],
+                  "kV)"
+                ],
+                "text-size": 11,
+                "text-offset": [0, 1.8],
+                "text-anchor": "top",
+                "text-justify": "center",
+                "text-font": ["Open Sans Semibold", "Arial Unicode MS Bold"],
+              },
+              paint: {
+                "text-color": "#0F172A",
+                "text-halo-color": "#FFFFFF",
+                "text-halo-width": 3.0,
               },
             },
 
@@ -902,7 +991,7 @@ export default function WestBengalPowerMap() {
       });
 
       // Click on Substations
-      map.on("click", "wb-substation-circle", (e) => {
+      const handleSubstationClick = (e) => {
         if (!e.features || e.features.length === 0) return;
         const feat = e.features[0];
         const props = feat.properties || {};
@@ -912,10 +1001,12 @@ export default function WestBengalPowerMap() {
           ...props,
           coords: feat.geometry.coordinates,
         });
-      });
+      };
+      map.on("click", "wb-substation-circle", handleSubstationClick);
+      map.on("click", "wb-substation-beacon", handleSubstationClick);
 
       // Pointer cursor hover
-      const clickable = ["wb-line-core", "wb-plant-core", "wb-plant-beacon", "wb-substation-circle"];
+      const clickable = ["wb-line-core", "wb-plant-core", "wb-plant-beacon", "wb-substation-circle", "wb-substation-beacon"];
       clickable.forEach((l) => {
         map.on("mouseenter", l, () => {
           map.getCanvas().style.cursor = "pointer";
@@ -1027,7 +1118,9 @@ export default function WestBengalPowerMap() {
     setVis("wb-plant-beacon", layersVisibility.powerPlants);
     setVis("wb-plant-core", layersVisibility.powerPlants);
     setVis("wb-plant-label", layersVisibility.powerPlants && layersVisibility.labels);
+    setVis("wb-substation-beacon", layersVisibility.substations);
     setVis("wb-substation-circle", layersVisibility.substations);
+    setVis("wb-substation-label", layersVisibility.substations && layersVisibility.labels);
     setVis("openinfra-line-casing", layersVisibility.liveOpenInfraTiles);
     setVis("openinfra-line-core", layersVisibility.liveOpenInfraTiles);
   }, [layersVisibility, mapLoaded]);
@@ -1042,7 +1135,7 @@ export default function WestBengalPowerMap() {
 
     if (!layersVisibility.labels) return;
 
-    // Render badges for Substations
+    // Render badges for Substations (Loudly demarcated)
     if (layersVisibility.substations) {
       allSubstations.forEach((sub) => {
         const el = document.createElement("div");
@@ -1054,6 +1147,7 @@ export default function WestBengalPowerMap() {
           align-items: center;
           transform: translate(-50%, -100%);
           pointer-events: auto;
+          z-index: 5;
         `;
 
         const badgeColor =
@@ -1069,27 +1163,29 @@ export default function WestBengalPowerMap() {
           <div style="
             background: ${badgeColor};
             color: #FFFFFF;
-            font-size: 10px;
-            font-weight: 800;
-            padding: 2px 6px;
+            font-size: 11px;
+            font-weight: 900;
+            padding: 3px 8px;
             border-radius: 999px;
-            box-shadow: 0 2px 6px rgba(0,0,0,0.35);
+            box-shadow: 0 3px 10px rgba(0,0,0,0.45);
             white-space: nowrap;
-            border: 1.5px solid #FFFFFF;
+            border: 2px solid #FFFFFF;
             display: flex;
             align-items: center;
-            gap: 4px;
+            gap: 5px;
+            letter-spacing: 0.2px;
           ">
             <span>⚡ ${sub.short_name || sub.name}</span>
-            <span style="background: rgba(0,0,0,0.25); padding: 1px 4px; border-radius: 4px; font-size: 8.5px;">${sub.voltage_class}kV</span>
+            <span style="background: rgba(0,0,0,0.3); padding: 1px 5px; border-radius: 4px; font-size: 9.5px; font-weight: 800;">${sub.voltage_class}kV</span>
           </div>
           <div style="
             width: 0;
             height: 0;
-            border-left: 4px solid transparent;
-            border-right: 4px solid transparent;
-            border-top: 5px solid ${badgeColor};
+            border-left: 5px solid transparent;
+            border-right: 5px solid transparent;
+            border-top: 6px solid ${badgeColor};
             margin-top: -1px;
+            filter: drop-shadow(0 2px 2px rgba(0,0,0,0.3));
           "></div>
         `;
 
@@ -1098,8 +1194,9 @@ export default function WestBengalPowerMap() {
           flyToEntity("substation", sub);
         });
 
+        const coords = getEntityCoordinates(sub);
         const marker = new Marker({ element: el })
-          .setLngLat(sub.coords)
+          .setLngLat([coords.lon, coords.lat])
           .addTo(map);
 
         markersRef.current.push(marker);
@@ -1118,33 +1215,35 @@ export default function WestBengalPowerMap() {
           align-items: center;
           transform: translate(-50%, -100%);
           pointer-events: auto;
+          z-index: 6;
         `;
 
         el.innerHTML = `
           <div style="
             background: #F59E0B;
             color: #78350F;
-            font-size: 10px;
+            font-size: 10.5px;
             font-weight: 800;
-            padding: 2px 7px;
+            padding: 3px 8px;
             border-radius: 999px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.35);
+            box-shadow: 0 3px 10px rgba(0,0,0,0.4);
             white-space: nowrap;
-            border: 1.5px solid #FFFFFF;
+            border: 2px solid #FFFFFF;
             display: flex;
             align-items: center;
             gap: 4px;
           ">
             <span>🏭 ${plant.short_name || plant.name}</span>
-            <span style="background: rgba(120,53,15,0.15); padding: 1px 4px; border-radius: 4px; font-size: 8.5px; font-weight: 800;">${plant.capacity_label || plant.capacity_mw + ' MW'}</span>
+            <span style="background: rgba(120,53,15,0.2); padding: 1px 5px; border-radius: 4px; font-size: 9px; font-weight: 800;">${plant.capacity_label || plant.capacity_mw + ' MW'}</span>
           </div>
           <div style="
             width: 0;
             height: 0;
-            border-left: 4px solid transparent;
-            border-right: 4px solid transparent;
-            border-top: 5px solid #F59E0B;
+            border-left: 5px solid transparent;
+            border-right: 5px solid transparent;
+            border-top: 6px solid #F59E0B;
             margin-top: -1px;
+            filter: drop-shadow(0 2px 2px rgba(0,0,0,0.3));
           "></div>
         `;
 
@@ -1153,8 +1252,9 @@ export default function WestBengalPowerMap() {
           flyToEntity("plant", plant);
         });
 
+        const pcoords = getEntityCoordinates(plant);
         const marker = new Marker({ element: el })
-          .setLngLat(plant.coords)
+          .setLngLat([pcoords.lon, pcoords.lat])
           .addTo(map);
 
         markersRef.current.push(marker);
@@ -1229,18 +1329,16 @@ export default function WestBengalPowerMap() {
     const map = mapRef.current;
     if (!map) return;
 
+    const coords = getEntityCoordinates(entity);
     if (type === "line") {
-      const mid = entity.coords?.[1] || entity.coords?.[0];
-      if (mid) {
-        map.flyTo({
-          center: mid,
-          zoom: 10.5,
-          speed: 1.2,
-        });
-      }
-    } else if (entity.coords) {
       map.flyTo({
-        center: entity.coords,
+        center: [coords.lon, coords.lat],
+        zoom: 10.5,
+        speed: 1.2,
+      });
+    } else {
+      map.flyTo({
+        center: [coords.lon, coords.lat],
         zoom: type === "plant" ? 12.0 : 12.5,
         speed: 1.3,
       });
@@ -1365,6 +1463,8 @@ export default function WestBengalPowerMap() {
       setImportingFile(false);
     }
   };
+
+  const selectedCoords = selectedEntity ? getEntityCoordinates(selectedEntity) : null;
 
   return (
     <div className="d-flex flex-column" style={{ minHeight: "100vh", backgroundColor: "#F8FAFC" }}>
@@ -2064,7 +2164,7 @@ export default function WestBengalPowerMap() {
                   </div>
 
                   {/* NASA Weather & Temp Info Box */}
-                  {selectedEntity.coords && (
+                  {selectedCoords && (
                     <div className="mb-2 p-2 rounded" style={{ backgroundColor: "#FEF3C7", border: "1px solid #FCD34D" }}>
                       <div className="d-flex align-items-center justify-content-between">
                         <span className="small fw-bold text-dark d-flex align-items-center gap-1">
@@ -2072,13 +2172,10 @@ export default function WestBengalPowerMap() {
                         </span>
                         <button
                           onClick={() => {
-                            const c = selectedEntity.coords;
-                            const lat = c ? (c[1] !== undefined ? c[1] : c[0]) : 22.5726;
-                            const lon = c ? (c[0] !== undefined ? c[0] : c[1]) : 88.3639;
                             setWeatherLocationTarget({
                               name: selectedEntity.name,
-                              latitude: lat,
-                              longitude: lon,
+                              latitude: selectedCoords.lat,
+                              longitude: selectedCoords.lon,
                               district: selectedEntity.district,
                               state: selectedEntity.state,
                             });
@@ -2092,7 +2189,7 @@ export default function WestBengalPowerMap() {
                       </div>
                       <div className="d-flex align-items-center justify-content-between mt-1 text-dark" style={{ fontSize: "11px" }}>
                         <span>
-                          Lat: {selectedEntity.coords[1]?.toFixed(3)}°N, Lon: {selectedEntity.coords[0]?.toFixed(3)}°E
+                          Lat: {selectedCoords.lat.toFixed(3)}°N, Lon: {selectedCoords.lon.toFixed(3)}°E
                         </span>
                         <span className="badge bg-warning text-dark font-monospace" style={{ fontSize: "9px" }}>
                           T2M • Daily
@@ -2102,16 +2199,13 @@ export default function WestBengalPowerMap() {
                   )}
 
                   <div className="d-flex align-items-center gap-1.5 pt-2 border-top">
-                    {selectedEntity.coords && (
+                    {selectedCoords && (
                       <button
                         onClick={() => {
-                          const c = selectedEntity.coords;
-                          const lat = c ? (c[1] !== undefined ? c[1] : c[0]) : 22.5726;
-                          const lon = c ? (c[0] !== undefined ? c[0] : c[1]) : 88.3639;
                           setWeatherLocationTarget({
                             name: selectedEntity.name,
-                            latitude: lat,
-                            longitude: lon,
+                            latitude: selectedCoords.lat,
+                            longitude: selectedCoords.lon,
                             district: selectedEntity.district,
                             state: selectedEntity.state,
                           });
@@ -2124,9 +2218,9 @@ export default function WestBengalPowerMap() {
                         NASA Weather
                       </button>
                     )}
-                    {selectedEntity.coords && (
+                    {selectedCoords && (
                       <a
-                        href={`https://openinframap.org/#14/${selectedEntity.coords[1]}/${selectedEntity.coords[0]}`}
+                        href={`https://openinframap.org/#14/${selectedCoords.lat.toFixed(4)}/${selectedCoords.lon.toFixed(4)}`}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="btn btn-outline-primary btn-xs py-1 px-2 d-flex align-items-center gap-1"
