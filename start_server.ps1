@@ -1,4 +1,4 @@
-﻿[CmdletBinding()]
+[CmdletBinding()]
 param([switch]$CheckOnly)
 $ErrorActionPreference = 'Stop'
 $projectRoot = $PSScriptRoot
@@ -119,7 +119,7 @@ try {
     Write-Host "Backend PID: $($backendProcess.Id); frontend PID: $($frontendProcess.Id)"
     Write-Host "Logs: $runtimeDir"
     Write-Host 'Run start_server.bat again to refresh both servers from this folder.'
-    Start-Process "http://127.0.0.1:$frontendPort/"
+    try { Start-Process "http://127.0.0.1:$frontendPort/" } catch { }
 } catch {
     foreach ($started in @($frontendProcess, $backendProcess)) {
         if ($started -and -not $started.HasExited) { Stop-Process -Id $started.Id -Force -ErrorAction SilentlyContinue }
