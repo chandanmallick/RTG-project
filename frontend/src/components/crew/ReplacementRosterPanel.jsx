@@ -227,6 +227,25 @@ export default function ReplacementRosterPanel({ onRefreshReplacements }) {
     }
   };
 
+  const toggleAutoScheduler = async (enabled) => {
+    try {
+      const res = await api.put("/replacement/roster/config", {
+        autoSchedulerEnabled: enabled,
+        isPaused: !enabled,
+      });
+      setConfig(res.data);
+      setActionNotice({
+        severity: enabled ? "success" : "warning",
+        text: `Auto sequential replacement scheduler is now ${enabled ? "ACTIVE (Runs daily at 07:00 IST)" : "PAUSED (No automatic duty allocations will be made)"}.`,
+      });
+    } catch (err) {
+      setActionNotice({
+        severity: "error",
+        text: err.response?.data?.detail || "Failed to update auto scheduler state.",
+      });
+    }
+  };
+
   // ==========================================
   // POOL REORDERING
   // ==========================================
@@ -478,6 +497,41 @@ export default function ReplacementRosterPanel({ onRefreshReplacements }) {
                 />
               </Box>
 
+              {/* Auto Scheduler (Sequential D-5) Toggle */}
+              <Box
+                sx={{
+                  bgcolor: (config?.autoSchedulerEnabled && !config?.isPaused) ? "rgba(16, 185, 129, 0.15)" : "rgba(245, 158, 11, 0.15)",
+                  px: 2,
+                  py: 1,
+                  borderRadius: 2.5,
+                  border: (config?.autoSchedulerEnabled && !config?.isPaused) ? "1px solid rgba(52, 211, 153, 0.4)" : "1px solid rgba(245, 158, 11, 0.4)",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 1.2,
+                }}
+              >
+                <Box sx={{ textAlign: "right" }}>
+                  <Typography variant="caption" sx={{ display: "block", color: "rgba(255, 255, 255, 0.7)", fontWeight: 700 }}>
+                    AUTO SCHEDULER
+                  </Typography>
+                  <Typography
+                    variant="body2"
+                    sx={{
+                      fontWeight: 800,
+                      color: (config?.autoSchedulerEnabled && !config?.isPaused) ? "#34D399" : "#FBBF24",
+                    }}
+                  >
+                    {(config?.autoSchedulerEnabled && !config?.isPaused) ? "▶ Active (07:00)" : "⏸ Paused"}
+                  </Typography>
+                </Box>
+                <Switch
+                  checked={Boolean(config?.autoSchedulerEnabled && !config?.isPaused)}
+                  onChange={(e) => toggleAutoScheduler(e.target.checked)}
+                  color="success"
+                  disabled={loading}
+                />
+              </Box>
+
               {/* Run D-5 Allocation Button */}
               <Button
                 variant="contained"
@@ -501,6 +555,32 @@ export default function ReplacementRosterPanel({ onRefreshReplacements }) {
           </Grid>
         </Grid>
       </Paper>
+
+      {/* Auto Scheduler Paused / Active Banner */}
+      {(!config?.autoSchedulerEnabled || config?.isPaused) && (
+        <Alert
+          severity="warning"
+          variant="filled"
+          sx={{
+            mb: 2.5,
+            borderRadius: 2.5,
+            bgcolor: "#78350F",
+            color: "#FEF3C7",
+            boxShadow: "0 2px 10px rgba(0, 0, 0, 0.08)",
+            display: "flex",
+            alignItems: "center",
+          }}
+        >
+          <Box>
+            <Typography variant="body2" sx={{ fontWeight: 800 }}>
+              ⏸ Auto Scheduler of Replacement (Sequential) is currently PAUSED
+            </Typography>
+            <Typography variant="caption" sx={{ color: "#FDE68A", display: "block", mt: 0.3 }}>
+              Automatic sequential duty allocations at 07:00 AM (D-5 notice) are suspended. To activate or test, toggle the switch above or click <strong>Run D-5 Allocation</strong> for manual control.
+            </Typography>
+          </Box>
+        </Alert>
+      )}
 
       {/* Metric Cards Row */}
       <Grid container spacing={2} sx={{ mb: 3 }}>

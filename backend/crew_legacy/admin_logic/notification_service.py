@@ -376,7 +376,8 @@ def send_email(to_list, subject, body, *, html=False, sender=None, enabled=None,
                 for email in cc_recipients
             ]
         if graph_attachments:
-            message["attachments"] = graph_attachments        encoded_sender = urllib.parse.quote(sender_address)
+            message["attachments"] = graph_attachments
+        encoded_sender = urllib.parse.quote(sender_address)
         endpoint = f"https://graph.microsoft.com/v1.0/users/{encoded_sender}/sendMail"
         req_headers = {"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"}
         payload = {

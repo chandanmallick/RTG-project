@@ -39,6 +39,40 @@ def get_frontend_base_url() -> str:
 # CONFIGURATION & POOL INITIALIZATION
 # =========================================================
 
+def get_employee_roles(emp: dict) -> Tuple[bool, bool]:
+    """
+    Returns (has_sic, has_shift_engineer) based on category, designation, role, and shiftGroupSic.
+    Matches any person in the database where SIC or Shift Engineer is mentioned.
+    """
+    if not emp:
+        return False, False
+    raw_cat = emp.get("category")
+    categories = [str(x).strip().lower() for x in (raw_cat if isinstance(raw_cat, list) else [raw_cat])] if raw_cat else []
+    cat_str = " ".join(categories)
+    desig_str = str(emp.get("designation") or "").strip().lower()
+    role_str = str(emp.get("role") or "").strip().lower()
+    is_shift_sic = bool(emp.get("isShiftGroupSic") or emp.get("isSIC"))
+
+    is_sic = (
+        any(c == "sic" or "sic" in c.split() or "sic" in c.split("&") or "sic" in c.split("/") for c in categories)
+        or "sic" in cat_str
+        or "shift in charge" in desig_str
+        or "shift-in-charge" in desig_str
+        or "shift in-charge" in desig_str
+        or "sic" in desig_str.split()
+        or role_str == "sic"
+        or is_shift_sic
+    )
+    is_se = (
+        any("shift engineer" in c or "shift_engineer" in c or c == "se" for c in categories)
+        or "shift engineer" in cat_str
+        or "shift engineer" in desig_str
+        or "shift_engineer" in desig_str
+        or role_str in ("shift_engineer", "shift engineer", "se")
+    )
+    return is_sic, is_se
+
+
 def init_default_pools() -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
     """
     Seeds the SIC and Shift Engineer pools ONLY from active employees marked as Replacement in the Employee database.
@@ -57,21 +91,11 @@ def init_default_pools() -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
         if not eid:
             continue
         duty_type = str(emp.get("dutyType") or "").strip().lower()
-        if duty_type != "replacement":
+        is_sic_registered, is_se_registered = get_employee_roles(emp)
+
+        # Include candidate if dutyType is 'replacement' or if SIC/Shift Engineer is explicitly mentioned
+        if not (duty_type == "replacement" or is_sic_registered or is_se_registered):
             continue
-
-        raw_cat = emp.get("category")
-        categories = [str(x).strip().lower() for x in (raw_cat if isinstance(raw_cat, list) else [raw_cat])]
-        cat_str = " ".join(categories)
-
-        is_sic_registered = (
-            any(c == "sic" or c == "sic & shift engineer" or "sic" in c.split() or "sic" in c.split("&") for c in categories)
-            or "sic" in cat_str
-        )
-        is_se_registered = (
-            any("shift engineer" in c or "shift_engineer" in c or c == "se" for c in categories)
-            or "shift engineer" in cat_str
-        )
 
         if is_sic_registered and eid not in seen_sic:
             seen_sic.add(eid)
@@ -121,6 +145,8 @@ def get_replacement_roster_config() -> Dict[str, Any]:
         if not config:
             config = {
                 "_id": CONFIG_ID,
+                "autoSchedulerEnabled": False,  # True = Active, False = Paused
+                "isPaused": True,
                 "testMode": False,  # False = Live All Future Duty, True = Test Basis
                 "allocationDaysNotice": 5,  # D-5
                 "longDurationThreshold": 3,  # Leaves with >= 3 consecutive days prompt Admin
@@ -182,6 +208,12 @@ def save_replacement_roster_config(payload: Dict[str, Any]) -> Dict[str, Any]:
     update_data = {
         "updatedAt": datetime.utcnow(),
     }
+    if "autoSchedulerEnabled" in payload:
+        update_data["autoSchedulerEnabled"] = bool(payload["autoSchedulerEnabled"])
+        update_data["isPaused"] = not bool(payload["autoSchedulerEnabled"])
+    if "isPaused" in payload:
+        update_data["isPaused"] = bool(payload["isPaused"])
+        update_data["autoSchedulerEnabled"] = not bool(payload["isPaused"])
     if "testMode" in payload:
         update_data["testMode"] = bool(payload["testMode"])
     if "allocationDaysNotice" in payload:
@@ -499,6 +531,8 @@ def get_employee_duty_matrix(month: str = None) -> Dict[str, Any]:
             })
 
     return {
+        "autoSchedulerEnabled": bool(config.get("autoSchedulerEnabled", False)),
+        "isPaused": bool(config.get("isPaused", True)),
         "testMode": config.get("testMode", False),
         "allocationDaysNotice": config.get("allocationDaysNotice", 5),
         "longDurationThreshold": long_duration_threshold,
@@ -573,6 +607,20 @@ def auto_allocate_d5_replacements(force: bool = False, test_mode: bool = None) -
     d5_date = (today_date + timedelta(days=5)).strftime("%Y-%m-%d")
 
     config = get_replacement_roster_config()
+    is_paused = bool(config.get("isPaused", False)) or not bool(config.get("autoSchedulerEnabled", True))
+    if is_paused and not force:
+        logger.info(f"D-5 sequential replacement auto-allocation is currently PAUSED by Administrator. Skipping execution on {d5_date}.")
+        return {
+            "timestamp": now_kolkata.isoformat(),
+            "mode": "PAUSED",
+            "targetDate": d5_date,
+            "scanned": 0,
+            "allocatedCount": 0,
+            "allocated": [],
+            "skipped": [],
+            "message": "Sequential replacement auto-scheduler is currently PAUSED. No replacements were allocated.",
+        }
+
     is_test_mode = config.get("testMode", False) if test_mode is None else bool(test_mode)
     long_threshold = config.get("longDurationThreshold", 3)
 
@@ -630,12 +678,24 @@ def auto_allocate_d5_replacements(force: bool = False, test_mode: bool = None) -
             })
             continue
 
-        # Determine target pool: SIC duty vs Shift Engineer duty
+        # Determine target pool based on Role leave (SIC or Shift Engineer)
         duty_doc = employee_daily_collection.find_one({
             "employeeId": applicant_id,
             "date": leave_date,
         }) or {}
+        applicant_doc = employee_collection.find_one({
+            "$or": [{"userId": applicant_id}, {"employeeId": applicant_id}]
+        }) or {}
+        applicant_has_sic, applicant_has_se = get_employee_roles(applicant_doc)
+
         is_sic_duty = bool(duty_doc.get("isSIC") or leave.get("isSIC"))
+        if not is_sic_duty:
+            if applicant_has_sic and not applicant_has_se:
+                is_sic_duty = True
+            elif applicant_has_sic and applicant_has_se:
+                assigned_duty = str(duty_doc.get("assignedDuty") or leave.get("assignedDuty") or "").lower()
+                is_sic_duty = "sic" in assigned_duty or duty_doc.get("isSIC") is True
+
         target_duty = clean_id(duty_doc.get("assignedDuty") or leave.get("assignedDuty") or "Shift")
 
         pool = sic_pool if is_sic_duty else shift_eng_pool
@@ -843,10 +903,21 @@ def auto_allocate_next_candidate_for_denied_duty(notification_id: str, user: dic
     applicant_id = clean_id(leave.get("employeeId")) if leave else ""
 
     config = get_replacement_roster_config()
+    applicant_doc = employee_collection.find_one({
+        "$or": [{"userId": applicant_id or denied_emp_id}, {"employeeId": applicant_id or denied_emp_id}]
+    }) or {}
+    applicant_has_sic, applicant_has_se = get_employee_roles(applicant_doc)
+
     is_sic_duty = bool(leave.get("isSIC")) if leave else False
     if not is_sic_duty:
         daily_app = employee_daily_collection.find_one({"employeeId": applicant_id or denied_emp_id, "date": duty_date}) or {}
         is_sic_duty = bool(daily_app.get("isSIC"))
+        if not is_sic_duty:
+            if applicant_has_sic and not applicant_has_se:
+                is_sic_duty = True
+            elif applicant_has_sic and applicant_has_se:
+                assigned_duty = str(daily_app.get("assignedDuty") or notif.get("assignedDuty") or "").lower()
+                is_sic_duty = "sic" in assigned_duty or daily_app.get("isSIC") is True
 
     sic_pool = [x for x in (config.get("sicPool") or []) if x.get("isActive", True)]
     shift_eng_pool = [x for x in (config.get("shiftEngineerPool") or []) if x.get("isActive", True)]

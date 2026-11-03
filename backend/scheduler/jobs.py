@@ -194,6 +194,96 @@ scheduler.add_job(
     replace_existing=True,
 )
 
+
+def run_auto_daily_mobile_briefing_job():
+    """
+    Automated Daily Briefing HTML Report dispatch at 08:00 hrs (Asia/Kolkata).
+    Generates the HTML briefing (Mobile View) and dispatches email to configured recipients
+    from Admin Module (admin/mail-settings).
+    """
+    import asyncio
+    import logging
+    from services.mobile_briefing_service import build_mobile_briefing_data, generate_mobile_briefing_html
+    from crew_legacy.admin_logic.notification_service import workflow_mail_templates, replacement_mail_settings, send_email
+
+    local_logger = logging.getLogger("daily_mobile_briefing_auto")
+    revision_id = f"BRIEFING_AUTO_{datetime.now(ZoneInfo('Asia/Kolkata')):%Y%m%d_%H%M%S}"
+
+    try:
+        data = asyncio.run(build_mobile_briefing_data())
+        rendered_html = generate_mobile_briefing_html(data)
+        report_date = data.get("date_formatted") or data.get("date")
+
+        templates = workflow_mail_templates()
+        briefing_tmpl = templates.get("daily_mobile_briefing") or {}
+        mail_settings = replacement_mail_settings()
+
+        if not briefing_tmpl.get("enabled", True):
+            local_logger.info("Daily mobile briefing workflow email is disabled in mail settings. Skipping auto send.")
+            return {"success": False, "message": "Workflow disabled in mail settings"}
+
+        to_raw = briefing_tmpl.get("recipients") or ""
+        cc_raw = briefing_tmpl.get("ccRecipients") or ""
+        to_list = [addr.strip() for addr in to_raw.replace(";", ",").split(",") if addr.strip()]
+        cc_list = [addr.strip() for addr in cc_raw.replace(";", ",").split(",") if addr.strip()]
+
+        if not to_list:
+            rep_mb = str(mail_settings.get("reportMailbox") or "").strip()
+            if rep_mb:
+                to_list = [rep_mb]
+
+        if not to_list:
+            local_logger.warning("No recipient mail addresses configured for daily mobile briefing. Skipping auto send.")
+            return {"success": False, "message": "No recipients configured in admin/mail-settings"}
+
+        subject_tmpl = briefing_tmpl.get("subjectTemplate") or "Daily Power System & Crew Briefing - {report_date}"
+        subject = subject_tmpl.replace("{report_date}", report_date)
+
+        send_result = send_email(
+            to_list=to_list,
+            subject=subject,
+            body=rendered_html,
+            html=True,
+            cc_list=cc_list if cc_list else None,
+            sender=mail_settings.get("sender"),
+            enabled=True,
+        )
+
+        PipelineLogger().log(
+            revision_id=revision_id,
+            pipeline_type="MOBILE_BRIEFING",
+            process_name="AUTO_0800_HTML_BRIEFING",
+            status="SUCCESS",
+            message=f"Dispatched Daily Mobile Briefing HTML report for {report_date} to {len(to_list)} recipients",
+            extra_data={"report_date": report_date, "recipients": to_list, "cc": cc_list},
+        )
+        return {"success": True, "date": report_date, "recipients": to_list}
+    except Exception as exc:
+        local_logger.error(f"Auto daily mobile briefing job failed: {exc}", exc_info=True)
+        PipelineLogger().log(
+            revision_id=revision_id,
+            pipeline_type="MOBILE_BRIEFING",
+            process_name="AUTO_0800_HTML_BRIEFING",
+            status="FAILED",
+            message=str(exc),
+            extra_data={},
+        )
+        return {"success": False, "error": str(exc)}
+
+
+scheduler.add_job(
+    run_auto_daily_mobile_briefing_job,
+    trigger="cron",
+    hour=8,
+    minute=0,
+    timezone="Asia/Kolkata",
+    id="daily_mobile_briefing_auto_0800",
+    max_instances=1,
+    coalesce=True,
+    misfire_grace_time=1800,
+    replace_existing=True,
+)
+
 PSP_DAILY_SOURCE_STATUS_COLLECTION = "psp_daily_source_sync_status"
 
 PSP_DAILY_DEMAND_SOURCES = {

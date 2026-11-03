@@ -136,3 +136,16 @@ async def send_mobile_briefing_email(
     except Exception as e:
         logger.error(f"Error sending mobile briefing email: {e}", exc_info=True)
         raise HTTPException(500, detail=f"Error sending mobile briefing email: {str(e)}")
+
+
+@router.post("/trigger-auto-job")
+async def trigger_auto_briefing_job(user=Depends(get_authenticated_user)):
+    """Manually test or trigger the 08:00 hrs automated mobile briefing dispatch job."""
+    from scheduler.jobs import run_auto_daily_mobile_briefing_job
+    try:
+        res = run_auto_daily_mobile_briefing_job()
+        return res
+    except Exception as exc:
+        logger.error(f"Manual trigger of auto mobile briefing job failed: {exc}", exc_info=True)
+        raise HTTPException(500, detail=f"Job execution failed: {str(exc)}")
+

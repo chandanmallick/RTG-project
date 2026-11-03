@@ -3181,6 +3181,18 @@ def replacement_candidates(
     }) or {}
     is_sic = bool(leave_daily.get("isSIC", is_sic))
     required_duty = leave_daily.get("assignedDuty") or leave.get("assignedDuty") or ""
+
+    applicant_emp = employee_collection.find_one({
+        "$or": [{"userId": leave.get("employeeId")}, {"employeeId": leave.get("employeeId")}]
+    }) or {}
+    from crew_legacy.services.replacement_roster_service import get_employee_roles
+    applicant_has_sic, applicant_has_se = get_employee_roles(applicant_emp)
+    if not is_sic:
+        if applicant_has_sic and not applicant_has_se:
+            is_sic = True
+        elif applicant_has_sic and applicant_has_se:
+            assigned_str = str(required_duty).lower()
+            is_sic = "sic" in assigned_str or bool(leave_daily.get("isSIC"))
     next_date = (
         datetime.strptime(leave_date, "%Y-%m-%d") + timedelta(days=1)
     ).strftime("%Y-%m-%d")
@@ -3238,11 +3250,12 @@ def replacement_candidates(
 
         # ==========================================
         # ROLE FILTER (SIC / SHIFT ENGINEER)
-        # USER REQUIREMENT: If employee is registered "SIC" under "Category" he will be placed for SIC leave,
-        # "Shift Engineer" then for other person in the shift.
+        # USER REQUIREMENT: Based on Role leave, match similar person from the database where SIC or Shift Engineer is mentioned.
         # ==========================================
-        is_sic_candidate = category_matches(category, "sic")
-        is_shift_engineer_candidate = category_matches(category, "shift engineer")
+        cand_has_sic, cand_has_se = get_employee_roles(c)
+        is_sic_candidate = cand_has_sic or category_matches(category, "sic")
+        is_shift_engineer_candidate = cand_has_se or category_matches(category, "shift engineer")
+
         if effective_role_filter == "sic" and not is_sic_candidate:
             continue
         if effective_role_filter == "shift_engineer" and not is_shift_engineer_candidate:
