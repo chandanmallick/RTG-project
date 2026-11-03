@@ -42,7 +42,7 @@
         "voltage": "400/220/132 kV",
         "voltage_class": 400,
         "district": "Purba Medinipur",
-        "color": "#DC2626",
+        "color": "#F59E0B",
         "icon": "flame",
         "state": "West Bengal"
       }
@@ -70,7 +70,7 @@
         "voltage": "400/220 kV",
         "voltage_class": 400,
         "district": "Birbhum",
-        "color": "#DC2626",
+        "color": "#F59E0B",
         "icon": "flame",
         "state": "West Bengal"
       }
@@ -98,7 +98,7 @@
         "voltage": "400/220 kV",
         "voltage_class": 400,
         "district": "Murshidabad",
-        "color": "#DC2626",
+        "color": "#F59E0B",
         "icon": "flame",
         "state": "West Bengal"
       }
@@ -126,7 +126,7 @@
         "voltage": "400/220 kV",
         "voltage_class": 400,
         "district": "Purulia",
-        "color": "#DC2626",
+        "color": "#F59E0B",
         "icon": "flame",
         "state": "West Bengal"
       }
@@ -154,7 +154,7 @@
         "voltage": "400/220 kV",
         "voltage_class": 400,
         "district": "Murshidabad",
-        "color": "#DC2626",
+        "color": "#F59E0B",
         "icon": "flame",
         "state": "West Bengal"
       }
@@ -182,7 +182,7 @@
         "voltage": "220/132 kV",
         "voltage_class": 220,
         "district": "Hooghly",
-        "color": "#DC2626",
+        "color": "#F59E0B",
         "icon": "flame",
         "state": "West Bengal"
       }
@@ -210,7 +210,7 @@
         "voltage": "400/220 kV",
         "voltage_class": 400,
         "district": "Bankura",
-        "color": "#DC2626",
+        "color": "#F59E0B",
         "icon": "flame",
         "state": "West Bengal"
       }
@@ -238,7 +238,7 @@
         "voltage": "220/132 kV",
         "voltage_class": 220,
         "district": "Paschim Bardhaman",
-        "color": "#DC2626",
+        "color": "#F59E0B",
         "icon": "flame",
         "state": "West Bengal"
       }
@@ -266,7 +266,7 @@
         "voltage": "400 kV",
         "voltage_class": 400,
         "district": "Paschim Bardhaman",
-        "color": "#DC2626",
+        "color": "#F59E0B",
         "icon": "flame",
         "state": "West Bengal"
       }
@@ -294,7 +294,7 @@
         "voltage": "220 kV",
         "voltage_class": 220,
         "district": "South 24 Parganas",
-        "color": "#DC2626",
+        "color": "#F59E0B",
         "icon": "flame",
         "state": "West Bengal"
       }
@@ -322,7 +322,7 @@
         "voltage": "220/132 kV",
         "voltage_class": 220,
         "district": "North 24 Parganas",
-        "color": "#DC2626",
+        "color": "#F59E0B",
         "icon": "flame",
         "state": "West Bengal"
       }
@@ -350,7 +350,7 @@
         "voltage": "132 kV",
         "voltage_class": 132,
         "district": "Kolkata",
-        "color": "#DC2626",
+        "color": "#F59E0B",
         "icon": "flame",
         "state": "West Bengal"
       }
@@ -378,7 +378,7 @@
         "voltage": "400 kV",
         "voltage_class": 400,
         "district": "Purulia",
-        "color": "#0284C7",
+        "color": "#F59E0B",
         "icon": "droplet",
         "state": "West Bengal"
       }
@@ -406,7 +406,7 @@
         "voltage": "220/132 kV",
         "voltage_class": 220,
         "district": "Kalimpong / Darjeeling",
-        "color": "#0284C7",
+        "color": "#F59E0B",
         "icon": "droplet",
         "state": "West Bengal"
       }
@@ -434,7 +434,7 @@
         "voltage": "132 kV",
         "voltage_class": 132,
         "district": "Darjeeling",
-        "color": "#0284C7",
+        "color": "#F59E0B",
         "icon": "droplet",
         "state": "West Bengal"
       }
@@ -462,7 +462,7 @@
         "voltage": "66/132 kV",
         "voltage_class": 132,
         "district": "Kalimpong",
-        "color": "#0284C7",
+        "color": "#F59E0B",
         "icon": "droplet",
         "state": "West Bengal"
       }
@@ -490,7 +490,7 @@
         "voltage": "400 kV",
         "voltage_class": 400,
         "district": "Purulia",
-        "color": "#DC2626",
+        "color": "#F59E0B",
         "icon": "flame",
         "state": "West Bengal"
       }
@@ -518,7 +518,7 @@
         "voltage": "400 kV",
         "voltage_class": 400,
         "district": "Inter-State Border",
-        "color": "#DC2626",
+        "color": "#F59E0B",
         "icon": "flame",
         "state": "West Bengal"
       }
@@ -542,7 +542,7 @@
         "voltage": "400/220 kV",
         "voltage_class": 400,
         "district": "Birbhum",
-        "color": "#EF4444",
+        "color": "#DC2626",
         "state": "West Bengal"
       }
     },
@@ -565,7 +565,7 @@
         "voltage": "400/220 kV",
         "voltage_class": 400,
         "district": "North 24 Parganas",
-        "color": "#EF4444",
+        "color": "#DC2626",
         "state": "West Bengal"
       }
     },
@@ -588,7 +588,7 @@
         "voltage": "400/220 kV",
         "voltage_class": 400,
         "district": "South 24 Parganas",
-        "color": "#EF4444",
+        "color": "#DC2626",
         "state": "West Bengal"
       }
     },
@@ -611,7 +611,7 @@
         "voltage": "400/220 kV",
         "voltage_class": 400,
         "district": "Paschim Bardhaman",
-        "color": "#EF4444",
+        "color": "#DC2626",
         "state": "West Bengal"
       }
     },
@@ -634,7 +634,7 @@
         "voltage": "400/220 kV",
         "voltage_class": 400,
         "district": "Murshidabad",
-        "color": "#EF4444",
+        "color": "#DC2626",
         "state": "West Bengal"
       }
     },
@@ -657,7 +657,7 @@
         "voltage": "400/220 kV",
         "voltage_class": 400,
         "district": "Hooghly",
-        "color": "#EF4444",
+        "color": "#DC2626",
         "state": "West Bengal"
       }
     },
@@ -680,7 +680,7 @@
         "voltage": "400/220 kV",
         "voltage_class": 400,
         "district": "Purba Bardhaman",
-        "color": "#EF4444",
+        "color": "#DC2626",
         "state": "West Bengal"
       }
     },
@@ -703,7 +703,7 @@
         "voltage": "400/220 kV",
         "voltage_class": 400,
         "district": "Bankura",
-        "color": "#EF4444",
+        "color": "#DC2626",
         "state": "West Bengal"
       }
     },
@@ -726,7 +726,7 @@
         "voltage": "765/400 kV",
         "voltage_class": 765,
         "district": "Paschim Medinipur",
-        "color": "#9333EA",
+        "color": "#CA8A04",
         "state": "West Bengal"
       }
     },
@@ -749,7 +749,7 @@
         "voltage": "400/220/132 kV",
         "voltage_class": 400,
         "district": "Malda",
-        "color": "#EF4444",
+        "color": "#DC2626",
         "state": "West Bengal"
       }
     },
@@ -772,7 +772,7 @@
         "voltage": "400/220 kV",
         "voltage_class": 400,
         "district": "Jalpaiguri",
-        "color": "#EF4444",
+        "color": "#DC2626",
         "state": "West Bengal"
       }
     },
@@ -795,7 +795,7 @@
         "voltage": "400/220 kV & \u00b1800kV HVDC",
         "voltage_class": 765,
         "district": "Alipurduar",
-        "color": "#9333EA",
+        "color": "#CA8A04",
         "state": "West Bengal"
       }
     },
@@ -818,7 +818,7 @@
         "voltage": "400/220 kV",
         "voltage_class": 400,
         "district": "Border Area",
-        "color": "#EF4444",
+        "color": "#DC2626",
         "state": "West Bengal"
       }
     },
@@ -841,7 +841,7 @@
         "voltage": "400/220 kV",
         "voltage_class": 400,
         "district": "Hooghly",
-        "color": "#EF4444",
+        "color": "#DC2626",
         "state": "West Bengal"
       }
     },
@@ -864,7 +864,7 @@
         "voltage": "220/132 kV",
         "voltage_class": 220,
         "district": "Purba Medinipur",
-        "color": "#F97316",
+        "color": "#16A34A",
         "state": "West Bengal"
       }
     },
@@ -887,7 +887,7 @@
         "voltage": "220/132 kV",
         "voltage_class": 220,
         "district": "Kolkata",
-        "color": "#F97316",
+        "color": "#16A34A",
         "state": "West Bengal"
       }
     },
@@ -910,7 +910,7 @@
         "voltage": "220/132 kV",
         "voltage_class": 220,
         "district": "North 24 Parganas",
-        "color": "#F97316",
+        "color": "#16A34A",
         "state": "West Bengal"
       }
     },
@@ -933,7 +933,7 @@
         "voltage": "220/132 kV",
         "voltage_class": 220,
         "district": "Howrah",
-        "color": "#F97316",
+        "color": "#16A34A",
         "state": "West Bengal"
       }
     },
@@ -956,7 +956,7 @@
         "voltage": "220/132 kV",
         "voltage_class": 220,
         "district": "Hooghly",
-        "color": "#F97316",
+        "color": "#16A34A",
         "state": "West Bengal"
       }
     },
@@ -979,7 +979,7 @@
         "voltage": "220/132 kV",
         "voltage_class": 220,
         "district": "Murshidabad",
-        "color": "#F97316",
+        "color": "#16A34A",
         "state": "West Bengal"
       }
     },
@@ -1002,7 +1002,7 @@
         "voltage": "220/132 kV",
         "voltage_class": 220,
         "district": "Paschim Bardhaman",
-        "color": "#F97316",
+        "color": "#16A34A",
         "state": "West Bengal"
       }
     },
@@ -1025,7 +1025,7 @@
         "voltage": "220/132 kV",
         "voltage_class": 220,
         "district": "Paschim Medinipur",
-        "color": "#F97316",
+        "color": "#16A34A",
         "state": "West Bengal"
       }
     },
@@ -1048,7 +1048,7 @@
         "voltage": "220/132 kV",
         "voltage_class": 220,
         "district": "Purulia",
-        "color": "#F97316",
+        "color": "#16A34A",
         "state": "West Bengal"
       }
     },
@@ -1071,7 +1071,7 @@
         "voltage": "220/132 kV",
         "voltage_class": 220,
         "district": "Jalpaiguri",
-        "color": "#F97316",
+        "color": "#16A34A",
         "state": "West Bengal"
       }
     },
@@ -1117,7 +1117,7 @@
         "voltage": "765/400 kV",
         "voltage_class": 765,
         "district": "Inter-State (JH)",
-        "color": "#9333EA",
+        "color": "#CA8A04",
         "state": "West Bengal"
       }
     },
@@ -1140,7 +1140,7 @@
         "voltage": "765/400 kV",
         "voltage_class": 765,
         "district": "Inter-State (JH)",
-        "color": "#9333EA",
+        "color": "#CA8A04",
         "state": "West Bengal"
       }
     },
@@ -1163,7 +1163,7 @@
         "voltage": "400/220 kV",
         "voltage_class": 400,
         "district": "Inter-State (OD)",
-        "color": "#EF4444",
+        "color": "#DC2626",
         "state": "West Bengal"
       }
     },
@@ -1186,7 +1186,7 @@
         "voltage": "400/220 kV",
         "voltage_class": 400,
         "district": "Inter-State (SK)",
-        "color": "#EF4444",
+        "color": "#DC2626",
         "state": "West Bengal"
       }
     },
@@ -1209,7 +1209,7 @@
         "voltage": "400/220 kV",
         "voltage_class": 400,
         "district": "Inter-State (AS)",
-        "color": "#EF4444",
+        "color": "#DC2626",
         "state": "West Bengal"
       }
     },
@@ -1232,7 +1232,7 @@
         "voltage": "400 kV",
         "voltage_class": 400,
         "district": "Inter-State (BR)",
-        "color": "#EF4444",
+        "color": "#DC2626",
         "state": "West Bengal"
       }
     },
@@ -1255,7 +1255,7 @@
         "voltage": "400 kV",
         "voltage_class": 400,
         "district": "Cross-Border (Bhutan)",
-        "color": "#EF4444",
+        "color": "#DC2626",
         "state": "West Bengal"
       }
     },
@@ -1278,7 +1278,7 @@
         "voltage": "400 kV & HVDC",
         "voltage_class": 400,
         "district": "Cross-Border (BD)",
-        "color": "#EF4444",
+        "color": "#DC2626",
         "state": "West Bengal"
       }
     },
@@ -1314,7 +1314,7 @@
         "line_type": "overhead",
         "from_name": "Midnapore (Kharagpur) 765/400 kV Substation",
         "to_name": "Ranchi 765/400 kV Substation (Jharkhand)",
-        "color": "#9333EA",
+        "color": "#CA8A04",
         "casing_color": "#FFFFFF",
         "state": "West Bengal"
       }
@@ -1351,7 +1351,7 @@
         "line_type": "overhead",
         "from_name": "Midnapore (Kharagpur) 765/400 kV Substation",
         "to_name": "Chaibasa 765/400 kV Substation (Jharkhand)",
-        "color": "#9333EA",
+        "color": "#CA8A04",
         "casing_color": "#FFFFFF",
         "state": "West Bengal"
       }
@@ -1388,7 +1388,7 @@
         "line_type": "hvdc",
         "from_name": "Alipurduar 400/220 kV & \u00b1800kV HVDC Terminal",
         "to_name": "Bongaigaon 400/220 kV Substation (Assam)",
-        "color": "#9333EA",
+        "color": "#CA8A04",
         "casing_color": "#FFFFFF",
         "state": "West Bengal"
       }
@@ -1425,7 +1425,7 @@
         "line_type": "overhead",
         "from_name": "Kolaghat TPS",
         "to_name": "Jeerat 400/220 kV Substation",
-        "color": "#EF4444",
+        "color": "#DC2626",
         "casing_color": "#FFFFFF",
         "state": "West Bengal"
       }
@@ -1462,7 +1462,7 @@
         "line_type": "overhead",
         "from_name": "Kolaghat TPS",
         "to_name": "Baripada 400/220 kV Substation (Odisha)",
-        "color": "#EF4444",
+        "color": "#DC2626",
         "casing_color": "#FFFFFF",
         "state": "West Bengal"
       }
@@ -1499,7 +1499,7 @@
         "line_type": "overhead",
         "from_name": "Kolaghat TPS",
         "to_name": "Midnapore (Kharagpur) 765/400 kV Substation",
-        "color": "#EF4444",
+        "color": "#DC2626",
         "casing_color": "#FFFFFF",
         "state": "West Bengal"
       }
@@ -1536,7 +1536,7 @@
         "line_type": "overhead",
         "from_name": "Kolaghat TPS",
         "to_name": "Arambagh 400/220 kV Substation",
-        "color": "#EF4444",
+        "color": "#DC2626",
         "casing_color": "#FFFFFF",
         "state": "West Bengal"
       }
@@ -1573,7 +1573,7 @@
         "line_type": "overhead",
         "from_name": "Kolaghat TPS",
         "to_name": "Subhasgram 400/220 kV Substation",
-        "color": "#EF4444",
+        "color": "#DC2626",
         "casing_color": "#FFFFFF",
         "state": "West Bengal"
       }
@@ -1610,7 +1610,7 @@
         "line_type": "overhead",
         "from_name": "Rajarhat 400/220 kV GIS Substation",
         "to_name": "Subhasgram 400/220 kV Substation",
-        "color": "#EF4444",
+        "color": "#DC2626",
         "casing_color": "#FFFFFF",
         "state": "West Bengal"
       }
@@ -1647,7 +1647,7 @@
         "line_type": "overhead",
         "from_name": "Rajarhat 400/220 kV GIS Substation",
         "to_name": "Jeerat 400/220 kV Substation",
-        "color": "#EF4444",
+        "color": "#DC2626",
         "casing_color": "#FFFFFF",
         "state": "West Bengal"
       }
@@ -1684,7 +1684,7 @@
         "line_type": "overhead",
         "from_name": "Arambagh 400/220 kV Substation",
         "to_name": "Burdwan (Paraj) 400/220 kV Substation",
-        "color": "#EF4444",
+        "color": "#DC2626",
         "casing_color": "#FFFFFF",
         "state": "West Bengal"
       }
@@ -1721,7 +1721,7 @@
         "line_type": "overhead",
         "from_name": "Arambagh 400/220 kV Substation",
         "to_name": "Bishnupur 400/220 kV Substation",
-        "color": "#EF4444",
+        "color": "#DC2626",
         "casing_color": "#FFFFFF",
         "state": "West Bengal"
       }
@@ -1758,7 +1758,7 @@
         "line_type": "overhead",
         "from_name": "Bishnupur 400/220 kV Substation",
         "to_name": "Midnapore (Kharagpur) 765/400 kV Substation",
-        "color": "#EF4444",
+        "color": "#DC2626",
         "casing_color": "#FFFFFF",
         "state": "West Bengal"
       }
@@ -1795,7 +1795,7 @@
         "line_type": "overhead",
         "from_name": "Bakreswar TPS",
         "to_name": "Jeenat 400/220 kV Substation",
-        "color": "#EF4444",
+        "color": "#DC2626",
         "casing_color": "#FFFFFF",
         "state": "West Bengal"
       }
@@ -1832,7 +1832,7 @@
         "line_type": "overhead",
         "from_name": "Bakreswar TPS",
         "to_name": "Durgapur 400/220 kV Substation (PG)",
-        "color": "#EF4444",
+        "color": "#DC2626",
         "casing_color": "#FFFFFF",
         "state": "West Bengal"
       }
@@ -1869,7 +1869,7 @@
         "line_type": "overhead",
         "from_name": "Bakreswar TPS",
         "to_name": "Burdwan (Paraj) 400/220 kV Substation",
-        "color": "#EF4444",
+        "color": "#DC2626",
         "casing_color": "#FFFFFF",
         "state": "West Bengal"
       }
@@ -1906,7 +1906,7 @@
         "line_type": "overhead",
         "from_name": "Jeenat 400/220 kV Substation",
         "to_name": "Gokarna 400/220 kV Substation",
-        "color": "#EF4444",
+        "color": "#DC2626",
         "casing_color": "#FFFFFF",
         "state": "West Bengal"
       }
@@ -1943,7 +1943,7 @@
         "line_type": "overhead",
         "from_name": "Jeenat 400/220 kV Substation",
         "to_name": "Durgapur 400/220 kV Substation (PG)",
-        "color": "#EF4444",
+        "color": "#DC2626",
         "casing_color": "#FFFFFF",
         "state": "West Bengal"
       }
@@ -1980,7 +1980,7 @@
         "line_type": "overhead",
         "from_name": "Jeenat 400/220 kV Substation",
         "to_name": "Burdwan (Paraj) 400/220 kV Substation",
-        "color": "#EF4444",
+        "color": "#DC2626",
         "casing_color": "#FFFFFF",
         "state": "West Bengal"
       }
@@ -2017,7 +2017,7 @@
         "line_type": "overhead",
         "from_name": "Sagardighi TPS",
         "to_name": "Gokarna 400/220 kV Substation",
-        "color": "#EF4444",
+        "color": "#DC2626",
         "casing_color": "#FFFFFF",
         "state": "West Bengal"
       }
@@ -2054,7 +2054,7 @@
         "line_type": "overhead",
         "from_name": "Sagardighi TPS",
         "to_name": "Farakka STPS",
-        "color": "#EF4444",
+        "color": "#DC2626",
         "casing_color": "#FFFFFF",
         "state": "West Bengal"
       }
@@ -2091,7 +2091,7 @@
         "line_type": "overhead",
         "from_name": "Sagardighi TPS",
         "to_name": "Jeenat 400/220 kV Substation",
-        "color": "#EF4444",
+        "color": "#DC2626",
         "casing_color": "#FFFFFF",
         "state": "West Bengal"
       }
@@ -2128,7 +2128,7 @@
         "line_type": "overhead",
         "from_name": "Farakka STPS",
         "to_name": "Malda 400/220/132 kV Substation",
-        "color": "#EF4444",
+        "color": "#DC2626",
         "casing_color": "#FFFFFF",
         "state": "West Bengal"
       }
@@ -2165,7 +2165,7 @@
         "line_type": "overhead",
         "from_name": "Farakka STPS",
         "to_name": "Kahalgaon 400 kV Switchyard (Bihar)",
-        "color": "#EF4444",
+        "color": "#DC2626",
         "casing_color": "#FFFFFF",
         "state": "West Bengal"
       }
@@ -2202,7 +2202,7 @@
         "line_type": "overhead",
         "from_name": "Farakka STPS",
         "to_name": "Jeenat 400/220 kV Substation",
-        "color": "#EF4444",
+        "color": "#DC2626",
         "casing_color": "#FFFFFF",
         "state": "West Bengal"
       }
@@ -2239,7 +2239,7 @@
         "line_type": "overhead",
         "from_name": "Durgapur 400/220 kV Substation (PG)",
         "to_name": "Maithon 400/220 kV Substation",
-        "color": "#EF4444",
+        "color": "#DC2626",
         "casing_color": "#FFFFFF",
         "state": "West Bengal"
       }
@@ -2276,7 +2276,7 @@
         "line_type": "overhead",
         "from_name": "Mejia Thermal Power Station (MTPS)",
         "to_name": "Maithon 400/220 kV Substation",
-        "color": "#EF4444",
+        "color": "#DC2626",
         "casing_color": "#FFFFFF",
         "state": "West Bengal"
       }
@@ -2313,7 +2313,7 @@
         "line_type": "overhead",
         "from_name": "Mejia Thermal Power Station (MTPS)",
         "to_name": "Arambagh 400/220 kV Substation",
-        "color": "#EF4444",
+        "color": "#DC2626",
         "casing_color": "#FFFFFF",
         "state": "West Bengal"
       }
@@ -2350,7 +2350,7 @@
         "line_type": "overhead",
         "from_name": "Durgapur Steel TPS (DSTPS)",
         "to_name": "Durgapur 400/220 kV Substation (PG)",
-        "color": "#EF4444",
+        "color": "#DC2626",
         "casing_color": "#FFFFFF",
         "state": "West Bengal"
       }
@@ -2387,7 +2387,7 @@
         "line_type": "overhead",
         "from_name": "Santaldih TPS",
         "to_name": "Raghunathpur Thermal Power Station",
-        "color": "#EF4444",
+        "color": "#DC2626",
         "casing_color": "#FFFFFF",
         "state": "West Bengal"
       }
@@ -2424,7 +2424,7 @@
         "line_type": "overhead",
         "from_name": "Santaldih TPS",
         "to_name": "Durgapur 400/220 kV Substation (PG)",
-        "color": "#EF4444",
+        "color": "#DC2626",
         "casing_color": "#FFFFFF",
         "state": "West Bengal"
       }
@@ -2461,7 +2461,7 @@
         "line_type": "overhead",
         "from_name": "Purulia Pumped Storage Project (PPSP)",
         "to_name": "Arambagh 400/220 kV Substation",
-        "color": "#EF4444",
+        "color": "#DC2626",
         "casing_color": "#FFFFFF",
         "state": "West Bengal"
       }
@@ -2498,7 +2498,7 @@
         "line_type": "overhead",
         "from_name": "Purulia Pumped Storage Project (PPSP)",
         "to_name": "Bakreswar TPS",
-        "color": "#EF4444",
+        "color": "#DC2626",
         "casing_color": "#FFFFFF",
         "state": "West Bengal"
       }
@@ -2535,7 +2535,7 @@
         "line_type": "overhead",
         "from_name": "Maithon Right Bank Power Plant (MPL)",
         "to_name": "Maithon 400/220 kV Substation",
-        "color": "#EF4444",
+        "color": "#DC2626",
         "casing_color": "#FFFFFF",
         "state": "West Bengal"
       }
@@ -2572,7 +2572,7 @@
         "line_type": "overhead",
         "from_name": "Malda 400/220/132 kV Substation",
         "to_name": "Siliguri 400/220 kV Substation",
-        "color": "#EF4444",
+        "color": "#DC2626",
         "casing_color": "#FFFFFF",
         "state": "West Bengal"
       }
@@ -2609,7 +2609,7 @@
         "line_type": "overhead",
         "from_name": "Siliguri 400/220 kV Substation",
         "to_name": "Rangpo 400/220 kV Substation (Sikkim)",
-        "color": "#EF4444",
+        "color": "#DC2626",
         "casing_color": "#FFFFFF",
         "state": "West Bengal"
       }
@@ -2646,7 +2646,7 @@
         "line_type": "overhead",
         "from_name": "Siliguri 400/220 kV Substation",
         "to_name": "Alipurduar 400/220 kV & \u00b1800kV HVDC Terminal",
-        "color": "#EF4444",
+        "color": "#DC2626",
         "casing_color": "#FFFFFF",
         "state": "West Bengal"
       }
@@ -2683,7 +2683,7 @@
         "line_type": "overhead",
         "from_name": "Alipurduar 400/220 kV & \u00b1800kV HVDC Terminal",
         "to_name": "Bongaigaon 400/220 kV Substation (Assam)",
-        "color": "#EF4444",
+        "color": "#DC2626",
         "casing_color": "#FFFFFF",
         "state": "West Bengal"
       }
@@ -2720,7 +2720,7 @@
         "line_type": "overhead",
         "from_name": "Alipurduar 400/220 kV & \u00b1800kV HVDC Terminal",
         "to_name": "Tala Hydro Switchyard (Bhutan)",
-        "color": "#EF4444",
+        "color": "#DC2626",
         "casing_color": "#FFFFFF",
         "state": "West Bengal"
       }
@@ -2757,7 +2757,7 @@
         "line_type": "overhead",
         "from_name": "Berhampore 220/132 kV Substation",
         "to_name": "Bheramara 400 kV / HVDC Station (Bangladesh)",
-        "color": "#EF4444",
+        "color": "#DC2626",
         "casing_color": "#FFFFFF",
         "state": "West Bengal"
       }
@@ -2794,7 +2794,7 @@
         "line_type": "overhead",
         "from_name": "Kolaghat TPS",
         "to_name": "Haldia 220/132 kV Substation",
-        "color": "#F97316",
+        "color": "#16A34A",
         "casing_color": "#FFFFFF",
         "state": "West Bengal"
       }
@@ -2831,7 +2831,7 @@
         "line_type": "overhead",
         "from_name": "Kolaghat TPS",
         "to_name": "Howrah 220/132 kV Substation",
-        "color": "#F97316",
+        "color": "#16A34A",
         "casing_color": "#FFFFFF",
         "state": "West Bengal"
       }
@@ -2868,7 +2868,7 @@
         "line_type": "overhead",
         "from_name": "Kolaghat TPS",
         "to_name": "Rishra 220/132 kV Substation",
-        "color": "#F97316",
+        "color": "#16A34A",
         "casing_color": "#FFFFFF",
         "state": "West Bengal"
       }
@@ -2905,7 +2905,7 @@
         "line_type": "overhead",
         "from_name": "Budge Budge Generating Station",
         "to_name": "Kasba 220/132 kV Substation",
-        "color": "#F97316",
+        "color": "#16A34A",
         "casing_color": "#FFFFFF",
         "state": "West Bengal"
       }
@@ -2942,7 +2942,7 @@
         "line_type": "overhead",
         "from_name": "Budge Budge Generating Station",
         "to_name": "Howrah 220/132 kV Substation",
-        "color": "#F97316",
+        "color": "#16A34A",
         "casing_color": "#FFFFFF",
         "state": "West Bengal"
       }
@@ -2979,7 +2979,7 @@
         "line_type": "overhead",
         "from_name": "Subhasgram 400/220 kV Substation",
         "to_name": "Kasba 220/132 kV Substation",
-        "color": "#F97316",
+        "color": "#16A34A",
         "casing_color": "#FFFFFF",
         "state": "West Bengal"
       }
@@ -3016,7 +3016,7 @@
         "line_type": "overhead",
         "from_name": "Bandel TPS",
         "to_name": "Rishra 220/132 kV Substation",
-        "color": "#F97316",
+        "color": "#16A34A",
         "casing_color": "#FFFFFF",
         "state": "West Bengal"
       }
@@ -3053,7 +3053,7 @@
         "line_type": "overhead",
         "from_name": "Titagarh Generating Station",
         "to_name": "Barasat 220/132 kV Substation",
-        "color": "#F97316",
+        "color": "#16A34A",
         "casing_color": "#FFFFFF",
         "state": "West Bengal"
       }
@@ -3090,7 +3090,7 @@
         "line_type": "overhead",
         "from_name": "Barasat 220/132 kV Substation",
         "to_name": "Rajarhat 400/220 kV GIS Substation",
-        "color": "#F97316",
+        "color": "#16A34A",
         "casing_color": "#FFFFFF",
         "state": "West Bengal"
       }
@@ -3127,7 +3127,7 @@
         "line_type": "overhead",
         "from_name": "Durgapur Projects Ltd (DPL)",
         "to_name": "Durgapur 400/220 kV Substation (PG)",
-        "color": "#F97316",
+        "color": "#16A34A",
         "casing_color": "#FFFFFF",
         "state": "West Bengal"
       }
@@ -3164,7 +3164,7 @@
         "line_type": "overhead",
         "from_name": "Durgapur 400/220 kV Substation (PG)",
         "to_name": "Asansol 220/132 kV Substation",
-        "color": "#F97316",
+        "color": "#16A34A",
         "casing_color": "#FFFFFF",
         "state": "West Bengal"
       }
@@ -3201,7 +3201,7 @@
         "line_type": "overhead",
         "from_name": "Midnapore (Kharagpur) 765/400 kV Substation",
         "to_name": "Kharagpur 220/132 kV Substation (WB)",
-        "color": "#F97316",
+        "color": "#16A34A",
         "casing_color": "#FFFFFF",
         "state": "West Bengal"
       }
@@ -3238,7 +3238,7 @@
         "line_type": "overhead",
         "from_name": "Santaldih TPS",
         "to_name": "Purulia Town 220/132 kV Substation",
-        "color": "#F97316",
+        "color": "#16A34A",
         "casing_color": "#FFFFFF",
         "state": "West Bengal"
       }
@@ -3275,7 +3275,7 @@
         "line_type": "overhead",
         "from_name": "Gokarna 400/220 kV Substation",
         "to_name": "Berhampore 220/132 kV Substation",
-        "color": "#F97316",
+        "color": "#16A34A",
         "casing_color": "#FFFFFF",
         "state": "West Bengal"
       }
@@ -3312,7 +3312,7 @@
         "line_type": "overhead",
         "from_name": "Siliguri 400/220 kV Substation",
         "to_name": "Siliguri (Fulbari) 220/132 kV Substation",
-        "color": "#F97316",
+        "color": "#16A34A",
         "casing_color": "#FFFFFF",
         "state": "West Bengal"
       }
@@ -3349,7 +3349,7 @@
         "line_type": "overhead",
         "from_name": "Teesta Low Dam III & IV Hydro",
         "to_name": "Siliguri 400/220 kV Substation",
-        "color": "#F97316",
+        "color": "#16A34A",
         "casing_color": "#FFFFFF",
         "state": "West Bengal"
       }
@@ -3563,7 +3563,7 @@
         "voltage_class": 400,
         "state": "Bihar",
         "district": "Patna",
-        "color": "#EF4444",
+        "color": "#F59E0B",
         "icon": "flame"
       }
     },
@@ -3591,7 +3591,7 @@
         "voltage_class": 400,
         "state": "Bihar",
         "district": "Bhagalpur",
-        "color": "#EF4444",
+        "color": "#F59E0B",
         "icon": "flame"
       }
     },
@@ -3619,7 +3619,7 @@
         "voltage_class": 765,
         "state": "Bihar",
         "district": "Aurangabad",
-        "color": "#9333EA",
+        "color": "#F59E0B",
         "icon": "flame"
       }
     },
@@ -3647,7 +3647,7 @@
         "voltage_class": 400,
         "state": "Bihar",
         "district": "Aurangabad",
-        "color": "#EF4444",
+        "color": "#F59E0B",
         "icon": "flame"
       }
     },
@@ -3671,7 +3671,7 @@
         "voltage_class": 765,
         "state": "Bihar",
         "district": "Gaya",
-        "color": "#9333EA",
+        "color": "#CA8A04",
         "notes": "Major ER pooling hub connecting Nabinagar, Ranchi, and Varanasi (NR)."
       }
     },
@@ -3695,7 +3695,7 @@
         "voltage_class": 400,
         "state": "Bihar",
         "district": "Patna",
-        "color": "#EF4444",
+        "color": "#DC2626",
         "notes": "Primary power feed into Bihar capital region."
       }
     },
@@ -3719,7 +3719,7 @@
         "voltage_class": 400,
         "state": "Bihar",
         "district": "Nalanda",
-        "color": "#EF4444",
+        "color": "#DC2626",
         "notes": "Key backbone substation linking Kahalgaon, Barh, and Sasaram."
       }
     },
@@ -3743,7 +3743,7 @@
         "voltage_class": 400,
         "state": "Bihar",
         "district": "Muzaffarpur",
-        "color": "#EF4444",
+        "color": "#DC2626",
         "notes": "Cross-border HVDC & AC interconnection gateway to Dhalkebar (Nepal)."
       }
     },
@@ -3767,7 +3767,7 @@
         "voltage_class": 765,
         "state": "Bihar",
         "district": "Rohtas",
-        "color": "#9333EA",
+        "color": "#CA8A04",
         "notes": "Historic 500 MW HVDC back-to-back & 765 kV synchronous link to Fatehpur (NR)."
       }
     },
@@ -3791,7 +3791,7 @@
         "voltage_class": 400,
         "state": "Bihar",
         "district": "Purnia",
-        "color": "#EF4444",
+        "color": "#DC2626",
         "notes": "Critical corridor hub connecting Bihar with North Bengal (Siliguri/Malda)."
       }
     },
@@ -3815,7 +3815,7 @@
         "voltage_class": 400,
         "state": "Bihar",
         "district": "Banka",
-        "color": "#EF4444"
+        "color": "#DC2626"
       }
     },
     {
@@ -3838,7 +3838,7 @@
         "voltage_class": 400,
         "state": "Bihar",
         "district": "Kishanganj",
-        "color": "#EF4444"
+        "color": "#DC2626"
       }
     },
     {
@@ -3865,7 +3865,7 @@
         "voltage_class": 765,
         "state": "Jharkhand",
         "district": "Chatra",
-        "color": "#9333EA",
+        "color": "#F59E0B",
         "icon": "flame"
       }
     },
@@ -3893,7 +3893,7 @@
         "voltage_class": 400,
         "state": "Jharkhand",
         "district": "Ramgarh",
-        "color": "#EF4444",
+        "color": "#F59E0B",
         "icon": "flame"
       }
     },
@@ -3921,7 +3921,7 @@
         "voltage_class": 400,
         "state": "Jharkhand",
         "district": "Koderma",
-        "color": "#EF4444",
+        "color": "#F59E0B",
         "icon": "flame"
       }
     },
@@ -3949,7 +3949,7 @@
         "voltage_class": 220,
         "state": "Jharkhand",
         "district": "Bokaro",
-        "color": "#F97316",
+        "color": "#F59E0B",
         "icon": "flame"
       }
     },
@@ -3977,7 +3977,7 @@
         "voltage_class": 220,
         "state": "Jharkhand",
         "district": "Bokaro",
-        "color": "#F97316",
+        "color": "#F59E0B",
         "icon": "flame"
       }
     },
@@ -4005,7 +4005,7 @@
         "voltage_class": 400,
         "state": "Jharkhand",
         "district": "Dhanbad",
-        "color": "#EF4444",
+        "color": "#F59E0B",
         "icon": "flame"
       }
     },
@@ -4029,7 +4029,7 @@
         "voltage_class": 400,
         "state": "Jharkhand",
         "district": "West Singhbhum",
-        "color": "#EF4444",
+        "color": "#DC2626",
         "notes": "Backbone link connecting Jamshedpur with Rourkela/Odisha."
       }
     },
@@ -4053,7 +4053,7 @@
         "voltage_class": 400,
         "state": "Jharkhand",
         "district": "East Singhbhum",
-        "color": "#EF4444",
+        "color": "#DC2626",
         "notes": "Heavy industrial steel corridor hub, linking Durgapur (WB) and Chaibasa."
       }
     },
@@ -4077,7 +4077,7 @@
         "voltage_class": 400,
         "state": "Jharkhand",
         "district": "Ramgarh",
-        "color": "#EF4444"
+        "color": "#DC2626"
       }
     },
     {
@@ -4100,7 +4100,7 @@
         "voltage_class": 400,
         "state": "Jharkhand",
         "district": "Dhanbad",
-        "color": "#EF4444"
+        "color": "#DC2626"
       }
     },
     {
@@ -4127,7 +4127,7 @@
         "voltage_class": 400,
         "state": "Odisha",
         "district": "Angul",
-        "color": "#EF4444",
+        "color": "#F59E0B",
         "icon": "flame",
         "notes": "Origin of 2,000 MW Talcher-Kolar HVDC bipole link to Southern Region (SR)."
       }
@@ -4156,7 +4156,7 @@
         "voltage_class": 765,
         "state": "Odisha",
         "district": "Sundargarh",
-        "color": "#9333EA",
+        "color": "#F59E0B",
         "icon": "flame"
       }
     },
@@ -4184,7 +4184,7 @@
         "voltage_class": 400,
         "state": "Odisha",
         "district": "Jharsuguda",
-        "color": "#EF4444",
+        "color": "#F59E0B",
         "icon": "flame"
       }
     },
@@ -4212,7 +4212,7 @@
         "voltage_class": 400,
         "state": "Odisha",
         "district": "Dhenkanal",
-        "color": "#EF4444",
+        "color": "#F59E0B",
         "icon": "flame"
       }
     },
@@ -4240,7 +4240,7 @@
         "voltage_class": 400,
         "state": "Odisha",
         "district": "Kalahandi",
-        "color": "#2563EB",
+        "color": "#F59E0B",
         "icon": "droplet"
       }
     },
@@ -4268,7 +4268,7 @@
         "voltage_class": 220,
         "state": "Odisha",
         "district": "Malkangiri",
-        "color": "#2563EB",
+        "color": "#F59E0B",
         "icon": "droplet"
       }
     },
@@ -4292,7 +4292,7 @@
         "voltage_class": 765,
         "state": "Odisha",
         "district": "Jharsuguda",
-        "color": "#9333EA",
+        "color": "#CA8A04",
         "notes": "Premier inter-regional hub between ER and Western Region (Raipur/Dharamjaygarh)."
       }
     },
@@ -4316,7 +4316,7 @@
         "voltage_class": 765,
         "state": "Odisha",
         "district": "Angul",
-        "color": "#9333EA",
+        "color": "#CA8A04",
         "notes": "Massive 765 kV generation pooling station for Talcher and Kamalanga complexes."
       }
     },
@@ -4340,7 +4340,7 @@
         "voltage_class": 400,
         "state": "Odisha",
         "district": "Dhenkanal",
-        "color": "#EF4444"
+        "color": "#DC2626"
       }
     },
     {
@@ -4363,7 +4363,7 @@
         "voltage_class": 400,
         "state": "Odisha",
         "district": "Khurda",
-        "color": "#EF4444",
+        "color": "#DC2626",
         "notes": "Chief supply point for capital city Bhubaneswar and Cuttack urban zone."
       }
     },
@@ -4387,7 +4387,7 @@
         "voltage_class": 400,
         "state": "Odisha",
         "district": "Sundargarh",
-        "color": "#EF4444"
+        "color": "#DC2626"
       }
     },
     {
@@ -4410,7 +4410,7 @@
         "voltage_class": 400,
         "state": "Odisha",
         "district": "Jajpur",
-        "color": "#EF4444",
+        "color": "#DC2626",
         "notes": "Steel hub Kalinganagar industrial grid gateway."
       }
     },
@@ -4434,7 +4434,7 @@
         "voltage_class": 400,
         "state": "Odisha",
         "district": "Koraput",
-        "color": "#EF4444",
+        "color": "#DC2626",
         "notes": "Southern Odisha interchange link to Gazuwaka (Southern Region)."
       }
     },
@@ -4462,7 +4462,7 @@
         "voltage_class": 400,
         "state": "Sikkim",
         "district": "East Sikkim",
-        "color": "#2563EB",
+        "color": "#F59E0B",
         "icon": "droplet"
       }
     },
@@ -4490,7 +4490,7 @@
         "voltage_class": 400,
         "state": "Sikkim",
         "district": "North Sikkim",
-        "color": "#2563EB",
+        "color": "#F59E0B",
         "icon": "droplet"
       }
     },
@@ -4518,7 +4518,7 @@
         "voltage_class": 220,
         "state": "Sikkim",
         "district": "East Sikkim",
-        "color": "#2563EB",
+        "color": "#F59E0B",
         "icon": "droplet"
       }
     },
@@ -4542,7 +4542,7 @@
         "voltage_class": 400,
         "state": "Sikkim",
         "district": "South Sikkim",
-        "color": "#EF4444",
+        "color": "#DC2626",
         "notes": "Pools Jorethang, Tashiding and Chuzachen hydro into ER Siliguri corridor."
       }
     },
@@ -4574,7 +4574,7 @@
         "voltage_class": 765,
         "circuits": 1,
         "crms_codebook": "765KV GAYA-RANCHI CKT-1",
-        "color": "#9333EA",
+        "color": "#CA8A04",
         "operator": "POWERGRID",
         "length_km": 178
       }
@@ -4607,7 +4607,7 @@
         "voltage_class": 765,
         "circuits": 2,
         "crms_codebook": "765KV GAYA-VARANASI CKT-1",
-        "color": "#9333EA",
+        "color": "#CA8A04",
         "operator": "POWERGRID",
         "length_km": 215,
         "inter_regional": "ER-NR"
@@ -4641,7 +4641,7 @@
         "voltage_class": 765,
         "circuits": 1,
         "crms_codebook": "765KV SASARAM-FATEHPUR CKT-1",
-        "color": "#9333EA",
+        "color": "#CA8A04",
         "operator": "POWERGRID",
         "length_km": 340,
         "inter_regional": "ER-NR"
@@ -4675,7 +4675,7 @@
         "voltage_class": 765,
         "circuits": 2,
         "crms_codebook": "765KV RANCHI-DHARAMJAYGARH CKT-1",
-        "color": "#9333EA",
+        "color": "#CA8A04",
         "operator": "POWERGRID",
         "length_km": 285,
         "inter_regional": "ER-WR"
@@ -4709,7 +4709,7 @@
         "voltage_class": 765,
         "circuits": 2,
         "crms_codebook": "765KV JHARSUGUDA-RAIPUR CKT-1",
-        "color": "#9333EA",
+        "color": "#CA8A04",
         "operator": "POWERGRID",
         "length_km": 310,
         "inter_regional": "ER-WR"
@@ -4743,7 +4743,7 @@
         "voltage_class": 765,
         "circuits": 2,
         "crms_codebook": "765KV ANGUL-JHARSUGUDA CKT-1",
-        "color": "#9333EA",
+        "color": "#CA8A04",
         "operator": "POWERGRID",
         "length_km": 190
       }
@@ -4776,7 +4776,7 @@
         "voltage_class": 400,
         "circuits": 2,
         "crms_codebook": "400KV DURGAPUR-JAMSHEDPUR CKT-1",
-        "color": "#EF4444",
+        "color": "#DC2626",
         "operator": "POWERGRID",
         "length_km": 142
       }
@@ -4809,7 +4809,7 @@
         "voltage_class": 400,
         "circuits": 2,
         "crms_codebook": "400KV BARH-PATNA CKT-1",
-        "color": "#EF4444",
+        "color": "#DC2626",
         "operator": "POWERGRID",
         "length_km": 68
       }
@@ -4838,7 +4838,7 @@
         "voltage_class": 400,
         "circuits": 2,
         "crms_codebook": "400KV BARH-BIHARSHARIF CKT-1",
-        "color": "#EF4444",
+        "color": "#DC2626",
         "operator": "POWERGRID",
         "length_km": 45
       }
@@ -4871,7 +4871,7 @@
         "voltage_class": 400,
         "circuits": 2,
         "crms_codebook": "400KV KAHALGAON-BIHARSHARIF CKT-1",
-        "color": "#EF4444",
+        "color": "#DC2626",
         "operator": "POWERGRID",
         "length_km": 195
       }
@@ -4904,7 +4904,7 @@
         "voltage_class": 400,
         "circuits": 2,
         "crms_codebook": "400KV KAHALGAON-MAITHON CKT-1",
-        "color": "#EF4444",
+        "color": "#DC2626",
         "operator": "POWERGRID",
         "length_km": 182
       }
@@ -4937,7 +4937,7 @@
         "voltage_class": 400,
         "circuits": 2,
         "crms_codebook": "400KV MAITHON-RANCHI CKT-1",
-        "color": "#EF4444",
+        "color": "#DC2626",
         "operator": "POWERGRID",
         "length_km": 165
       }
@@ -4970,7 +4970,7 @@
         "voltage_class": 400,
         "circuits": 2,
         "crms_codebook": "400KV CHAIBASA-ROURKELA CKT-1",
-        "color": "#EF4444",
+        "color": "#DC2626",
         "operator": "POWERGRID",
         "length_km": 128
       }
@@ -5003,7 +5003,7 @@
         "voltage_class": 400,
         "circuits": 2,
         "crms_codebook": "400KV TALCHER-MERAMUNDALI CKT-1",
-        "color": "#EF4444",
+        "color": "#DC2626",
         "operator": "OPTCL",
         "length_km": 54
       }
@@ -5036,7 +5036,7 @@
         "voltage_class": 400,
         "circuits": 2,
         "crms_codebook": "400KV MERAMUNDALI-MENDHASAL CKT-1",
-        "color": "#EF4444",
+        "color": "#DC2626",
         "operator": "OPTCL",
         "length_km": 72
       }
@@ -5069,7 +5069,7 @@
         "voltage_class": 400,
         "circuits": 2,
         "crms_codebook": "400KV MUZAFFARPUR-DHALKEBAR CKT-1",
-        "color": "#EF4444",
+        "color": "#DC2626",
         "operator": "CPTC / POWERGRID",
         "length_km": 140,
         "cross_border": "India-Nepal"
@@ -5103,7 +5103,7 @@
         "voltage_class": 400,
         "circuits": 2,
         "crms_codebook": "400KV RANGPO-SILIGURI CKT-1",
-        "color": "#EF4444",
+        "color": "#DC2626",
         "operator": "POWERGRID",
         "length_km": 96
       }
@@ -5132,7 +5132,7 @@
         "voltage_class": 400,
         "circuits": 2,
         "crms_codebook": "400KV TEESTA V-RANGPO CKT-1",
-        "color": "#EF4444",
+        "color": "#DC2626",
         "operator": "POWERGRID",
         "length_km": 38
       }
@@ -5165,7 +5165,7 @@
         "voltage_class": 400,
         "circuits": 2,
         "crms_codebook": "400KV BAHARAMPUR-BHERAMARA CKT-1",
-        "color": "#EF4444",
+        "color": "#DC2626",
         "operator": "POWERGRID",
         "length_km": 105,
         "cross_border": "India-Bangladesh"

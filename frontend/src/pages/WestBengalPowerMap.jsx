@@ -41,8 +41,20 @@ import defaultGridGeoJson from "../data/power_map/eastern_region_power_grid.json
 // Base map style options (Watermark-free, zero-API-key defaults)
 export const BASEMAP_PROVIDERS = [
   {
+    id: "esri-gray",
+    label: "Power Grid Light Canvas (Minimal Civil Roads)",
+    shortLabel: "Light Canvas",
+    attribution: 'Tiles © <a href="https://www.esri.com/" target="_blank">Esri</a>, HERE, Garmin, © OpenStreetMap contributors',
+    requiresKey: false,
+    badge: "Recommended • No Key",
+    tiles: [
+      "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}",
+    ],
+    description: "Minimalist light gray canvas. Civil roads and settlements are muted to keep electrical corridors and substations in full focus.",
+  },
+  {
     id: "osm",
-    label: "OpenStreetMap Standard",
+    label: "OpenStreetMap (De-emphasized Roads)",
     shortLabel: "OSM",
     attribution: '© <a href="https://www.openstreetmap.org/copyright" target="_blank">OpenStreetMap contributors</a>',
     requiresKey: false,
@@ -50,19 +62,7 @@ export const BASEMAP_PROVIDERS = [
     tiles: [
       "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
     ],
-    description: "Standard OpenStreetMap with towns, highways, and district boundaries.",
-  },
-  {
-    id: "esri-gray",
-    label: "Esri Light Gray Canvas",
-    shortLabel: "Light",
-    attribution: 'Tiles © <a href="https://www.esri.com/" target="_blank">Esri</a>, HERE, Garmin, © OpenStreetMap contributors',
-    requiresKey: false,
-    badge: "Free • No Key",
-    tiles: [
-      "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}",
-    ],
-    description: "Minimalist light gray canvas. Gives maximum contrast for power transmission lines and substation badges.",
+    description: "Standard OpenStreetMap. When Civil Muting is active, roads and railways are softened so power corridors stand out.",
   },
   {
     id: "satellite",
@@ -154,7 +154,8 @@ export default function WestBengalPowerMap() {
   const fileInputRef = useRef(null);
 
   // UI state
-  const [activeBaseMap, setActiveBaseMap] = useState("osm");
+  const [activeBaseMap, setActiveBaseMap] = useState("esri-gray");
+  const [muteCivilInfra, setMuteCivilInfra] = useState(true);
   const [selectedEntity, setSelectedEntity] = useState(null);
   const [activeTab, setActiveTab] = useState("all"); // 'all', 'plants', 'substations', 'lines'
   const [searchQuery, setSearchQuery] = useState("");
@@ -457,13 +458,18 @@ export default function WestBengalPowerMap() {
             },
           },
           layers: [
-            // 1. Base raster map
+            // 1. Base raster map (Civil infrastructure desaturated to spotlight electrical grid)
             {
               id: "base-tiles-layer",
               type: "raster",
               source: "base-tiles",
               minzoom: 0,
               maxzoom: 20,
+              paint: {
+                "raster-saturation": muteCivilInfra ? -0.88 : 0,
+                "raster-contrast": muteCivilInfra ? -0.18 : 0,
+                "raster-opacity": muteCivilInfra ? 0.68 : 1.0,
+              },
             },
 
             // 2. OpenInfra Vector Tiles Overlay (Optional, toggled by user)
@@ -478,9 +484,9 @@ export default function WestBengalPowerMap() {
                 "line-cap": "round",
               },
               paint: {
-                "line-color": "#FFFFFF",
-                "line-width": ["interpolate", ["linear"], ["zoom"], 6, 2, 10, 4.5, 14, 7],
-                "line-opacity": 0.6,
+                "line-color": "#0F172A",
+                "line-width": ["interpolate", ["linear"], ["zoom"], 6, 3, 10, 5.5, 14, 8],
+                "line-opacity": 0.75,
               },
             },
             {
@@ -496,18 +502,18 @@ export default function WestBengalPowerMap() {
               paint: {
                 "line-color": [
                   "case",
-                  [">=", ["to-number", ["get", "voltage"], 0], 700000], "#9333EA",
-                  [">=", ["to-number", ["get", "voltage"], 0], 380000], "#EF4444",
-                  [">=", ["to-number", ["get", "voltage"], 0], 200000], "#F97316",
+                  [">=", ["to-number", ["get", "voltage"], 0], 700000], "#CA8A04",
+                  [">=", ["to-number", ["get", "voltage"], 0], 380000], "#DC2626",
+                  [">=", ["to-number", ["get", "voltage"], 0], 200000], "#16A34A",
                   [">=", ["to-number", ["get", "voltage"], 0], 100000], "#0284C7",
-                  "#10B981",
+                  "#0284C7",
                 ],
-                "line-width": 2,
-                "line-opacity": 0.85,
+                "line-width": 2.5,
+                "line-opacity": 0.9,
               },
             },
 
-            // 3. West Bengal Power Transmission Lines - Halo / Casing (OpenInfra style)
+            // 3. Power Transmission Lines - Dark High-Contrast Casing (OpenInfra style)
             {
               id: "wb-line-casing",
               type: "line",
@@ -518,7 +524,7 @@ export default function WestBengalPowerMap() {
                 "line-cap": "round",
               },
               paint: {
-                "line-color": activeBaseMap === "satellite" ? "#0F172A" : "#FFFFFF",
+                "line-color": "#0F172A",
                 "line-width": [
                   "interpolate",
                   ["linear"],
@@ -526,41 +532,41 @@ export default function WestBengalPowerMap() {
                   4,
                   [
                     "case",
-                    [">=", ["get", "voltage_class"], 765], 8.5,
-                    [">=", ["get", "voltage_class"], 400], 7.0,
-                    [">=", ["get", "voltage_class"], 220], 5.5,
-                    3.8,
+                    [">=", ["get", "voltage_class"], 765], 9.5,
+                    [">=", ["get", "voltage_class"], 400], 8.0,
+                    [">=", ["get", "voltage_class"], 220], 6.2,
+                    4.6,
                   ],
                   7,
                   [
                     "case",
-                    [">=", ["get", "voltage_class"], 765], 11.0,
-                    [">=", ["get", "voltage_class"], 400], 9.0,
-                    [">=", ["get", "voltage_class"], 220], 7.0,
-                    4.8,
+                    [">=", ["get", "voltage_class"], 765], 12.0,
+                    [">=", ["get", "voltage_class"], 400], 10.0,
+                    [">=", ["get", "voltage_class"], 220], 8.0,
+                    5.8,
                   ],
                   10,
                   [
                     "case",
-                    [">=", ["get", "voltage_class"], 765], 13.5,
-                    [">=", ["get", "voltage_class"], 400], 11.0,
-                    [">=", ["get", "voltage_class"], 220], 8.5,
-                    6.0,
+                    [">=", ["get", "voltage_class"], 765], 15.0,
+                    [">=", ["get", "voltage_class"], 400], 12.5,
+                    [">=", ["get", "voltage_class"], 220], 10.0,
+                    7.5,
                   ],
                   14,
                   [
                     "case",
-                    [">=", ["get", "voltage_class"], 765], 16.0,
-                    [">=", ["get", "voltage_class"], 400], 13.5,
-                    [">=", ["get", "voltage_class"], 220], 10.5,
-                    7.5,
+                    [">=", ["get", "voltage_class"], 765], 18.0,
+                    [">=", ["get", "voltage_class"], 400], 15.0,
+                    [">=", ["get", "voltage_class"], 220], 12.0,
+                    9.0,
                   ],
                 ],
-                "line-opacity": 0.92,
+                "line-opacity": 0.88,
               },
             },
 
-            // 4. West Bengal Power Transmission Lines - Bold Core (OpenInfra style)
+            // 4. Power Transmission Lines - Bold Core in Standard Voltage Colors
             {
               id: "wb-line-core",
               type: "line",
@@ -579,34 +585,34 @@ export default function WestBengalPowerMap() {
                   4,
                   [
                     "case",
-                    [">=", ["get", "voltage_class"], 765], 6.0,
-                    [">=", ["get", "voltage_class"], 400], 4.8,
-                    [">=", ["get", "voltage_class"], 220], 3.5,
-                    2.4,
+                    [">=", ["get", "voltage_class"], 765], 6.5,
+                    [">=", ["get", "voltage_class"], 400], 5.2,
+                    [">=", ["get", "voltage_class"], 220], 3.8,
+                    2.6,
                   ],
                   7,
                   [
                     "case",
-                    [">=", ["get", "voltage_class"], 765], 8.0,
-                    [">=", ["get", "voltage_class"], 400], 6.5,
-                    [">=", ["get", "voltage_class"], 220], 4.8,
-                    3.2,
+                    [">=", ["get", "voltage_class"], 765], 9.0,
+                    [">=", ["get", "voltage_class"], 400], 7.2,
+                    [">=", ["get", "voltage_class"], 220], 5.2,
+                    3.6,
                   ],
                   10,
                   [
                     "case",
-                    [">=", ["get", "voltage_class"], 765], 10.5,
-                    [">=", ["get", "voltage_class"], 400], 8.5,
-                    [">=", ["get", "voltage_class"], 220], 6.2,
-                    4.2,
+                    [">=", ["get", "voltage_class"], 765], 11.5,
+                    [">=", ["get", "voltage_class"], 400], 9.2,
+                    [">=", ["get", "voltage_class"], 220], 7.0,
+                    4.8,
                   ],
                   14,
                   [
                     "case",
-                    [">=", ["get", "voltage_class"], 765], 13.0,
-                    [">=", ["get", "voltage_class"], 400], 10.5,
-                    [">=", ["get", "voltage_class"], 220], 8.0,
-                    5.5,
+                    [">=", ["get", "voltage_class"], 765], 14.0,
+                    [">=", ["get", "voltage_class"], 400], 11.5,
+                    [">=", ["get", "voltage_class"], 220], 9.0,
+                    6.2,
                   ],
                 ],
                 "line-opacity": 1.0,
@@ -634,7 +640,7 @@ export default function WestBengalPowerMap() {
               },
             },
 
-            // 6. Substation Circles
+            // 6. Substation Circles (Standard Voltage Coded)
             {
               id: "wb-substation-circle",
               type: "circle",
@@ -645,18 +651,18 @@ export default function WestBengalPowerMap() {
                   "interpolate",
                   ["linear"],
                   ["zoom"],
-                  4, 5.5,
-                  7, 8.5,
-                  10, 11.5,
-                  14, 15.0,
+                  4, 6.0,
+                  7, 9.5,
+                  10, 13.0,
+                  14, 17.0,
                 ],
                 "circle-color": ["get", "color"],
-                "circle-stroke-width": 2.5,
+                "circle-stroke-width": 3.0,
                 "circle-stroke-color": "#FFFFFF",
               },
             },
 
-            // 7. Power Plant Outer Glowing Beacon (Visible Like OpenInfra)
+            // 7. Power Plant Outer Glowing Beacon (Amber #F59E0B)
             {
               id: "wb-plant-beacon",
               type: "circle",
@@ -667,18 +673,18 @@ export default function WestBengalPowerMap() {
                   "interpolate",
                   ["linear"],
                   ["zoom"],
-                  6, 9.0,
-                  10, 15.0,
-                  14, 22.0,
+                  6, 11.0,
+                  10, 17.0,
+                  14, 25.0,
                 ],
-                "circle-color": ["get", "color"],
-                "circle-opacity": 0.35,
-                "circle-stroke-width": 2,
-                "circle-stroke-color": ["get", "color"],
+                "circle-color": "#F59E0B",
+                "circle-opacity": 0.45,
+                "circle-stroke-width": 2.5,
+                "circle-stroke-color": "#F59E0B",
               },
             },
 
-            // 8. Power Plant Core Circle
+            // 8. Power Plant Core Circle (Amber #F59E0B)
             {
               id: "wb-plant-core",
               type: "circle",
@@ -689,17 +695,17 @@ export default function WestBengalPowerMap() {
                   "interpolate",
                   ["linear"],
                   ["zoom"],
-                  6, 6.0,
-                  10, 9.5,
-                  14, 13.5,
+                  6, 7.5,
+                  10, 11.5,
+                  14, 16.0,
                 ],
-                "circle-color": ["get", "color"],
-                "circle-stroke-width": 2.5,
+                "circle-color": "#F59E0B",
+                "circle-stroke-width": 3.0,
                 "circle-stroke-color": "#FFFFFF",
               },
             },
 
-            // 9. Power Plant Labels (Always visible with MW capacity)
+            // 9. Power Plant Labels (Always visible with short name & MW capacity)
             {
               id: "wb-plant-label",
               type: "symbol",
@@ -720,9 +726,9 @@ export default function WestBengalPowerMap() {
                 "text-justify": "center",
               },
               paint: {
-                "text-color": "#991B1B",
+                "text-color": "#78350F",
                 "text-halo-color": "#FFFFFF",
-                "text-halo-width": 2.8,
+                "text-halo-width": 3.0,
               },
             },
           ],
@@ -843,7 +849,7 @@ export default function WestBengalPowerMap() {
     };
   }, []);
 
-  // Update base map layer when changed or when API key changes
+  // Update base map layer when changed or when API key or muting toggle changes
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapLoaded) return;
@@ -860,15 +866,14 @@ export default function WestBengalPowerMap() {
       }
     }
 
-    // Update casing color according to basemap contrast
-    if (map.getLayer("wb-line-casing")) {
-      map.setPaintProperty(
-        "wb-line-casing",
-        "line-color",
-        activeBaseMap === "satellite" ? "#0F172A" : "#FFFFFF"
-      );
+    // Apply civil infrastructure muting / desaturation on the raster basemap
+    if (map.getLayer("base-tiles-layer")) {
+      const isSat = activeBaseMap === "satellite";
+      map.setPaintProperty("base-tiles-layer", "raster-saturation", !isSat && muteCivilInfra ? -0.88 : 0);
+      map.setPaintProperty("base-tiles-layer", "raster-contrast", !isSat && muteCivilInfra ? -0.18 : 0);
+      map.setPaintProperty("base-tiles-layer", "raster-opacity", !isSat && muteCivilInfra ? 0.68 : 1.0);
     }
-  }, [activeBaseMap, cartoApiKey, mapLoaded]);
+  }, [activeBaseMap, cartoApiKey, muteCivilInfra, mapLoaded]);
 
   // Update layer visibility
   useEffect(() => {
@@ -918,11 +923,11 @@ export default function WestBengalPowerMap() {
 
         const badgeColor =
           sub.voltage_class >= 765
-            ? "#9333EA"
+            ? "#CA8A04"
             : sub.voltage_class >= 400
             ? "#DC2626"
             : sub.voltage_class >= 220
-            ? "#EA580C"
+            ? "#16A34A"
             : "#0284C7";
 
         el.innerHTML = `
@@ -965,7 +970,62 @@ export default function WestBengalPowerMap() {
         markersRef.current.push(marker);
       });
     }
-  }, [mapLoaded, layersVisibility.labels, layersVisibility.substations, allSubstations]);
+
+    // Render badges for Power Generating Stations (Amber #F59E0B)
+    if (layersVisibility.powerPlants) {
+      allPlants.forEach((plant) => {
+        const el = document.createElement("div");
+        el.className = "wb-plant-badge";
+        el.style.cssText = `
+          cursor: pointer;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          transform: translate(-50%, -100%);
+          pointer-events: auto;
+        `;
+
+        el.innerHTML = `
+          <div style="
+            background: #F59E0B;
+            color: #78350F;
+            font-size: 10px;
+            font-weight: 800;
+            padding: 2px 7px;
+            border-radius: 999px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.35);
+            white-space: nowrap;
+            border: 1.5px solid #FFFFFF;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+          ">
+            <span>🏭 ${plant.short_name || plant.name}</span>
+            <span style="background: rgba(120,53,15,0.15); padding: 1px 4px; border-radius: 4px; font-size: 8.5px; font-weight: 800;">${plant.capacity_label || plant.capacity_mw + ' MW'}</span>
+          </div>
+          <div style="
+            width: 0;
+            height: 0;
+            border-left: 4px solid transparent;
+            border-right: 4px solid transparent;
+            border-top: 5px solid #F59E0B;
+            margin-top: -1px;
+          "></div>
+        `;
+
+        el.addEventListener("click", (e) => {
+          e.stopPropagation();
+          flyToEntity("plant", plant);
+        });
+
+        const marker = new Marker({ element: el })
+          .setLngLat(plant.coords)
+          .addTo(map);
+
+        markersRef.current.push(marker);
+      });
+    }
+  }, [mapLoaded, layersVisibility.labels, layersVisibility.substations, layersVisibility.powerPlants, allSubstations, allPlants]);
 
   // Fly to Entity (Substation, Power Plant, or Line)
   const flyToEntity = (type, entity) => {
@@ -1295,22 +1355,36 @@ export default function WestBengalPowerMap() {
                     )}
                   </div>
 
-                  {/* Filter Pills */}
+                  {/* Filter Pills with Standard Voltage Colors */}
                   <div className="d-flex flex-wrap gap-1 mb-2">
-                    {["all", "765", "400", "220", "132"].map((vf) => (
-                      <button
-                        key={vf}
-                        className={`btn btn-xs px-2 py-0 rounded-pill ${
-                          voltageFilter === vf
-                            ? "btn-dark fw-bold"
-                            : "btn-outline-secondary"
-                        }`}
-                        style={{ fontSize: "11px" }}
-                        onClick={() => setVoltageFilter(vf)}
-                      >
-                        {vf === "all" ? "All kV" : `${vf} kV`}
-                      </button>
-                    ))}
+                    {["all", "765", "400", "220", "132"].map((vf) => {
+                      const chipColor =
+                        vf === "765"
+                          ? "#CA8A04"
+                          : vf === "400"
+                          ? "#DC2626"
+                          : vf === "220"
+                          ? "#16A34A"
+                          : vf === "132"
+                          ? "#0284C7"
+                          : "#1E293B";
+                      const isActive = voltageFilter === vf;
+                      return (
+                        <button
+                          key={vf}
+                          className="btn btn-xs px-2 py-0.5 rounded-pill fw-bold transition-all"
+                          style={{
+                            fontSize: "11px",
+                            backgroundColor: isActive ? chipColor : "transparent",
+                            color: isActive ? "#FFFFFF" : chipColor,
+                            border: `1.5px solid ${chipColor}`,
+                          }}
+                          onClick={() => setVoltageFilter(vf)}
+                        >
+                          {vf === "all" ? "All kV" : `${vf} kV`}
+                        </button>
+                      );
+                    })}
                   </div>
 
                   {/* Operator Filter */}
@@ -1335,14 +1409,14 @@ export default function WestBengalPowerMap() {
 
                 {/* Directory Content List */}
                 <div className="card-body p-2 flex-grow-1 overflow-auto">
-                  {/* Power Plants Section */}
+                  {/* Power Plants Section (Amber #F59E0B) */}
                   {(activeTab === "all" || activeTab === "plants") && filteredPlants.length > 0 && (
                     <div className="mb-3">
-                      <div className="d-flex align-items-center justify-content-between px-1 mb-1 text-danger fw-bold small">
+                      <div className="d-flex align-items-center justify-content-between px-1 mb-1 fw-bold small" style={{ color: "#B45309" }}>
                         <span className="d-flex align-items-center gap-1">
-                          <Flame size={14} /> Power Generating Stations
+                          <Flame size={14} style={{ color: "#F59E0B" }} /> Power Generating Stations
                         </span>
-                        <span className="badge bg-danger-subtle text-danger rounded-pill">
+                        <span className="badge rounded-pill fw-bold" style={{ backgroundColor: "#FEF3C7", color: "#92400E" }}>
                           {filteredPlants.length}
                         </span>
                       </div>
@@ -1355,23 +1429,28 @@ export default function WestBengalPowerMap() {
                               onClick={() => flyToEntity("plant", plant)}
                               className={`p-2 rounded-2 border transition-all ${
                                 isSelected
-                                  ? "bg-danger-subtle border-danger shadow-sm"
+                                  ? "shadow-sm"
                                   : "bg-white hover-bg-light cursor-pointer"
                               }`}
-                              style={{ cursor: "pointer" }}
+                              style={{
+                                cursor: "pointer",
+                                backgroundColor: isSelected ? "#FEF3C7" : undefined,
+                                borderColor: isSelected ? "#F59E0B" : undefined,
+                                borderLeft: `4px solid #F59E0B`,
+                              }}
                             >
                               <div className="d-flex align-items-center justify-content-between">
                                 <span className="fw-bold text-dark small d-flex align-items-center gap-1.5">
                                   <span>{plant.fuel === "coal" ? "🔥" : "💧"}</span>
                                   <span>{plant.short_name || plant.name}</span>
                                 </span>
-                                <span className="badge bg-amber-subtle text-amber-900 border fw-bold" style={{ fontSize: "10px", backgroundColor: "#FEF3C7", color: "#92400E" }}>
+                                <span className="badge border fw-bold" style={{ fontSize: "10px", backgroundColor: "#FEF3C7", color: "#92400E", borderColor: "#FDE68A" }}>
                                   {plant.capacity_label || `${plant.capacity_mw} MW`}
                                 </span>
                               </div>
                               <div className="d-flex align-items-center justify-content-between text-muted mt-1" style={{ fontSize: "11px" }}>
                                 <span>{plant.operator} · {plant.district}</span>
-                                <span className="text-danger fw-semibold">{plant.voltage || '400 kV'}</span>
+                                <span className="fw-bold" style={{ color: "#B45309" }}>{plant.voltage || '400 kV'}</span>
                               </div>
                             </div>
                           );
@@ -1396,11 +1475,11 @@ export default function WestBengalPowerMap() {
                           const isSelected = selectedEntity?.id === sub.id;
                           const vColor =
                             sub.voltage_class >= 765
-                              ? "#9333EA"
+                              ? "#CA8A04"
                               : sub.voltage_class >= 400
                               ? "#DC2626"
                               : sub.voltage_class >= 220
-                              ? "#EA580C"
+                              ? "#16A34A"
                               : "#0284C7";
 
                           return (
@@ -1409,17 +1488,20 @@ export default function WestBengalPowerMap() {
                               onClick={() => flyToEntity("substation", sub)}
                               className={`p-2 rounded-2 border transition-all ${
                                 isSelected
-                                  ? "bg-primary-subtle border-primary shadow-sm"
+                                  ? "bg-light border-primary shadow-sm"
                                   : "bg-white hover-bg-light cursor-pointer"
                               }`}
-                              style={{ cursor: "pointer" }}
+                              style={{
+                                cursor: "pointer",
+                                borderLeft: `4px solid ${vColor}`,
+                              }}
                             >
                               <div className="d-flex align-items-center justify-content-between">
                                 <span className="fw-bold text-dark small d-flex align-items-center gap-1.5">
                                   <span
                                     style={{
-                                      width: "8px",
-                                      height: "8px",
+                                      width: "9px",
+                                      height: "9px",
                                       borderRadius: "50%",
                                       backgroundColor: vColor,
                                       display: "inline-block",
@@ -1428,11 +1510,11 @@ export default function WestBengalPowerMap() {
                                   <span>{sub.short_name || sub.name}</span>
                                 </span>
                                 <span
-                                  className="badge rounded-pill"
+                                  className="badge rounded-pill fw-bold"
                                   style={{
-                                    backgroundColor: `${vColor}15`,
+                                    backgroundColor: `${vColor}18`,
                                     color: vColor,
-                                    border: `1px solid ${vColor}40`,
+                                    border: `1.5px solid ${vColor}50`,
                                     fontSize: "10px",
                                   }}
                                 >
@@ -1584,7 +1666,7 @@ export default function WestBengalPowerMap() {
                 {/* Grid Infrastructure Layer Toggles */}
                 <div>
                   <div className="fw-bold text-muted mb-1" style={{ fontSize: "10px", letterSpacing: "0.5px" }}>
-                    GRID LAYERS
+                    GRID LAYERS & INFRASTRUCTURE
                   </div>
                   <div className="d-flex flex-column gap-1" style={{ fontSize: "11px" }}>
                     <label className="d-flex align-items-center gap-1.5 cursor-pointer user-select-none">
@@ -1595,7 +1677,7 @@ export default function WestBengalPowerMap() {
                           setLayersVisibility({ ...layersVisibility, powerLines: e.target.checked })
                         }
                       />
-                      <span className="fw-bold text-danger">⚡ Transmission Corridors (WB)</span>
+                      <span className="fw-bold text-dark">⚡ Transmission Corridors (ER)</span>
                     </label>
 
                     <label className="d-flex align-items-center gap-1.5 cursor-pointer user-select-none">
@@ -1606,7 +1688,7 @@ export default function WestBengalPowerMap() {
                           setLayersVisibility({ ...layersVisibility, powerPlants: e.target.checked })
                         }
                       />
-                      <span className="fw-bold text-dark">🔥 Power Generating Stations</span>
+                      <span className="fw-bold" style={{ color: "#B45309" }}>🏭 Power Generating Stations (Amber)</span>
                     </label>
 
                     <label className="d-flex align-items-center gap-1.5 cursor-pointer user-select-none">
@@ -1631,7 +1713,19 @@ export default function WestBengalPowerMap() {
                       <span>Station Name Badges</span>
                     </label>
 
-                    <label className="d-flex align-items-center gap-1.5 cursor-pointer user-select-none mt-1 pt-1 border-top">
+                    {/* De-emphasize Civil Infrastructure Switch */}
+                    <label className="d-flex align-items-center gap-1.5 cursor-pointer user-select-none mt-1 pt-1 border-top bg-light p-1 rounded">
+                      <input
+                        type="checkbox"
+                        checked={muteCivilInfra}
+                        onChange={(e) => setMuteCivilInfra(e.target.checked)}
+                      />
+                      <span className="fw-bold text-dark" style={{ fontSize: "10.5px" }}>
+                        🛡 De-emphasize Roads & Civil Infra
+                      </span>
+                    </label>
+
+                    <label className="d-flex align-items-center gap-1.5 cursor-pointer user-select-none pt-0.5">
                       <input
                         type="checkbox"
                         checked={layersVisibility.liveOpenInfraTiles}
@@ -1768,43 +1862,44 @@ export default function WestBengalPowerMap() {
               </div>
             )}
 
-            {/* Voltage Legend Overlay (OpenInfra Standard Colors) */}
+            {/* Voltage Legend Overlay (Standard Grid Colors) */}
             <div
-              className="position-absolute bottom-0 end-0 m-3 card border-0 shadow-sm rounded-3 p-2 bg-white bg-opacity-95 backdrop-blur z-2"
-              style={{ fontSize: "10.5px" }}
+              className="position-absolute bottom-0 end-0 m-3 card border-0 shadow rounded-3 p-2.5 bg-white bg-opacity-95 backdrop-blur z-2"
+              style={{ fontSize: "11px", minWidth: "215px" }}
             >
-              <div className="fw-bold text-dark mb-1 d-flex align-items-center justify-content-between gap-3">
+              <div className="fw-bold text-dark mb-1.5 d-flex align-items-center justify-content-between gap-3 border-bottom pb-1">
                 <span>Voltage Legend (kV)</span>
-                <span className="badge bg-secondary-subtle text-secondary" style={{ fontSize: "8.5px" }}>
-                  OpenInfra
+                <span className="badge bg-dark text-white" style={{ fontSize: "9px" }}>
+                  Standard Grid
                 </span>
               </div>
-              <div className="d-flex flex-column gap-1">
-                <div className="d-flex align-items-center gap-1.5">
-                  <span style={{ width: "16px", height: "4px", backgroundColor: "#9333EA", borderRadius: "2px" }}></span>
-                  <span className="fw-bold">765 kV / ±800kV HVDC</span>
+              <div className="d-flex flex-column gap-1.5">
+                <div className="d-flex align-items-center gap-2">
+                  <span style={{ width: "18px", height: "5px", backgroundColor: "#CA8A04", borderRadius: "2px", border: "1px solid #0F172A", display: "inline-block" }}></span>
+                  <span className="fw-bold" style={{ color: "#CA8A04" }}>765 kV</span>
+                  <span className="text-muted small ms-auto">Dark Yellow</span>
                 </div>
-                <div className="d-flex align-items-center gap-1.5">
-                  <span style={{ width: "16px", height: "4px", backgroundColor: "#EF4444", borderRadius: "2px" }}></span>
-                  <span className="fw-bold">400 kV</span>
-                  <span className="text-muted">(Main Grid)</span>
+                <div className="d-flex align-items-center gap-2">
+                  <span style={{ width: "18px", height: "5px", backgroundColor: "#DC2626", borderRadius: "2px", border: "1px solid #0F172A", display: "inline-block" }}></span>
+                  <span className="fw-bold" style={{ color: "#DC2626" }}>400 kV</span>
+                  <span className="text-muted small ms-auto">Red (Main Grid)</span>
                 </div>
-                <div className="d-flex align-items-center gap-1.5">
-                  <span style={{ width: "16px", height: "4px", backgroundColor: "#F97316", borderRadius: "2px" }}></span>
-                  <span className="fw-bold">220 kV</span>
+                <div className="d-flex align-items-center gap-2">
+                  <span style={{ width: "18px", height: "5px", backgroundColor: "#16A34A", borderRadius: "2px", border: "1px solid #0F172A", display: "inline-block" }}></span>
+                  <span className="fw-bold" style={{ color: "#16A34A" }}>220 kV</span>
+                  <span className="text-muted small ms-auto">Green</span>
                 </div>
-                <div className="d-flex align-items-center gap-1.5">
-                  <span style={{ width: "16px", height: "4px", backgroundColor: "#0284C7", borderRadius: "2px" }}></span>
-                  <span className="fw-bold">132 kV</span>
-                  <span className="text-muted">(Sub-transmission)</span>
+                <div className="d-flex align-items-center gap-2">
+                  <span style={{ width: "18px", height: "5px", backgroundColor: "#0284C7", borderRadius: "2px", border: "1px solid #0F172A", display: "inline-block" }}></span>
+                  <span className="fw-bold" style={{ color: "#0284C7" }}>132 kV</span>
+                  <span className="text-muted small ms-auto">Blue</span>
                 </div>
-                <div className="d-flex align-items-center gap-1.5 pt-1 mt-1 border-top">
-                  <span style={{ width: "10px", height: "10px", backgroundColor: "#DC2626", borderRadius: "50%", border: "2px solid #FFF", display: "inline-block" }}></span>
-                  <span className="fw-bold">🔥 Thermal Power Station</span>
-                </div>
-                <div className="d-flex align-items-center gap-1.5">
-                  <span style={{ width: "10px", height: "10px", backgroundColor: "#0284C7", borderRadius: "50%", border: "2px solid #FFF", display: "inline-block" }}></span>
-                  <span className="fw-bold">💧 Hydroelectric / PPSP</span>
+                <div className="d-flex align-items-center gap-2 pt-1.5 mt-0.5 border-top">
+                  <span style={{ width: "12px", height: "12px", backgroundColor: "#F59E0B", borderRadius: "50%", border: "2px solid #FFF", boxShadow: "0 0 0 1.5px #B45309", display: "inline-block" }}></span>
+                  <span className="fw-bold" style={{ color: "#B45309" }}>🏭 Power Plants / Gen</span>
+                  <span className="badge rounded-pill ms-auto" style={{ backgroundColor: "#FEF3C7", color: "#92400E", fontSize: "9px" }}>
+                    Amber (#F59E0B)
+                  </span>
                 </div>
               </div>
             </div>

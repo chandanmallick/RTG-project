@@ -464,9 +464,10 @@ class PowerMapService:
             category = "power_plant" if power_tag == "plant" else "power_substation"
 
             color = (
-                "#9333EA" if volt_class >= 765 else
-                "#EF4444" if volt_class >= 400 else
-                "#F97316" if volt_class >= 220 else
+                "#F59E0B" if category == "power_plant" else
+                "#CA8A04" if volt_class >= 765 else
+                "#DC2626" if volt_class >= 400 else
+                "#16A34A" if volt_class >= 220 else
                 "#0284C7"
             )
 

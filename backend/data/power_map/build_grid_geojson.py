@@ -165,7 +165,7 @@ def build_geojson():
                     "voltage": node["volt"],
                     "voltage_class": node["vclass"],
                     "district": node.get("dist", "West Bengal"),
-                    "color": "#DC2626" if node["fuel"] == "coal" else "#0284C7",
+                    "color": "#F59E0B",
                     "icon": "flame" if node["fuel"] == "coal" else "droplet",
                 }
             })
@@ -190,9 +190,9 @@ def build_geojson():
                     "voltage_class": node["vclass"],
                     "district": node.get("dist", "West Bengal"),
                     "color": (
-                        "#9333EA" if node["vclass"] >= 765 else
-                        "#EF4444" if node["vclass"] >= 400 else
-                        "#F97316" if node["vclass"] >= 220 else
+                        "#CA8A04" if node["vclass"] >= 765 else
+                        "#DC2626" if node["vclass"] >= 400 else
+                        "#16A34A" if node["vclass"] >= 220 else
                         "#0284C7"
                     ),
                 }
@@ -227,11 +227,11 @@ def build_geojson():
         vclass = int(v / 1000)
 
         color = (
-            "#9333EA" if v >= 700000 else
-            "#EF4444" if v >= 380000 else
-            "#F97316" if v >= 200000 else
+            "#CA8A04" if v >= 700000 else
+            "#DC2626" if v >= 380000 else
+            "#16A34A" if v >= 200000 else
             "#0284C7" if v >= 100000 else
-            "#10B981"
+            "#0284C7"
         )
 
         features.append({
