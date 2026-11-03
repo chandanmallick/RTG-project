@@ -139,3 +139,4 @@ async def export_nasa_power_json(
     except Exception as e:
         logger.error(f"Error exporting weather data: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Export failed: {str(e)}")
+

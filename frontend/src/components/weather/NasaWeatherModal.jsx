@@ -839,3 +839,4 @@ for lat, lon in locations:
     </div>
   );
 }
+

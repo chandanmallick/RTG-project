@@ -46,43 +46,29 @@ import NasaWeatherModal from "../components/weather/NasaWeatherModal";
 export const BASEMAP_PROVIDERS = [
   {
     id: "osm",
-    label: "Power Grid Muted Map (OpenStreetMap)",
-    shortLabel: "OSM Muted",
+    label: "OpenStreetMap Standard",
+    shortLabel: "OSM",
     attribution: '© <a href="https://www.openstreetmap.org/copyright" target="_blank">OpenStreetMap contributors</a>',
     requiresKey: false,
-    badge: "Recommended • Live",
+    badge: "Free • Live",
     bgColor: "#F1F5F9",
     tiles: [
       "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
     ],
-    description: "Standard live basemap with civil infrastructure de-emphasized so power corridors and substations stand out.",
+    description: "Standard live OpenStreetMap with highways, towns, rivers, and civil boundaries.",
   },
   {
-    id: "carto-light",
-    label: "Carto Light Canvas (High Contrast)",
-    shortLabel: "Light Canvas",
-    attribution: '© <a href="https://carto.com/" target="_blank">CARTO</a>, © OpenStreetMap contributors',
+    id: "esri-gray",
+    label: "Esri Light Gray Canvas",
+    shortLabel: "Light",
+    attribution: 'Tiles © <a href="https://www.esri.com/" target="_blank">Esri</a>, HERE, Garmin, © OpenStreetMap contributors',
     requiresKey: false,
     badge: "Clean Canvas",
     bgColor: "#F8FAFC",
     tiles: [
-      "https://a.basemaps.cartocdn.com/rastertiles/light_all/{z}/{x}/{y}.png",
-      "https://b.basemaps.cartocdn.com/rastertiles/light_all/{z}/{x}/{y}.png",
+      "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}",
     ],
-    description: "Clean light basemap with soft roads and high contrast for electrical corridors.",
-  },
-  {
-    id: "osm-full",
-    label: "OpenStreetMap (Standard Detail)",
-    shortLabel: "OSM Full",
-    attribution: '© <a href="https://www.openstreetmap.org/copyright" target="_blank">OpenStreetMap contributors</a>',
-    requiresKey: false,
-    badge: "Standard",
-    bgColor: "#F1F5F9",
-    tiles: [
-      "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
-    ],
-    description: "Full-color OpenStreetMap with standard road, river, and town rendering.",
+    description: "Minimalist light gray canvas. Gives maximum contrast for power transmission corridors and substation badges with zero road clutter.",
   },
   {
     id: "satellite",
@@ -98,34 +84,17 @@ export const BASEMAP_PROVIDERS = [
     description: "High resolution aerial satellite imagery showing actual switchyards, terrain, and rivers.",
   },
   {
-    id: "blank-light",
-    label: "Clean Grid Canvas - Light (Zero Road Clutter)",
-    shortLabel: "Clean Canvas",
-    attribution: "Eastern Region Power System • National Grid",
+    id: "esri-topo",
+    label: "Esri Topographic",
+    shortLabel: "Topo",
+    attribution: 'Tiles © <a href="https://www.esri.com/" target="_blank">Esri</a>, USGS',
     requiresKey: false,
-    badge: "100% Offline • Vector",
-    bgColor: "#F8FAFC",
-    stateFill: "#F8FAFC",
-    stateOutline: "#CBD5E1",
-    labelColor: "#94A3B8",
-    haloColor: "#FFFFFF",
-    tiles: null,
-    description: "Pure electrical grid focus. Zero civil highways or local streets. High-contrast transmission corridors, substations, and regional state boundaries.",
-  },
-  {
-    id: "blank-dark",
-    label: "Control Room Dark Canvas (SCADA Display)",
-    shortLabel: "Blank Dark",
-    attribution: "Eastern Region Power System • National Grid",
-    requiresKey: false,
-    badge: "SCADA • 100% Offline",
-    bgColor: "#0B132B",
-    stateFill: "#111C44",
-    stateOutline: "#334155",
-    labelColor: "#64748B",
-    haloColor: "#0B132B",
-    tiles: null,
-    description: "High-contrast dark mode canvas optimized for control room video walls and operator consoles.",
+    badge: "Topography",
+    bgColor: "#F1F5F9",
+    tiles: [
+      "https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}",
+    ],
+    description: "Topographic contours, terrain relief, and geographical landmarks.",
   },
   {
     id: "carto-voyager",
@@ -134,6 +103,7 @@ export const BASEMAP_PROVIDERS = [
     attribution: '© <a href="https://carto.com/" target="_blank">CARTO</a>, © OpenStreetMap contributors',
     requiresKey: true,
     badge: "API Key Req.",
+    bgColor: "#F8FAFC",
     getTiles: (key) => [
       `https://a.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png${key ? `?key=${key}` : ""}`,
       `https://b.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png${key ? `?key=${key}` : ""}`,
@@ -481,7 +451,6 @@ export default function WestBengalPowerMap() {
 
     const activeProvider = BASEMAP_PROVIDERS.find((b) => b.id === activeBaseMap) || BASEMAP_PROVIDERS[0];
     const initialTiles = activeProvider.getTiles ? activeProvider.getTiles(cartoApiKey) : activeProvider.tiles;
-    const isBlank = activeProvider.id.startsWith("blank");
 
     let failsafeTimer = null;
 
@@ -498,7 +467,7 @@ export default function WestBengalPowerMap() {
             },
             "base-tiles": {
               type: "raster",
-              tiles: initialTiles && initialTiles.length > 0 ? initialTiles : ["data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAA="],
+              tiles: initialTiles && initialTiles.length > 0 ? initialTiles : ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],
               tileSize: 256,
               attribution: activeProvider.attribution,
             },
@@ -515,7 +484,7 @@ export default function WestBengalPowerMap() {
             },
           },
           layers: [
-            // 0. Base Canvas Background (Light #F8FAFC or Dark #0B132B)
+            // 0. Base Canvas Background
             {
               id: "canvas-background",
               type: "background",
@@ -524,18 +493,17 @@ export default function WestBengalPowerMap() {
               },
             },
 
-            // 1. Regional State Boundaries Fill (Clean offline state polygons)
+            // 1. Base raster map (OSM, Light Gray, Satellite, Topo) - ALWAYS visible and never clamped
             {
-              id: "er-state-fill",
-              type: "fill",
-              source: "er-boundaries",
-              filter: ["==", ["get", "category"], "state_boundary"],
-              layout: {
-                visibility: isBlank ? "visible" : "none",
-              },
+              id: "base-tiles-layer",
+              type: "raster",
+              source: "base-tiles",
+              minzoom: 0,
+              maxzoom: 20,
               paint: {
-                "fill-color": activeProvider.stateFill || "#FFFFFF",
-                "fill-opacity": 0.88,
+                "raster-saturation": muteCivilInfra && activeBaseMap === "osm" ? -0.7 : 0,
+                "raster-contrast": muteCivilInfra && activeBaseMap === "osm" ? -0.1 : 0,
+                "raster-opacity": muteCivilInfra && activeBaseMap === "osm" ? 0.75 : 1.0,
               },
             },
 
@@ -546,14 +514,14 @@ export default function WestBengalPowerMap() {
               source: "er-boundaries",
               filter: ["==", ["get", "category"], "state_boundary"],
               layout: {
-                visibility: isBlank ? "visible" : "none",
                 "line-join": "round",
                 "line-cap": "round",
               },
               paint: {
-                "line-color": activeProvider.stateOutline || "#CBD5E1",
+                "line-color": "#475569",
                 "line-width": 1.5,
                 "line-dasharray": [4, 2],
+                "line-opacity": 0.55,
               },
             },
 
@@ -564,33 +532,16 @@ export default function WestBengalPowerMap() {
               source: "er-boundaries",
               filter: ["==", ["get", "category"], "state_label"],
               layout: {
-                visibility: isBlank ? "visible" : "none",
                 "text-field": ["get", "name"],
                 "text-size": 13,
                 "text-font": ["Open Sans Semibold", "Arial Unicode MS Bold"],
                 "text-letter-spacing": 0.12,
               },
               paint: {
-                "text-color": activeProvider.labelColor || "#94A3B8",
-                "text-halo-color": activeProvider.haloColor || "#FFFFFF",
+                "text-color": "#1E293B",
+                "text-halo-color": "#FFFFFF",
                 "text-halo-width": 2.5,
-              },
-            },
-
-            // 4. Base raster map (OSM or Satellite, hidden when in Clean Canvas mode)
-            {
-              id: "base-tiles-layer",
-              type: "raster",
-              source: "base-tiles",
-              minzoom: 0,
-              maxzoom: 20,
-              layout: {
-                visibility: isBlank ? "none" : "visible",
-              },
-              paint: {
-                "raster-saturation": muteCivilInfra ? -0.85 : 0,
-                "raster-contrast": muteCivilInfra ? -0.15 : 0,
-                "raster-opacity": muteCivilInfra ? 0.65 : 1.0,
+                "text-opacity": 0.85,
               },
             },
 
@@ -847,12 +798,8 @@ export default function WestBengalPowerMap() {
         },
         center: initialCenter,
         zoom: initialZoom,
-        minZoom: 5.5,
+        minZoom: 3,
         maxZoom: 18,
-        maxBounds: [
-          [81.5, 19.0],
-          [93.0, 29.5],
-        ],
       });
 
       map.addControl(new NavigationControl({ showCompass: true }), "top-right");
@@ -982,44 +929,23 @@ export default function WestBengalPowerMap() {
     if (!map || !mapLoaded) return;
 
     const baseConfig = BASEMAP_PROVIDERS.find((b) => b.id === activeBaseMap) || BASEMAP_PROVIDERS[0];
-    const isBlank = baseConfig.id.startsWith("blank");
 
     // 1. Update background canvas color
     if (map.getLayer("canvas-background")) {
       map.setPaintProperty("canvas-background", "background-color", baseConfig.bgColor || "#F8FAFC");
     }
 
-    // 2. Update regional state boundaries
-    if (map.getLayer("er-state-fill")) {
-      map.setPaintProperty("er-state-fill", "fill-color", baseConfig.stateFill || "#FFFFFF");
-      map.setLayoutProperty("er-state-fill", "visibility", isBlank ? "visible" : "none");
-    }
-    if (map.getLayer("er-state-outline")) {
-      map.setPaintProperty("er-state-outline", "line-color", baseConfig.stateOutline || "#CBD5E1");
-      map.setLayoutProperty("er-state-outline", "visibility", isBlank ? "visible" : "none");
-    }
-    if (map.getLayer("er-state-label")) {
-      map.setPaintProperty("er-state-label", "text-color", baseConfig.labelColor || "#94A3B8");
-      map.setPaintProperty("er-state-label", "text-halo-color", baseConfig.haloColor || "#FFFFFF");
-      map.setLayoutProperty("er-state-label", "visibility", isBlank ? "visible" : "none");
-    }
-
-    // 3. Update base raster tiles layer
+    // 2. Update base raster tiles layer
     if (map.getLayer("base-tiles-layer")) {
-      if (isBlank) {
-        map.setLayoutProperty("base-tiles-layer", "visibility", "none");
-      } else {
-        map.setLayoutProperty("base-tiles-layer", "visibility", "visible");
-        const src = map.getSource("base-tiles");
-        const tiles = baseConfig.getTiles ? baseConfig.getTiles(cartoApiKey) : baseConfig.tiles;
-        if (src && src.setTiles && tiles) {
-          src.setTiles(tiles);
-        }
-        const isSat = baseConfig.id === "satellite";
-        map.setPaintProperty("base-tiles-layer", "raster-saturation", !isSat && muteCivilInfra ? -0.85 : 0);
-        map.setPaintProperty("base-tiles-layer", "raster-contrast", !isSat && muteCivilInfra ? -0.15 : 0);
-        map.setPaintProperty("base-tiles-layer", "raster-opacity", !isSat && muteCivilInfra ? 0.65 : 1.0);
+      const src = map.getSource("base-tiles");
+      const tiles = baseConfig.getTiles ? baseConfig.getTiles(cartoApiKey) : baseConfig.tiles;
+      if (src && src.setTiles && tiles && tiles.length > 0) {
+        src.setTiles(tiles);
       }
+      const isOsm = baseConfig.id === "osm";
+      map.setPaintProperty("base-tiles-layer", "raster-saturation", isOsm && muteCivilInfra ? -0.7 : 0);
+      map.setPaintProperty("base-tiles-layer", "raster-contrast", isOsm && muteCivilInfra ? -0.1 : 0);
+      map.setPaintProperty("base-tiles-layer", "raster-opacity", isOsm && muteCivilInfra ? 0.75 : 1.0);
     }
   }, [activeBaseMap, cartoApiKey, muteCivilInfra, mapLoaded]);
 
@@ -1841,7 +1767,7 @@ export default function WestBengalPowerMap() {
             <div
               ref={mapContainerRef}
               className="w-100 h-100 rounded-3 border shadow-sm position-relative overflow-hidden"
-              style={{ backgroundColor: activeBaseMap === "blank-dark" ? "#0B132B" : "#F8FAFC" }}
+              style={{ backgroundColor: "#F8FAFC" }}
             />
 
             {/* Toggle Sidebar Button */}
