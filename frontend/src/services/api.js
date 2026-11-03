@@ -1438,6 +1438,39 @@ const API = {
     });
     return res.data;
   },
+
+  // NASA POWER Weather & Temperature APIs
+  getWeatherCities: async () => {
+    const res = await axios.get(`${BASE_URL}/weather/cities`);
+    return res.data;
+  },
+
+  getNasaPowerWeather: async ({ latitude, longitude, start = "20240101", end = "20241231", cityName = null, refresh = false }) => {
+    const res = await axios.get(`${BASE_URL}/weather/nasa-power/point`, {
+      params: {
+        latitude,
+        longitude,
+        start,
+        end,
+        city_name: cityName,
+        refresh,
+      },
+    });
+    return res.data;
+  },
+
+  getBatchNasaWeather: async (locations, start = "20240101", end = "20241231") => {
+    const res = await axios.post(`${BASE_URL}/weather/nasa-power/batch`, {
+      locations,
+      start,
+      end,
+    });
+    return res.data;
+  },
+
+  getNasaPowerExportUrl: (latitude, longitude, start = "20240101", end = "20241231") => {
+    return `${BASE_URL}/weather/nasa-power/export?latitude=${latitude}&longitude=${longitude}&start=${start}&end=${end}`;
+  },
 };
 
 export default API;

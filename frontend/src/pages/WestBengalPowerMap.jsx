@@ -33,22 +33,79 @@ import {
   Droplets,
   ArrowRight,
   Filter,
+  CloudSun,
+  Thermometer,
 } from "lucide-react";
 import TopNavbar from "../components/layout/TopNavbar";
 import API from "../services/api";
 import defaultGridGeoJson from "../data/power_map/eastern_region_power_grid.json";
+import easternRegionBoundaries from "../data/power_map/eastern_region_boundaries.json";
+import NasaWeatherModal from "../components/weather/NasaWeatherModal";
 
 // Base map style options (Watermark-free, zero-API-key defaults)
 export const BASEMAP_PROVIDERS = [
   {
+    id: "osm",
+    label: "Power Grid Muted Map (OpenStreetMap)",
+    shortLabel: "OSM Muted",
+    attribution: '© <a href="https://www.openstreetmap.org/copyright" target="_blank">OpenStreetMap contributors</a>',
+    requiresKey: false,
+    badge: "Recommended • Live",
+    bgColor: "#F1F5F9",
+    tiles: [
+      "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+    ],
+    description: "Standard live basemap with civil infrastructure de-emphasized so power corridors and substations stand out.",
+  },
+  {
+    id: "carto-light",
+    label: "Carto Light Canvas (High Contrast)",
+    shortLabel: "Light Canvas",
+    attribution: '© <a href="https://carto.com/" target="_blank">CARTO</a>, © OpenStreetMap contributors',
+    requiresKey: false,
+    badge: "Clean Canvas",
+    bgColor: "#F8FAFC",
+    tiles: [
+      "https://a.basemaps.cartocdn.com/rastertiles/light_all/{z}/{x}/{y}.png",
+      "https://b.basemaps.cartocdn.com/rastertiles/light_all/{z}/{x}/{y}.png",
+    ],
+    description: "Clean light basemap with soft roads and high contrast for electrical corridors.",
+  },
+  {
+    id: "osm-full",
+    label: "OpenStreetMap (Standard Detail)",
+    shortLabel: "OSM Full",
+    attribution: '© <a href="https://www.openstreetmap.org/copyright" target="_blank">OpenStreetMap contributors</a>',
+    requiresKey: false,
+    badge: "Standard",
+    bgColor: "#F1F5F9",
+    tiles: [
+      "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+    ],
+    description: "Full-color OpenStreetMap with standard road, river, and town rendering.",
+  },
+  {
+    id: "satellite",
+    label: "Esri Satellite Imagery",
+    shortLabel: "Satellite",
+    attribution: 'Tiles © <a href="https://www.esri.com/" target="_blank">Esri</a>, Maxar, Earthstar Geographics',
+    requiresKey: false,
+    badge: "Aerial",
+    bgColor: "#0F172A",
+    tiles: [
+      "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+    ],
+    description: "High resolution aerial satellite imagery showing actual switchyards, terrain, and rivers.",
+  },
+  {
     id: "blank-light",
     label: "Clean Grid Canvas - Light (Zero Road Clutter)",
-    shortLabel: "Blank Light",
+    shortLabel: "Clean Canvas",
     attribution: "Eastern Region Power System • National Grid",
     requiresKey: false,
-    badge: "100% Offline • Clean Canvas",
+    badge: "100% Offline • Vector",
     bgColor: "#F8FAFC",
-    stateFill: "#FFFFFF",
+    stateFill: "#F8FAFC",
     stateOutline: "#CBD5E1",
     labelColor: "#94A3B8",
     haloColor: "#FFFFFF",
@@ -69,32 +126,6 @@ export const BASEMAP_PROVIDERS = [
     haloColor: "#0B132B",
     tiles: null,
     description: "High-contrast dark mode canvas optimized for control room video walls and operator consoles.",
-  },
-  {
-    id: "osm",
-    label: "OpenStreetMap (De-emphasized Roads)",
-    shortLabel: "OSM Muted",
-    attribution: '© <a href="https://www.openstreetmap.org/copyright" target="_blank">OpenStreetMap contributors</a>',
-    requiresKey: false,
-    badge: "Live Tiles",
-    bgColor: "#F1F5F9",
-    tiles: [
-      "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
-    ],
-    description: "Standard OpenStreetMap. When Civil Muting is active, roads and railways are softened so power corridors stand out.",
-  },
-  {
-    id: "satellite",
-    label: "Esri Satellite Imagery",
-    shortLabel: "Satellite",
-    attribution: 'Tiles © <a href="https://www.esri.com/" target="_blank">Esri</a>, Maxar, Earthstar Geographics',
-    requiresKey: false,
-    badge: "Free • No Key",
-    bgColor: "#0F172A",
-    tiles: [
-      "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
-    ],
-    description: "High resolution aerial satellite imagery showing actual switchyards, terrain, and rivers.",
   },
   {
     id: "carto-voyager",
@@ -162,7 +193,7 @@ export default function WestBengalPowerMap() {
   const fileInputRef = useRef(null);
 
   // UI state
-  const [activeBaseMap, setActiveBaseMap] = useState("blank-light");
+  const [activeBaseMap, setActiveBaseMap] = useState("osm");
   const [muteCivilInfra, setMuteCivilInfra] = useState(true);
   const [selectedEntity, setSelectedEntity] = useState(null);
   const [activeTab, setActiveTab] = useState("all"); // 'all', 'plants', 'substations', 'lines'
@@ -174,6 +205,11 @@ export default function WestBengalPowerMap() {
   const [mapLoaded, setMapLoaded] = useState(false);
   const [mapError, setMapError] = useState(null);
 
+  // NASA POWER Weather & Temperature state
+  const [weatherModalOpen, setWeatherModalOpen] = useState(false);
+  const [weatherLocationTarget, setWeatherLocationTarget] = useState(null);
+  const [weatherCities, setWeatherCities] = useState([]);
+
   // Layer toggles
   const [layersVisibility, setLayersVisibility] = useState({
     powerLines: true,
@@ -181,6 +217,7 @@ export default function WestBengalPowerMap() {
     substations: true,
     labels: true,
     liveOpenInfraTiles: false,
+    cityWeather: true,
   });
 
   // Extract catalog entities from GeoJSON
@@ -279,15 +316,16 @@ export default function WestBengalPowerMap() {
     });
   }, [allLines, searchQuery, voltageFilter, operatorFilter]);
 
-  // Fetch live dataset, sync status, and CRMS mappings on mount
+  // Fetch live dataset, sync status, CRMS mappings, and Weather cities on mount
   useEffect(() => {
     const fetchRemoteData = async () => {
       try {
-        const [dataRes, statusRes, crmsMapRes, crmsElemRes] = await Promise.allSettled([
+        const [dataRes, statusRes, crmsMapRes, crmsElemRes, citiesRes] = await Promise.allSettled([
           API.getPowerGridData(),
           API.getPowerGridStatus(),
           API.getCRMSMappings(),
           API.getCRMSCodebookElements("AC_TRANSMISSION_LINE_CIRCUIT"),
+          API.getWeatherCities(),
         ]);
         if (dataRes.status === "fulfilled" && dataRes.value?.features?.length > 0) {
           setGridData(dataRes.value);
@@ -305,6 +343,9 @@ export default function WestBengalPowerMap() {
         if (crmsElemRes.status === "fulfilled") {
           setCrmsElements(crmsElemRes.value?.elements || []);
           setCrmsIsLive(Boolean(crmsElemRes.value?.is_live));
+        }
+        if (citiesRes.status === "fulfilled" && citiesRes.value?.cities) {
+          setWeatherCities(citiesRes.value.cities);
         }
       } catch (err) {
         console.warn("Using bundled Eastern Region power grid dataset:", err);
@@ -453,7 +494,7 @@ export default function WestBengalPowerMap() {
           sources: {
             "er-boundaries": {
               type: "geojson",
-              data: "/geodata/eastern_region_boundaries.json",
+              data: easternRegionBoundaries || "/geodata/eastern_region_boundaries.json",
             },
             "base-tiles": {
               type: "raster",
@@ -1132,7 +1173,68 @@ export default function WestBengalPowerMap() {
         markersRef.current.push(marker);
       });
     }
-  }, [mapLoaded, layersVisibility.labels, layersVisibility.substations, layersVisibility.powerPlants, allSubstations, allPlants]);
+
+    // Render Weather / Temperature badges for Key Cities
+    if (layersVisibility.cityWeather && weatherCities && weatherCities.length > 0) {
+      weatherCities.slice(0, 15).forEach((city) => {
+        const el = document.createElement("div");
+        el.className = "er-city-weather-badge";
+        el.style.cssText = `
+          cursor: pointer;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          transform: translate(-50%, -100%);
+          pointer-events: auto;
+        `;
+        el.innerHTML = `
+          <div style="
+            background: linear-gradient(135deg, #0F172A 0%, #1E293B 100%);
+            color: #FFFFFF;
+            font-size: 9.5px;
+            font-weight: 700;
+            padding: 2px 6px;
+            border-radius: 999px;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+            white-space: nowrap;
+            border: 1.5px solid #F59E0B;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+          ">
+            <span>🌦️ ${city.name}</span>
+            <span style="background: rgba(245,158,11,0.3); color: #FDE68A; padding: 1px 3px; border-radius: 3px; font-size: 8px; font-weight: 800;">NASA Temp</span>
+          </div>
+          <div style="
+            width: 0;
+            height: 0;
+            border-left: 3px solid transparent;
+            border-right: 3px solid transparent;
+            border-top: 4px solid #0F172A;
+            margin-top: -1px;
+          "></div>
+        `;
+
+        el.addEventListener("click", (e) => {
+          e.stopPropagation();
+          setWeatherLocationTarget({
+            name: city.name,
+            latitude: city.latitude,
+            longitude: city.longitude,
+            district: city.district,
+            state: city.state,
+          });
+          setWeatherModalOpen(true);
+        });
+
+        const marker = new Marker({ element: el })
+          .setLngLat([city.longitude, city.latitude])
+          .addTo(map);
+
+        markersRef.current.push(marker);
+      });
+    }
+  }, [mapLoaded, layersVisibility.labels, layersVisibility.substations, layersVisibility.powerPlants, layersVisibility.cityWeather, allSubstations, allPlants, weatherCities]);
 
   // Fly to Entity (Substation, Power Plant, or Line)
   const flyToEntity = (type, entity) => {
@@ -1343,6 +1445,23 @@ export default function WestBengalPowerMap() {
               <span className="badge bg-white text-dark rounded-pill ms-1" style={{ fontSize: "10px" }}>
                 {Object.keys(crmsMappings).length} Mapped
               </span>
+            </button>
+
+            {/* NASA Weather & Temperature Button */}
+            <button
+              onClick={() => {
+                setWeatherLocationTarget(null);
+                setWeatherModalOpen(true);
+              }}
+              className="btn btn-sm d-flex align-items-center gap-1.5 fw-bold shadow-sm text-dark border-0"
+              style={{
+                background: "linear-gradient(135deg, #F59E0B 0%, #D97706 100%)",
+                color: "#FFFFFF",
+              }}
+              title="NASA POWER Daily Meteorology & Temperature Analysis"
+            >
+              <CloudSun size={14} className="text-white" />
+              <span className="text-white">Weather / Temp (NASA)</span>
             </button>
 
             {/* Live Sync / Update Data Button */}
@@ -1820,6 +1939,20 @@ export default function WestBengalPowerMap() {
                       <span>Station Name Badges</span>
                     </label>
 
+                    <label className="d-flex align-items-center gap-1.5 cursor-pointer user-select-none">
+                      <input
+                        type="checkbox"
+                        checked={layersVisibility.cityWeather}
+                        onChange={(e) =>
+                          setLayersVisibility({
+                            ...layersVisibility,
+                            cityWeather: e.target.checked,
+                          })
+                        }
+                      />
+                      <span className="fw-bold" style={{ color: "#D97706" }}>🌦️ City Weather Badges (NASA)</span>
+                    </label>
+
                     {/* De-emphasize Civil Infrastructure Switch */}
                     <label className="d-flex align-items-center gap-1.5 cursor-pointer user-select-none mt-1 pt-1 border-top bg-light p-1 rounded">
                       <input
@@ -1943,7 +2076,67 @@ export default function WestBengalPowerMap() {
                     </div>
                   </div>
 
+                  {/* NASA Weather & Temp Info Box */}
+                  {selectedEntity.coords && (
+                    <div className="mb-2 p-2 rounded" style={{ backgroundColor: "#FEF3C7", border: "1px solid #FCD34D" }}>
+                      <div className="d-flex align-items-center justify-content-between">
+                        <span className="small fw-bold text-dark d-flex align-items-center gap-1">
+                          <CloudSun size={13} className="text-warning-emphasis" /> NASA Weather & Temp:
+                        </span>
+                        <button
+                          onClick={() => {
+                            const c = selectedEntity.coords;
+                            const lat = c ? (c[1] !== undefined ? c[1] : c[0]) : 22.5726;
+                            const lon = c ? (c[0] !== undefined ? c[0] : c[1]) : 88.3639;
+                            setWeatherLocationTarget({
+                              name: selectedEntity.name,
+                              latitude: lat,
+                              longitude: lon,
+                              district: selectedEntity.district,
+                              state: selectedEntity.state,
+                            });
+                            setWeatherModalOpen(true);
+                          }}
+                          className="btn btn-link btn-xs p-0 text-decoration-none fw-bold text-dark"
+                          style={{ fontSize: "10.5px" }}
+                        >
+                          View NASA Trends ➔
+                        </button>
+                      </div>
+                      <div className="d-flex align-items-center justify-content-between mt-1 text-dark" style={{ fontSize: "11px" }}>
+                        <span>
+                          Lat: {selectedEntity.coords[1]?.toFixed(3)}°N, Lon: {selectedEntity.coords[0]?.toFixed(3)}°E
+                        </span>
+                        <span className="badge bg-warning text-dark font-monospace" style={{ fontSize: "9px" }}>
+                          T2M • Daily
+                        </span>
+                      </div>
+                    </div>
+                  )}
+
                   <div className="d-flex align-items-center gap-1.5 pt-2 border-top">
+                    {selectedEntity.coords && (
+                      <button
+                        onClick={() => {
+                          const c = selectedEntity.coords;
+                          const lat = c ? (c[1] !== undefined ? c[1] : c[0]) : 22.5726;
+                          const lon = c ? (c[0] !== undefined ? c[0] : c[1]) : 88.3639;
+                          setWeatherLocationTarget({
+                            name: selectedEntity.name,
+                            latitude: lat,
+                            longitude: lon,
+                            district: selectedEntity.district,
+                            state: selectedEntity.state,
+                          });
+                          setWeatherModalOpen(true);
+                        }}
+                        className="btn btn-warning btn-xs py-1 px-2 d-flex align-items-center gap-1 fw-bold text-dark shadow-xs"
+                        style={{ fontSize: "11px" }}
+                      >
+                        <CloudSun size={12} />
+                        NASA Weather
+                      </button>
+                    )}
                     {selectedEntity.coords && (
                       <a
                         href={`https://openinframap.org/#14/${selectedEntity.coords[1]}/${selectedEntity.coords[0]}`}
@@ -2545,6 +2738,12 @@ export default function WestBengalPowerMap() {
           </div>
         </div>
       )}
+      {/* NASA POWER Weather & Temperature Modal */}
+      <NasaWeatherModal
+        isOpen={weatherModalOpen}
+        onClose={() => setWeatherModalOpen(false)}
+        initialLocation={weatherLocationTarget}
+      />
     </div>
   );
 }
