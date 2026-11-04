@@ -520,7 +520,8 @@ export default function WestBengalPowerMap() {
             },
             openinframap: {
               type: "vector",
-              tiles: ["https://openinframap.org/tiles/{z}/{x}/{y}.pbf"],
+              // tile.openinframap.org has proper CORS headers unlike openinframap.org/tiles/
+              tiles: ["https://tile.openinframap.org/{z}/{x}/{y}.pbf"],
               maxzoom: 17,
               attribution:
                 '<a href="https://openinframap.org" target="_blank">Open Infrastructure Map</a> | <a href="https://maplibre.org" target="_blank">MapLibre</a>',
@@ -588,29 +589,29 @@ export default function WestBengalPowerMap() {
               },
             },
 
-            // 5. OpenInfra Vector Tiles Overlay (Superimposed on top of OSM)
+            // 5. OpenInfra Vector Tiles Overlay — thin precise style matching openinframap.org
             {
               id: "openinfra-line-casing",
               type: "line",
               source: "openinframap",
               "source-layer": "power_line",
               layout: {
-                visibility: "visible",
+                visibility: "none",
                 "line-join": "round",
                 "line-cap": "round",
               },
               paint: {
-                "line-color": "#0F172A",
+                "line-color": "#FFFFFF",
                 "line-width": [
                   "interpolate",
                   ["linear"],
                   ["zoom"],
-                  4, 6.0,
-                  7, 9.5,
-                  10, 13.5,
-                  14, 18.0,
+                  4, 2.0,
+                  8, 3.5,
+                  12, 5.0,
+                  16, 7.0,
                 ],
-                "line-opacity": 0.95,
+                "line-opacity": 0.9,
               },
             },
             {
@@ -619,7 +620,7 @@ export default function WestBengalPowerMap() {
               source: "openinframap",
               "source-layer": "power_line",
               layout: {
-                visibility: "visible",
+                visibility: "none",
                 "line-join": "round",
                 "line-cap": "round",
               },
@@ -630,22 +631,22 @@ export default function WestBengalPowerMap() {
                   [">=", ["to-number", ["get", "voltage"], 0], 380000], "#DC2626",
                   [">=", ["to-number", ["get", "voltage"], 0], 200000], "#16A34A",
                   [">=", ["to-number", ["get", "voltage"], 0], 100000], "#0284C7",
-                  "#0284C7",
+                  "#64748B",
                 ],
                 "line-width": [
                   "interpolate",
                   ["linear"],
                   ["zoom"],
-                  4, 3.8,
-                  7, 6.5,
-                  10, 9.5,
-                  14, 13.0,
+                  4, 1.0,
+                  8, 2.0,
+                  12, 3.0,
+                  16, 5.0,
                 ],
                 "line-opacity": 1.0,
               },
             },
 
-            // 6. Power Transmission Lines - Bold Dark High-Contrast Casing
+            // 6. Power Transmission Lines - Thin white casing (outline) matching OpenInfraMap style
             {
               id: "wb-line-casing",
               type: "line",
@@ -656,7 +657,7 @@ export default function WestBengalPowerMap() {
                 "line-cap": "round",
               },
               paint: {
-                "line-color": "#0F172A",
+                "line-color": "#FFFFFF",
                 "line-width": [
                   "interpolate",
                   ["linear"],
@@ -665,35 +666,44 @@ export default function WestBengalPowerMap() {
                   [
                     "match",
                     ["get", "voltage_class"],
-                    765, 11.0,
-                    400, 9.5,
-                    220, 7.5,
-                    6.0
+                    765, 4.0,
+                    400, 3.5,
+                    220, 3.0,
+                    2.5
                   ],
                   8,
                   [
                     "match",
                     ["get", "voltage_class"],
-                    765, 15.0,
-                    400, 13.0,
-                    220, 10.5,
-                    8.5
+                    765, 5.5,
+                    400, 4.5,
+                    220, 3.8,
+                    3.0
                   ],
                   12,
                   [
                     "match",
                     ["get", "voltage_class"],
-                    765, 20.0,
-                    400, 17.0,
-                    220, 13.5,
-                    11.0
+                    765, 7.0,
+                    400, 6.0,
+                    220, 5.0,
+                    4.0
+                  ],
+                  16,
+                  [
+                    "match",
+                    ["get", "voltage_class"],
+                    765, 9.0,
+                    400, 7.5,
+                    220, 6.5,
+                    5.0
                   ]
                 ],
-                "line-opacity": 0.95,
+                "line-opacity": 0.9,
               },
             },
 
-            // 7. Power Transmission Lines - Bold Core in Standard Voltage Colors
+            // 7. Power Transmission Lines - Thin voltage-coloured core matching OpenInfraMap style
             {
               id: "wb-line-core",
               type: "line",
@@ -713,28 +723,37 @@ export default function WestBengalPowerMap() {
                   [
                     "match",
                     ["get", "voltage_class"],
-                    765, 7.5,
-                    400, 6.5,
-                    220, 5.0,
-                    3.8
+                    765, 2.2,
+                    400, 1.8,
+                    220, 1.4,
+                    1.0
                   ],
                   8,
                   [
                     "match",
                     ["get", "voltage_class"],
-                    765, 11.0,
-                    400, 9.5,
-                    220, 7.5,
-                    5.5
+                    765, 3.2,
+                    400, 2.6,
+                    220, 2.0,
+                    1.5
                   ],
                   12,
                   [
                     "match",
                     ["get", "voltage_class"],
-                    765, 15.0,
-                    400, 13.0,
-                    220, 10.0,
-                    7.5
+                    765, 4.5,
+                    400, 3.5,
+                    220, 2.8,
+                    2.0
+                  ],
+                  16,
+                  [
+                    "match",
+                    ["get", "voltage_class"],
+                    765, 6.5,
+                    400, 5.0,
+                    220, 4.0,
+                    3.0
                   ]
                 ],
                 "line-opacity": 1.0,
@@ -762,7 +781,7 @@ export default function WestBengalPowerMap() {
               },
             },
 
-            // 9. Substation Outer Radar Halo / Demarcation Beacon (Loud Demarcation)
+            // 9. Substation outer glow halo — subtle, tight, OpenInfraMap-style
             {
               id: "wb-substation-beacon",
               type: "circle",
@@ -773,19 +792,20 @@ export default function WestBengalPowerMap() {
                   "interpolate",
                   ["linear"],
                   ["zoom"],
-                  4, 12.0,
-                  7, 17.0,
-                  10, 23.0,
-                  14, 30.0,
+                  4, 5.0,
+                  7, 7.5,
+                  10, 11.0,
+                  14, 16.0,
                 ],
                 "circle-color": ["get", "color"],
-                "circle-opacity": 0.38,
-                "circle-stroke-width": 2.5,
+                "circle-opacity": 0.22,
+                "circle-stroke-width": 1.5,
                 "circle-stroke-color": ["get", "color"],
+                "circle-stroke-opacity": 0.6,
               },
             },
 
-            // 10. Substation Circles (Standard Voltage Coded, Loud High-Contrast Border)
+            // 10. Substation dot — compact, OpenInfraMap-style small square-ish node
             {
               id: "wb-substation-circle",
               type: "circle",
@@ -796,13 +816,13 @@ export default function WestBengalPowerMap() {
                   "interpolate",
                   ["linear"],
                   ["zoom"],
-                  4, 7.5,
-                  7, 11.5,
-                  10, 15.5,
-                  14, 20.0,
+                  4, 3.0,
+                  7, 5.0,
+                  10, 7.5,
+                  14, 10.0,
                 ],
                 "circle-color": ["get", "color"],
-                "circle-stroke-width": 3.5,
+                "circle-stroke-width": 2.0,
                 "circle-stroke-color": "#FFFFFF",
               },
             },
@@ -1135,19 +1155,19 @@ export default function WestBengalPowerMap() {
 
     if (!layersVisibility.labels) return;
 
-    // Render badges for Substations (Loudly demarcated)
+    // Render badges for Substations
+    // Using anchor='bottom' so the callout arrow tip points exactly at the coordinate
     if (layersVisibility.substations) {
       allSubstations.forEach((sub) => {
         const el = document.createElement("div");
         el.className = "wb-substation-badge";
+        // No manual transform — MapLibre Marker with anchor:'bottom' handles positioning
         el.style.cssText = `
           cursor: pointer;
           display: flex;
           flex-direction: column;
           align-items: center;
-          transform: translate(-50%, -100%);
           pointer-events: auto;
-          z-index: 5;
         `;
 
         const badgeColor =
@@ -1163,29 +1183,27 @@ export default function WestBengalPowerMap() {
           <div style="
             background: ${badgeColor};
             color: #FFFFFF;
-            font-size: 11px;
-            font-weight: 900;
-            padding: 3px 8px;
+            font-size: 10px;
+            font-weight: 800;
+            padding: 2px 7px;
             border-radius: 999px;
-            box-shadow: 0 3px 10px rgba(0,0,0,0.45);
+            box-shadow: 0 2px 6px rgba(0,0,0,0.35);
             white-space: nowrap;
-            border: 2px solid #FFFFFF;
+            border: 1.5px solid #FFFFFF;
             display: flex;
             align-items: center;
-            gap: 5px;
-            letter-spacing: 0.2px;
+            gap: 4px;
           ">
             <span>⚡ ${sub.short_name || sub.name}</span>
-            <span style="background: rgba(0,0,0,0.3); padding: 1px 5px; border-radius: 4px; font-size: 9.5px; font-weight: 800;">${sub.voltage_class}kV</span>
+            <span style="background: rgba(0,0,0,0.25); padding: 1px 4px; border-radius: 3px; font-size: 8.5px; font-weight: 700;">${sub.voltage_class}kV</span>
           </div>
           <div style="
             width: 0;
             height: 0;
-            border-left: 5px solid transparent;
-            border-right: 5px solid transparent;
-            border-top: 6px solid ${badgeColor};
+            border-left: 4px solid transparent;
+            border-right: 4px solid transparent;
+            border-top: 5px solid ${badgeColor};
             margin-top: -1px;
-            filter: drop-shadow(0 2px 2px rgba(0,0,0,0.3));
           "></div>
         `;
 
@@ -1195,7 +1213,8 @@ export default function WestBengalPowerMap() {
         });
 
         const coords = getEntityCoordinates(sub);
-        const marker = new Marker({ element: el })
+        // anchor:'bottom' means the bottom-centre of the element sits exactly at the coordinate
+        const marker = new Marker({ element: el, anchor: "bottom" })
           .setLngLat([coords.lon, coords.lat])
           .addTo(map);
 
@@ -1208,42 +1227,40 @@ export default function WestBengalPowerMap() {
       allPlants.forEach((plant) => {
         const el = document.createElement("div");
         el.className = "wb-plant-badge";
+        // anchor:'bottom' on the Marker — no manual CSS transform needed
         el.style.cssText = `
           cursor: pointer;
           display: flex;
           flex-direction: column;
           align-items: center;
-          transform: translate(-50%, -100%);
           pointer-events: auto;
-          z-index: 6;
         `;
 
         el.innerHTML = `
           <div style="
             background: #F59E0B;
             color: #78350F;
-            font-size: 10.5px;
+            font-size: 10px;
             font-weight: 800;
-            padding: 3px 8px;
+            padding: 2px 7px;
             border-radius: 999px;
-            box-shadow: 0 3px 10px rgba(0,0,0,0.4);
+            box-shadow: 0 2px 8px rgba(0,0,0,0.35);
             white-space: nowrap;
-            border: 2px solid #FFFFFF;
+            border: 1.5px solid #FFFFFF;
             display: flex;
             align-items: center;
             gap: 4px;
           ">
             <span>🏭 ${plant.short_name || plant.name}</span>
-            <span style="background: rgba(120,53,15,0.2); padding: 1px 5px; border-radius: 4px; font-size: 9px; font-weight: 800;">${plant.capacity_label || plant.capacity_mw + ' MW'}</span>
+            <span style="background: rgba(120,53,15,0.2); padding: 1px 4px; border-radius: 3px; font-size: 8.5px; font-weight: 700;">${plant.capacity_label || plant.capacity_mw + ' MW'}</span>
           </div>
           <div style="
             width: 0;
             height: 0;
-            border-left: 5px solid transparent;
-            border-right: 5px solid transparent;
-            border-top: 6px solid #F59E0B;
+            border-left: 4px solid transparent;
+            border-right: 4px solid transparent;
+            border-top: 5px solid #F59E0B;
             margin-top: -1px;
-            filter: drop-shadow(0 2px 2px rgba(0,0,0,0.3));
           "></div>
         `;
 
@@ -1253,7 +1270,7 @@ export default function WestBengalPowerMap() {
         });
 
         const pcoords = getEntityCoordinates(plant);
-        const marker = new Marker({ element: el })
+        const marker = new Marker({ element: el, anchor: "bottom" })
           .setLngLat([pcoords.lon, pcoords.lat])
           .addTo(map);
 
