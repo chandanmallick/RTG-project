@@ -64,28 +64,12 @@ export function getEntityCoordinates(entity) {
 // Base map style options (Watermark-free, zero-API-key defaults)
 export const BASEMAP_PROVIDERS = [
   {
-    id: "osm",
-    label: "OpenStreetMap Standard (Lower Base)",
-    shortLabel: "OSM",
-    attribution: '© <a href="https://www.openstreetmap.org/copyright" target="_blank">OpenStreetMap contributors</a>',
-    requiresKey: false,
-    badge: "Base Map • Live",
-    bgColor: "#F1F5F9",
-    tiles: [
-      "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
-      "https://a.tile.openstreetmap.org/{z}/{x}/{y}.png",
-      "https://b.tile.openstreetmap.org/{z}/{x}/{y}.png",
-      "https://c.tile.openstreetmap.org/{z}/{x}/{y}.png",
-    ],
-    description: "Standard live OpenStreetMap with highways, towns, rivers, and civil boundaries as the primary lower base map.",
-  },
-  {
     id: "carto-light",
-    label: "Carto Light Canvas (High Contrast)",
-    shortLabel: "Light",
+    label: "Carto Light Canvas (High Contrast • OpenInfra Style)",
+    shortLabel: "Light (Clean)",
     attribution: '© <a href="https://carto.com/" target="_blank">CARTO</a>, © OpenStreetMap contributors',
     requiresKey: false,
-    badge: "High Contrast",
+    badge: "OpenInfra Canvas",
     bgColor: "#F8FAFC",
     tiles: [
       "https://a.basemaps.cartocdn.com/rastertiles/light_all/{z}/{x}/{y}.png",
@@ -93,7 +77,7 @@ export const BASEMAP_PROVIDERS = [
       "https://c.basemaps.cartocdn.com/rastertiles/light_all/{z}/{x}/{y}.png",
       "https://d.basemaps.cartocdn.com/rastertiles/light_all/{z}/{x}/{y}.png",
     ],
-    description: "Clean, muted light canvas with open CORS headers.",
+    description: "Clean, muted light canvas matching OpenInfraMap. Power transmission corridors and substations stand out immediately with zero road clutter.",
   },
   {
     id: "esri-gray",
@@ -107,6 +91,22 @@ export const BASEMAP_PROVIDERS = [
       "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}",
     ],
     description: "Minimalist light gray canvas. Gives maximum contrast for power transmission corridors and substation badges with zero road clutter.",
+  },
+  {
+    id: "osm",
+    label: "OpenStreetMap Standard (Highways & Terrain)",
+    shortLabel: "OSM",
+    attribution: '© <a href="https://www.openstreetmap.org/copyright" target="_blank">OpenStreetMap contributors</a>',
+    requiresKey: false,
+    badge: "OSM Roads",
+    bgColor: "#F1F5F9",
+    tiles: [
+      "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+      "https://a.tile.openstreetmap.org/{z}/{x}/{y}.png",
+      "https://b.tile.openstreetmap.org/{z}/{x}/{y}.png",
+      "https://c.tile.openstreetmap.org/{z}/{x}/{y}.png",
+    ],
+    description: "Standard live OpenStreetMap with highways, towns, rivers, and civil boundaries as the secondary base map.",
   },
   {
     id: "satellite",
@@ -201,8 +201,8 @@ export default function WestBengalPowerMap() {
   const fileInputRef = useRef(null);
 
   // UI state
-  const [activeBaseMap, setActiveBaseMap] = useState("osm");
-  const [muteCivilInfra, setMuteCivilInfra] = useState(false);
+  const [activeBaseMap, setActiveBaseMap] = useState("carto-light");
+  const [muteCivilInfra, setMuteCivilInfra] = useState(true);
   const [selectedEntity, setSelectedEntity] = useState(null);
   const [activeTab, setActiveTab] = useState("all"); // 'all', 'plants', 'substations', 'lines'
   const [searchQuery, setSearchQuery] = useState("");
@@ -520,8 +520,10 @@ export default function WestBengalPowerMap() {
             },
             openinframap: {
               type: "vector",
-              // tile.openinframap.org has proper CORS headers unlike openinframap.org/tiles/
-              tiles: ["https://tile.openinframap.org/{z}/{x}/{y}.pbf"],
+              tiles: [
+                "/api/power-map/openinfra-tiles/{z}/{x}/{y}.pbf",
+                "https://openinframap.org/tiles/{z}/{x}/{y}.pbf",
+              ],
               maxzoom: 17,
               attribution:
                 '<a href="https://openinframap.org" target="_blank">Open Infrastructure Map</a> | <a href="https://maplibre.org" target="_blank">MapLibre</a>',
@@ -545,9 +547,9 @@ export default function WestBengalPowerMap() {
               minzoom: 0,
               maxzoom: 20,
               paint: {
-                "raster-saturation": muteCivilInfra && activeBaseMap === "osm" ? -0.7 : 0,
-                "raster-contrast": muteCivilInfra && activeBaseMap === "osm" ? -0.1 : 0,
-                "raster-opacity": muteCivilInfra && activeBaseMap === "osm" ? 0.75 : 1.0,
+                "raster-saturation": muteCivilInfra && activeBaseMap === "osm" ? -0.85 : 0,
+                "raster-contrast": muteCivilInfra && activeBaseMap === "osm" ? -0.15 : 0,
+                "raster-opacity": muteCivilInfra && activeBaseMap === "osm" ? 0.55 : 1.0,
               },
             },
 
@@ -589,7 +591,7 @@ export default function WestBengalPowerMap() {
               },
             },
 
-            // 5. OpenInfra Vector Tiles Overlay — thin precise style matching openinframap.org
+            // 5. OpenInfra Vector Tiles Overlay — Bold saturated style matching openinframap.org
             {
               id: "openinfra-line-casing",
               type: "line",
@@ -601,17 +603,17 @@ export default function WestBengalPowerMap() {
                 "line-cap": "round",
               },
               paint: {
-                "line-color": "#FFFFFF",
+                "line-color": "#0F172A",
                 "line-width": [
                   "interpolate",
                   ["linear"],
                   ["zoom"],
-                  4, 2.0,
-                  8, 3.5,
-                  12, 5.0,
-                  16, 7.0,
+                  4, 2.8,
+                  8, 4.5,
+                  12, 7.5,
+                  16, 11.0,
                 ],
-                "line-opacity": 0.9,
+                "line-opacity": 0.85,
               },
             },
             {
@@ -627,26 +629,107 @@ export default function WestBengalPowerMap() {
               paint: {
                 "line-color": [
                   "case",
-                  [">=", ["to-number", ["get", "voltage"], 0], 700000], "#CA8A04",
-                  [">=", ["to-number", ["get", "voltage"], 0], 380000], "#DC2626",
-                  [">=", ["to-number", ["get", "voltage"], 0], 200000], "#16A34A",
-                  [">=", ["to-number", ["get", "voltage"], 0], 100000], "#0284C7",
-                  "#64748B",
+                  // 765 kV / 800 kV UHV (Gold / Dark Yellow)
+                  [
+                    "any",
+                    [">=", ["to-number", ["get", "voltage"], 0], 700000],
+                    [
+                      "all",
+                      [">=", ["to-number", ["get", "voltage"], 0], 650],
+                      ["<", ["to-number", ["get", "voltage"], 0], 2000]
+                    ]
+                  ],
+                  "#CA8A04",
+                  // 400 kV EHV (Grid Red)
+                  [
+                    "any",
+                    [
+                      "all",
+                      [">=", ["to-number", ["get", "voltage"], 0], 350000],
+                      ["<", ["to-number", ["get", "voltage"], 0], 650000]
+                    ],
+                    [
+                      "all",
+                      [">=", ["to-number", ["get", "voltage"], 0], 350],
+                      ["<", ["to-number", ["get", "voltage"], 0], 650]
+                    ]
+                  ],
+                  "#DC2626",
+                  // 220 kV HV (Forest Green)
+                  [
+                    "any",
+                    [
+                      "all",
+                      [">=", ["to-number", ["get", "voltage"], 0], 190000],
+                      ["<", ["to-number", ["get", "voltage"], 0], 350000]
+                    ],
+                    [
+                      "all",
+                      [">=", ["to-number", ["get", "voltage"], 0], 190],
+                      ["<", ["to-number", ["get", "voltage"], 0], 350]
+                    ]
+                  ],
+                  "#16A34A",
+                  // 132 kV / 66 kV (Electric Blue)
+                  [
+                    "any",
+                    [
+                      "all",
+                      [">=", ["to-number", ["get", "voltage"], 0], 50000],
+                      ["<", ["to-number", ["get", "voltage"], 0], 190000]
+                    ],
+                    [
+                      "all",
+                      [">=", ["to-number", ["get", "voltage"], 0], 50],
+                      ["<", ["to-number", ["get", "voltage"], 0], 190]
+                    ]
+                  ],
+                  "#0284C7",
+                  // OpenInfra Distinct Purple for all other transmission lines
+                  "#9333EA",
                 ],
                 "line-width": [
                   "interpolate",
                   ["linear"],
                   ["zoom"],
-                  4, 1.0,
-                  8, 2.0,
-                  12, 3.0,
-                  16, 5.0,
+                  4, 1.6,
+                  8, 2.8,
+                  12, 5.0,
+                  16, 8.0,
                 ],
                 "line-opacity": 1.0,
               },
             },
+            {
+              id: "openinfra-line-label",
+              type: "symbol",
+              source: "openinframap",
+              "source-layer": "power_line",
+              minzoom: 10.0,
+              layout: {
+                visibility: "none",
+                "symbol-placement": "line",
+                "text-field": [
+                  "case",
+                  [">=", ["to-number", ["get", "voltage"], 0], 1000],
+                  ["concat", ["to-string", ["round", ["/", ["to-number", ["get", "voltage"], 0], 1000]]], " kV"],
+                  [">", ["to-number", ["get", "voltage"], 0], 0],
+                  ["concat", ["to-string", ["to-number", ["get", "voltage"], 0]], " kV"],
+                  ""
+                ],
+                "text-size": 11,
+                "text-font": ["Open Sans Bold", "Arial Unicode MS Bold"],
+                "symbol-spacing": 250,
+                "text-keep-upright": true,
+              },
+              paint: {
+                "text-color": "#FFFFFF",
+                "text-halo-color": "#0F172A",
+                "text-halo-width": 3.0,
+              },
+            },
 
-            // 6. Power Transmission Lines - Thin white casing (outline) matching OpenInfraMap style
+            // 6. Curated ER Transmission Lines - High-Contrast Dark Slate Casing (Replaces washed-out white casing)
             {
               id: "wb-line-casing",
               type: "line",
@@ -657,7 +740,7 @@ export default function WestBengalPowerMap() {
                 "line-cap": "round",
               },
               paint: {
-                "line-color": "#FFFFFF",
+                "line-color": "#0F172A",
                 "line-width": [
                   "interpolate",
                   ["linear"],
@@ -666,44 +749,62 @@ export default function WestBengalPowerMap() {
                   [
                     "match",
                     ["get", "voltage_class"],
-                    765, 4.0,
-                    400, 3.5,
-                    220, 3.0,
-                    2.5
+                    800, 5.5,
+                    765, 5.5,
+                    400, 4.8,
+                    220, 3.8,
+                    3.0
                   ],
                   8,
                   [
                     "match",
                     ["get", "voltage_class"],
-                    765, 5.5,
-                    400, 4.5,
-                    220, 3.8,
-                    3.0
+                    800, 8.5,
+                    765, 8.5,
+                    400, 7.2,
+                    220, 5.8,
+                    4.5
                   ],
                   12,
                   [
                     "match",
                     ["get", "voltage_class"],
-                    765, 7.0,
-                    400, 6.0,
-                    220, 5.0,
-                    4.0
+                    800, 12.0,
+                    765, 12.0,
+                    400, 10.5,
+                    220, 8.5,
+                    7.0
                   ],
                   16,
                   [
                     "match",
                     ["get", "voltage_class"],
-                    765, 9.0,
-                    400, 7.5,
-                    220, 6.5,
-                    5.0
+                    800, 17.0,
+                    765, 17.0,
+                    400, 15.0,
+                    220, 12.0,
+                    10.0
                   ]
+                ],
+                "line-offset": [
+                  "case",
+                  ["==", ["get", "circuits"], 2],
+                  [
+                    "interpolate",
+                    ["linear"],
+                    ["zoom"],
+                    6, 1.2,
+                    10, 2.5,
+                    14, 4.5,
+                    17, 7.0
+                  ],
+                  0
                 ],
                 "line-opacity": 0.9,
               },
             },
 
-            // 7. Power Transmission Lines - Thin voltage-coloured core matching OpenInfraMap style
+            // 7. Curated ER Transmission Lines - Ultra-Prominent Saturated Core
             {
               id: "wb-line-core",
               type: "line",
@@ -723,56 +824,180 @@ export default function WestBengalPowerMap() {
                   [
                     "match",
                     ["get", "voltage_class"],
-                    765, 2.2,
-                    400, 1.8,
-                    220, 1.4,
-                    1.0
+                    800, 3.2,
+                    765, 3.2,
+                    400, 2.6,
+                    220, 2.0,
+                    1.6
                   ],
                   8,
                   [
                     "match",
                     ["get", "voltage_class"],
-                    765, 3.2,
-                    400, 2.6,
-                    220, 2.0,
-                    1.5
+                    800, 5.0,
+                    765, 5.0,
+                    400, 4.2,
+                    220, 3.2,
+                    2.5
                   ],
                   12,
                   [
                     "match",
                     ["get", "voltage_class"],
-                    765, 4.5,
-                    400, 3.5,
-                    220, 2.8,
-                    2.0
+                    800, 7.5,
+                    765, 7.5,
+                    400, 6.2,
+                    220, 5.0,
+                    4.0
                   ],
                   16,
                   [
                     "match",
                     ["get", "voltage_class"],
-                    765, 6.5,
-                    400, 5.0,
-                    220, 4.0,
-                    3.0
+                    800, 11.0,
+                    765, 11.0,
+                    400, 9.5,
+                    220, 7.5,
+                    6.0
                   ]
+                ],
+                "line-offset": [
+                  "case",
+                  ["==", ["get", "circuits"], 2],
+                  [
+                    "interpolate",
+                    ["linear"],
+                    ["zoom"],
+                    6, 1.2,
+                    10, 2.5,
+                    14, 4.5,
+                    17, 7.0
+                  ],
+                  0
                 ],
                 "line-opacity": 1.0,
               },
             },
 
-            // 8. Line Labels
+            // 7b. Double Circuit Parallel Track (Casing)
+            {
+              id: "wb-line-circuit2-casing",
+              type: "line",
+              source: "wb-power-grid",
+              filter: ["all", ["==", ["get", "category"], "power_line"], ["==", ["get", "circuits"], 2]],
+              layout: {
+                "line-join": "round",
+                "line-cap": "round",
+              },
+              paint: {
+                "line-color": "#0F172A",
+                "line-width": [
+                  "interpolate",
+                  ["linear"],
+                  ["zoom"],
+                  4, 4.8,
+                  8, 7.2,
+                  12, 10.5,
+                  16, 15.0
+                ],
+                "line-offset": [
+                  "interpolate",
+                  ["linear"],
+                  ["zoom"],
+                  6, -1.2,
+                  10, -2.5,
+                  14, -4.5,
+                  17, -7.0
+                ],
+                "line-opacity": 0.9,
+              },
+            },
+
+            // 7c. Double Circuit Parallel Track (Core)
+            {
+              id: "wb-line-circuit2-core",
+              type: "line",
+              source: "wb-power-grid",
+              filter: ["all", ["==", ["get", "category"], "power_line"], ["==", ["get", "circuits"], 2]],
+              layout: {
+                "line-join": "round",
+                "line-cap": "round",
+              },
+              paint: {
+                "line-color": ["get", "color"],
+                "line-width": [
+                  "interpolate",
+                  ["linear"],
+                  ["zoom"],
+                  4, 2.6,
+                  8, 4.2,
+                  12, 6.2,
+                  16, 9.5
+                ],
+                "line-offset": [
+                  "interpolate",
+                  ["linear"],
+                  ["zoom"],
+                  6, -1.2,
+                  10, -2.5,
+                  14, -4.5,
+                  17, -7.0
+                ],
+                "line-opacity": 1.0,
+              },
+            },
+
+            // 8a. In-Line Operating Voltage Badges along transmission corridors
+            {
+              id: "wb-line-voltage-badge",
+              type: "symbol",
+              source: "wb-power-grid",
+              filter: ["==", ["get", "category"], "power_line"],
+              minzoom: 8.0,
+              layout: {
+                "symbol-placement": "line",
+                "text-field": [
+                  "concat",
+                  ["to-string", ["get", "voltage_class"]],
+                  " kV",
+                  ["case", ["==", ["get", "circuits"], 2], " (D/C)", ""]
+                ],
+                "text-size": [
+                  "interpolate",
+                  ["linear"],
+                  ["zoom"],
+                  8, 9.5,
+                  12, 11.0,
+                  16, 12.5
+                ],
+                "text-font": ["Open Sans Bold", "Arial Unicode MS Bold"],
+                "text-letter-spacing": 0.05,
+                "symbol-spacing": 260,
+                "text-keep-upright": true,
+              },
+              paint: {
+                "text-color": "#FFFFFF",
+                "text-halo-color": ["get", "color"],
+                "text-halo-width": 3.5,
+                "text-halo-blur": 0.5,
+              },
+            },
+
+            // 8b. Full Transmission Corridor Names at deeper zooms
             {
               id: "wb-line-label",
               type: "symbol",
               source: "wb-power-grid",
               filter: ["==", ["get", "category"], "power_line"],
-              minzoom: 8.5,
+              minzoom: 10.5,
               layout: {
                 "symbol-placement": "line",
                 "text-field": ["get", "name"],
                 "text-size": 11,
                 "text-font": ["Open Sans Semibold", "Arial Unicode MS Bold"],
                 "text-letter-spacing": 0.04,
+                "symbol-spacing": 350,
+                "text-offset": [0, 1.2],
               },
               paint: {
                 "text-color": "#0F172A",
@@ -952,8 +1177,8 @@ export default function WestBengalPowerMap() {
         markLoaded();
       }, 800);
 
-      // Click on Power Transmission Lines
-      map.on("click", "wb-line-core", (e) => {
+      // Click on Power Transmission Lines (Master Corridors & Circuit 2 & OpenInfra Lines)
+      const handleLineClick = (e) => {
         if (!e.features || e.features.length === 0) return;
         const feat = e.features[0];
         const props = feat.properties || {};
@@ -961,16 +1186,47 @@ export default function WestBengalPowerMap() {
         new Popup({ offset: 12, className: "power-popup" })
           .setLngLat(e.lngLat)
           .setHTML(`
-            <div style="font-family: inherit; font-size: 13px; line-height: 1.45; padding: 4px; min-width: 220px;">
+            <div style="font-family: inherit; font-size: 13px; line-height: 1.45; padding: 4px; min-width: 230px;">
               <div style="display: flex; align-items: center; gap: 6px; font-weight: 800; color: #0F172A; margin-bottom: 6px;">
-                <span style="display: inline-block; width: 12px; height: 12px; border-radius: 3px; background: ${props.color || '#EF4444'};"></span>
-                <span>⚡ ${props.name}</span>
+                <span style="display: inline-block; width: 13px; height: 13px; border-radius: 3px; background: ${props.color || '#EF4444'};"></span>
+                <span>⚡ ${props.name || 'Transmission Corridor'}</span>
               </div>
               <div style="font-size: 11.5px; color: #475569; display: flex; flex-direction: column; gap: 3px;">
-                <div><b>Operating Voltage:</b> <span style="color:#DC2626; font-weight:800; font-size:12.5px;">${props.voltage_label || props.voltage_class + ' kV'}</span></div>
-                <div><b>Circuits:</b> ${props.circuits === 2 ? 'Double Circuit (D/C)' : 'Single Circuit (S/C)'}</div>
-                <div><b>Utility / Operator:</b> ${props.operator || 'WBSETCL'}</div>
-                <div><b>Type:</b> ${props.line_type || 'Overhead Corridor'}</div>
+                <div><b>Operating Voltage:</b> <span style="color:${props.color || '#DC2626'}; font-weight:800; font-size:12.5px;">${props.voltage_label || (props.voltage_class ? props.voltage_class + ' kV' : '400 kV')}</span></div>
+                <div><b>Corridor Circuits:</b> ${props.circuits === 2 ? 'Double Circuit (D/C) Twin Track' : 'Single Circuit (S/C)'}</div>
+                <div><b>Utility / Operator:</b> ${props.operator || 'POWERGRID / WBSETCL'}</div>
+                <div><b>Type:</b> ${props.line_type || 'Overhead Transmission Corridor'}</div>
+                ${props.length_km ? `<div><b>Corridor Length:</b> ${props.length_km} km</div>` : ''}
+              </div>
+            </div>
+          `)
+          .addTo(map);
+      };
+
+      map.on("click", "wb-line-core", handleLineClick);
+      map.on("click", "wb-line-circuit2-core", handleLineClick);
+
+      // Click on Live OpenInfra Vector Lines
+      map.on("click", "openinfra-line-core", (e) => {
+        if (!e.features || e.features.length === 0) return;
+        const feat = e.features[0];
+        const props = feat.properties || {};
+        const rawV = parseFloat(props.voltage) || 0;
+        const vDisplay = rawV >= 1000 ? Math.round(rawV / 1000) + " kV" : (rawV > 0 ? rawV + " kV" : "Transmission Line");
+
+        new Popup({ offset: 12, className: "power-popup" })
+          .setLngLat(e.lngLat)
+          .setHTML(`
+            <div style="font-family: inherit; font-size: 13px; line-height: 1.45; padding: 4px; min-width: 220px;">
+              <div style="display: flex; align-items: center; gap: 6px; font-weight: 800; color: #0F172A; margin-bottom: 6px;">
+                <span style="font-size: 14px;">🌐</span>
+                <span>OpenInfra Transmission Line</span>
+              </div>
+              <div style="font-size: 11.5px; color: #475569; display: flex; flex-direction: column; gap: 3px;">
+                <div><b>Operating Voltage:</b> <span style="color:#DC2626; font-weight:800;">${vDisplay}</span></div>
+                <div><b>Circuits:</b> ${props.circuits || 1}</div>
+                <div><b>Operator / Grid:</b> ${props.operator || 'National / Regional Grid'}</div>
+                <div><b>Source:</b> OpenInfrastructureMap (MVT)</div>
               </div>
             </div>
           `)
@@ -1026,7 +1282,7 @@ export default function WestBengalPowerMap() {
       map.on("click", "wb-substation-beacon", handleSubstationClick);
 
       // Pointer cursor hover
-      const clickable = ["wb-line-core", "wb-plant-core", "wb-plant-beacon", "wb-substation-circle", "wb-substation-beacon"];
+      const clickable = ["wb-line-core", "wb-line-circuit2-core", "openinfra-line-core", "wb-plant-core", "wb-plant-beacon", "wb-substation-circle", "wb-substation-beacon"];
       clickable.forEach((l) => {
         map.on("mouseenter", l, () => {
           map.getCanvas().style.cursor = "pointer";
@@ -1134,6 +1390,9 @@ export default function WestBengalPowerMap() {
 
     setVis("wb-line-casing", layersVisibility.powerLines);
     setVis("wb-line-core", layersVisibility.powerLines);
+    setVis("wb-line-circuit2-casing", layersVisibility.powerLines);
+    setVis("wb-line-circuit2-core", layersVisibility.powerLines);
+    setVis("wb-line-voltage-badge", layersVisibility.powerLines && layersVisibility.labels);
     setVis("wb-line-label", layersVisibility.powerLines && layersVisibility.labels);
     setVis("wb-plant-beacon", layersVisibility.powerPlants);
     setVis("wb-plant-core", layersVisibility.powerPlants);
@@ -1143,6 +1402,7 @@ export default function WestBengalPowerMap() {
     setVis("wb-substation-label", layersVisibility.substations && layersVisibility.labels);
     setVis("openinfra-line-casing", layersVisibility.liveOpenInfraTiles);
     setVis("openinfra-line-core", layersVisibility.liveOpenInfraTiles);
+    setVis("openinfra-line-label", layersVisibility.liveOpenInfraTiles && layersVisibility.labels);
   }, [layersVisibility, mapLoaded]);
 
   // Render HTML Markers for Substations & Plants

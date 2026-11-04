@@ -125,6 +125,37 @@ async def export_grid_dataset():
         raise HTTPException(status_code=500, detail=f"Export failed: {str(e)}")
 
 
+@router.get("/openinfra-tiles/{z}/{x}/{y}.pbf")
+async def get_openinfra_tile(z: int, x: int, y: int):
+    """
+    Proxy OpenInfraMap MVT vector tiles with CORS headers and caching.
+    Provides transparent access for MapLibre GL in constrained/CORS environments.
+    """
+    tile_url = f"https://openinframap.org/tiles/{z}/{x}/{y}.pbf"
+    try:
+        import urllib.request
+        req = urllib.request.Request(
+            tile_url,
+            headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) RTG-PowerMap/3.0",
+                "Accept": "*/*",
+            }
+        )
+        with urllib.request.urlopen(req, timeout=2.0) as resp:
+            content = resp.read()
+            return Response(
+                content=content,
+                media_type="application/x-protobuf",
+                headers={
+                    "Access-Control-Allow-Origin": "*",
+                    "Cache-Control": "public, max-age=86400",
+                }
+            )
+    except Exception as e:
+        return Response(status_code=204, headers={"Access-Control-Allow-Origin": "*"})
+
+
+
 # ─────────────────────────────────────────────────────────────
 # CRMS CODEBOOK MASTER DATA MAPPING ENDPOINTS
 # ─────────────────────────────────────────────────────────────
