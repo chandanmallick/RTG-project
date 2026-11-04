@@ -42,7 +42,7 @@ function Get-RtgProcesses {
 }
 
 function Wait-LocalServer([string]$Url, $Process, [string]$LogFile) {
-    $deadline = (Get-Date).AddSeconds(60)
+    $deadline = (Get-Date).AddSeconds(120)
     do {
         $Process.Refresh()
         if ($Process.HasExited) { throw "Server exited. See $LogFile" }
@@ -52,7 +52,7 @@ function Wait-LocalServer([string]$Url, $Process, [string]$LogFile) {
         } catch { }
         Start-Sleep -Milliseconds 500
     } while ((Get-Date) -lt $deadline)
-    throw "Server did not become ready within 60 seconds. See $LogFile"
+    throw "Server did not become ready within 120 seconds. See $LogFile"
 }
 
 try {
