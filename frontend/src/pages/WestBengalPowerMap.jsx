@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useMemo } from "react";
-import { Map, NavigationControl, Marker, Popup } from "../vendor/maplibre-gl/maplibre-gl.mjs";
+import { Map, NavigationControl, Marker, Popup, setWorkerUrl } from "../vendor/maplibre-gl/maplibre-gl.mjs";
+import maplibreWorkerUrl from "../vendor/maplibre-gl/maplibre-gl-worker.mjs?url";
 import "../vendor/maplibre-gl/maplibre-gl.css";
 import {
   Zap,
@@ -41,6 +42,10 @@ import API from "../services/api";
 import defaultGridGeoJson from "../data/power_map/eastern_region_power_grid.json";
 import easternRegionBoundaries from "../data/power_map/eastern_region_boundaries.json";
 import NasaWeatherModal from "../components/weather/NasaWeatherModal";
+
+// The vendored ESM build needs a separate, matching worker. Let Vite emit its
+// asset URL explicitly; the library's relative default breaks after bundling.
+setWorkerUrl(maplibreWorkerUrl);
 
 // Safe coordinate extraction helper (supports Points [lon, lat] and LineStrings [[lon, lat], ...])
 export function getEntityCoordinates(entity) {

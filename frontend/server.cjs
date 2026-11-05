@@ -11,6 +11,7 @@ const MIME_TYPES = {
   '.html': 'text/html',
   '.css': 'text/css',
   '.js': 'text/javascript',
+  '.mjs': 'text/javascript',
   '.json': 'application/json',
   '.png': 'image/png',
   '.jpg': 'image/jpeg',
@@ -53,7 +54,7 @@ const server = http.createServer((req, res) => {
   fs.stat(filePath, (err, stats) => {
     if (err || !stats.isFile()) {
       // Do NOT serve index.html for missing script/style/font assets
-      if (req.url.startsWith('/assets/') || ['.js', '.css', '.map', '.png', '.jpg', '.jpeg', '.svg', '.woff', '.woff2'].includes(ext)) {
+      if (req.url.startsWith('/assets/') || ['.js', '.mjs', '.css', '.map', '.png', '.jpg', '.jpeg', '.svg', '.woff', '.woff2'].includes(ext)) {
         res.writeHead(404, { 'Content-Type': 'text/plain' });
         res.end('Asset Not Found');
         return;
