@@ -552,13 +552,13 @@
       "geometry": {
         "type": "Point",
         "coordinates": [
-          88.487,
-          22.583
+          88.5318,
+          22.5783
         ]
       },
       "properties": {
         "id": "rajarhat_sub",
-        "name": "Rajarhat 400/220 kV GIS Substation",
+        "name": "Rajarhat 400/220 kV GIS Substation (POWERGRID)",
         "short_name": "Rajarhat 400/220 kV GIS Substation",
         "category": "power_substation",
         "operator": "POWERGRID",
@@ -575,13 +575,13 @@
       "geometry": {
         "type": "Point",
         "coordinates": [
-          88.412,
-          22.418
+          88.4342,
+          22.4132
         ]
       },
       "properties": {
         "id": "subhasgram_sub",
-        "name": "Subhasgram 400/220 kV Substation",
+        "name": "Subhasgram 400/220 kV Substation (POWERGRID)",
         "short_name": "Subhasgram 400/220 kV Substation",
         "category": "power_substation",
         "operator": "POWERGRID",
@@ -644,13 +644,13 @@
       "geometry": {
         "type": "Point",
         "coordinates": [
-          87.781,
-          22.885
+          87.7197,
+          22.8864
         ]
       },
       "properties": {
         "id": "arambagh_sub",
-        "name": "Arambagh 400/220 kV Substation",
+        "name": "Arambagh 400/220 kV Substation (WBSETCL)",
         "short_name": "Arambagh 400/220 kV Substation",
         "category": "power_substation",
         "operator": "WBSETCL",
@@ -696,7 +696,7 @@
       },
       "properties": {
         "id": "bishnupur_sub",
-        "name": "Bishnupur 400/220 kV Substation",
+        "name": "Bishnupur 400/220 kV Substation (WBSETCL)",
         "short_name": "Bishnupur 400/220 kV Substation",
         "category": "power_substation",
         "operator": "WBSETCL",
@@ -713,20 +713,20 @@
       "geometry": {
         "type": "Point",
         "coordinates": [
-          87.317,
-          22.404
+          87.5053,
+          22.667
         ]
       },
       "properties": {
         "id": "midnapore_765",
-        "name": "Midnapore (Kharagpur) 765/400 kV Substation",
-        "short_name": "Midnapore",
+        "name": "Medinipur 765/400 kV Substation (POWERGRID)",
+        "short_name": "Medinipur 765 kV Substation",
         "category": "power_substation",
         "operator": "POWERGRID",
         "voltage": "765/400 kV",
         "voltage_class": 765,
         "district": "Paschim Medinipur",
-        "color": "#CA8A04",
+        "color": "#00B4D8",
         "state": "West Bengal"
       }
     },
@@ -828,19 +828,19 @@
       "geometry": {
         "type": "Point",
         "coordinates": [
-          88.42,
-          23.06
+          88.5046,
+          22.9358
         ]
       },
       "properties": {
         "id": "jeerat_sub",
-        "name": "Jeerat 400/220 kV Substation",
+        "name": "Jeerat / New Jeerat 765/400/220 kV Substation (WBSETCL/POWERGRID)",
         "short_name": "Jeerat 400/220 kV Substation",
         "category": "power_substation",
         "operator": "WBSETCL",
         "voltage": "400/220 kV",
         "voltage_class": 400,
-        "district": "Hooghly",
+        "district": "Hooghly / Nadia",
         "color": "#DC2626",
         "state": "West Bengal"
       }
@@ -1289,8 +1289,8 @@
         "type": "LineString",
         "coordinates": [
           [
-            87.317,
-            22.404
+            87.5053,
+            22.667
           ],
           [
             86.3121,
@@ -1326,8 +1326,8 @@
         "type": "LineString",
         "coordinates": [
           [
-            87.317,
-            22.404
+            87.5053,
+            22.667
           ],
           [
             86.5635,
@@ -1482,8 +1482,8 @@
             22.4313
           ],
           [
-            87.317,
-            22.404
+            87.5053,
+            22.667
           ]
         ]
       },
@@ -1741,8 +1741,8 @@
             22.7419
           ],
           [
-            87.317,
-            22.404
+            87.5053,
+            22.667
           ]
         ]
       },
@@ -3176,8 +3176,8 @@
         "type": "LineString",
         "coordinates": [
           [
-            87.317,
-            22.404
+            87.5053,
+            22.667
           ],
           [
             87.3335,

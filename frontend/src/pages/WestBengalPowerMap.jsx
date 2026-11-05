@@ -64,6 +64,22 @@ export function getEntityCoordinates(entity) {
 // Base map style options (Watermark-free, zero-API-key defaults)
 export const BASEMAP_PROVIDERS = [
   {
+    id: "osm",
+    label: "OpenStreetMap Standard (Highways & Terrain)",
+    shortLabel: "OSM",
+    attribution: '© <a href="https://www.openstreetmap.org/copyright" target="_blank">OpenStreetMap contributors</a>',
+    requiresKey: false,
+    badge: "OSM Roads",
+    bgColor: "#F1F5F9",
+    tiles: [
+      "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+      "https://a.tile.openstreetmap.org/{z}/{x}/{y}.png",
+      "https://b.tile.openstreetmap.org/{z}/{x}/{y}.png",
+      "https://c.tile.openstreetmap.org/{z}/{x}/{y}.png",
+    ],
+    description: "Standard live OpenStreetMap with highways, towns, rivers, and civil boundaries as the secondary base map.",
+  },
+  {
     id: "carto-light",
     label: "Carto Light Canvas (High Contrast • OpenInfra Style)",
     shortLabel: "Light (Clean)",
@@ -91,22 +107,6 @@ export const BASEMAP_PROVIDERS = [
       "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}",
     ],
     description: "Minimalist light gray canvas. Gives maximum contrast for power transmission corridors and substation badges with zero road clutter.",
-  },
-  {
-    id: "osm",
-    label: "OpenStreetMap Standard (Highways & Terrain)",
-    shortLabel: "OSM",
-    attribution: '© <a href="https://www.openstreetmap.org/copyright" target="_blank">OpenStreetMap contributors</a>',
-    requiresKey: false,
-    badge: "OSM Roads",
-    bgColor: "#F1F5F9",
-    tiles: [
-      "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
-      "https://a.tile.openstreetmap.org/{z}/{x}/{y}.png",
-      "https://b.tile.openstreetmap.org/{z}/{x}/{y}.png",
-      "https://c.tile.openstreetmap.org/{z}/{x}/{y}.png",
-    ],
-    description: "Standard live OpenStreetMap with highways, towns, rivers, and civil boundaries as the secondary base map.",
   },
   {
     id: "satellite",
@@ -201,7 +201,7 @@ export default function WestBengalPowerMap() {
   const fileInputRef = useRef(null);
 
   // UI state
-  const [activeBaseMap, setActiveBaseMap] = useState("carto-light");
+  const [activeBaseMap, setActiveBaseMap] = useState("osm");
   const [muteCivilInfra, setMuteCivilInfra] = useState(true);
   const [selectedEntity, setSelectedEntity] = useState(null);
   const [activeTab, setActiveTab] = useState("all"); // 'all', 'plants', 'substations', 'lines'
@@ -223,9 +223,9 @@ export default function WestBengalPowerMap() {
     powerLines: true,
     powerPlants: true,
     substations: true,
-    labels: true,
+    labels: false, // Clean OpenInfra-style vector rendering by default (zero badge clutter)
     liveOpenInfraTiles: true,
-    cityWeather: true,
+    cityWeather: false, // Weather badges toggleable on demand
   });
 
   // Extract catalog entities from GeoJSON
@@ -506,10 +506,10 @@ export default function WestBengalPowerMap() {
             "base-tiles": {
               type: "raster",
               tiles: initialTiles && initialTiles.length > 0 ? initialTiles : [
-                "https://a.basemaps.cartocdn.com/rastertiles/light_all/{z}/{x}/{y}.png",
-                "https://b.basemaps.cartocdn.com/rastertiles/light_all/{z}/{x}/{y}.png",
-                "https://c.basemaps.cartocdn.com/rastertiles/light_all/{z}/{x}/{y}.png",
-                "https://d.basemaps.cartocdn.com/rastertiles/light_all/{z}/{x}/{y}.png",
+                "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+                "https://a.tile.openstreetmap.org/{z}/{x}/{y}.png",
+                "https://b.tile.openstreetmap.org/{z}/{x}/{y}.png",
+                "https://c.tile.openstreetmap.org/{z}/{x}/{y}.png",
               ],
               tileSize: 256,
               attribution: activeProvider.attribution,
@@ -629,7 +629,7 @@ export default function WestBengalPowerMap() {
               paint: {
                 "line-color": [
                   "case",
-                  // 765 kV / 800 kV UHV (Gold / Dark Yellow)
+                  // 765 kV / 800 kV UHV (Electric Cyan / Teal - OpenInfra standard)
                   [
                     "any",
                     [">=", ["to-number", ["get", "voltage"], 0], 700000],
@@ -639,8 +639,8 @@ export default function WestBengalPowerMap() {
                       ["<", ["to-number", ["get", "voltage"], 0], 2000]
                     ]
                   ],
-                  "#CA8A04",
-                  // 400 kV EHV (Grid Red)
+                  "#00B4D8",
+                  // 400 kV EHV (OpenInfra Distinct Purple / Magenta)
                   [
                     "any",
                     [
@@ -654,8 +654,8 @@ export default function WestBengalPowerMap() {
                       ["<", ["to-number", ["get", "voltage"], 0], 650]
                     ]
                   ],
-                  "#DC2626",
-                  // 220 kV HV (Forest Green)
+                  "#9333EA",
+                  // 220 kV HV (OpenInfra Grid Red)
                   [
                     "any",
                     [
@@ -669,8 +669,8 @@ export default function WestBengalPowerMap() {
                       ["<", ["to-number", ["get", "voltage"], 0], 350]
                     ]
                   ],
-                  "#16A34A",
-                  // 132 kV / 66 kV (Electric Blue)
+                  "#DC2626",
+                  // 132 kV / 66 kV (OpenInfra Orange / Amber)
                   [
                     "any",
                     [
@@ -684,9 +684,9 @@ export default function WestBengalPowerMap() {
                       ["<", ["to-number", ["get", "voltage"], 0], 190]
                     ]
                   ],
-                  "#0284C7",
-                  // OpenInfra Distinct Purple for all other transmission lines
-                  "#9333EA",
+                  "#D97706",
+                  // Muted Slate for lower distribution lines
+                  "#64748B",
                 ],
                 "line-width": [
                   "interpolate",
@@ -718,7 +718,7 @@ export default function WestBengalPowerMap() {
                   ""
                 ],
                 "text-size": 11,
-                "text-font": ["Open Sans Bold", "Arial Unicode MS Bold"],
+                "text-font": ["Open Sans Semibold", "Arial Unicode MS Bold"],
                 "symbol-spacing": 250,
                 "text-keep-upright": true,
               },
@@ -726,6 +726,182 @@ export default function WestBengalPowerMap() {
                 "text-color": "#FFFFFF",
                 "text-halo-color": "#0F172A",
                 "text-halo-width": 3.0,
+              },
+            },
+
+            // 5b. OpenInfra Substation Yard Boundary Polygons (Exact GIS Footprint)
+            {
+              id: "openinfra-substation-area",
+              type: "fill",
+              source: "openinframap",
+              "source-layer": "power_substation",
+              minzoom: 8.0,
+              layout: {
+                visibility: "none",
+              },
+              paint: {
+                "fill-color": [
+                  "case",
+                  ["any",
+                    [">=", ["to-number", ["get", "voltage"], 0], 700000],
+                    ["all", [">=", ["to-number", ["get", "voltage"], 0], 650], ["<", ["to-number", ["get", "voltage"], 0], 2000]]
+                  ],
+                  "#00B4D8",
+                  ["any",
+                    ["all", [">=", ["to-number", ["get", "voltage"], 0], 350000], ["<", ["to-number", ["get", "voltage"], 0], 650000]],
+                    ["all", [">=", ["to-number", ["get", "voltage"], 0], 350], ["<", ["to-number", ["get", "voltage"], 0], 650]]
+                  ],
+                  "#9333EA",
+                  ["any",
+                    ["all", [">=", ["to-number", ["get", "voltage"], 0], 190000], ["<", ["to-number", ["get", "voltage"], 0], 350000]],
+                    ["all", [">=", ["to-number", ["get", "voltage"], 0], 190], ["<", ["to-number", ["get", "voltage"], 0], 350]]
+                  ],
+                  "#DC2626",
+                  ["any",
+                    ["all", [">=", ["to-number", ["get", "voltage"], 0], 50000], ["<", ["to-number", ["get", "voltage"], 0], 190000]],
+                    ["all", [">=", ["to-number", ["get", "voltage"], 0], 50], ["<", ["to-number", ["get", "voltage"], 0], 190]]
+                  ],
+                  "#D97706",
+                  "#7C3AED"
+                ],
+                "fill-opacity": 0.45,
+                "fill-outline-color": "#0F172A",
+              },
+            },
+            {
+              id: "openinfra-substation-outline",
+              type: "line",
+              source: "openinframap",
+              "source-layer": "power_substation",
+              minzoom: 8.0,
+              layout: {
+                visibility: "none",
+                "line-join": "round",
+                "line-cap": "round",
+              },
+              paint: {
+                "line-color": "#0F172A",
+                "line-width": 1.5,
+                "line-opacity": 0.8,
+              },
+            },
+
+            // 5c. OpenInfra Substation Centroid Node Markers (Exact GIS Position matching OpenInfraMap)
+            {
+              id: "openinfra-substation-point",
+              type: "circle",
+              source: "openinframap",
+              "source-layer": "power_substation_point",
+              minzoom: 6.0,
+              layout: {
+                visibility: "none",
+              },
+              paint: {
+                "circle-radius": [
+                  "interpolate",
+                  ["linear"],
+                  ["zoom"],
+                  6, 3.0,
+                  9, 5.0,
+                  12, 7.5,
+                  15, 10.0
+                ],
+                "circle-color": [
+                  "case",
+                  ["any",
+                    [">=", ["to-number", ["get", "voltage"], 0], 700000],
+                    ["all", [">=", ["to-number", ["get", "voltage"], 0], 650], ["<", ["to-number", ["get", "voltage"], 0], 2000]]
+                  ],
+                  "#00B4D8",
+                  ["any",
+                    ["all", [">=", ["to-number", ["get", "voltage"], 0], 350000], ["<", ["to-number", ["get", "voltage"], 0], 650000]],
+                    ["all", [">=", ["to-number", ["get", "voltage"], 0], 350], ["<", ["to-number", ["get", "voltage"], 0], 650]]
+                  ],
+                  "#9333EA",
+                  ["any",
+                    ["all", [">=", ["to-number", ["get", "voltage"], 0], 190000], ["<", ["to-number", ["get", "voltage"], 0], 350000]],
+                    ["all", [">=", ["to-number", ["get", "voltage"], 0], 190], ["<", ["to-number", ["get", "voltage"], 0], 350]]
+                  ],
+                  "#DC2626",
+                  ["any",
+                    ["all", [">=", ["to-number", ["get", "voltage"], 0], 50000], ["<", ["to-number", ["get", "voltage"], 0], 190000]],
+                    ["all", [">=", ["to-number", ["get", "voltage"], 0], 50], ["<", ["to-number", ["get", "voltage"], 0], 190]]
+                  ],
+                  "#D97706",
+                  "#7C3AED"
+                ],
+                "circle-stroke-width": 2.0,
+                "circle-stroke-color": "#FFFFFF",
+                "circle-opacity": 0.95,
+              },
+            },
+
+            // 5d. OpenInfra Substation Text Labels (Native MapLibre collision avoidance)
+            {
+              id: "openinfra-substation-label",
+              type: "symbol",
+              source: "openinframap",
+              "source-layer": "power_substation_point",
+              minzoom: 9.0,
+              layout: {
+                visibility: "none",
+                "text-field": [
+                  "case",
+                  ["!=", ["get", "name"], ""],
+                  ["get", "name"],
+                  ["!=", ["get", "voltage"], ""],
+                  ["concat", ["to-string", ["get", "voltage"]], " kV Substation"],
+                  "Substation"
+                ],
+                "text-font": ["Open Sans Semibold", "Arial Unicode MS Bold"],
+                "text-size": 11,
+                "text-offset": [0, 1.4],
+                "text-anchor": "top",
+                "text-optional": true,
+                "text-max-width": 10,
+              },
+              paint: {
+                "text-color": "#0F172A",
+                "text-halo-color": "#FFFFFF",
+                "text-halo-width": 2.5,
+              },
+            },
+
+            // 5e. OpenInfra Power Generating Station Footprints
+            {
+              id: "openinfra-plant-area",
+              type: "fill",
+              source: "openinframap",
+              "source-layer": "power_plant",
+              minzoom: 8.5,
+              layout: {
+                visibility: "none",
+              },
+              paint: {
+                "fill-color": "#F59E0B",
+                "fill-opacity": 0.35,
+                "fill-outline-color": "#B45309",
+              },
+            },
+            {
+              id: "openinfra-plant-label",
+              type: "symbol",
+              source: "openinframap",
+              "source-layer": "power_plant",
+              minzoom: 8.5,
+              layout: {
+                visibility: "none",
+                "text-field": ["get", "name"],
+                "text-font": ["Open Sans Semibold", "Arial Unicode MS Bold"],
+                "text-size": 11,
+                "text-offset": [0, 1.4],
+                "text-anchor": "top",
+                "text-optional": true,
+              },
+              paint: {
+                "text-color": "#78350F",
+                "text-halo-color": "#FFFFFF",
+                "text-halo-width": 2.5,
               },
             },
 
@@ -785,20 +961,6 @@ export default function WestBengalPowerMap() {
                     220, 12.0,
                     10.0
                   ]
-                ],
-                "line-offset": [
-                  "case",
-                  ["==", ["get", "circuits"], 2],
-                  [
-                    "interpolate",
-                    ["linear"],
-                    ["zoom"],
-                    6, 1.2,
-                    10, 2.5,
-                    14, 4.5,
-                    17, 7.0
-                  ],
-                  0
                 ],
                 "line-opacity": 0.9,
               },
@@ -860,20 +1022,6 @@ export default function WestBengalPowerMap() {
                     220, 7.5,
                     6.0
                   ]
-                ],
-                "line-offset": [
-                  "case",
-                  ["==", ["get", "circuits"], 2],
-                  [
-                    "interpolate",
-                    ["linear"],
-                    ["zoom"],
-                    6, 1.2,
-                    10, 2.5,
-                    14, 4.5,
-                    17, 7.0
-                  ],
-                  0
                 ],
                 "line-opacity": 1.0,
               },
@@ -970,7 +1118,7 @@ export default function WestBengalPowerMap() {
                   12, 11.0,
                   16, 12.5
                 ],
-                "text-font": ["Open Sans Bold", "Arial Unicode MS Bold"],
+                "text-font": ["Open Sans Semibold", "Arial Unicode MS Bold"],
                 "text-letter-spacing": 0.05,
                 "symbol-spacing": 260,
                 "text-keep-upright": true,
@@ -1206,6 +1354,37 @@ export default function WestBengalPowerMap() {
       map.on("click", "wb-line-core", handleLineClick);
       map.on("click", "wb-line-circuit2-core", handleLineClick);
 
+      // Click on OpenInfra Live Substations (Exact GIS features)
+      const handleOpenInfraSubClick = (e) => {
+        if (!e.features || e.features.length === 0) return;
+        const feat = e.features[0];
+        const props = feat.properties || {};
+        const rawV = parseFloat(props.voltage) || 0;
+        const vDisplay = rawV >= 1000 ? Math.round(rawV / 1000) + " kV" : (rawV > 0 ? rawV + " kV" : "Transmission Substation");
+        const subName = props.name || `${vDisplay} Substation`;
+
+        new Popup({ offset: 12, className: "power-popup" })
+          .setLngLat(e.lngLat)
+          .setHTML(`
+            <div style="font-family: inherit; font-size: 13px; line-height: 1.45; padding: 4px; min-width: 230px;">
+              <div style="display: flex; align-items: center; gap: 6px; font-weight: 800; color: #0F172A; margin-bottom: 6px;">
+                <span style="display: inline-block; width: 12px; height: 12px; border-radius: 2px; background: #7C3AED; border: 1.5px solid #FFFFFF;"></span>
+                <span>⚡ ${subName}</span>
+              </div>
+              <div style="font-size: 11.5px; color: #475569; display: flex; flex-direction: column; gap: 3px;">
+                <div><b>Operating Voltage:</b> <span style="color:#7C3AED; font-weight:800;">${vDisplay}</span></div>
+                <div><b>Substation Type:</b> ${props.substation || 'Transmission Grid Substation'}</div>
+                <div><b>Exact Coordinates:</b> ${e.lngLat.lat.toFixed(5)}° N, ${e.lngLat.lng.toFixed(5)}° E</div>
+                <div><b>Source:</b> OpenStreetMap / OpenInfraMap (MVT)</div>
+              </div>
+            </div>
+          `)
+          .addTo(map);
+      };
+
+      map.on("click", "openinfra-substation-point", handleOpenInfraSubClick);
+      map.on("click", "openinfra-substation-area", handleOpenInfraSubClick);
+
       // Click on Live OpenInfra Vector Lines
       map.on("click", "openinfra-line-core", (e) => {
         if (!e.features || e.features.length === 0) return;
@@ -1282,7 +1461,7 @@ export default function WestBengalPowerMap() {
       map.on("click", "wb-substation-beacon", handleSubstationClick);
 
       // Pointer cursor hover
-      const clickable = ["wb-line-core", "wb-line-circuit2-core", "openinfra-line-core", "wb-plant-core", "wb-plant-beacon", "wb-substation-circle", "wb-substation-beacon"];
+      const clickable = ["wb-line-core", "wb-line-circuit2-core", "openinfra-line-core", "openinfra-substation-point", "openinfra-substation-area", "openinfra-plant-area", "wb-plant-core", "wb-plant-beacon", "wb-substation-circle", "wb-substation-beacon"];
       clickable.forEach((l) => {
         map.on("mouseenter", l, () => {
           map.getCanvas().style.cursor = "pointer";
@@ -1402,7 +1581,13 @@ export default function WestBengalPowerMap() {
     setVis("wb-substation-label", layersVisibility.substations && layersVisibility.labels);
     setVis("openinfra-line-casing", layersVisibility.liveOpenInfraTiles);
     setVis("openinfra-line-core", layersVisibility.liveOpenInfraTiles);
-    setVis("openinfra-line-label", layersVisibility.liveOpenInfraTiles && layersVisibility.labels);
+    setVis("openinfra-line-label", layersVisibility.liveOpenInfraTiles);
+    setVis("openinfra-substation-area", layersVisibility.substations && layersVisibility.liveOpenInfraTiles);
+    setVis("openinfra-substation-outline", layersVisibility.substations && layersVisibility.liveOpenInfraTiles);
+    setVis("openinfra-substation-point", layersVisibility.substations && layersVisibility.liveOpenInfraTiles);
+    setVis("openinfra-substation-label", layersVisibility.substations && layersVisibility.liveOpenInfraTiles);
+    setVis("openinfra-plant-area", layersVisibility.powerPlants && layersVisibility.liveOpenInfraTiles);
+    setVis("openinfra-plant-label", layersVisibility.powerPlants && layersVisibility.liveOpenInfraTiles);
   }, [layersVisibility, mapLoaded]);
 
   // Render HTML Markers for Substations & Plants
