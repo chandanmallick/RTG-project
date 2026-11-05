@@ -520,13 +520,10 @@ export default function WestBengalPowerMap() {
             },
             openinframap: {
               type: "vector",
-              tiles: [
-                "/api/power-map/openinfra-tiles/{z}/{x}/{y}.pbf",
-                "https://openinframap.org/tiles/{z}/{x}/{y}.pbf",
-              ],
+              tiles: ["/api/power-map/openinfra-tiles/{z}/{x}/{y}.pbf"],
               maxzoom: 17,
               attribution:
-                '<a href="https://openinframap.org" target="_blank">Open Infrastructure Map</a> | <a href="https://maplibre.org" target="_blank">MapLibre</a>',
+                '<a href="https://www.openstreetmap.org/copyright" target="_blank">© OpenStreetMap contributors</a> · <a href="https://openinframap.org/copyright" target="_blank">Open Infrastructure Map</a>',
             },
           },
           layers: [
@@ -735,7 +732,7 @@ export default function WestBengalPowerMap() {
               type: "fill",
               source: "openinframap",
               "source-layer": "power_substation",
-              minzoom: 8.0,
+              minzoom: 13.0,
               layout: {
                 visibility: "none",
               },
@@ -773,7 +770,7 @@ export default function WestBengalPowerMap() {
               type: "line",
               source: "openinframap",
               "source-layer": "power_substation",
-              minzoom: 8.0,
+              minzoom: 13.0,
               layout: {
                 visibility: "none",
                 "line-join": "round",
@@ -842,16 +839,16 @@ export default function WestBengalPowerMap() {
               type: "symbol",
               source: "openinframap",
               "source-layer": "power_substation_point",
-              minzoom: 9.0,
+              minzoom: 6.0,
               layout: {
                 visibility: "none",
                 "text-field": [
                   "case",
-                  ["!=", ["get", "name"], ""],
+                  ["all", ["has", "name"], ["!=", ["get", "name"], ""]],
                   ["get", "name"],
-                  ["!=", ["get", "voltage"], ""],
+                  ["all", ["has", "voltage"], ["!=", ["get", "voltage"], ""]],
                   ["concat", ["to-string", ["get", "voltage"]], " kV Substation"],
-                  "Substation"
+                  ""
                 ],
                 "text-font": ["Open Sans Semibold", "Arial Unicode MS Bold"],
                 "text-size": 11,
@@ -1307,6 +1304,18 @@ export default function WestBengalPowerMap() {
 
       map.addControl(new NavigationControl({ showCompass: true }), "top-right");
 
+      // Keep mapped OSM geometry and names above the approximate curated grid data.
+      map.on("load", () => {
+        [
+          "openinfra-line-casing", "openinfra-line-core", "openinfra-plant-area",
+          "openinfra-substation-area", "openinfra-substation-outline",
+          "openinfra-substation-point", "openinfra-line-label",
+          "openinfra-plant-label", "openinfra-substation-label",
+        ].forEach((id) => {
+          if (map.getLayer(id)) map.moveLayer(id);
+        });
+      });
+
       // Multi-stage map load trigger to guarantee markers & layers load immediately
       let hasLoaded = false;
       const markLoaded = () => {
@@ -1576,9 +1585,9 @@ export default function WestBengalPowerMap() {
     setVis("wb-plant-beacon", layersVisibility.powerPlants);
     setVis("wb-plant-core", layersVisibility.powerPlants);
     setVis("wb-plant-label", layersVisibility.powerPlants && layersVisibility.labels);
-    setVis("wb-substation-beacon", layersVisibility.substations);
-    setVis("wb-substation-circle", layersVisibility.substations);
-    setVis("wb-substation-label", layersVisibility.substations && layersVisibility.labels);
+    setVis("wb-substation-beacon", layersVisibility.substations && !layersVisibility.liveOpenInfraTiles);
+    setVis("wb-substation-circle", layersVisibility.substations && !layersVisibility.liveOpenInfraTiles);
+    setVis("wb-substation-label", layersVisibility.substations && layersVisibility.labels && !layersVisibility.liveOpenInfraTiles);
     setVis("openinfra-line-casing", layersVisibility.liveOpenInfraTiles);
     setVis("openinfra-line-core", layersVisibility.liveOpenInfraTiles);
     setVis("openinfra-line-label", layersVisibility.liveOpenInfraTiles);
@@ -1602,7 +1611,7 @@ export default function WestBengalPowerMap() {
 
     // Render badges for Substations
     // Using anchor='bottom' so the callout arrow tip points exactly at the coordinate
-    if (layersVisibility.substations) {
+    if (layersVisibility.substations && !layersVisibility.liveOpenInfraTiles) {
       allSubstations.forEach((sub) => {
         const el = document.createElement("div");
         el.className = "wb-substation-badge";

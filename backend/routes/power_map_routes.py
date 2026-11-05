@@ -131,7 +131,7 @@ async def get_openinfra_tile(z: int, x: int, y: int):
     Proxy OpenInfraMap MVT vector tiles with CORS headers and caching.
     Provides transparent access for MapLibre GL in constrained/CORS environments.
     """
-    tile_url = f"https://openinframap.org/tiles/{z}/{x}/{y}.pbf"
+    tile_url = f"https://openinframap.org/map/power/{z}/{x}/{y}.pbf"
     try:
         import urllib.request
         req = urllib.request.Request(
@@ -141,7 +141,7 @@ async def get_openinfra_tile(z: int, x: int, y: int):
                 "Accept": "*/*",
             }
         )
-        with urllib.request.urlopen(req, timeout=2.0) as resp:
+        with urllib.request.urlopen(req, timeout=10.0) as resp:
             content = resp.read()
             return Response(
                 content=content,
@@ -152,7 +152,8 @@ async def get_openinfra_tile(z: int, x: int, y: int):
                 }
             )
     except Exception as e:
-        return Response(status_code=204, headers={"Access-Control-Allow-Origin": "*"})
+        logger.warning("OpenInfra power tile %s/%s/%s unavailable: %s", z, x, y, e)
+        raise HTTPException(status_code=502, detail="OpenInfra power tile unavailable")
 
 
 
