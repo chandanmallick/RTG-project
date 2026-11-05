@@ -81,18 +81,13 @@ export const BASEMAP_PROVIDERS = [
   },
   {
     id: "carto-light",
-    label: "Carto Light Canvas (High Contrast • OpenInfra Style)",
+    label: "OpenInfra Light Canvas",
     shortLabel: "Light (Clean)",
-    attribution: '© <a href="https://carto.com/" target="_blank">CARTO</a>, © OpenStreetMap contributors',
+    attribution: '© <a href="https://www.openstreetmap.org/copyright" target="_blank">OpenStreetMap contributors</a>',
     requiresKey: false,
     badge: "OpenInfra Canvas",
     bgColor: "#F8FAFC",
-    tiles: [
-      "https://a.basemaps.cartocdn.com/rastertiles/light_all/{z}/{x}/{y}.png",
-      "https://b.basemaps.cartocdn.com/rastertiles/light_all/{z}/{x}/{y}.png",
-      "https://c.basemaps.cartocdn.com/rastertiles/light_all/{z}/{x}/{y}.png",
-      "https://d.basemaps.cartocdn.com/rastertiles/light_all/{z}/{x}/{y}.png",
-    ],
+    tiles: [],
     description: "Clean, muted light canvas matching OpenInfraMap. Power transmission corridors and substations stand out immediately with zero road clutter.",
   },
   {
@@ -518,9 +513,15 @@ export default function WestBengalPowerMap() {
               type: "geojson",
               data: gridData,
             },
+            "openinfra-basemap": {
+              type: "vector",
+              tiles: ["https://openinframap.org/20250311/{z}/{x}/{y}.mvt"],
+              maxzoom: 15,
+              attribution: '<a href="https://www.openstreetmap.org/copyright" target="_blank">© OpenStreetMap contributors</a>',
+            },
             openinframap: {
               type: "vector",
-              tiles: ["/api/power-map/openinfra-tiles/{z}/{x}/{y}.pbf"],
+              tiles: ["https://openinframap.org/map/power/{z}/{x}/{y}.pbf"],
               maxzoom: 17,
               attribution:
                 '<a href="https://www.openstreetmap.org/copyright" target="_blank">© OpenStreetMap contributors</a> · <a href="https://openinframap.org/copyright" target="_blank">Open Infrastructure Map</a>',
@@ -546,8 +547,44 @@ export default function WestBengalPowerMap() {
               paint: {
                 "raster-saturation": muteCivilInfra && activeBaseMap === "osm" ? -0.85 : 0,
                 "raster-contrast": muteCivilInfra && activeBaseMap === "osm" ? -0.15 : 0,
-                "raster-opacity": muteCivilInfra && activeBaseMap === "osm" ? 0.55 : 1.0,
+                "raster-opacity": activeBaseMap === "carto-light" ? 0 : muteCivilInfra && activeBaseMap === "osm" ? 0.55 : 1.0,
               },
+            },
+
+            // Key-free OpenInfraMap vector canvas for the Light (Clean) option.
+            {
+              id: "openinfra-base-landuse",
+              type: "fill",
+              source: "openinfra-basemap",
+              "source-layer": "landuse",
+              layout: { visibility: activeBaseMap === "carto-light" ? "visible" : "none" },
+              paint: { "fill-color": ["match", ["get", "kind"], "forest", "#E5ECE4", "wood", "#E5ECE4", "water", "#DCE8ED", "#F1F0EC"], "fill-opacity": 0.75 },
+            },
+            {
+              id: "openinfra-base-water",
+              type: "fill",
+              source: "openinfra-basemap",
+              "source-layer": "water",
+              filter: ["==", ["geometry-type"], "Polygon"],
+              layout: { visibility: activeBaseMap === "carto-light" ? "visible" : "none" },
+              paint: { "fill-color": "#DCE8ED" },
+            },
+            {
+              id: "openinfra-base-rivers",
+              type: "line",
+              source: "openinfra-basemap",
+              "source-layer": "water",
+              filter: ["==", ["geometry-type"], "LineString"],
+              layout: { visibility: activeBaseMap === "carto-light" ? "visible" : "none" },
+              paint: { "line-color": "#C9DCE4", "line-width": 1 },
+            },
+            {
+              id: "openinfra-base-roads",
+              type: "line",
+              source: "openinfra-basemap",
+              "source-layer": "roads",
+              layout: { visibility: activeBaseMap === "carto-light" ? "visible" : "none" },
+              paint: { "line-color": "#E2E1DD", "line-width": ["interpolate", ["linear"], ["zoom"], 6, 0.3, 14, 1.5] },
             },
 
             // 2. Regional State Boundaries Outlines (Dashed boundary lines)
@@ -702,18 +739,11 @@ export default function WestBengalPowerMap() {
               type: "symbol",
               source: "openinframap",
               "source-layer": "power_line",
-              minzoom: 10.0,
+              minzoom: 9.0,
               layout: {
                 visibility: "none",
                 "symbol-placement": "line",
-                "text-field": [
-                  "case",
-                  [">=", ["to-number", ["get", "voltage"], 0], 1000],
-                  ["concat", ["to-string", ["round", ["/", ["to-number", ["get", "voltage"], 0], 1000]]], " kV"],
-                  [">", ["to-number", ["get", "voltage"], 0], 0],
-                  ["concat", ["to-string", ["to-number", ["get", "voltage"], 0]], " kV"],
-                  ""
-                ],
+                "text-field": ["case", ["has", "name"], ["concat", ["get", "name"], " · ", ["to-string", ["get", "voltage"]], " kV"], ["has", "voltage"], ["concat", ["to-string", ["get", "voltage"]], " kV"], ""],
                 "text-size": 11,
                 "text-font": ["Open Sans Semibold", "Arial Unicode MS Bold"],
                 "symbol-spacing": 250,
@@ -724,6 +754,32 @@ export default function WestBengalPowerMap() {
                 "text-halo-color": "#0F172A",
                 "text-halo-width": 3.0,
               },
+            },
+
+            // Tower and pole positions are mapped OSM features, available at detailed zoom.
+            {
+              id: "openinfra-towers",
+              type: "circle",
+              source: "openinframap",
+              "source-layer": "power_tower",
+              minzoom: 13,
+              layout: { visibility: "none" },
+              paint: {
+                "circle-radius": ["interpolate", ["linear"], ["zoom"], 13, 2, 17, 5],
+                "circle-color": ["match", ["get", "type"], "pole", "#64748B", "#334155"],
+                "circle-stroke-color": "#FFFFFF",
+                "circle-stroke-width": 1,
+              },
+            },
+            {
+              id: "openinfra-tower-label",
+              type: "symbol",
+              source: "openinframap",
+              "source-layer": "power_tower",
+              minzoom: 15,
+              filter: ["has", "ref"],
+              layout: { visibility: "none", "text-field": ["get", "ref"], "text-size": 10, "text-offset": [0, 1.2], "text-anchor": "top" },
+              paint: { "text-color": "#334155", "text-halo-color": "#FFFFFF", "text-halo-width": 2 },
             },
 
             // 5b. OpenInfra Substation Yard Boundary Polygons (Exact GIS Footprint)
@@ -1309,8 +1365,8 @@ export default function WestBengalPowerMap() {
         [
           "openinfra-line-casing", "openinfra-line-core", "openinfra-plant-area",
           "openinfra-substation-area", "openinfra-substation-outline",
-          "openinfra-substation-point", "openinfra-line-label",
-          "openinfra-plant-label", "openinfra-substation-label",
+          "openinfra-substation-point", "openinfra-towers", "openinfra-line-label",
+          "openinfra-plant-label", "openinfra-substation-label", "openinfra-tower-label",
         ].forEach((id) => {
           if (map.getLayer(id)) map.moveLayer(id);
         });
@@ -1394,11 +1450,21 @@ export default function WestBengalPowerMap() {
       map.on("click", "openinfra-substation-point", handleOpenInfraSubClick);
       map.on("click", "openinfra-substation-area", handleOpenInfraSubClick);
 
+      map.on("click", "openinfra-towers", (e) => {
+        const props = e.features?.[0]?.properties || {};
+        const escape = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
+        new Popup({ offset: 10, className: "power-popup" })
+          .setLngLat(e.lngLat)
+          .setHTML(`<div style="font-size:13px;line-height:1.5;padding:4px"><b>${escape(props.type === "pole" ? "Power pole" : "Transmission tower")}</b>${props.ref ? `<div><b>Reference:</b> ${escape(props.ref)}</div>` : ""}${props.name ? `<div><b>Name:</b> ${escape(props.name)}</div>` : ""}<div><b>Mapped position:</b> ${e.lngLat.lat.toFixed(5)}° N, ${e.lngLat.lng.toFixed(5)}° E</div><div><b>Source:</b> OpenStreetMap / OpenInfraMap</div></div>`)
+          .addTo(map);
+      });
+
       // Click on Live OpenInfra Vector Lines
       map.on("click", "openinfra-line-core", (e) => {
         if (!e.features || e.features.length === 0) return;
         const feat = e.features[0];
         const props = feat.properties || {};
+        const escape = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
         const rawV = parseFloat(props.voltage) || 0;
         const vDisplay = rawV >= 1000 ? Math.round(rawV / 1000) + " kV" : (rawV > 0 ? rawV + " kV" : "Transmission Line");
 
@@ -1408,12 +1474,14 @@ export default function WestBengalPowerMap() {
             <div style="font-family: inherit; font-size: 13px; line-height: 1.45; padding: 4px; min-width: 220px;">
               <div style="display: flex; align-items: center; gap: 6px; font-weight: 800; color: #0F172A; margin-bottom: 6px;">
                 <span style="font-size: 14px;">🌐</span>
-                <span>OpenInfra Transmission Line</span>
+                <span>${escape(props.name || props.ref || "OpenInfra Transmission Line")}</span>
               </div>
               <div style="font-size: 11.5px; color: #475569; display: flex; flex-direction: column; gap: 3px;">
                 <div><b>Operating Voltage:</b> <span style="color:#DC2626; font-weight:800;">${vDisplay}</span></div>
-                <div><b>Circuits:</b> ${props.circuits || 1}</div>
-                <div><b>Operator / Grid:</b> ${props.operator || 'National / Regional Grid'}</div>
+                <div><b>Circuits:</b> ${escape(props.circuits || "Unspecified")}</div>
+                <div><b>Line type:</b> ${escape(props.line || "Power line")}</div>
+                <div><b>Operator / Grid:</b> ${escape(props.operator || "Unspecified")}</div>
+                ${props.ref ? `<div><b>Reference:</b> ${escape(props.ref)}</div>` : ""}
                 <div><b>Source:</b> OpenInfrastructureMap (MVT)</div>
               </div>
             </div>
@@ -1470,7 +1538,7 @@ export default function WestBengalPowerMap() {
       map.on("click", "wb-substation-beacon", handleSubstationClick);
 
       // Pointer cursor hover
-      const clickable = ["wb-line-core", "wb-line-circuit2-core", "openinfra-line-core", "openinfra-substation-point", "openinfra-substation-area", "openinfra-plant-area", "wb-plant-core", "wb-plant-beacon", "wb-substation-circle", "wb-substation-beacon"];
+      const clickable = ["wb-line-core", "wb-line-circuit2-core", "openinfra-line-core", "openinfra-towers", "openinfra-substation-point", "openinfra-substation-area", "openinfra-plant-area", "wb-plant-core", "wb-plant-beacon", "wb-substation-circle", "wb-substation-beacon"];
       clickable.forEach((l) => {
         map.on("mouseenter", l, () => {
           map.getCanvas().style.cursor = "pointer";
@@ -1510,6 +1578,13 @@ export default function WestBengalPowerMap() {
     // 1. Update background canvas color
     if (map.getLayer("canvas-background")) {
       map.setPaintProperty("canvas-background", "background-color", baseConfig.bgColor || "#F8FAFC");
+    }
+    const cleanCanvas = activeBaseMap === "carto-light";
+    ["openinfra-base-landuse", "openinfra-base-water", "openinfra-base-rivers", "openinfra-base-roads"].forEach((id) => {
+      if (map.getLayer(id)) map.setLayoutProperty(id, "visibility", cleanCanvas ? "visible" : "none");
+    });
+    if (map.getLayer("base-tiles-layer")) {
+      map.setLayoutProperty("base-tiles-layer", "visibility", cleanCanvas ? "none" : "visible");
     }
 
     // 2. Robust remove-layer -> remove-source -> re-add-source -> re-add-layer pattern
@@ -1591,6 +1666,8 @@ export default function WestBengalPowerMap() {
     setVis("openinfra-line-casing", layersVisibility.liveOpenInfraTiles);
     setVis("openinfra-line-core", layersVisibility.liveOpenInfraTiles);
     setVis("openinfra-line-label", layersVisibility.liveOpenInfraTiles);
+    setVis("openinfra-towers", layersVisibility.liveOpenInfraTiles);
+    setVis("openinfra-tower-label", layersVisibility.liveOpenInfraTiles);
     setVis("openinfra-substation-area", layersVisibility.substations && layersVisibility.liveOpenInfraTiles);
     setVis("openinfra-substation-outline", layersVisibility.substations && layersVisibility.liveOpenInfraTiles);
     setVis("openinfra-substation-point", layersVisibility.substations && layersVisibility.liveOpenInfraTiles);
