@@ -43,6 +43,18 @@ import defaultGridGeoJson from "../data/power_map/eastern_region_power_grid.json
 import easternRegionBoundaries from "../data/power_map/eastern_region_boundaries.json";
 import NasaWeatherModal from "../components/weather/NasaWeatherModal";
 
+const DEFAULT_OPENINFRA_LINE_COLORS = {
+  765: "#CA8A04",
+  400: "#DC2626",
+  220: "#16A34A",
+  132: "#0284C7",
+};
+
+const openInfraLineColorExpression = (colors) => [
+  "step", ["to-number", ["get", "voltage"], 0], "#64748B",
+  50, colors[132], 190, colors[220], 350, colors[400], 650, colors[765],
+];
+
 // The vendored ESM build needs a separate, matching worker. Let Vite emit its
 // asset URL explicitly; the library's relative default breaks after bundling.
 setWorkerUrl(maplibreWorkerUrl);
@@ -212,6 +224,16 @@ export default function WestBengalPowerMap() {
   const [isFullScreen, setIsFullScreen] = useState(false);
   const [mapLoaded, setMapLoaded] = useState(false);
   const [mapError, setMapError] = useState(null);
+  const [openInfraLineColors, setOpenInfraLineColors] = useState(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem("rtg_openinfra_line_colors") || "{}");
+      return Object.fromEntries(Object.entries(DEFAULT_OPENINFRA_LINE_COLORS).map(([voltage, color]) => [
+        voltage, /^#[0-9a-f]{6}$/i.test(saved[voltage]) ? saved[voltage] : color,
+      ]));
+    } catch {
+      return { ...DEFAULT_OPENINFRA_LINE_COLORS };
+    }
+  });
 
   // NASA POWER Weather & Temperature state
   const [weatherModalOpen, setWeatherModalOpen] = useState(false);
@@ -223,7 +245,7 @@ export default function WestBengalPowerMap() {
     powerLines: true,
     powerPlants: true,
     substations: true,
-    labels: false, // Clean OpenInfra-style vector rendering by default (zero badge clutter)
+    labels: true,
     liveOpenInfraTiles: true,
     cityWeather: false, // Weather badges toggleable on demand
   });
@@ -666,67 +688,7 @@ export default function WestBengalPowerMap() {
                 "line-cap": "round",
               },
               paint: {
-                "line-color": [
-                  "case",
-                  // 765 kV / 800 kV UHV (Electric Cyan / Teal - OpenInfra standard)
-                  [
-                    "any",
-                    [">=", ["to-number", ["get", "voltage"], 0], 700000],
-                    [
-                      "all",
-                      [">=", ["to-number", ["get", "voltage"], 0], 650],
-                      ["<", ["to-number", ["get", "voltage"], 0], 2000]
-                    ]
-                  ],
-                  "#00B4D8",
-                  // 400 kV EHV (OpenInfra Distinct Purple / Magenta)
-                  [
-                    "any",
-                    [
-                      "all",
-                      [">=", ["to-number", ["get", "voltage"], 0], 350000],
-                      ["<", ["to-number", ["get", "voltage"], 0], 650000]
-                    ],
-                    [
-                      "all",
-                      [">=", ["to-number", ["get", "voltage"], 0], 350],
-                      ["<", ["to-number", ["get", "voltage"], 0], 650]
-                    ]
-                  ],
-                  "#9333EA",
-                  // 220 kV HV (OpenInfra Grid Red)
-                  [
-                    "any",
-                    [
-                      "all",
-                      [">=", ["to-number", ["get", "voltage"], 0], 190000],
-                      ["<", ["to-number", ["get", "voltage"], 0], 350000]
-                    ],
-                    [
-                      "all",
-                      [">=", ["to-number", ["get", "voltage"], 0], 190],
-                      ["<", ["to-number", ["get", "voltage"], 0], 350]
-                    ]
-                  ],
-                  "#DC2626",
-                  // 132 kV / 66 kV (OpenInfra Orange / Amber)
-                  [
-                    "any",
-                    [
-                      "all",
-                      [">=", ["to-number", ["get", "voltage"], 0], 50000],
-                      ["<", ["to-number", ["get", "voltage"], 0], 190000]
-                    ],
-                    [
-                      "all",
-                      [">=", ["to-number", ["get", "voltage"], 0], 50],
-                      ["<", ["to-number", ["get", "voltage"], 0], 190]
-                    ]
-                  ],
-                  "#D97706",
-                  // Muted Slate for lower distribution lines
-                  "#64748B",
-                ],
+                "line-color": openInfraLineColorExpression(openInfraLineColors),
                 "line-width": [
                   "interpolate",
                   ["linear"],
@@ -1427,11 +1389,23 @@ export default function WestBengalPowerMap() {
       // Click on OpenInfra Live Substations (Exact GIS features)
       const handleOpenInfraSubClick = (e) => {
         if (!e.features || e.features.length === 0) return;
+        if (e.features[0].geometry?.type !== "Point" &&
+            map.queryRenderedFeatures(e.point, { layers: ["openinfra-substation-point"] }).length) return;
         const feat = e.features[0];
         const props = feat.properties || {};
+        const pointFeatures = feat.geometry?.type === "Point" ? [feat] : map.querySourceFeatures("openinframap", { sourceLayer: "power_substation_point" });
+        const mappedPoint = pointFeatures.find((point) => point.geometry?.type === "Point" &&
+          ((feat.id != null && point.id === feat.id) || (props.name && point.properties?.name === props.name)));
+        const exactCoords = mappedPoint?.geometry?.coordinates || (feat.geometry?.type === "Point" ? feat.geometry.coordinates : null);
         const rawV = parseFloat(props.voltage) || 0;
         const vDisplay = rawV >= 1000 ? Math.round(rawV / 1000) + " kV" : (rawV > 0 ? rawV + " kV" : "Transmission Substation");
         const subName = props.name || `${vDisplay} Substation`;
+        if (exactCoords) {
+          setSelectedEntity({ type: "substation", id: `osm-${mappedPoint?.id ?? feat.id ?? subName}`,
+            name: subName, voltage: vDisplay, operator: props.operator || "", coords: exactCoords,
+            exactLocation: true, source: "OpenInfraMap" });
+        } else setSelectedEntity(null);
+        const escape = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
 
         new Popup({ offset: 12, className: "power-popup" })
           .setLngLat(e.lngLat)
@@ -1439,12 +1413,12 @@ export default function WestBengalPowerMap() {
             <div style="font-family: inherit; font-size: 13px; line-height: 1.45; padding: 4px; min-width: 230px;">
               <div style="display: flex; align-items: center; gap: 6px; font-weight: 800; color: #0F172A; margin-bottom: 6px;">
                 <span style="display: inline-block; width: 12px; height: 12px; border-radius: 2px; background: #7C3AED; border: 1.5px solid #FFFFFF;"></span>
-                <span>⚡ ${subName}</span>
+                <span>⚡ ${escape(subName)}</span>
               </div>
               <div style="font-size: 11.5px; color: #475569; display: flex; flex-direction: column; gap: 3px;">
                 <div><b>Operating Voltage:</b> <span style="color:#7C3AED; font-weight:800;">${vDisplay}</span></div>
-                <div><b>Substation Type:</b> ${props.substation || 'Transmission Grid Substation'}</div>
-                <div><b>Exact Coordinates:</b> ${e.lngLat.lat.toFixed(5)}° N, ${e.lngLat.lng.toFixed(5)}° E</div>
+                <div><b>Substation Type:</b> ${escape(props.substation || 'Transmission Grid Substation')}</div>
+                <div><b>Mapped Coordinates:</b> ${exactCoords ? `${exactCoords[1].toFixed(5)}° N, ${exactCoords[0].toFixed(5)}° E` : 'Select the mapped point for coordinates'}</div>
                 <div><b>Source:</b> OpenStreetMap / OpenInfraMap (MVT)</div>
               </div>
             </div>
@@ -1645,6 +1619,16 @@ export default function WestBengalPowerMap() {
     }
   }, [activeBaseMap, cartoApiKey, muteCivilInfra, mapLoaded]);
 
+  useEffect(() => {
+    const map = mapRef.current;
+    if (mapLoaded && map?.getLayer("openinfra-line-core")) {
+      map.setPaintProperty("openinfra-line-core", "line-color", openInfraLineColorExpression(openInfraLineColors));
+    }
+    try {
+      localStorage.setItem("rtg_openinfra_line_colors", JSON.stringify(openInfraLineColors));
+    } catch { /* Colour changes still apply for this session. */ }
+  }, [mapLoaded, openInfraLineColors]);
+
   // Update layer visibility
   useEffect(() => {
     const map = mapRef.current;
@@ -1656,32 +1640,24 @@ export default function WestBengalPowerMap() {
       }
     };
 
-    setVis("wb-line-casing", layersVisibility.powerLines);
-    setVis("wb-line-core", layersVisibility.powerLines);
-    setVis("wb-line-circuit2-casing", layersVisibility.powerLines);
-    setVis("wb-line-circuit2-core", layersVisibility.powerLines);
-    setVis("wb-line-voltage-badge", layersVisibility.powerLines && layersVisibility.labels);
-    setVis("wb-line-label", layersVisibility.powerLines && layersVisibility.labels);
-    setVis("wb-plant-beacon", layersVisibility.powerPlants);
-    setVis("wb-plant-core", layersVisibility.powerPlants);
-    setVis("wb-plant-label", layersVisibility.powerPlants && layersVisibility.labels);
-    setVis("wb-substation-beacon", layersVisibility.substations && !layersVisibility.liveOpenInfraTiles);
-    setVis("wb-substation-circle", layersVisibility.substations && !layersVisibility.liveOpenInfraTiles);
-    setVis("wb-substation-label", layersVisibility.substations && layersVisibility.labels && !layersVisibility.liveOpenInfraTiles);
-    setVis("openinfra-line-casing", layersVisibility.liveOpenInfraTiles);
-    setVis("openinfra-line-core", layersVisibility.liveOpenInfraTiles);
-    setVis("openinfra-line-label", layersVisibility.liveOpenInfraTiles);
-    setVis("openinfra-towers", layersVisibility.liveOpenInfraTiles);
-    setVis("openinfra-tower-label", layersVisibility.liveOpenInfraTiles);
+    ["wb-line-casing", "wb-line-core", "wb-line-circuit2-casing", "wb-line-circuit2-core",
+      "wb-line-voltage-badge", "wb-line-label", "wb-plant-beacon", "wb-plant-core",
+      "wb-plant-label", "wb-substation-beacon", "wb-substation-circle", "wb-substation-label"
+    ].forEach((id) => setVis(id, false));
+    setVis("openinfra-line-casing", layersVisibility.powerLines && layersVisibility.liveOpenInfraTiles);
+    setVis("openinfra-line-core", layersVisibility.powerLines && layersVisibility.liveOpenInfraTiles);
+    setVis("openinfra-line-label", layersVisibility.powerLines && layersVisibility.labels && layersVisibility.liveOpenInfraTiles);
+    setVis("openinfra-towers", layersVisibility.powerLines && layersVisibility.liveOpenInfraTiles);
+    setVis("openinfra-tower-label", layersVisibility.powerLines && layersVisibility.labels && layersVisibility.liveOpenInfraTiles);
     setVis("openinfra-substation-area", layersVisibility.substations && layersVisibility.liveOpenInfraTiles);
     setVis("openinfra-substation-outline", layersVisibility.substations && layersVisibility.liveOpenInfraTiles);
     setVis("openinfra-substation-point", layersVisibility.substations && layersVisibility.liveOpenInfraTiles);
-    setVis("openinfra-substation-label", layersVisibility.substations && layersVisibility.liveOpenInfraTiles);
+    setVis("openinfra-substation-label", layersVisibility.substations && layersVisibility.labels && layersVisibility.liveOpenInfraTiles);
     setVis("openinfra-plant-area", layersVisibility.powerPlants && layersVisibility.liveOpenInfraTiles);
     setVis("openinfra-plant-label", layersVisibility.powerPlants && layersVisibility.liveOpenInfraTiles);
   }, [layersVisibility, mapLoaded]);
 
-  // Render HTML Markers for Substations & Plants
+  // City weather markers are independent of the mapped electrical network.
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapLoaded) return;
@@ -1689,130 +1665,7 @@ export default function WestBengalPowerMap() {
     markersRef.current.forEach((m) => m.remove());
     markersRef.current = [];
 
-    if (!layersVisibility.labels) return;
-
-    // Render badges for Substations
-    // Using anchor='bottom' so the callout arrow tip points exactly at the coordinate
-    if (layersVisibility.substations && !layersVisibility.liveOpenInfraTiles) {
-      allSubstations.forEach((sub) => {
-        const el = document.createElement("div");
-        el.className = "wb-substation-badge";
-        // No manual transform — MapLibre Marker with anchor:'bottom' handles positioning
-        el.style.cssText = `
-          cursor: pointer;
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          pointer-events: auto;
-        `;
-
-        const badgeColor =
-          sub.voltage_class >= 765
-            ? "#CA8A04"
-            : sub.voltage_class >= 400
-            ? "#DC2626"
-            : sub.voltage_class >= 220
-            ? "#16A34A"
-            : "#0284C7";
-
-        el.innerHTML = `
-          <div style="
-            background: ${badgeColor};
-            color: #FFFFFF;
-            font-size: 10px;
-            font-weight: 800;
-            padding: 2px 7px;
-            border-radius: 999px;
-            box-shadow: 0 2px 6px rgba(0,0,0,0.35);
-            white-space: nowrap;
-            border: 1.5px solid #FFFFFF;
-            display: flex;
-            align-items: center;
-            gap: 4px;
-          ">
-            <span>⚡ ${sub.short_name || sub.name}</span>
-            <span style="background: rgba(0,0,0,0.25); padding: 1px 4px; border-radius: 3px; font-size: 8.5px; font-weight: 700;">${sub.voltage_class}kV</span>
-          </div>
-          <div style="
-            width: 0;
-            height: 0;
-            border-left: 4px solid transparent;
-            border-right: 4px solid transparent;
-            border-top: 5px solid ${badgeColor};
-            margin-top: -1px;
-          "></div>
-        `;
-
-        el.addEventListener("click", (e) => {
-          e.stopPropagation();
-          flyToEntity("substation", sub);
-        });
-
-        const coords = getEntityCoordinates(sub);
-        // anchor:'bottom' means the bottom-centre of the element sits exactly at the coordinate
-        const marker = new Marker({ element: el, anchor: "bottom" })
-          .setLngLat([coords.lon, coords.lat])
-          .addTo(map);
-
-        markersRef.current.push(marker);
-      });
-    }
-
-    // Render badges for Power Generating Stations (Amber #F59E0B)
-    if (layersVisibility.powerPlants) {
-      allPlants.forEach((plant) => {
-        const el = document.createElement("div");
-        el.className = "wb-plant-badge";
-        // anchor:'bottom' on the Marker — no manual CSS transform needed
-        el.style.cssText = `
-          cursor: pointer;
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          pointer-events: auto;
-        `;
-
-        el.innerHTML = `
-          <div style="
-            background: #F59E0B;
-            color: #78350F;
-            font-size: 10px;
-            font-weight: 800;
-            padding: 2px 7px;
-            border-radius: 999px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.35);
-            white-space: nowrap;
-            border: 1.5px solid #FFFFFF;
-            display: flex;
-            align-items: center;
-            gap: 4px;
-          ">
-            <span>🏭 ${plant.short_name || plant.name}</span>
-            <span style="background: rgba(120,53,15,0.2); padding: 1px 4px; border-radius: 3px; font-size: 8.5px; font-weight: 700;">${plant.capacity_label || plant.capacity_mw + ' MW'}</span>
-          </div>
-          <div style="
-            width: 0;
-            height: 0;
-            border-left: 4px solid transparent;
-            border-right: 4px solid transparent;
-            border-top: 5px solid #F59E0B;
-            margin-top: -1px;
-          "></div>
-        `;
-
-        el.addEventListener("click", (e) => {
-          e.stopPropagation();
-          flyToEntity("plant", plant);
-        });
-
-        const pcoords = getEntityCoordinates(plant);
-        const marker = new Marker({ element: el, anchor: "bottom" })
-          .setLngLat([pcoords.lon, pcoords.lat])
-          .addTo(map);
-
-        markersRef.current.push(marker);
-      });
-    }
+    if (!layersVisibility.cityWeather) return;
 
     // Render Weather / Temperature badges for Key Cities
     if (layersVisibility.cityWeather && weatherCities && weatherCities.length > 0) {
@@ -1878,7 +1731,8 @@ export default function WestBengalPowerMap() {
 
   // Fly to Entity (Substation, Power Plant, or Line)
   const flyToEntity = (type, entity) => {
-    setSelectedEntity({ type, ...entity });
+    // Catalog positions locate a vicinity only. Weather requires a mapped OSM point.
+    setSelectedEntity(entity.exactLocation ? { type, ...entity } : null);
     const map = mapRef.current;
     if (!map) return;
 
@@ -2043,7 +1897,7 @@ export default function WestBengalPowerMap() {
               Eastern Region Power System Grid Map
             </h4>
             <div className="text-muted small mt-1">
-              Visualizing <b>{allLines.length} Transmission Corridors</b>, <b>{allPlants.length} Generating Stations ({totalCapacityMW.toLocaleString()} MW)</b>, and <b>{allSubstations.length} Grid Substations</b> across West Bengal, Odisha, Bihar, Jharkhand & Sikkim.
+              OpenInfraMap electrical network across West Bengal, Odisha, Bihar, Jharkhand & Sikkim. Select a mapped substation for its coordinates and NASA weather.
             </div>
 
             {/* Quick State Zoom Pills */}
@@ -2167,6 +2021,9 @@ export default function WestBengalPowerMap() {
             <div className="col-12 col-lg-4 col-xl-3 d-flex flex-column" style={{ height: "100%" }}>
               <div className="card h-100 border-0 shadow-sm rounded-3 d-flex flex-column">
                 <div className="card-header bg-white border-bottom p-3">
+                  <div className="text-muted mb-2" style={{ fontSize: "10px" }}>
+                    Reference directory: rows zoom to an approximate area. Map geometry and station weather use OpenInfraMap positions.
+                  </div>
                   {/* Category Tabs: Substations, Power Plants, Transmission Lines */}
                   <div className="btn-group w-100 btn-group-sm mb-2" role="group">
                     <button
@@ -2543,7 +2400,7 @@ export default function WestBengalPowerMap() {
                           setLayersVisibility({ ...layersVisibility, powerLines: e.target.checked })
                         }
                       />
-                      <span className="fw-bold text-dark">⚡ Transmission Corridors (ER)</span>
+                      <span className="fw-bold text-dark">OpenInfra transmission lines & towers</span>
                     </label>
 
                     <label className="d-flex align-items-center gap-1.5 cursor-pointer user-select-none">
@@ -2554,7 +2411,7 @@ export default function WestBengalPowerMap() {
                           setLayersVisibility({ ...layersVisibility, powerPlants: e.target.checked })
                         }
                       />
-                      <span className="fw-bold" style={{ color: "#B45309" }}>🏭 Power Generating Stations (Amber)</span>
+                      <span className="fw-bold" style={{ color: "#B45309" }}>OpenInfra generating stations</span>
                     </label>
 
                     <label className="d-flex align-items-center gap-1.5 cursor-pointer user-select-none">
@@ -2576,7 +2433,7 @@ export default function WestBengalPowerMap() {
                           setLayersVisibility({ ...layersVisibility, labels: e.target.checked })
                         }
                       />
-                      <span>Station Name Badges</span>
+                      <span>Mapped station and line names</span>
                     </label>
 
                     <label className="d-flex align-items-center gap-1.5 cursor-pointer user-select-none">
@@ -2616,8 +2473,25 @@ export default function WestBengalPowerMap() {
                           })
                         }
                       />
-                      <span className="text-primary fw-semibold">🌐 Live OpenInfra Vector Tiles</span>
+                      <span className="text-primary fw-semibold">Show OpenInfra electrical network</span>
                     </label>
+                    <div className="border-top mt-1 pt-1">
+                      <div className="d-flex align-items-center justify-content-between mb-1">
+                        <span className="fw-bold text-muted" style={{ fontSize: "10px" }}>OPENINFRA LINE COLOURS</span>
+                        <button type="button" className="btn btn-link btn-xs p-0" style={{ fontSize: "10px" }}
+                          onClick={() => setOpenInfraLineColors({ ...DEFAULT_OPENINFRA_LINE_COLORS })}>Reset</button>
+                      </div>
+                      <div className="d-flex gap-2 flex-wrap">
+                        {Object.keys(DEFAULT_OPENINFRA_LINE_COLORS).map((voltage) => (
+                          <label key={voltage} className="d-flex align-items-center gap-1" title={`Change ${voltage} kV line colour`}>
+                            <input type="color" value={openInfraLineColors[voltage]}
+                              onChange={(event) => setOpenInfraLineColors((current) => ({ ...current, [voltage]: event.target.value }))}
+                              style={{ width: "22px", height: "20px", padding: 0, border: 0, cursor: "pointer" }} />
+                            <span>{voltage} kV</span>
+                          </label>
+                        ))}
+                      </div>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -2652,7 +2526,7 @@ export default function WestBengalPowerMap() {
                           {selectedEntity.voltage || selectedEntity.voltage_label || `${selectedEntity.voltage_class} kV`}
                         </span>
                         <span className="badge bg-light text-secondary border" style={{ fontSize: "10px" }}>
-                          {selectedEntity.operator || "WBSETCL"}
+                          {selectedEntity.operator || "Operator not mapped"}
                         </span>
                       </div>
                       <h6 className="fw-bold text-dark mb-0">{selectedEntity.name}</h6>
@@ -2685,8 +2559,8 @@ export default function WestBengalPowerMap() {
                     {selectedEntity.type === "substation" && (
                       <div>
                         <div><b>Voltage Level:</b> {selectedEntity.voltage}</div>
-                        <div><b>District:</b> {selectedEntity.district}</div>
-                        <div><b>Operator:</b> {selectedEntity.operator}</div>
+                        {selectedEntity.district && <div><b>District:</b> {selectedEntity.district}</div>}
+                        <div><b>Source:</b> {selectedEntity.source || "OpenInfraMap"}</div>
                       </div>
                     )}
                   </div>
@@ -2804,29 +2678,25 @@ export default function WestBengalPowerMap() {
               <div className="fw-bold text-dark mb-1.5 d-flex align-items-center justify-content-between gap-3 border-bottom pb-1">
                 <span>Voltage Legend (kV)</span>
                 <span className="badge bg-dark text-white" style={{ fontSize: "9px" }}>
-                  Standard Grid
+                  OpenInfra
                 </span>
               </div>
               <div className="d-flex flex-column gap-1.5">
                 <div className="d-flex align-items-center gap-2">
-                  <span style={{ width: "18px", height: "5px", backgroundColor: "#CA8A04", borderRadius: "2px", border: "1px solid #0F172A", display: "inline-block" }}></span>
-                  <span className="fw-bold" style={{ color: "#CA8A04" }}>765 kV</span>
-                  <span className="text-muted small ms-auto">Dark Yellow</span>
+                  <span style={{ width: "18px", height: "5px", backgroundColor: openInfraLineColors[765], borderRadius: "2px", border: "1px solid #0F172A", display: "inline-block" }}></span>
+                  <span className="fw-bold" style={{ color: openInfraLineColors[765] }}>765 kV</span>
                 </div>
                 <div className="d-flex align-items-center gap-2">
-                  <span style={{ width: "18px", height: "5px", backgroundColor: "#DC2626", borderRadius: "2px", border: "1px solid #0F172A", display: "inline-block" }}></span>
-                  <span className="fw-bold" style={{ color: "#DC2626" }}>400 kV</span>
-                  <span className="text-muted small ms-auto">Red (Main Grid)</span>
+                  <span style={{ width: "18px", height: "5px", backgroundColor: openInfraLineColors[400], borderRadius: "2px", border: "1px solid #0F172A", display: "inline-block" }}></span>
+                  <span className="fw-bold" style={{ color: openInfraLineColors[400] }}>400 kV</span>
                 </div>
                 <div className="d-flex align-items-center gap-2">
-                  <span style={{ width: "18px", height: "5px", backgroundColor: "#16A34A", borderRadius: "2px", border: "1px solid #0F172A", display: "inline-block" }}></span>
-                  <span className="fw-bold" style={{ color: "#16A34A" }}>220 kV</span>
-                  <span className="text-muted small ms-auto">Green</span>
+                  <span style={{ width: "18px", height: "5px", backgroundColor: openInfraLineColors[220], borderRadius: "2px", border: "1px solid #0F172A", display: "inline-block" }}></span>
+                  <span className="fw-bold" style={{ color: openInfraLineColors[220] }}>220 kV</span>
                 </div>
                 <div className="d-flex align-items-center gap-2">
-                  <span style={{ width: "18px", height: "5px", backgroundColor: "#0284C7", borderRadius: "2px", border: "1px solid #0F172A", display: "inline-block" }}></span>
-                  <span className="fw-bold" style={{ color: "#0284C7" }}>132 kV</span>
-                  <span className="text-muted small ms-auto">Blue</span>
+                  <span style={{ width: "18px", height: "5px", backgroundColor: openInfraLineColors[132], borderRadius: "2px", border: "1px solid #0F172A", display: "inline-block" }}></span>
+                  <span className="fw-bold" style={{ color: openInfraLineColors[132] }}>132 kV</span>
                 </div>
                 <div className="d-flex align-items-center gap-2 pt-1.5 mt-0.5 border-top">
                   <span style={{ width: "12px", height: "12px", backgroundColor: "#F59E0B", borderRadius: "50%", border: "2px solid #FFF", boxShadow: "0 0 0 1.5px #B45309", display: "inline-block" }}></span>
