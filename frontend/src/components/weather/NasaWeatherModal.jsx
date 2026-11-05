@@ -32,6 +32,17 @@ import {
 } from "recharts";
 import API from "../../services/api";
 
+// Available NASA POWER Meteorological Parameters
+const NASA_PARAM_OPTIONS = [
+  { id: "T2M", label: "T2M (Air Temp Mean)", unit: "°C", color: "#F59E0B", strokeWidth: 2.5, defaultActive: true },
+  { id: "T2M_MAX", label: "T2M_MAX (Max Temp)", unit: "°C", color: "#EF4444", strokeWidth: 2, defaultActive: true },
+  { id: "T2M_MIN", label: "T2M_MIN (Min Temp)", unit: "°C", color: "#3B82F6", strokeWidth: 2, defaultActive: true },
+  { id: "T2MDEW", label: "T2MDEW (Dew Point)", unit: "°C", color: "#10B981", strokeWidth: 1.5, strokeDasharray: "4 4", defaultActive: true },
+  { id: "TS", label: "TS (Earth Skin Temp)", unit: "°C", color: "#8B5CF6", strokeWidth: 1.5, strokeDasharray: "2 2", defaultActive: true },
+  { id: "T2M_RANGE", label: "T2M_RANGE (Diurnal Swing)", unit: "°C", color: "#F97316", strokeWidth: 1.5, strokeDasharray: "3 3", defaultActive: false },
+  { id: "T2MWET", label: "T2MWET (Wet Bulb Temp)", unit: "°C", color: "#06B6D4", strokeWidth: 1.5, strokeDasharray: "5 5", defaultActive: false },
+];
+
 export default function NasaWeatherModal({
   isOpen,
   onClose,
@@ -76,6 +87,15 @@ export default function NasaWeatherModal({
   const [startDate, setStartDate] = useState(defaultDates.start);
   const [endDate, setEndDate] = useState(defaultDates.end);
   const [activeDatePreset, setActiveDatePreset] = useState("2024");
+  const [selectedParams, setSelectedParams] = useState({
+    T2M: true,
+    T2M_MAX: true,
+    T2M_MIN: true,
+    T2MDEW: true,
+    TS: true,
+    T2M_RANGE: false,
+    T2MWET: false,
+  });
 
   // Query state
   const [weatherData, setWeatherData] = useState(null);
@@ -157,12 +177,18 @@ export default function NasaWeatherModal({
     }
     setLoading(true);
     setError(null);
+    const activeParamKeys = Object.entries(selectedParams)
+      .filter(([_, active]) => active)
+      .map(([key]) => key);
+    const paramStr = activeParamKeys.length > 0 ? activeParamKeys.join(",") : "T2M,T2MDEW,T2MWET,TS,T2M_RANGE,T2M_MAX,T2M_MIN";
+
     try {
       const data = await API.getNasaPowerWeather({
         latitude: Number(latitude),
         longitude: Number(longitude),
         start: startDate.replace(/-/g, ""),
         end: endDate.replace(/-/g, ""),
+        parameters: paramStr,
         cityName: locationLabel || selectedCityName,
         forceRefresh: force,
       });
@@ -192,11 +218,16 @@ export default function NasaWeatherModal({
 
   // Export JSON Download URL
   const handleDownloadJson = () => {
+    const activeParamKeys = Object.entries(selectedParams)
+      .filter(([_, active]) => active)
+      .map(([key]) => key);
+    const paramStr = activeParamKeys.length > 0 ? activeParamKeys.join(",") : "T2M,T2MDEW,T2MWET,TS,T2M_RANGE,T2M_MAX,T2M_MIN";
     const url = API.getNasaPowerExportUrl(
       Number(latitude),
       Number(longitude),
       startDate.replace(/-/g, ""),
-      endDate.replace(/-/g, "")
+      endDate.replace(/-/g, ""),
+      paramStr
     );
     window.open(url, "_blank");
   };
@@ -403,43 +434,64 @@ export default function NasaWeatherModal({
                   />
                 </div>
 
-                {/* Date Preset Buttons */}
-                <div className="col-md-3">
-                  <label className="form-label fw-bold small text-muted mb-1 d-flex align-items-center gap-1">
-                    <Calendar size={13} className="text-primary" />
-                    Time Range Preset
-                  </label>
-                  <div className="btn-group btn-group-sm w-100" role="group">
-                    <button
-                      type="button"
-                      className={`btn ${
-                        activeDatePreset === "2024" ? "btn-primary fw-bold" : "btn-outline-secondary"
-                      }`}
+                {/* Date Range Selector & Presets */}
+                <div className="col-md-5">
+                  <div className="d-flex align-items-center justify-content-between mb-1">
+                    <label className="form-label fw-bold small text-muted mb-0 d-flex align-items-center gap-1">
+                      <Calendar size={13} className="text-primary" />
+                      Date Range (Custom / Preset)
+                    </label>
+                    <div className="btn-group btn-group-xs" role="group">
+                      <button
+                        type="button"
+                        className={`btn btn-xs py-0 px-1.5 ${activeDatePreset === "2024" ? "btn-primary fw-bold" : "btn-outline-secondary"}`}
+                        style={{ fontSize: "10px" }}
+                        onClick={() => handleDatePreset("2024")}
+                      >
+                        2024
+                      </button>
+                      <button
+                        type="button"
+                        className={`btn btn-xs py-0 px-1.5 ${activeDatePreset === "recent30" ? "btn-primary fw-bold" : "btn-outline-secondary"}`}
+                        style={{ fontSize: "10px" }}
+                        onClick={() => handleDatePreset("recent30")}
+                      >
+                        Past 30d
+                      </button>
+                      <button
+                        type="button"
+                        className={`btn btn-xs py-0 px-1.5 ${activeDatePreset === "2023" ? "btn-primary fw-bold" : "btn-outline-secondary"}`}
+                        style={{ fontSize: "10px" }}
+                        onClick={() => handleDatePreset("2023")}
+                      >
+                        2023
+                      </button>
+                    </div>
+                  </div>
+                  <div className="d-flex align-items-center gap-2">
+                    <input
+                      type="date"
+                      className="form-control form-control-sm"
+                      value={startDate.length === 8 ? `${startDate.slice(0,4)}-${startDate.slice(4,6)}-${startDate.slice(6,8)}` : startDate}
+                      onChange={(e) => {
+                        setStartDate(e.target.value.replace(/-/g, ""));
+                        setActiveDatePreset("custom");
+                      }}
+                      title="Start Date"
                       style={{ fontSize: "11px" }}
-                      onClick={() => handleDatePreset("2024")}
-                    >
-                      Year 2024
-                    </button>
-                    <button
-                      type="button"
-                      className={`btn ${
-                        activeDatePreset === "recent30" ? "btn-primary fw-bold" : "btn-outline-secondary"
-                      }`}
+                    />
+                    <span className="text-muted small">to</span>
+                    <input
+                      type="date"
+                      className="form-control form-control-sm"
+                      value={endDate.length === 8 ? `${endDate.slice(0,4)}-${endDate.slice(4,6)}-${endDate.slice(6,8)}` : endDate}
+                      onChange={(e) => {
+                        setEndDate(e.target.value.replace(/-/g, ""));
+                        setActiveDatePreset("custom");
+                      }}
+                      title="End Date"
                       style={{ fontSize: "11px" }}
-                      onClick={() => handleDatePreset("recent30")}
-                    >
-                      Past 30d
-                    </button>
-                    <button
-                      type="button"
-                      className={`btn ${
-                        activeDatePreset === "2023" ? "btn-primary fw-bold" : "btn-outline-secondary"
-                      }`}
-                      style={{ fontSize: "11px" }}
-                      onClick={() => handleDatePreset("2023")}
-                    >
-                      Year 2023
-                    </button>
+                    />
                   </div>
                 </div>
 
@@ -453,6 +505,88 @@ export default function NasaWeatherModal({
                     <RefreshCw size={13} className={loading ? "spin-animation" : ""} />
                     {loading ? "Querying..." : "Fetch Weather"}
                   </button>
+                </div>
+              </div>
+
+              {/* NASA Meteorological Parameters / Data Types Selection */}
+              <div className="mt-2.5 pt-2 border-top">
+                <div className="d-flex align-items-center justify-content-between mb-1.5">
+                  <span className="fw-bold small text-muted d-flex align-items-center gap-1" style={{ fontSize: "11px" }}>
+                    <Layers size={12} className="text-primary" />
+                    NASA Data Types & Parameters to Plot:
+                  </span>
+                  <div className="d-flex gap-1.5">
+                    <button
+                      type="button"
+                      className="btn btn-link btn-xs p-0 text-decoration-none small"
+                      style={{ fontSize: "10.5px" }}
+                      onClick={() => {
+                        const allOn = {};
+                        NASA_PARAM_OPTIONS.forEach((p) => { allOn[p.id] = true; });
+                        setSelectedParams(allOn);
+                      }}
+                    >
+                      Select All
+                    </button>
+                    <span className="text-muted small">•</span>
+                    <button
+                      type="button"
+                      className="btn btn-link btn-xs p-0 text-decoration-none small text-muted"
+                      style={{ fontSize: "10.5px" }}
+                      onClick={() => {
+                        setSelectedParams({
+                          T2M: true,
+                          T2M_MAX: true,
+                          T2M_MIN: true,
+                          T2MDEW: false,
+                          TS: false,
+                          T2M_RANGE: false,
+                          T2MWET: false,
+                        });
+                      }}
+                    >
+                      Reset Defaults
+                    </button>
+                  </div>
+                </div>
+                <div className="d-flex flex-wrap gap-2">
+                  {NASA_PARAM_OPTIONS.map((param) => {
+                    const isSelected = Boolean(selectedParams[param.id]);
+                    return (
+                      <label
+                        key={param.id}
+                        className={`d-flex align-items-center gap-1.5 px-2 py-1 rounded-2 border cursor-pointer user-select-none transition-all ${
+                          isSelected ? "bg-white shadow-sm border-primary" : "bg-light text-muted border-transparent"
+                        }`}
+                        style={{ fontSize: "11px" }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={(e) => {
+                            setSelectedParams({
+                              ...selectedParams,
+                              [param.id]: e.target.checked,
+                            });
+                          }}
+                          className="form-check-input mt-0"
+                          style={{ cursor: "pointer" }}
+                        />
+                        <span
+                          style={{
+                            width: "8px",
+                            height: "8px",
+                            borderRadius: "50%",
+                            backgroundColor: param.color,
+                            display: "inline-block",
+                          }}
+                        />
+                        <span className={isSelected ? "fw-bold text-dark" : ""}>
+                          {param.label}
+                        </span>
+                      </label>
+                    );
+                  })}
                 </div>
               </div>
 
@@ -705,48 +839,80 @@ for lat, lon in locations:
                           }}
                         />
                         <Legend wrapperStyle={{ fontSize: "11px", paddingTop: "6px" }} />
-                        <Line
-                          type="monotone"
-                          dataKey="t2m_max"
-                          name="Max Temp (T2M_MAX)"
-                          stroke="#EF4444"
-                          strokeWidth={2}
-                          dot={false}
-                        />
-                        <Line
-                          type="monotone"
-                          dataKey="t2m"
-                          name="Mean Temp (T2M)"
-                          stroke="#F59E0B"
-                          strokeWidth={2.5}
-                          dot={false}
-                        />
-                        <Line
-                          type="monotone"
-                          dataKey="t2m_min"
-                          name="Min Temp (T2M_MIN)"
-                          stroke="#3B82F6"
-                          strokeWidth={2}
-                          dot={false}
-                        />
-                        <Line
-                          type="monotone"
-                          dataKey="t2mdew"
-                          name="Dew Point (T2MDEW)"
-                          stroke="#10B981"
-                          strokeWidth={1.5}
-                          strokeDasharray="4 4"
-                          dot={false}
-                        />
-                        <Line
-                          type="monotone"
-                          dataKey="ts"
-                          name="Skin Temp (TS)"
-                          stroke="#8B5CF6"
-                          strokeWidth={1.5}
-                          strokeDasharray="2 2"
-                          dot={false}
-                        />
+                        {selectedParams.T2M_MAX && (
+                          <Line
+                            type="monotone"
+                            dataKey="t2m_max"
+                            name="Max Temp (T2M_MAX)"
+                            stroke="#EF4444"
+                            strokeWidth={2}
+                            dot={false}
+                          />
+                        )}
+                        {selectedParams.T2M && (
+                          <Line
+                            type="monotone"
+                            dataKey="t2m"
+                            name="Mean Temp (T2M)"
+                            stroke="#F59E0B"
+                            strokeWidth={2.5}
+                            dot={false}
+                          />
+                        )}
+                        {selectedParams.T2M_MIN && (
+                          <Line
+                            type="monotone"
+                            dataKey="t2m_min"
+                            name="Min Temp (T2M_MIN)"
+                            stroke="#3B82F6"
+                            strokeWidth={2}
+                            dot={false}
+                          />
+                        )}
+                        {selectedParams.T2MDEW && (
+                          <Line
+                            type="monotone"
+                            dataKey="t2mdew"
+                            name="Dew Point (T2MDEW)"
+                            stroke="#10B981"
+                            strokeWidth={1.5}
+                            strokeDasharray="4 4"
+                            dot={false}
+                          />
+                        )}
+                        {selectedParams.TS && (
+                          <Line
+                            type="monotone"
+                            dataKey="ts"
+                            name="Skin Temp (TS)"
+                            stroke="#8B5CF6"
+                            strokeWidth={1.5}
+                            strokeDasharray="2 2"
+                            dot={false}
+                          />
+                        )}
+                        {selectedParams.T2M_RANGE && (
+                          <Line
+                            type="monotone"
+                            dataKey="t2m_range"
+                            name="Diurnal Range (T2M_RANGE)"
+                            stroke="#F97316"
+                            strokeWidth={1.5}
+                            strokeDasharray="3 3"
+                            dot={false}
+                          />
+                        )}
+                        {selectedParams.T2MWET && (
+                          <Line
+                            type="monotone"
+                            dataKey="t2mwet"
+                            name="Wet Bulb (T2MWET)"
+                            stroke="#06B6D4"
+                            strokeWidth={1.5}
+                            strokeDasharray="5 5"
+                            dot={false}
+                          />
+                        )}
                       </LineChart>
                     </ResponsiveContainer>
                   ) : (

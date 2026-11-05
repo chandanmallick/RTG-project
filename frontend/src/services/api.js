@@ -1445,13 +1445,14 @@ const API = {
     return res.data;
   },
 
-  getNasaPowerWeather: async ({ latitude, longitude, start = "20240101", end = "20241231", cityName = null, refresh = false }) => {
+  getNasaPowerWeather: async ({ latitude, longitude, start = "20240101", end = "20241231", parameters = "T2M,T2MDEW,T2MWET,TS,T2M_RANGE,T2M_MAX,T2M_MIN", cityName = null, refresh = false }) => {
     const res = await axios.get(`${BASE_URL}/weather/nasa-power/point`, {
       params: {
         latitude,
         longitude,
         start,
         end,
+        parameters,
         city_name: cityName,
         refresh,
       },
@@ -1468,8 +1469,8 @@ const API = {
     return res.data;
   },
 
-  getNasaPowerExportUrl: (latitude, longitude, start = "20240101", end = "20241231") => {
-    return `${BASE_URL}/weather/nasa-power/export?latitude=${latitude}&longitude=${longitude}&start=${start}&end=${end}`;
+  getNasaPowerExportUrl: (latitude, longitude, start = "20240101", end = "20241231", parameters = "T2M,T2MDEW,T2MWET,TS,T2M_RANGE,T2M_MAX,T2M_MIN") => {
+    return `${BASE_URL}/weather/nasa-power/export?latitude=${latitude}&longitude=${longitude}&start=${start}&end=${end}&parameters=${parameters}`;
   },
 };
 
