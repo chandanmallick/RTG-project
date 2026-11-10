@@ -415,7 +415,9 @@ def get_special_roster_matrix(
                 "WEEKLY_OFF", "WEEKLY-OFF", "C-OFF", "COMP-OFF", "COMPENSATORY OFF", "NONE", ""
             }
 
-            is_leave_sic = bool(l.get("isSIC")) or (eid in sic_emp_ids) or bool(d_rec.get("isSIC"))
+            from crew_legacy.services.replacement_roster_service import is_sic_place_vacant
+            sic_place_vacant, he_is_sic, has_acting_sic = is_sic_place_vacant(l, d_rec)
+            is_leave_sic = sic_place_vacant
             is_marked_for_rep = bool(
                 is_leave_sic
                 or l.get("replacementRequired")
@@ -785,12 +787,9 @@ def sequential_allocate_department_manpower(
             if target_shifts and s not in target_shifts:
                 continue
 
-            is_leave_sic = (
-                bool(leave.get("isSIC"))
-                or bool(leave.get("sicReplacementRequired"))
-                or (eid in sic_emp_ids)
-                or bool(d_rec.get("isSIC"))
-            )
+            from crew_legacy.services.replacement_roster_service import is_sic_place_vacant
+            sic_place_vacant, he_is_sic, has_acting_sic = is_sic_place_vacant(leave, d_rec)
+            is_leave_sic = sic_place_vacant
 
             slots_to_fill.append({
                 "type": "leave_replacement",
@@ -877,21 +876,10 @@ def sequential_allocate_department_manpower(
             if duty_counts.get(cand_id, 0) >= max_duties_per_person:
                 continue
 
-            # Check if candidate is on leave on this date
-            cand_leave = leave_request_collection.find_one({
-                "employeeId": employee_id_filter(cand_id),
-                "date": sdate,
-                "finalStatus": {"$in": list(ACTIVE_LEAVE_STATUSES)},
-            })
-            if cand_leave:
-                continue
-
-            # Check if candidate is already scheduled on a shift on this date
-            cand_daily = employee_daily_collection.find_one({
-                "employeeId": employee_id_filter(cand_id),
-                "date": sdate,
-            })
-            if cand_daily and cand_daily.get("assignedDuty") in SHIFT_DUTIES:
+            # Verify candidate availability (not on leave, not active shift group member, not on active duty)
+            from crew_legacy.services.replacement_roster_service import is_candidate_available_on_date
+            cand_available, _ = is_candidate_available_on_date(cand_id, sdate)
+            if not cand_available:
                 continue
 
             # Candidate match found!

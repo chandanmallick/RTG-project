@@ -86,10 +86,12 @@ def get_employee_roles(emp: dict) -> Tuple[bool, bool]:
         or is_shift_sic
     )
     is_se = (
-        any("shift engineer" in c or "shift_engineer" in c or c == "se" for c in categories)
+        any("shift engineer" in c or "shift_engineer" in c or c == "se" or "junior engineer" in c or c == "je" for c in categories)
         or "shift engineer" in cat_str
         or "shift engineer" in desig_str
         or "shift_engineer" in desig_str
+        or "junior engineer" in desig_str
+        or "je" in desig_str.split()
         or role_str in ("shift_engineer", "shift engineer", "se")
     )
     return is_sic, is_se
@@ -114,27 +116,41 @@ def is_sic_place_vacant(leave: dict, daily: dict = None) -> Tuple[bool, bool, bo
     leave_date = clean_id(leave.get("date"))
     group_name = clean_id(leave.get("groupName") or (daily or {}).get("groupName"))
 
-    # 1. Determine if employee taking leave is SIC (he_is_sic)
+    # Active Shift Group SIC check
+    active_sic_ids = set()
+    for grp in roster_group_collection.find({"isActive": True}, {"shiftInCharge": 1, "groupName": 1, "name": 1}):
+        sic_obj = grp.get("shiftInCharge") or {}
+        sid = clean_id(sic_obj.get("employeeId"))
+        if sid:
+            active_sic_ids.add(sid)
+
+    applicant_emp = employee_collection.find_one({
+        "$or": [{"userId": leave_emp_id}, {"employeeId": leave_emp_id}]
+    }) or {}
+    emp_has_sic, emp_has_se = get_employee_roles(applicant_emp)
+
     he_is_sic = False
-    if (daily or {}).get("isSIC") or leave.get("isSIC"):
+    if leave_emp_id and leave_emp_id in active_sic_ids:
         he_is_sic = True
-    else:
-        applicant_emp = employee_collection.find_one({
-            "$or": [{"userId": leave_emp_id}, {"employeeId": leave_emp_id}]
-        }) or {}
-        emp_has_sic, emp_has_se = get_employee_roles(applicant_emp)
-        if emp_has_sic and not emp_has_se:
-            he_is_sic = True
-        elif emp_has_sic and emp_has_se:
-            assigned = str((daily or {}).get("assignedDuty") or leave.get("assignedDuty") or "").lower()
-            he_is_sic = "sic" in assigned or bool((daily or {}).get("isSIC")) or bool(applicant_emp.get("isShiftGroupSic"))
-        elif emp_has_sic:
-            he_is_sic = True
+    elif bool(applicant_emp.get("isShiftGroupSic")):
+        he_is_sic = True
+    elif emp_has_sic and not emp_has_se:
+        he_is_sic = True
+    elif emp_has_sic and emp_has_se:
+        assigned = str((daily or {}).get("assignedDuty") or leave.get("assignedDuty") or "").lower()
+        he_is_sic = "sic" in assigned or bool((daily or {}).get("isSIC")) or bool(applicant_emp.get("isShiftGroupSic"))
+    elif not emp_has_se and (leave.get("isSIC") or (daily or {}).get("isSIC")):
+        he_is_sic = True
 
     # Check designated roster groups if groupName exists
     if not he_is_sic and group_name and leave_emp_id:
-        group_doc = roster_group_collection.find_one({"name": group_name}) or {}
-        sic_member_id = clean_id(group_doc.get("sicEmployeeId") or group_doc.get("shiftInChargeId"))
+        group_doc = (
+            roster_group_collection.find_one({"$or": [{"groupName": group_name}, {"name": group_name}], "isActive": True})
+            or roster_group_collection.find_one({"$or": [{"groupName": group_name}, {"name": group_name}]})
+            or {}
+        )
+        sic_obj = group_doc.get("shiftInCharge") or {}
+        sic_member_id = clean_id(sic_obj.get("employeeId") or group_doc.get("sicEmployeeId") or group_doc.get("shiftInChargeId"))
         if sic_member_id and sic_member_id == leave_emp_id:
             he_is_sic = True
 
