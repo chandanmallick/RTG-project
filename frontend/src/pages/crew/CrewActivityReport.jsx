@@ -62,6 +62,7 @@ export default function CrewActivityReport() {
   const [employeeIds, setEmployeeIds] = useState(currentEmployeeId ? [currentEmployeeId] : []);
   const [startDate, setStartDate] = useState(yearStart());
   const [endDate, setEndDate] = useState(today());
+  const [selectedDepartment, setSelectedDepartment] = useState("All");
   const [kind, setKind] = useState(() => {
     const requested = new URLSearchParams(window.location.search).get("kind") || "All";
     return ["All", "Leave", "Training", "Sports", "C-OFF", "Replacement duty"].includes(requested) ? requested : "All";
@@ -98,13 +99,28 @@ export default function CrewActivityReport() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  const load = async () => {
+  const load = async (deptOverride) => {
     setLoading(true);
     setError("");
     try {
-      const response = await api.get("/profile/activity-report", { params: { employeeIds: employeeIds.join(","), startDate, endDate } });
+      const dept = deptOverride !== undefined ? deptOverride : selectedDepartment;
+      const response = await api.get("/profile/activity-report", {
+        params: {
+          employeeIds: employeeIds.join(","),
+          department: dept !== "All" ? dept : undefined,
+          startDate,
+          endDate,
+        },
+      });
       setReport(response.data || { summary: {}, rows: [] });
-      if (!employeeIds.length && response.data?.employeeId) setEmployeeIds([response.data.employeeId]);
+      if (response.data?.userDepartment && !response.data?.isAdmin) {
+        setSelectedDepartment(response.data.userDepartment);
+      } else if (response.data?.selectedDepartment && selectedDepartment === "All" && response.data.selectedDepartment !== "All") {
+        setSelectedDepartment(response.data.selectedDepartment);
+      }
+      if (!employeeIds.length && response.data?.employeeId && response.data?.employeeId !== "all") {
+        setEmployeeIds([response.data.employeeId]);
+      }
     } catch (requestError) {
       setError(requestError.response?.data?.detail || "Crew activity report could not be loaded.");
     } finally {
@@ -120,6 +136,9 @@ export default function CrewActivityReport() {
       const period = matrixPeriod === "Month" ? monthBounds(matrixMonth) : { startDate, endDate };
       const response = await api.get("/profile/activity-matrix", { params: period });
       setMatrix(response.data || { dutyCategories: [], shiftDutyCategories: [], leaveCategories: [], otherCategories: [], departments: [], subDepartments: [], departmentSubDepartments: {}, subDepartmentGroups: {}, groupNames: [], rows: [] });
+      if (response.data?.userDepartment && !response.data?.isAdmin) {
+        setMatrixDepartment(response.data.userDepartment);
+      }
     } catch (requestError) {
       setError(requestError.response?.data?.detail || "Employee activity matrix could not be loaded.");
     } finally {
@@ -149,6 +168,13 @@ export default function CrewActivityReport() {
     && `${row.employeeName || ""} ${row.employeeId || ""} ${row.title || ""} ${row.detail || ""} ${row.groupName || ""}`.toLowerCase().includes(recordSearch.trim().toLowerCase())
   ).sort((a,b) => String(b.date).localeCompare(String(a.date))), [report.rows, kind, recordStatus, recordSearch]);
   const recordStatuses = [...new Set((report.rows || []).map(row => row.status).filter(Boolean))].sort();
+  const filteredEmployeeOptions = useMemo(() => {
+    if (selectedDepartment === "All" || !report.employees) return report.employees || [];
+    return (report.employees || []).filter(
+      (emp) => emp.department === selectedDepartment || (emp.departments || []).includes(selectedDepartment)
+    );
+  }, [report.employees, selectedDepartment]);
+
   const exportRows = () => {
     const cell = value => { let text = String(value ?? ""); if (/^[=+@-]/.test(text)) text = "'" + text; return `"${text.replaceAll('"', '""')}"`; };
     const csv = [["Date", "Employee ID", "Employee", "Type", "Particular", "Status", "Details"], ...rows.map(row => [row.date, row.employeeId, row.employeeName, row.kind, row.title, row.status, row.detail])].map(row => row.map(cell).join(",")).join("\r\n");
@@ -307,7 +333,35 @@ export default function CrewActivityReport() {
     ) : <>
     <Paper elevation={0} sx={{ p: 2, borderRadius: 3 }}>
       <Stack direction="row" spacing={1}  useFlexGap sx={{ ...({ flexWrap: "wrap", gap: 1.5, "& .MuiTextField-root": { minWidth: 130 } }), alignItems: "center" }}>
-        {reportMode === "detail" && report.canViewAll && <EmployeeMultiSelect options={report.employees || []} value={employeeIds} onChange={setEmployeeIds} allOption />}
+        {reportMode === "detail" && (
+          <TextField
+            select
+            size="small"
+            label="Department"
+            value={selectedDepartment}
+            onChange={(event) => {
+              const nextDept = event.target.value;
+              setSelectedDepartment(nextDept);
+              setEmployeeIds([]);
+              load(nextDept);
+            }}
+            sx={{ minWidth: 175 }}
+            disabled={!report.isAdmin && (report.departments || []).length <= 1}
+          >
+            {report.isAdmin && <MenuItem value="All">All departments</MenuItem>}
+            {(report.departments || report.allDepartments || []).map((value) => (
+              <MenuItem key={value} value={value}>{value}</MenuItem>
+            ))}
+          </TextField>
+        )}
+        {reportMode === "detail" && (report.canViewAll || report.isAdmin || (report.employees && report.employees.length > 1)) && (
+          <EmployeeMultiSelect
+            options={filteredEmployeeOptions}
+            value={employeeIds}
+            onChange={setEmployeeIds}
+            allOption
+          />
+        )}
         {reportMode !== "detail" && <TextField select size="small" label="Period" value={matrixPeriod} onChange={(event) => { setMatrixPeriod(event.target.value); if (reportMode === "crms") clearCrmsReport(); }} sx={{ width: 115 }}>
           {["Date range", "Month"].map((value) => <MenuItem key={value} value={value}>{value}</MenuItem>)}
         </TextField>}
@@ -320,10 +374,27 @@ export default function CrewActivityReport() {
         </TextField> : reportMode === "matrix" ? <TextField select size="small" label="Activity category" value={matrixKind} onChange={(event) => { setMatrixKind(event.target.value); setMatrixActivitySubtype("All"); setMatrixEmployee([]); }} sx={{ minWidth: 165 }}>
           {["All", "Shift duty", "Leave", "Other"].map((value) => <MenuItem key={value} value={value}>{value}</MenuItem>)}
         </TextField> : null}
-        {reportMode === "matrix" && <TextField select size="small" label="Department" value={matrixDepartment} onChange={(event) => { setMatrixDepartment(event.target.value); setMatrixSubDepartment("All"); setMatrixGroup("All"); setMatrixEmployee([]); }} sx={{ width: 180 }}>
-          <MenuItem value="All">All departments</MenuItem>
-          {(matrix.departments || []).map((value) => <MenuItem key={value} value={value}>{value}</MenuItem>)}
-        </TextField>}
+        {reportMode === "matrix" && (
+          <TextField
+            select
+            size="small"
+            label="Department"
+            value={matrixDepartment}
+            onChange={(event) => {
+              setMatrixDepartment(event.target.value);
+              setMatrixSubDepartment("All");
+              setMatrixGroup("All");
+              setMatrixEmployee([]);
+            }}
+            sx={{ width: 180 }}
+            disabled={!matrix.isAdmin && (matrix.departments || []).length <= 1}
+          >
+            {matrix.isAdmin && <MenuItem value="All">All departments</MenuItem>}
+            {(matrix.departments || []).map((value) => (
+              <MenuItem key={value} value={value}>{value}</MenuItem>
+            ))}
+          </TextField>
+        )}
         {reportMode === "matrix" && <TextField select size="small" label="Sub-department" value={matrixSubDepartment} onChange={(event) => { setMatrixSubDepartment(event.target.value); setMatrixGroup("All"); setMatrixEmployee([]); }} sx={{ width: 190 }}>
           <MenuItem value="All">All sub-departments</MenuItem>
           {matrixSubDepartmentOptions.map((value) => <MenuItem key={value} value={value}>{value}</MenuItem>)}

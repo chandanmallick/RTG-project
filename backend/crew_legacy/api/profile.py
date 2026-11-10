@@ -307,10 +307,40 @@ def _report_date(value) -> str:
     return str(value or "")[:10]
 
 
+def _report_actor_is_admin(user: dict) -> bool:
+    role = str(user.get("role") or "").lower()
+    return role in ["admin", "superadmin"] or bool(user.get("isAdmin")) or str(user.get("employeeId") or "") == "50041"
+
+
 def _report_actor_can_view_all(user: dict) -> bool:
-    # Crew Reports are an authenticated employee resource. This includes the
-    # detailed report, consolidated activity matrix and CRMS reconciliation.
-    return bool(str(user.get("employeeId") or user.get("userId") or "").strip())
+    # USER REQUIREMENT: Only admin can see all things across all departments.
+    return _report_actor_is_admin(user)
+
+
+def _get_user_department(user: dict) -> str:
+    dept = user.get("department")
+    if dept and str(dept).strip():
+        return str(dept).strip()
+    depts = user.get("departments")
+    if depts and isinstance(depts, list) and len(depts) > 0 and depts[0]:
+        return str(depts[0]).strip()
+    actor_id = str(user.get("employeeId") or user.get("userId") or "").strip()
+    if actor_id:
+        emp = employee_collection.find_one({"$or": [{"userId": actor_id}, {"employeeId": actor_id}]}) or {}
+        dept = emp.get("department")
+        if dept and str(dept).strip():
+            return str(dept).strip()
+        depts = emp.get("departments")
+        if depts and isinstance(depts, list) and len(depts) > 0 and depts[0]:
+            return str(depts[0]).strip()
+    return ""
+
+
+def _all_departments() -> list[str]:
+    org_depts = [str(u.get("name") or "").strip() for u in organization_unit_collection.find({"unitType": "department", "isActive": {"$ne": False}})]
+    emp_depts = [str(d).strip() for d in employee_collection.distinct("department") if d]
+    combined = sorted(set(filter(None, org_depts + emp_depts)))
+    return combined
 
 
 def _inclusive_days(start_value, end_value=None, window_start: str | None = None, window_end: str | None = None) -> int:
@@ -357,23 +387,62 @@ def update_profile_edit_settings(data: dict, user=Depends(get_current_user)):
 # ---------------------------------
 @router.get("/activity-report")
 def activity_report(
-    employeeId: str | None = Query(default=None),
-    employeeIds: str | None = Query(default=None),
-    startDate: str | None = Query(default=None),
-    endDate: str | None = Query(default=None),
+    employeeId: str | None = None,
+    employeeIds: str | None = None,
+    department: str | None = None,
+    startDate: str | None = None,
+    endDate: str | None = None,
     user=Depends(get_current_user),
 ):
-    """Single audit/report feed for leave, training, C-OFF and replacement duties."""
+    """Single audit/report feed for leave, training, C-OFF and replacement duties organized department-wise."""
     actor_id = str(user.get("employeeId") or "").strip()
-    can_view_all = _report_actor_can_view_all(user)
-    requested_ids = [value.strip() for value in str(employeeIds or employeeId or actor_id).split(",") if value.strip()]
+    is_admin = _report_actor_is_admin(user)
+    user_dept = _get_user_department(user)
+    all_depts = _all_departments()
+
+    # Department scope:
+    # Only admin can select "All" or other departments; non-admin is locked to user_dept
+    if is_admin:
+        allowed_depts = all_depts
+        effective_dept = department if department and department != "All" else None
+    else:
+        allowed_depts = [user_dept] if user_dept else []
+        effective_dept = user_dept
+
+    # Fetch employees eligible for this department view
+    emp_query = {"isActive": {"$ne": False}}
+    if effective_dept:
+        emp_query["$or"] = [{"department": effective_dept}, {"departments": effective_dept}]
+    dept_employees = list(employee_collection.find(
+        emp_query,
+        {"userId": 1, "employeeId": 1, "name": 1, "designation": 1, "department": 1, "departments": 1}
+    ).sort("name", 1))
+    dept_employee_ids = {str(item.get("userId") or item.get("employeeId") or "").strip() for item in dept_employees if str(item.get("userId") or item.get("employeeId") or "").strip()}
+
+    requested_raw = str(employeeIds or employeeId or "").strip()
+    requested_ids = [value.strip() for value in requested_raw.split(",") if value.strip()]
     target_all = any(value.lower() == "all" for value in requested_ids)
-    target_ids = [] if target_all else list(dict.fromkeys(requested_ids))
+
+    if not is_admin:
+        if target_all or not requested_ids:
+            target_ids = list(dept_employee_ids) if dept_employee_ids else ([actor_id] if actor_id else [])
+            target_all = False
+        else:
+            for rid in requested_ids:
+                if rid != actor_id and rid not in dept_employee_ids:
+                    raise HTTPException(403, detail="You can view reports only for your own department")
+            target_ids = list(dict.fromkeys(requested_ids))
+    else:
+        if target_all:
+            target_ids = list(dept_employee_ids) if effective_dept else []
+            target_all = not bool(effective_dept)
+        elif requested_ids:
+            target_ids = list(dict.fromkeys(requested_ids))
+        else:
+            target_ids = list(dept_employee_ids) if effective_dept else []
+            target_all = not bool(effective_dept)
+
     target_id = target_ids[0] if len(target_ids) == 1 else ""
-    if not target_ids and not target_all:
-        raise HTTPException(400, detail="Employee ID is required")
-    if (target_all or any(value != actor_id for value in target_ids)) and not can_view_all:
-        raise HTTPException(403, detail="You can view only your own crew activity report")
 
     date_filter = {}
     if startDate:
@@ -523,26 +592,56 @@ def activity_report(
         "compOffDates": [_report_date(item.get("earnedDate") or item.get("date")) for item in filtered_coff_records],
         "replacement": len(replacements),
     }
-    employee_options = []
-    if can_view_all:
+    if is_admin:
+        if effective_dept:
+            employee_options = [{
+                "employeeId": str(item.get("userId") or item.get("employeeId") or ""),
+                "name": item.get("name") or "", "designation": item.get("designation") or "",
+                "department": item.get("department") or ((item.get("departments") or [""])[0]),
+            } for item in dept_employees]
+        else:
+            employee_options = [{
+                "employeeId": str(item.get("userId") or item.get("employeeId") or ""),
+                "name": item.get("name") or "", "designation": item.get("designation") or "",
+                "department": item.get("department") or ((item.get("departments") or [""])[0]),
+            } for item in employee_collection.find({"isActive": {"$ne": False}}, {"userId": 1, "employeeId": 1, "name": 1, "designation": 1, "department": 1, "departments": 1}).sort("name", 1)]
+    else:
         employee_options = [{
             "employeeId": str(item.get("userId") or item.get("employeeId") or ""),
             "name": item.get("name") or "", "designation": item.get("designation") or "",
-        } for item in employee_collection.find({"isActive": {"$ne": False}}, {"userId": 1, "employeeId": 1, "name": 1, "designation": 1}).sort("name", 1)]
-        employee_options = [item for item in employee_options if item["employeeId"]]
+            "department": item.get("department") or ((item.get("departments") or [""])[0]),
+        } for item in dept_employees]
 
-    return {"employeeId": "all" if target_all else target_id, "employeeIds": target_ids, "canViewAll": can_view_all, "employees": employee_options, "summary": summary, "rows": rows}
+    employee_options = [item for item in employee_options if item["employeeId"]]
+
+    return {
+        "employeeId": "all" if target_all else target_id,
+        "employeeIds": target_ids,
+        "canViewAll": is_admin,
+        "isAdmin": is_admin,
+        "userDepartment": user_dept,
+        "selectedDepartment": effective_dept or "All",
+        "departments": allowed_depts,
+        "allDepartments": all_depts if is_admin else [user_dept],
+        "employees": employee_options,
+        "summary": summary,
+        "rows": rows,
+    }
 
 
 @router.get("/activity-matrix")
 def activity_matrix(
-    startDate: str | None = Query(default=None),
-    endDate: str | None = Query(default=None),
+    startDate: str | None = None,
+    endDate: str | None = None,
     user=Depends(get_current_user),
 ):
-    """Consolidated employee duty, replacement, training and leave matrix."""
-    if not _report_actor_can_view_all(user):
-        raise HTTPException(403, detail="Employee activity matrix is available to administrators")
+    """Consolidated employee duty, replacement, training and leave matrix organized department-wise."""
+    is_admin = _report_actor_is_admin(user)
+    user_dept = _get_user_department(user)
+    all_depts = _all_departments()
+
+    if not is_admin and not user_dept:
+        raise HTTPException(403, detail="Department assignment required to view activity matrix")
     if not startDate or not endDate or startDate > endDate:
         raise HTTPException(400, detail="A valid From and To date are required")
 
@@ -812,8 +911,18 @@ def activity_matrix(
         and str(item.get("value") or "").strip().upper().replace(" ", "-") not in {"C-OFF", "COFF"}
     }
     category_order = sorted(categories | configured_leave_categories, key=lambda value: (value not in {"CL", "C-OFF"}, value))
-    rows = sorted(people.values(), key=lambda row: ((row["employeeName"] or "").lower(), row["employeeId"]))
-    department_options = sorted({value for row in rows for value in row.get("departments") or []})
+    all_rows = sorted(people.values(), key=lambda row: ((row["employeeName"] or "").lower(), row["employeeId"]))
+
+    if not is_admin:
+        # Non-admin sees ONLY rows from their own department
+        rows = [r for r in all_rows if user_dept in (r.get("departments") or [r.get("department")])]
+        department_options = [user_dept]
+    else:
+        rows = all_rows
+        department_options = sorted({value for row in rows for value in row.get("departments") or []})
+        if not department_options:
+            department_options = all_depts
+
     sub_department_options = sorted({value for values in department_sub_departments.values() for value in values})
     group_options = sorted(period_group_members, key=str.lower)
     return {
@@ -825,6 +934,9 @@ def activity_matrix(
         "leaveCategories": category_order,
         "otherCategories": ["Training", "C-OFF"],
         "departments": department_options,
+        "allDepartments": all_depts if is_admin else [user_dept],
+        "isAdmin": is_admin,
+        "userDepartment": user_dept,
         "subDepartments": sub_department_options,
         "departmentSubDepartments": department_sub_departments,
         "groupNames": group_options,

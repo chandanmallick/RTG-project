@@ -31,6 +31,28 @@ def clean_id(value) -> str:
     return str(value or "").replace("\xa0", " ").strip()
 
 
+def get_active_shift_group_member_ids() -> set[str]:
+    """
+    Returns the set of employee IDs who are currently in an active shift group
+    (either as Shift In Charge or as a group member).
+    User Requirement: Persons currently in a shift group must NOT be included in either sequential replacement pool.
+    """
+    active_ids = set()
+    for group in roster_group_collection.find({"isActive": True}):
+        sic_id = clean_id(
+            (group.get("shiftInCharge") or {}).get("employeeId")
+            or group.get("sicEmployeeId")
+            or group.get("shiftInChargeId")
+        )
+        if sic_id:
+            active_ids.add(sic_id)
+        for m in (group.get("members") or []):
+            mid = clean_id(m.get("employeeId") or m.get("userId"))
+            if mid:
+                active_ids.add(mid)
+    return active_ids
+
+
 def get_frontend_base_url() -> str:
     return _runtime_env_value("FRONTEND_URL") or "http://localhost:3001"
 
@@ -144,6 +166,7 @@ def is_sic_place_vacant(leave: dict, daily: dict = None) -> Tuple[bool, bool, bo
 def init_default_pools() -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
     """
     Seeds the SIC and Shift Engineer pools ONLY from active employees marked as Replacement in the Employee database.
+    Excludes all persons who are currently in an active shift group.
     Pool 1: SIC Pool (SIC, SIC & Shift Engineer)
     Pool 2: Shift Engineer Pool (Shift Engineers)
     """
@@ -152,11 +175,14 @@ def init_default_pools() -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
     seen_sic = set()
     seen_se = set()
 
-    # USER REQUIREMENT: Pool should include only persons having marked in the Employee database (dutyType == 'Replacement')
+    # Exclude anyone currently in an active shift group
+    active_shift_group_ids = get_active_shift_group_member_ids()
+
+    # USER REQUIREMENT: Pool should include only persons marked in the Employee database (dutyType == 'Replacement')
     active_employees = list(employee_collection.find({"isActive": {"$ne": False}}))
     for emp in active_employees:
         eid = clean_id(emp.get("userId") or emp.get("employeeId"))
-        if not eid:
+        if not eid or eid in active_shift_group_ids:
             continue
         duty_type = str(emp.get("dutyType") or "").strip().lower()
         is_sic_registered, is_se_registered = get_employee_roles(emp)
@@ -200,6 +226,7 @@ def init_default_pools() -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
 def get_replacement_roster_config() -> Dict[str, Any]:
     """Retrieve replacement roster configuration or create default if not present."""
     config = replacement_roster_config_collection.find_one({"_id": CONFIG_ID})
+    active_shift_group_ids = get_active_shift_group_member_ids()
 
     # Verify existing pool members against Employee database
     marked_replacement_ids = {
@@ -222,6 +249,7 @@ def get_replacement_roster_config() -> Dict[str, Any]:
                 "shiftEngineerPool": shift_eng_pool,
                 "nextSicIndex": 0,
                 "nextShiftEngineerIndex": 0,
+                "delayedCandidateIds": {"sic": [], "shiftEngineer": []},
                 "rejectionCounters": {},
                 "longDurationPolicies": {},
                 "createdAt": datetime.utcnow(),
@@ -236,38 +264,61 @@ def get_replacement_roster_config() -> Dict[str, Any]:
             if not config.get("shiftEngineerPool"):
                 updates["shiftEngineerPool"] = shift_eng_pool
                 config["shiftEngineerPool"] = shift_eng_pool
+            if "delayedCandidateIds" not in config:
+                updates["delayedCandidateIds"] = {"sic": [], "shiftEngineer": []}
+                config["delayedCandidateIds"] = {"sic": [], "shiftEngineer": []}
             if updates:
                 replacement_roster_config_collection.update_one({"_id": CONFIG_ID}, {"$set": updates})
-    elif marked_replacement_ids:
-        # Verify pool members strictly match registered Category in Employee database
+    else:
+        # Verify pool members strictly match registered Category and exclude active shift group members
         fresh_sic, fresh_se = init_default_pools()
         fresh_sic_map = {x["employeeId"]: x for x in fresh_sic}
         fresh_se_map = {x["employeeId"]: x for x in fresh_se}
 
-        current_sic_ids = [clean_id(x.get("employeeId")) for x in (config.get("sicPool") or [])]
-        current_se_ids = [clean_id(x.get("employeeId")) for x in (config.get("shiftEngineerPool") or [])]
+        current_sic = config.get("sicPool") or []
+        current_se = config.get("shiftEngineerPool") or []
 
-        if set(current_sic_ids) != set(fresh_sic_map.keys()) or set(current_se_ids) != set(fresh_se_map.keys()):
-            updated_sic = [fresh_sic_map[eid] for eid in current_sic_ids if eid in fresh_sic_map]
+        # Filter out active shift group members from current pools
+        clean_current_sic = [x for x in current_sic if clean_id(x.get("employeeId")) not in active_shift_group_ids]
+        clean_current_se = [x for x in current_se if clean_id(x.get("employeeId")) not in active_shift_group_ids]
+
+        clean_sic_ids = [clean_id(x.get("employeeId")) for x in clean_current_sic]
+        clean_se_ids = [clean_id(x.get("employeeId")) for x in clean_current_se]
+
+        needs_save = False
+        updates = {}
+
+        if set(clean_sic_ids) != set(fresh_sic_map.keys()) or len(clean_current_sic) != len(current_sic):
+            updated_sic = [fresh_sic_map[eid] for eid in clean_sic_ids if eid in fresh_sic_map]
             for eid, item in fresh_sic_map.items():
-                if eid not in current_sic_ids:
+                if eid not in clean_sic_ids:
                     updated_sic.append(item)
             for i, item in enumerate(updated_sic):
                 item["seniorityOrder"] = i + 1
+            config["sicPool"] = updated_sic
+            updates["sicPool"] = updated_sic
+            needs_save = True
 
-            updated_se = [fresh_se_map[eid] for eid in current_se_ids if eid in fresh_se_map]
+        if set(clean_se_ids) != set(fresh_se_map.keys()) or len(clean_current_se) != len(current_se):
+            updated_se = [fresh_se_map[eid] for eid in clean_se_ids if eid in fresh_se_map]
             for eid, item in fresh_se_map.items():
-                if eid not in current_se_ids:
+                if eid not in clean_se_ids:
                     updated_se.append(item)
             for i, item in enumerate(updated_se):
                 item["seniorityOrder"] = i + 1
-
-            config["sicPool"] = updated_sic
             config["shiftEngineerPool"] = updated_se
-            replacement_roster_config_collection.update_one(
-                {"_id": CONFIG_ID},
-                {"$set": {"sicPool": updated_sic, "shiftEngineerPool": updated_se, "updatedAt": datetime.utcnow()}}
-            )
+            updates["shiftEngineerPool"] = updated_se
+            needs_save = True
+
+        if "delayedCandidateIds" not in config:
+            config["delayedCandidateIds"] = {"sic": [], "shiftEngineer": []}
+            updates["delayedCandidateIds"] = {"sic": [], "shiftEngineer": []}
+            needs_save = True
+
+        if needs_save:
+            updates["updatedAt"] = datetime.utcnow()
+            replacement_roster_config_collection.update_one({"_id": CONFIG_ID}, {"$set": updates})
+
     return config
 
 
@@ -643,7 +694,22 @@ def set_long_duration_policy(leave_group_id: str, policy: str, permanent_employe
 # =========================================================
 
 def is_candidate_available_on_date(candidate_id: str, target_date: str) -> Tuple[bool, str]:
-    """Verifies candidate is not on leave or already scheduled for duty on target date."""
+    """
+    Verifies candidate is not on approved or proposed leave, not an active shift group member,
+    and not already scheduled for duty on target date.
+    User Requirement: If someone is on approved or proposed leave, their term should be delayed.
+    Persons currently on shift group must NOT be included.
+    """
+    candidate_id = clean_id(candidate_id)
+    if not candidate_id:
+        return False, "Invalid candidate ID"
+
+    # 1. Shift group exclusion check
+    active_shift_ids = get_active_shift_group_member_ids()
+    if candidate_id in active_shift_ids:
+        return False, "Active Shift Group member"
+
+    # 2. Check employee_daily_collection for leave
     daily = employee_daily_collection.find_one({
         "employeeId": candidate_id,
         "date": target_date,
@@ -653,11 +719,22 @@ def is_candidate_available_on_date(candidate_id: str, target_date: str) -> Tuple
     if leave_status and leave_status not in {"Rejected", "Withdrawn", "Cancelled", "Canceled"}:
         return False, f"On leave ({leave_status})"
 
-    assigned = clean_id(daily.get("assignedDuty"))
-    # In shift operations, candidates on OFF / General duty are preferred for replacement
+    # 3. Check leave_request_collection for any approved OR proposed/pending leave
+    leave_doc = leave_request_collection.find_one({
+        "employeeId": candidate_id,
+        "date": target_date,
+        "finalStatus": {"$nin": ["Rejected", "Withdrawn", "Cancelled", "Canceled"]},
+    })
+    if leave_doc:
+        st = clean_id(leave_doc.get("finalStatus") or leave_doc.get("status") or "Proposed")
+        return False, f"On leave ({st})"
+
+    # 4. Check existing replacement or active duty
     if daily.get("replacementDuty"):
         return False, "Already assigned replacement on this date"
 
+    assigned = clean_id(daily.get("assignedDuty"))
+    # In shift operations, candidates on OFF / General duty are preferred for replacement
     if assigned and assigned not in {"OFF", "O1", "O2", "General", "H", "Holiday", ""}:
         return False, f"Already assigned active shift ({assigned})"
 
@@ -780,8 +857,28 @@ def auto_allocate_d5_replacements(force: bool = False, test_mode: bool = None) -
                 emp = employee_collection.find_one({"$or": [{"userId": perm_id}, {"employeeId": perm_id}]}) or {}
                 chosen_candidate = {"employeeId": perm_id, "name": emp.get("name") or perm_id}
 
+        delayed_map = config.get("delayedCandidateIds") or {"sic": [], "shiftEngineer": []}
+        pool_key = "sic" if is_sic_duty else "shiftEngineer"
+        delayed_for_pool = list(delayed_map.get(pool_key, []))
+
         if not chosen_candidate:
-            # Sequential round-robin search
+            # 1. Check if any previously delayed candidate is now available (their term was postponed due to leave)
+            for del_id in list(delayed_for_pool):
+                if del_id == applicant_id:
+                    continue
+                avail, _ = is_candidate_available_on_date(del_id, leave_date)
+                if avail:
+                    cand_match = next((c for c in pool if c["employeeId"] == del_id), None)
+                    if cand_match:
+                        chosen_candidate = cand_match
+                        delayed_for_pool.remove(del_id)
+                        logger.info(f"Allocated delayed candidate {cand_match['name']} ({del_id}) on {leave_date}")
+                        break
+                    else:
+                        delayed_for_pool.remove(del_id)
+
+        if not chosen_candidate:
+            # 2. Sequential round-robin search
             start_idx = next_sic_idx if is_sic_duty else next_se_idx
             pool_len = len(pool)
             found_idx = None
@@ -792,6 +889,9 @@ def auto_allocate_d5_replacements(force: bool = False, test_mode: bool = None) -
                 cid = cand["employeeId"]
 
                 if cid == applicant_id:
+                    # Person taking leave cannot replace themselves: delay their turn
+                    if cid not in delayed_for_pool:
+                        delayed_for_pool.append(cid)
                     continue
 
                 available, avail_reason = is_candidate_available_on_date(cid, leave_date)
@@ -799,12 +899,21 @@ def auto_allocate_d5_replacements(force: bool = False, test_mode: bool = None) -
                     chosen_candidate = cand
                     found_idx = cand_idx
                     break
+                else:
+                    # User requirement: If someone is on approved or proposed leave, he/she shouldn't be allocated
+                    # by auto sequence. His/Her term should be delayed.
+                    if "leave" in avail_reason.lower():
+                        if cid not in delayed_for_pool:
+                            delayed_for_pool.append(cid)
+                            logger.info(f"Candidate {cand['name']} ({cid}) is on leave on {leave_date}. Term delayed.")
 
             if found_idx is not None:
                 if is_sic_duty:
                     next_sic_idx = (found_idx + 1) % pool_len
                 else:
                     next_se_idx = (found_idx + 1) % pool_len
+
+        delayed_map[pool_key] = delayed_for_pool
 
         if not chosen_candidate:
             skipped_list.append({
@@ -910,14 +1019,16 @@ def auto_allocate_d5_replacements(force: bool = False, test_mode: bool = None) -
             "status": "SIMULATED" if is_test_mode else "ALLOCATED",
         })
 
-    # Update state pointer in config
+    # Update state pointer and delayed candidates in config
     if not is_test_mode:
+        delayed_map = config.get("delayedCandidateIds") or {"sic": [], "shiftEngineer": []}
         replacement_roster_config_collection.update_one(
             {"_id": CONFIG_ID},
             {
                 "$set": {
                     "nextSicIndex": next_sic_idx,
                     "nextShiftEngineerIndex": next_se_idx,
+                    "delayedCandidateIds": delayed_map,
                     "lastD5Run": now_kolkata.isoformat(),
                     "updatedAt": datetime.utcnow(),
                 }
@@ -989,43 +1100,67 @@ def auto_allocate_next_candidate_for_denied_duty(notification_id: str, user: dic
     if not pool:
         raise HTTPException(400, f"Cannot allocate: {pool_name} is empty or has no active members")
 
-    next_idx = config.get("nextSicIndex", 0) if is_sic_duty else config.get("nextShiftEngineerIndex", 0)
-    pool_len = len(pool)
+    delayed_map = config.get("delayedCandidateIds") or {"sic": [], "shiftEngineer": []}
+    pool_key = "sic" if is_sic_duty else "shiftEngineer"
+    delayed_for_pool = list(delayed_map.get(pool_key, []))
 
     chosen_candidate = None
     found_idx = None
 
-    for offset in range(pool_len):
-        cand_idx = (next_idx + offset) % pool_len
-        cand = pool[cand_idx]
-        cid = clean_id(cand.get("employeeId"))
-
-        if cid == denied_emp_id or cid == applicant_id:
+    # Check previously delayed candidates first
+    for del_id in list(delayed_for_pool):
+        if del_id == denied_emp_id or del_id == applicant_id:
             continue
+        avail, _ = is_candidate_available_on_date(del_id, duty_date)
+        if avail:
+            cand_match = next((c for c in pool if c["employeeId"] == del_id), None)
+            if cand_match:
+                chosen_candidate = cand_match
+                delayed_for_pool.remove(del_id)
+                logger.info(f"Allocated delayed candidate {cand_match['name']} ({del_id}) for denied duty on {duty_date}")
+                break
+            else:
+                delayed_for_pool.remove(del_id)
 
-        available, _ = is_candidate_available_on_date(cid, duty_date)
-        if available:
-            chosen_candidate = cand
-            found_idx = cand_idx
-            break
+    if not chosen_candidate:
+        next_idx = config.get("nextSicIndex", 0) if is_sic_duty else config.get("nextShiftEngineerIndex", 0)
+        pool_len = len(pool)
 
-    if not chosen_candidate or found_idx is None:
+        for offset in range(pool_len):
+            cand_idx = (next_idx + offset) % pool_len
+            cand = pool[cand_idx]
+            cid = clean_id(cand.get("employeeId"))
+
+            if cid == denied_emp_id or cid == applicant_id:
+                if cid != denied_emp_id and cid not in delayed_for_pool:
+                    delayed_for_pool.append(cid)
+                continue
+
+            available, avail_reason = is_candidate_available_on_date(cid, duty_date)
+            if available:
+                chosen_candidate = cand
+                found_idx = cand_idx
+                break
+            else:
+                if "leave" in avail_reason.lower() and cid not in delayed_for_pool:
+                    delayed_for_pool.append(cid)
+
+    delayed_map[pool_key] = delayed_for_pool
+
+    if not chosen_candidate:
         raise HTTPException(400, f"No available candidates in {pool_name} for {duty_date}")
 
     cid = chosen_candidate["employeeId"]
     cname = chosen_candidate["name"]
 
-    # Advance state pointer
-    if is_sic_duty:
-        replacement_roster_config_collection.update_one(
-            {"_id": CONFIG_ID},
-            {"$set": {"nextSicIndex": (found_idx + 1) % pool_len, "updatedAt": datetime.utcnow()}}
-        )
-    else:
-        replacement_roster_config_collection.update_one(
-            {"_id": CONFIG_ID},
-            {"$set": {"nextShiftEngineerIndex": (found_idx + 1) % pool_len, "updatedAt": datetime.utcnow()}}
-        )
+    # Advance state pointer if candidate was chosen from pool
+    updates = {"delayedCandidateIds": delayed_map, "updatedAt": datetime.utcnow()}
+    if found_idx is not None:
+        if is_sic_duty:
+            updates["nextSicIndex"] = (found_idx + 1) % len(pool)
+        else:
+            updates["nextShiftEngineerIndex"] = (found_idx + 1) % len(pool)
+    replacement_roster_config_collection.update_one({"_id": CONFIG_ID}, {"$set": updates})
 
     now = datetime.utcnow()
     actor_id = str((user or {}).get("employeeId") or "ADMIN")

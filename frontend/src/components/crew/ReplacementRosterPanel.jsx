@@ -1208,24 +1208,38 @@ export default function ReplacementRosterPanel({ onRefreshReplacements }) {
                 <TableBody>
                   {(config?.sicPool || []).map((emp, idx) => {
                     const isNext = (config?.nextSicIndex || 0) % (config?.sicPool?.length || 1) === idx;
+                    const isDelayed = (config?.delayedCandidateIds?.sic || []).includes(emp.employeeId);
                     return (
                       <TableRow
                         key={emp.employeeId}
                         sx={{
-                          bgcolor: isNext ? "rgba(59, 130, 246, 0.08)" : "transparent",
-                          "&:hover": { bgcolor: isNext ? "rgba(59, 130, 246, 0.12)" : "#F8FAFC" },
+                          bgcolor: isDelayed ? "rgba(245, 158, 11, 0.08)" : isNext ? "rgba(59, 130, 246, 0.08)" : "transparent",
+                          "&:hover": { bgcolor: isDelayed ? "rgba(245, 158, 11, 0.14)" : isNext ? "rgba(59, 130, 246, 0.12)" : "#F8FAFC" },
                         }}
                       >
                         <TableCell sx={{ fontWeight: 800, color: "#64748B" }}>#{idx + 1}</TableCell>
                         <TableCell>
                           <Typography variant="body2" sx={{ fontWeight: 800, color: "#0F172A" }}>
-                            {emp.employeeName}
+                            {emp.employeeName || emp.name}
                           </Typography>
                         </TableCell>
                         <TableCell sx={{ color: "#64748B", fontFamily: "monospace" }}>{emp.employeeId}</TableCell>
                         <TableCell>{emp.designation || "SIC Eligible"}</TableCell>
                         <TableCell align="center">
-                          {isNext ? (
+                          {isDelayed ? (
+                            <Chip
+                              size="small"
+                              icon={<Clock size={12} color="#D97706" />}
+                              label="TERM DELAYED (ON LEAVE)"
+                              sx={{
+                                bgcolor: "#FEF3C7",
+                                color: "#B45309",
+                                fontWeight: 800,
+                                fontSize: 10,
+                                border: "1px solid #FCD34D",
+                              }}
+                            />
+                          ) : isNext ? (
                             <Chip
                               size="small"
                               icon={<Zap size={12} color="#FFFFFF" />}
@@ -1314,24 +1328,38 @@ export default function ReplacementRosterPanel({ onRefreshReplacements }) {
                 <TableBody>
                   {(config?.shiftEngineerPool || []).map((emp, idx) => {
                     const isNext = (config?.nextShiftEngineerIndex || 0) % (config?.shiftEngineerPool?.length || 1) === idx;
+                    const isDelayed = (config?.delayedCandidateIds?.shiftEngineer || []).includes(emp.employeeId);
                     return (
                       <TableRow
                         key={emp.employeeId}
                         sx={{
-                          bgcolor: isNext ? "rgba(22, 163, 74, 0.08)" : "transparent",
-                          "&:hover": { bgcolor: isNext ? "rgba(22, 163, 74, 0.12)" : "#F8FAFC" },
+                          bgcolor: isDelayed ? "rgba(245, 158, 11, 0.08)" : isNext ? "rgba(22, 163, 74, 0.08)" : "transparent",
+                          "&:hover": { bgcolor: isDelayed ? "rgba(245, 158, 11, 0.14)" : isNext ? "rgba(22, 163, 74, 0.12)" : "#F8FAFC" },
                         }}
                       >
                         <TableCell sx={{ fontWeight: 800, color: "#64748B" }}>#{idx + 1}</TableCell>
                         <TableCell>
                           <Typography variant="body2" sx={{ fontWeight: 800, color: "#0F172A" }}>
-                            {emp.employeeName}
+                            {emp.employeeName || emp.name}
                           </Typography>
                         </TableCell>
                         <TableCell sx={{ color: "#64748B", fontFamily: "monospace" }}>{emp.employeeId}</TableCell>
                         <TableCell>{emp.designation || "Shift Engineer"}</TableCell>
                         <TableCell align="center">
-                          {isNext ? (
+                          {isDelayed ? (
+                            <Chip
+                              size="small"
+                              icon={<Clock size={12} color="#D97706" />}
+                              label="TERM DELAYED (ON LEAVE)"
+                              sx={{
+                                bgcolor: "#FEF3C7",
+                                color: "#B45309",
+                                fontWeight: 800,
+                                fontSize: 10,
+                                border: "1px solid #FCD34D",
+                              }}
+                            />
+                          ) : isNext ? (
                             <Chip
                               size="small"
                               icon={<Zap size={12} color="#FFFFFF" />}
