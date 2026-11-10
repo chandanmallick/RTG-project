@@ -247,7 +247,7 @@ export default function WestBengalPowerMap() {
     powerLines: true,
     powerPlants: true,
     substations: true,
-    labels: false,
+    labels: false, // Clean OpenInfra-style vector rendering by default (zero badge clutter)
     liveOpenInfraTiles: true,
     cityWeather: false,
 
@@ -764,90 +764,76 @@ export default function WestBengalPowerMap() {
               ],
               layout: { visibility: "none", "line-join": "round", "line-cap": "round" },
               paint: {
-                "line-color": "#0F172A",
-                "line-width": ["interpolate", ["linear"], ["zoom"], 4, 3.5, 8, 5.5, 12, 8.5, 16, 12.0],
-                "line-opacity": 0.85,
-              },
-            },
-            {
-              id: "oi-line-400-core",
-              type: "line",
-              source: "openinframap",
-              "source-layer": "power_line",
-              filter: ["any",
-                ["all", [">=", ["to-number", ["get", "voltage"], 0], 350], ["<", ["to-number", ["get", "voltage"], 0], 650]],
-                ["all", [">=", ["to-number", ["get", "voltage"], 0], 350000], ["<", ["to-number", ["get", "voltage"], 0], 650000]]
-              ],
-              layout: { visibility: "none", "line-join": "round", "line-cap": "round" },
-              paint: {
-                "line-color": "#DC2626",
-                "line-width": ["interpolate", ["linear"], ["zoom"], 4, 2.0, 8, 3.5, 12, 5.5, 16, 8.0],
-                "line-opacity": 1.0,
-              },
-            },
-            // -- 220 kV - Forest Green #16A34A -----------------------------------------------------
-            {
-              id: "oi-line-220-casing",
-              type: "line",
-              source: "openinframap",
-              "source-layer": "power_line",
-              filter: ["any",
-                ["all", [">=", ["to-number", ["get", "voltage"], 0], 190], ["<", ["to-number", ["get", "voltage"], 0], 350]],
-                ["all", [">=", ["to-number", ["get", "voltage"], 0], 190000], ["<", ["to-number", ["get", "voltage"], 0], 350000]]
-              ],
-              layout: { visibility: "none", "line-join": "round", "line-cap": "round" },
-              paint: {
-                "line-color": "#0F172A",
-                "line-width": ["interpolate", ["linear"], ["zoom"], 4, 3.0, 8, 4.5, 12, 7.0, 16, 10.0],
-                "line-opacity": 0.85,
-              },
-            },
-            {
-              id: "oi-line-220-core",
-              type: "line",
-              source: "openinframap",
-              "source-layer": "power_line",
-              filter: ["any",
-                ["all", [">=", ["to-number", ["get", "voltage"], 0], 190], ["<", ["to-number", ["get", "voltage"], 0], 350]],
-                ["all", [">=", ["to-number", ["get", "voltage"], 0], 190000], ["<", ["to-number", ["get", "voltage"], 0], 350000]]
-              ],
-              layout: { visibility: "none", "line-join": "round", "line-cap": "round" },
-              paint: {
-                "line-color": "#16A34A",
-                "line-width": ["interpolate", ["linear"], ["zoom"], 4, 1.8, 8, 2.8, 12, 4.5, 16, 6.5],
-                "line-opacity": 1.0,
-              },
-            },
-            // -- 132 kV / 110 kV / 66 kV - Electric Blue #0284C7 ----------------------------------
-            {
-              id: "oi-line-132-casing",
-              type: "line",
-              source: "openinframap",
-              "source-layer": "power_line",
-              filter: ["any",
-                ["all", [">=", ["to-number", ["get", "voltage"], 0], 50], ["<", ["to-number", ["get", "voltage"], 0], 190]],
-                ["all", [">=", ["to-number", ["get", "voltage"], 0], 50000], ["<", ["to-number", ["get", "voltage"], 0], 190000]]
-              ],
-              layout: { visibility: "none", "line-join": "round", "line-cap": "round" },
-              paint: {
-                "line-color": "#0F172A",
-                "line-width": ["interpolate", ["linear"], ["zoom"], 4, 2.5, 8, 3.8, 12, 6.0, 16, 8.5],
-                "line-opacity": 0.80,
-              },
-            },
-            {
-              id: "oi-line-132-core",
-              type: "line",
-              source: "openinframap",
-              "source-layer": "power_line",
-              filter: ["any",
-                ["all", [">=", ["to-number", ["get", "voltage"], 0], 50], ["<", ["to-number", ["get", "voltage"], 0], 190]],
-                ["all", [">=", ["to-number", ["get", "voltage"], 0], 50000], ["<", ["to-number", ["get", "voltage"], 0], 190000]]
-              ],
-              layout: { visibility: "none", "line-join": "round", "line-cap": "round" },
-              paint: {
-                "line-color": "#0284C7",
-                "line-width": ["interpolate", ["linear"], ["zoom"], 4, 1.5, 8, 2.4, 12, 3.8, 16, 5.5],
+                "line-color": [
+                  "case",
+                  // 765 kV / 800 kV UHV (Electric Cyan / Teal - OpenInfra standard)
+                  [
+                    "any",
+                    [">=", ["to-number", ["get", "voltage"], 0], 700000],
+                    [
+                      "all",
+                      [">=", ["to-number", ["get", "voltage"], 0], 650],
+                      ["<", ["to-number", ["get", "voltage"], 0], 2000]
+                    ]
+                  ],
+                  "#00B4D8",
+                  // 400 kV EHV (OpenInfra Distinct Purple / Magenta)
+                  [
+                    "any",
+                    [
+                      "all",
+                      [">=", ["to-number", ["get", "voltage"], 0], 350000],
+                      ["<", ["to-number", ["get", "voltage"], 0], 650000]
+                    ],
+                    [
+                      "all",
+                      [">=", ["to-number", ["get", "voltage"], 0], 350],
+                      ["<", ["to-number", ["get", "voltage"], 0], 650]
+                    ]
+                  ],
+                  "#9333EA",
+                  // 220 kV HV (OpenInfra Grid Red)
+                  [
+                    "any",
+                    [
+                      "all",
+                      [">=", ["to-number", ["get", "voltage"], 0], 190000],
+                      ["<", ["to-number", ["get", "voltage"], 0], 350000]
+                    ],
+                    [
+                      "all",
+                      [">=", ["to-number", ["get", "voltage"], 0], 190],
+                      ["<", ["to-number", ["get", "voltage"], 0], 350]
+                    ]
+                  ],
+                  "#DC2626",
+                  // 132 kV / 66 kV (OpenInfra Orange / Amber)
+                  [
+                    "any",
+                    [
+                      "all",
+                      [">=", ["to-number", ["get", "voltage"], 0], 50000],
+                      ["<", ["to-number", ["get", "voltage"], 0], 190000]
+                    ],
+                    [
+                      "all",
+                      [">=", ["to-number", ["get", "voltage"], 0], 50],
+                      ["<", ["to-number", ["get", "voltage"], 0], 190]
+                    ]
+                  ],
+                  "#D97706",
+                  // Muted Slate for lower distribution lines
+                  "#64748B",
+                ],
+                "line-width": [
+                  "interpolate",
+                  ["linear"],
+                  ["zoom"],
+                  4, 1.6,
+                  8, 2.8,
+                  12, 5.0,
+                  16, 8.0,
+                ],
                 "line-opacity": 1.0,
               },
             },
@@ -1637,8 +1623,6 @@ export default function WestBengalPowerMap() {
       // Click on OpenInfra Live Substations (Exact GIS features)
       const handleOpenInfraSubClick = (e) => {
         if (!e.features || e.features.length === 0) return;
-        if (e.features[0].geometry?.type !== "Point" &&
-          map.queryRenderedFeatures(e.point, { layers: ["openinfra-substation-point"] }).length) return;
         const feat = e.features[0];
         const props = feat.properties || {};
         const pointFeatures = feat.geometry?.type === "Point" ? [feat] : map.querySourceFeatures("openinframap", { sourceLayer: "power_substation_point" });
@@ -1648,14 +1632,6 @@ export default function WestBengalPowerMap() {
         const rawV = parseFloat(props.voltage) || 0;
         const vDisplay = rawV >= 1000 ? Math.round(rawV / 1000) + " kV" : (rawV > 0 ? rawV + " kV" : "Transmission Substation");
         const subName = props.name || `${vDisplay} Substation`;
-        if (exactCoords) {
-          setSelectedEntity({
-            type: "substation", id: `osm-${mappedPoint?.id ?? feat.id ?? subName}`,
-            name: subName, voltage: vDisplay, operator: props.operator || "", coords: exactCoords,
-            exactLocation: true, source: "OpenInfraMap"
-          });
-        } else setSelectedEntity(null);
-        const escape = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
 
         new Popup({ offset: 12, className: "power-popup" })
           .setLngLat(e.lngLat)
@@ -1939,71 +1915,29 @@ export default function WestBengalPowerMap() {
       }
     };
 
-    // Curated ER GeoJSON layers are hidden from canvas (directory only)
-    setVis("wb-line-casing", false);
-    setVis("wb-line-core", false);
-    setVis("wb-line-circuit2-casing", false);
-    setVis("wb-line-circuit2-core", false);
-    setVis("wb-line-voltage-badge", false);
-    setVis("wb-line-label", false);
-    setVis("wb-plant-beacon", false);
-    setVis("wb-plant-core", false);
-    setVis("wb-plant-label", false);
-    setVis("wb-substation-beacon", false);
-    setVis("wb-substation-circle", false);
-    setVis("wb-substation-label", false);
-
-    // Administrative Boundaries Toggles
-    setVis("er-state-outline", layersVisibility.stateBoundaries);
-    setVis("er-state-label", layersVisibility.stateBoundaries);
-    setVis("er-district-outline", layersVisibility.districtBoundaries);
-    setVis("er-district-label", layersVisibility.districtBoundaries);
-
-    // OpenInfra Transmission Line layers (split by voltage)
-    const liveLines = layersVisibility.powerLines && layersVisibility.liveOpenInfraTiles;
-    const show765L = liveLines && layersVisibility.line765;
-    const show400L = liveLines && layersVisibility.line400;
-    const show220L = liveLines && layersVisibility.line220;
-    const show132L = liveLines && layersVisibility.line132;
-
-    setVis("oi-line-765-casing", show765L);
-    setVis("oi-line-765-core", show765L);
-    setVis("oi-line-400-casing", show400L);
-    setVis("oi-line-400-core", show400L);
-    setVis("oi-line-220-casing", show220L);
-    setVis("oi-line-220-core", show220L);
-    setVis("oi-line-132-casing", show132L);
-    setVis("oi-line-132-core", show132L);
-    setVis("openinfra-line-label", liveLines && layersVisibility.labels);
-    setVis("openinfra-towers", liveLines);
-    setVis("openinfra-tower-label", liveLines && layersVisibility.labels);
-
-    // OpenInfra Substation layers (split by voltage)
-    const liveSubs = layersVisibility.substations && layersVisibility.liveOpenInfraTiles;
-    const show765S = liveSubs && layersVisibility.sub765;
-    const show400S = liveSubs && layersVisibility.sub400;
-    const show220S = liveSubs && layersVisibility.sub220;
-    const show132S = liveSubs && layersVisibility.sub132;
-
-    setVis("oi-sub-765-fill", show765S);
-    setVis("oi-sub-400-fill", show400S);
-    setVis("oi-sub-220-fill", show220S);
-    setVis("oi-sub-132-fill", show132S);
-    setVis("openinfra-substation-outline", show765S || show400S || show220S || show132S);
-    setVis("oi-sub-765-point", show765S);
-    setVis("oi-sub-400-point", show400S);
-    setVis("oi-sub-220-point", show220S);
-    setVis("oi-sub-132-point", show132S);
-    setVis("openinfra-substation-label", liveSubs && layersVisibility.labels);
-
-    // OpenInfra Generating Station layers (split by fuel type)
-    const livePlants = layersVisibility.powerPlants && layersVisibility.liveOpenInfraTiles;
-    setVis("oi-plant-thermal", livePlants && layersVisibility.genThermal);
-    setVis("oi-plant-hydro", livePlants && layersVisibility.genHydro);
-    setVis("oi-plant-solar", livePlants && layersVisibility.genSolar);
-    setVis("oi-plant-wind", livePlants && layersVisibility.genWind);
-    setVis("oi-plant-other", livePlants && layersVisibility.genOther);
-    setVis("openinfra-plant-label", livePlants && layersVisibility.labels);
+    setVis("wb-line-casing", layersVisibility.powerLines);
+    setVis("wb-line-core", layersVisibility.powerLines);
+    setVis("wb-line-circuit2-casing", layersVisibility.powerLines);
+    setVis("wb-line-circuit2-core", layersVisibility.powerLines);
+    setVis("wb-line-voltage-badge", layersVisibility.powerLines && layersVisibility.labels);
+    setVis("wb-line-label", layersVisibility.powerLines && layersVisibility.labels);
+    setVis("wb-plant-beacon", layersVisibility.powerPlants);
+    setVis("wb-plant-core", layersVisibility.powerPlants);
+    setVis("wb-plant-label", layersVisibility.powerPlants && layersVisibility.labels);
+    setVis("wb-substation-beacon", layersVisibility.substations && !layersVisibility.liveOpenInfraTiles);
+    setVis("wb-substation-circle", layersVisibility.substations && !layersVisibility.liveOpenInfraTiles);
+    setVis("wb-substation-label", layersVisibility.substations && layersVisibility.labels && !layersVisibility.liveOpenInfraTiles);
+    setVis("openinfra-line-casing", layersVisibility.liveOpenInfraTiles);
+    setVis("openinfra-line-core", layersVisibility.liveOpenInfraTiles);
+    setVis("openinfra-line-label", layersVisibility.liveOpenInfraTiles);
+    setVis("openinfra-towers", layersVisibility.liveOpenInfraTiles);
+    setVis("openinfra-tower-label", layersVisibility.liveOpenInfraTiles);
+    setVis("openinfra-substation-area", layersVisibility.substations && layersVisibility.liveOpenInfraTiles);
+    setVis("openinfra-substation-outline", layersVisibility.substations && layersVisibility.liveOpenInfraTiles);
+    setVis("openinfra-substation-point", layersVisibility.substations && layersVisibility.liveOpenInfraTiles);
+    setVis("openinfra-substation-label", layersVisibility.substations && layersVisibility.liveOpenInfraTiles);
+    setVis("openinfra-plant-area", layersVisibility.powerPlants && layersVisibility.liveOpenInfraTiles);
+    setVis("openinfra-plant-label", layersVisibility.powerPlants && layersVisibility.liveOpenInfraTiles);
   }, [layersVisibility, mapLoaded]);
 
   // City weather markers are independent of the mapped electrical network.
@@ -2016,8 +1950,9 @@ export default function WestBengalPowerMap() {
 
     if (!layersVisibility.labels) return;
 
-    // Render badges for Substations (only if liveOpenInfraTiles is explicitly disabled)
-    if (false && layersVisibility.substations && !layersVisibility.liveOpenInfraTiles) {
+    // Render badges for Substations
+    // Using anchor='bottom' so the callout arrow tip points exactly at the coordinate
+    if (layersVisibility.substations && !layersVisibility.liveOpenInfraTiles) {
       allSubstations.forEach((sub) => {
         const el = document.createElement("div");
         el.className = "wb-substation-badge";
@@ -2082,8 +2017,8 @@ export default function WestBengalPowerMap() {
       });
     }
 
-    // Render badges for Power Generating Stations (only if liveOpenInfraTiles is false)
-    if (layersVisibility.powerPlants && !layersVisibility.liveOpenInfraTiles) {
+    // Render badges for Power Generating Stations (Amber #F59E0B)
+    if (layersVisibility.powerPlants) {
       allPlants.forEach((plant) => {
         const el = document.createElement("div");
         el.className = "wb-plant-badge";
@@ -2619,8 +2554,8 @@ export default function WestBengalPowerMap() {
                               key={plant.id}
                               onClick={() => flyToEntity("plant", plant)}
                               className={`p-2 rounded-2 border transition-all ${isSelected
-                                  ? "shadow-sm"
-                                  : "bg-white hover-bg-light cursor-pointer"
+                                ? "shadow-sm"
+                                : "bg-white hover-bg-light cursor-pointer"
                                 }`}
                               style={{
                                 cursor: "pointer",
@@ -2677,8 +2612,8 @@ export default function WestBengalPowerMap() {
                               key={sub.id}
                               onClick={() => flyToEntity("substation", sub)}
                               className={`p-2 rounded-2 border transition-all ${isSelected
-                                  ? "bg-light border-primary shadow-sm"
-                                  : "bg-white hover-bg-light cursor-pointer"
+                                ? "bg-light border-primary shadow-sm"
+                                : "bg-white hover-bg-light cursor-pointer"
                                 }`}
                               style={{
                                 cursor: "pointer",
@@ -2740,8 +2675,8 @@ export default function WestBengalPowerMap() {
                               key={line.id}
                               onClick={() => flyToEntity("line", line)}
                               className={`p-2 rounded-2 border transition-all ${isSelected
-                                  ? "bg-warning-subtle border-warning shadow-sm"
-                                  : "bg-white hover-bg-light cursor-pointer"
+                                ? "bg-warning-subtle border-warning shadow-sm"
+                                : "bg-white hover-bg-light cursor-pointer"
                                 }`}
                               style={{ cursor: "pointer" }}
                             >
@@ -2836,8 +2771,8 @@ export default function WestBengalPowerMap() {
                       <button
                         key={prov.id}
                         className={`btn btn-xs px-2 py-0.5 rounded-1 ${activeBaseMap === prov.id
-                            ? "btn-dark fw-bold text-white shadow-xs"
-                            : "btn-outline-secondary"
+                          ? "btn-dark fw-bold text-white shadow-xs"
+                          : "btn-outline-secondary"
                           }`}
                         style={{ fontSize: "11px" }}
                         onClick={() => setActiveBaseMap(prov.id)}
@@ -2850,345 +2785,94 @@ export default function WestBengalPowerMap() {
                 </div>
 
                 {/* Grid Infrastructure Layer Toggles */}
-                <div style={{ maxHeight: "380px", overflowY: "auto" }}>
-                  <div className="d-flex align-items-center justify-content-between mb-1 pb-1 border-bottom">
-                    <span className="fw-bold text-dark text-uppercase" style={{ fontSize: "10px", letterSpacing: "0.5px" }}>
-                      LAYERS & VOLTAGE FILTERS
-                    </span>
-                    <div className="d-flex gap-1">
-                      <button
-                        type="button"
-                        className="btn btn-link btn-xs p-0 text-decoration-none small text-primary"
-                        style={{ fontSize: "10px" }}
-                        onClick={() => {
-                          setLayersVisibility((prev) => ({
-                            ...prev,
-                            stateBoundaries: true,
-                            districtBoundaries: true,
-                            line765: true, line400: true, line220: true, line132: true,
-                            sub765: true, sub400: true, sub220: true, sub132: true,
-                            genThermal: true, genHydro: true, genSolar: true, genWind: true, genOther: true,
-                            powerLines: true, powerPlants: true, substations: true,
-                            liveOpenInfraTiles: true,
-                          }));
-                        }}
-                      >
-                        All On
-                      </button>
-                      <span className="text-muted" style={{ fontSize: "10px" }}>•</span>
-                      <button
-                        type="button"
-                        className="btn btn-link btn-xs p-0 text-decoration-none small text-muted"
-                        style={{ fontSize: "10px" }}
-                        onClick={() => {
-                          setLayersVisibility((prev) => ({
-                            ...prev,
-                            line765: false, line400: false, line220: false, line132: false,
-                            sub765: false, sub400: false, sub220: false, sub132: false,
-                            genThermal: false, genHydro: false, genSolar: false, genWind: false, genOther: false,
-                          }));
-                        }}
-                      >
-                        Reset
-                      </button>
-                    </div>
+                <div>
+                  <div className="fw-bold text-muted mb-1" style={{ fontSize: "10px", letterSpacing: "0.5px" }}>
+                    GRID LAYERS & INFRASTRUCTURE
                   </div>
+                  <div className="d-flex flex-column gap-1" style={{ fontSize: "11px" }}>
+                    <label className="d-flex align-items-center gap-1.5 cursor-pointer user-select-none">
+                      <input
+                        type="checkbox"
+                        checked={layersVisibility.powerLines}
+                        onChange={(e) =>
+                          setLayersVisibility({ ...layersVisibility, powerLines: e.target.checked })
+                        }
+                      />
+                      <span className="fw-bold text-dark">⚡ Transmission Corridors (ER)</span>
+                    </label>
 
-                  <div className="d-flex flex-column gap-1.5" style={{ fontSize: "11px" }}>
-                    {/* 1. Administrative Boundaries (State & District) */}
-                    <div className="bg-light p-1.5 rounded-2 border">
-                      <div className="fw-bold text-muted mb-1" style={{ fontSize: "9.5px", letterSpacing: "0.5px" }}>
-                        ADMINISTRATIVE BOUNDARIES
-                      </div>
-                      <div className="d-flex flex-column gap-1">
-                        <label className="d-flex align-items-center gap-1.5 cursor-pointer user-select-none">
-                          <input
-                            type="checkbox"
-                            checked={layersVisibility.stateBoundaries}
-                            onChange={(e) =>
-                              setLayersVisibility({ ...layersVisibility, stateBoundaries: e.target.checked })
-                            }
-                          />
-                          <span className="fw-semibold text-dark">🏛️ State Boundaries (ER)</span>
-                        </label>
-                        <label className="d-flex align-items-center gap-1.5 cursor-pointer user-select-none">
-                          <input
-                            type="checkbox"
-                            checked={layersVisibility.districtBoundaries}
-                            onChange={(e) =>
-                              setLayersVisibility({ ...layersVisibility, districtBoundaries: e.target.checked })
-                            }
-                          />
-                          <span className="fw-semibold text-secondary">📍 District Boundaries</span>
-                        </label>
-                      </div>
-                    </div>
+                    <label className="d-flex align-items-center gap-1.5 cursor-pointer user-select-none">
+                      <input
+                        type="checkbox"
+                        checked={layersVisibility.powerPlants}
+                        onChange={(e) =>
+                          setLayersVisibility({ ...layersVisibility, powerPlants: e.target.checked })
+                        }
+                      />
+                      <span className="fw-bold" style={{ color: "#B45309" }}>🏭 Power Generating Stations (Amber)</span>
+                    </label>
 
-                    {/* 2. Transmission Lines by Voltage */}
-                    <div className="bg-light p-1.5 rounded-2 border">
-                      <div className="d-flex align-items-center justify-content-between mb-1">
-                        <span className="fw-bold text-muted" style={{ fontSize: "9.5px", letterSpacing: "0.5px" }}>
-                          TRANSMISSION LINES (BY VOLTAGE)
-                        </span>
-                        <label className="d-flex align-items-center gap-1 cursor-pointer user-select-none mb-0">
-                          <input
-                            type="checkbox"
-                            checked={layersVisibility.powerLines}
-                            onChange={(e) =>
-                              setLayersVisibility({ ...layersVisibility, powerLines: e.target.checked })
-                            }
-                            className="form-check-input mt-0"
-                            style={{ width: "12px", height: "12px" }}
-                          />
-                          <span className="small text-muted" style={{ fontSize: "9.5px" }}>Master</span>
-                        </label>
-                      </div>
-                      <div className="d-flex flex-column gap-1 ps-1">
-                        <label className="d-flex align-items-center gap-1.5 cursor-pointer user-select-none">
-                          <input
-                            type="checkbox"
-                            checked={layersVisibility.line765}
-                            onChange={(e) =>
-                              setLayersVisibility({ ...layersVisibility, line765: e.target.checked })
-                            }
-                          />
-                          <span style={{ width: "12px", height: "4px", backgroundColor: "#CA8A04", borderRadius: "1px", display: "inline-block" }} />
-                          <span className="fw-bold" style={{ color: "#CA8A04" }}>765 kV / 800 kV</span>
-                          <span className="text-muted ms-auto" style={{ fontSize: "9.5px" }}>Dark Yellow</span>
-                        </label>
-                        <label className="d-flex align-items-center gap-1.5 cursor-pointer user-select-none">
-                          <input
-                            type="checkbox"
-                            checked={layersVisibility.line400}
-                            onChange={(e) =>
-                              setLayersVisibility({ ...layersVisibility, line400: e.target.checked })
-                            }
-                          />
-                          <span style={{ width: "12px", height: "4px", backgroundColor: "#DC2626", borderRadius: "1px", display: "inline-block" }} />
-                          <span className="fw-bold" style={{ color: "#DC2626" }}>400 kV</span>
-                          <span className="text-muted ms-auto" style={{ fontSize: "9.5px" }}>Red</span>
-                        </label>
-                        <label className="d-flex align-items-center gap-1.5 cursor-pointer user-select-none">
-                          <input
-                            type="checkbox"
-                            checked={layersVisibility.line220}
-                            onChange={(e) =>
-                              setLayersVisibility({ ...layersVisibility, line220: e.target.checked })
-                            }
-                          />
-                          <span style={{ width: "12px", height: "4px", backgroundColor: "#16A34A", borderRadius: "1px", display: "inline-block" }} />
-                          <span className="fw-bold" style={{ color: "#16A34A" }}>220 kV</span>
-                          <span className="text-muted ms-auto" style={{ fontSize: "9.5px" }}>Green</span>
-                        </label>
-                        <label className="d-flex align-items-center gap-1.5 cursor-pointer user-select-none">
-                          <input
-                            type="checkbox"
-                            checked={layersVisibility.line132}
-                            onChange={(e) =>
-                              setLayersVisibility({ ...layersVisibility, line132: e.target.checked })
-                            }
-                          />
-                          <span style={{ width: "12px", height: "4px", backgroundColor: "#0284C7", borderRadius: "1px", display: "inline-block" }} />
-                          <span className="fw-bold" style={{ color: "#0284C7" }}>132 kV / 66 kV</span>
-                          <span className="text-muted ms-auto" style={{ fontSize: "9.5px" }}>Blue</span>
-                        </label>
-                      </div>
-                    </div>
+                    <label className="d-flex align-items-center gap-1.5 cursor-pointer user-select-none">
+                      <input
+                        type="checkbox"
+                        checked={layersVisibility.substations}
+                        onChange={(e) =>
+                          setLayersVisibility({ ...layersVisibility, substations: e.target.checked })
+                        }
+                      />
+                      <span>Substations & Switchyards</span>
+                    </label>
 
-                    {/* 3. Substations by Voltage */}
-                    <div className="bg-light p-1.5 rounded-2 border">
-                      <div className="d-flex align-items-center justify-content-between mb-1">
-                        <span className="fw-bold text-muted" style={{ fontSize: "9.5px", letterSpacing: "0.5px" }}>
-                          SUBSTATIONS & SWITCHYARDS
-                        </span>
-                        <label className="d-flex align-items-center gap-1 cursor-pointer user-select-none mb-0">
-                          <input
-                            type="checkbox"
-                            checked={layersVisibility.substations}
-                            onChange={(e) =>
-                              setLayersVisibility({ ...layersVisibility, substations: e.target.checked })
-                            }
-                            className="form-check-input mt-0"
-                            style={{ width: "12px", height: "12px" }}
-                          />
-                          <span className="small text-muted" style={{ fontSize: "9.5px" }}>Master</span>
-                        </label>
-                      </div>
-                      <div className="d-flex flex-column gap-1 ps-1">
-                        <label className="d-flex align-items-center gap-1.5 cursor-pointer user-select-none">
-                          <input
-                            type="checkbox"
-                            checked={layersVisibility.sub765}
-                            onChange={(e) =>
-                              setLayersVisibility({ ...layersVisibility, sub765: e.target.checked })
-                            }
-                          />
-                          <span style={{ width: "8px", height: "8px", borderRadius: "50%", backgroundColor: "#CA8A04", display: "inline-block" }} />
-                          <span>765 kV Substation Nodes</span>
-                        </label>
-                        <label className="d-flex align-items-center gap-1.5 cursor-pointer user-select-none">
-                          <input
-                            type="checkbox"
-                            checked={layersVisibility.sub400}
-                            onChange={(e) =>
-                              setLayersVisibility({ ...layersVisibility, sub400: e.target.checked })
-                            }
-                          />
-                          <span style={{ width: "8px", height: "8px", borderRadius: "50%", backgroundColor: "#DC2626", display: "inline-block" }} />
-                          <span>400 kV Substation Nodes</span>
-                        </label>
-                        <label className="d-flex align-items-center gap-1.5 cursor-pointer user-select-none">
-                          <input
-                            type="checkbox"
-                            checked={layersVisibility.sub220}
-                            onChange={(e) =>
-                              setLayersVisibility({ ...layersVisibility, sub220: e.target.checked })
-                            }
-                          />
-                          <span style={{ width: "8px", height: "8px", borderRadius: "50%", backgroundColor: "#16A34A", display: "inline-block" }} />
-                          <span>220 kV Substation Nodes</span>
-                        </label>
-                        <label className="d-flex align-items-center gap-1.5 cursor-pointer user-select-none">
-                          <input
-                            type="checkbox"
-                            checked={layersVisibility.sub132}
-                            onChange={(e) =>
-                              setLayersVisibility({ ...layersVisibility, sub132: e.target.checked })
-                            }
-                          />
-                          <span style={{ width: "8px", height: "8px", borderRadius: "50%", backgroundColor: "#0284C7", display: "inline-block" }} />
-                          <span>132 kV Substation Nodes</span>
-                        </label>
-                      </div>
-                    </div>
+                    <label className="d-flex align-items-center gap-1.5 cursor-pointer user-select-none">
+                      <input
+                        type="checkbox"
+                        checked={layersVisibility.labels}
+                        onChange={(e) =>
+                          setLayersVisibility({ ...layersVisibility, labels: e.target.checked })
+                        }
+                      />
+                      <span>Station Name Badges</span>
+                    </label>
 
-                    {/* 4. Power Generating Stations by Fuel Type */}
-                    <div className="bg-light p-1.5 rounded-2 border">
-                      <div className="d-flex align-items-center justify-content-between mb-1">
-                        <span className="fw-bold text-muted" style={{ fontSize: "9.5px", letterSpacing: "0.5px" }}>
-                          GENERATING STATIONS (BY FUEL)
-                        </span>
-                        <label className="d-flex align-items-center gap-1 cursor-pointer user-select-none mb-0">
-                          <input
-                            type="checkbox"
-                            checked={layersVisibility.powerPlants}
-                            onChange={(e) =>
-                              setLayersVisibility({ ...layersVisibility, powerPlants: e.target.checked })
-                            }
-                            className="form-check-input mt-0"
-                            style={{ width: "12px", height: "12px" }}
-                          />
-                          <span className="small text-muted" style={{ fontSize: "9.5px" }}>Master</span>
-                        </label>
-                      </div>
-                      <div className="d-flex flex-column gap-1 ps-1">
-                        <label className="d-flex align-items-center gap-1.5 cursor-pointer user-select-none">
-                          <input
-                            type="checkbox"
-                            checked={layersVisibility.genThermal}
-                            onChange={(e) =>
-                              setLayersVisibility({ ...layersVisibility, genThermal: e.target.checked })
-                            }
-                          />
-                          <span style={{ width: "8px", height: "8px", backgroundColor: "#EF4444", borderRadius: "2px", display: "inline-block" }} />
-                          <span className="fw-semibold" style={{ color: "#EF4444" }}>🔥 Thermal (Coal/Gas/Nuclear)</span>
-                        </label>
-                        <label className="d-flex align-items-center gap-1.5 cursor-pointer user-select-none">
-                          <input
-                            type="checkbox"
-                            checked={layersVisibility.genHydro}
-                            onChange={(e) =>
-                              setLayersVisibility({ ...layersVisibility, genHydro: e.target.checked })
-                            }
-                          />
-                          <span style={{ width: "8px", height: "8px", backgroundColor: "#3B82F6", borderRadius: "2px", display: "inline-block" }} />
-                          <span className="fw-semibold" style={{ color: "#3B82F6" }}>💧 Hydroelectric</span>
-                        </label>
-                        <label className="d-flex align-items-center gap-1.5 cursor-pointer user-select-none">
-                          <input
-                            type="checkbox"
-                            checked={layersVisibility.genSolar}
-                            onChange={(e) =>
-                              setLayersVisibility({ ...layersVisibility, genSolar: e.target.checked })
-                            }
-                          />
-                          <span style={{ width: "8px", height: "8px", backgroundColor: "#F59E0B", borderRadius: "2px", display: "inline-block" }} />
-                          <span className="fw-semibold" style={{ color: "#D97706" }}>☀️ Solar Power</span>
-                        </label>
-                        <label className="d-flex align-items-center gap-1.5 cursor-pointer user-select-none">
-                          <input
-                            type="checkbox"
-                            checked={layersVisibility.genWind}
-                            onChange={(e) =>
-                              setLayersVisibility({ ...layersVisibility, genWind: e.target.checked })
-                            }
-                          />
-                          <span style={{ width: "8px", height: "8px", backgroundColor: "#10B981", borderRadius: "2px", display: "inline-block" }} />
-                          <span className="fw-semibold" style={{ color: "#059669" }}>💨 Wind Energy</span>
-                        </label>
-                        <label className="d-flex align-items-center gap-1.5 cursor-pointer user-select-none">
-                          <input
-                            type="checkbox"
-                            checked={layersVisibility.genOther}
-                            onChange={(e) =>
-                              setLayersVisibility({ ...layersVisibility, genOther: e.target.checked })
-                            }
-                          />
-                          <span style={{ width: "8px", height: "8px", backgroundColor: "#9333EA", borderRadius: "2px", display: "inline-block" }} />
-                          <span className="fw-semibold" style={{ color: "#7C3AED" }}>⚡ Other / Biomass</span>
-                        </label>
-                      </div>
-                    </div>
+                    <label className="d-flex align-items-center gap-1.5 cursor-pointer user-select-none">
+                      <input
+                        type="checkbox"
+                        checked={layersVisibility.cityWeather}
+                        onChange={(e) =>
+                          setLayersVisibility({
+                            ...layersVisibility,
+                            cityWeather: e.target.checked,
+                          })
+                        }
+                      />
+                      <span className="fw-bold" style={{ color: "#D97706" }}>🌦️ City Weather Badges (NASA)</span>
+                    </label>
 
-                    {/* 5. Station Labels & Weather */}
-                    <div className="d-flex flex-column gap-1 pt-1 border-top">
-                      <label className="d-flex align-items-center gap-1.5 cursor-pointer user-select-none">
-                        <input
-                          type="checkbox"
-                          checked={layersVisibility.labels}
-                          onChange={(e) =>
-                            setLayersVisibility({ ...layersVisibility, labels: e.target.checked })
-                          }
-                        />
-                        <span>Station & Substation Name Labels</span>
-                      </label>
-                      <label className="d-flex align-items-center gap-1.5 cursor-pointer user-select-none">
-                        <input
-                          type="checkbox"
-                          checked={layersVisibility.cityWeather}
-                          onChange={(e) =>
-                            setLayersVisibility({
-                              ...layersVisibility,
-                              cityWeather: e.target.checked,
-                            })
-                          }
-                        />
-                        <span className="fw-bold" style={{ color: "#D97706" }}>🌦️ City Weather Badges (NASA)</span>
-                      </label>
-                      <label className="d-flex align-items-center gap-1.5 cursor-pointer user-select-none">
-                        <input
-                          type="checkbox"
-                          checked={muteCivilInfra}
-                          onChange={(e) => setMuteCivilInfra(e.target.checked)}
-                        />
-                        <span className="fw-bold text-dark" style={{ fontSize: "10.5px" }}>
-                          🛡 De-emphasize Roads & Civil Infra
-                        </span>
-                      </label>
-                      <label className="d-flex align-items-center gap-1.5 cursor-pointer user-select-none">
-                        <input
-                          type="checkbox"
-                          checked={layersVisibility.liveOpenInfraTiles}
-                          onChange={(e) =>
-                            setLayersVisibility({
-                              ...layersVisibility,
-                              liveOpenInfraTiles: e.target.checked,
-                            })
-                          }
-                        />
-                        <span className="text-primary fw-semibold">🌐 Live OpenInfra Vector Tiles</span>
-                      </label>
-                    </div>
+                    {/* De-emphasize Civil Infrastructure Switch */}
+                    <label className="d-flex align-items-center gap-1.5 cursor-pointer user-select-none mt-1 pt-1 border-top bg-light p-1 rounded">
+                      <input
+                        type="checkbox"
+                        checked={muteCivilInfra}
+                        onChange={(e) => setMuteCivilInfra(e.target.checked)}
+                      />
+                      <span className="fw-bold text-dark" style={{ fontSize: "10.5px" }}>
+                        🛡 De-emphasize Roads & Civil Infra
+                      </span>
+                    </label>
+
+                    <label className="d-flex align-items-center gap-1.5 cursor-pointer user-select-none pt-0.5">
+                      <input
+                        type="checkbox"
+                        checked={layersVisibility.liveOpenInfraTiles}
+                        onChange={(e) =>
+                          setLayersVisibility({
+                            ...layersVisibility,
+                            liveOpenInfraTiles: e.target.checked,
+                          })
+                        }
+                      />
+                      <span className="text-primary fw-semibold">🌐 Live OpenInfra Vector Tiles</span>
+                    </label>
                   </div>
                 </div>
               </div>
@@ -3434,10 +3118,10 @@ export default function WestBengalPowerMap() {
                 {syncFeedback && (
                   <div
                     className={`alert alert-${syncFeedback.type === "success"
-                        ? "success"
-                        : syncFeedback.type === "warning"
-                          ? "warning"
-                          : "danger"
+                      ? "success"
+                      : syncFeedback.type === "warning"
+                        ? "warning"
+                        : "danger"
                       } d-flex align-items-start gap-2 mb-3`}
                   >
                     {syncFeedback.type === "success" ? (
@@ -3743,8 +3427,8 @@ export default function WestBengalPowerMap() {
                                 <td>
                                   <span
                                     className={`badge rounded-pill ${p.category === "power_line"
-                                        ? "bg-primary-subtle text-primary"
-                                        : "bg-warning-subtle text-dark"
+                                      ? "bg-primary-subtle text-primary"
+                                      : "bg-warning-subtle text-dark"
                                       } fw-semibold`}
                                     style={{ fontSize: "10px" }}
                                   >

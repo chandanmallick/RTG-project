@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import {
   X,
   CloudSun,
@@ -104,10 +104,14 @@ export default function NasaWeatherModal({
   const [viewMode, setViewMode] = useState("chart"); // 'chart' or 'table'
   const [copiedUrl, setCopiedUrl] = useState(false);
   const [showPythonSnippet, setShowPythonSnippet] = useState(false);
+  const weatherRequestId = useRef(0);
 
   // Sync initialLocation prop if modal opens for a new target
   useEffect(() => {
     if (initialLocation && initialLocation.latitude && initialLocation.longitude) {
+      weatherRequestId.current += 1;
+      setWeatherData(null);
+      setLoading(false);
       setLatitude(Number(initialLocation.latitude));
       setLongitude(Number(initialLocation.longitude));
       setLocationLabel(initialLocation.name || `Location (${initialLocation.latitude}, ${initialLocation.longitude})`);
@@ -177,11 +181,11 @@ export default function NasaWeatherModal({
     }
     setLoading(true);
     setError(null);
+    const requestId = ++weatherRequestId.current;
     const activeParamKeys = Object.entries(selectedParams)
       .filter(([_, active]) => active)
       .map(([key]) => key);
     const paramStr = activeParamKeys.length > 0 ? activeParamKeys.join(",") : "T2M,T2MDEW,T2MWET,TS,T2M_RANGE,T2M_MAX,T2M_MIN";
-
     try {
       const data = await API.getNasaPowerWeather({
         latitude: Number(latitude),
@@ -192,17 +196,21 @@ export default function NasaWeatherModal({
         cityName: locationLabel || selectedCityName,
         forceRefresh: force,
       });
-      setWeatherData(data);
+      if (requestId === weatherRequestId.current) setWeatherData(data);
     } catch (err) {
-      console.error("NASA POWER fetch failed:", err);
-      setError(err?.response?.data?.detail || err.message || "Failed to retrieve NASA POWER data");
+      if (requestId === weatherRequestId.current) {
+        console.error("NASA POWER fetch failed:", err);
+        setError(err?.response?.data?.detail || err.message || "Failed to retrieve NASA POWER data");
+      }
     } finally {
-      setLoading(false);
+      if (requestId === weatherRequestId.current) setLoading(false);
     }
   };
 
   // Auto-fetch on first open if no data
   useEffect(() => {
+    if (initialLocation &&
+        (Number(latitude) !== Number(initialLocation.latitude) || Number(longitude) !== Number(initialLocation.longitude))) return;
     if (isOpen && !weatherData && !loading) {
       handleFetchWeather();
     }

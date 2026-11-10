@@ -1795,6 +1795,7 @@ def apply_leave(data: dict, user=Depends(get_authenticated_user)):
             "leave_count": len(dates),
             "leave_dates": dates[0] if len(dates) == 1 else f"{dates[0]} to {dates[-1]}",
             "group_name": group_name,
+            "reason": reason or "Not specified",
         },
     )
     return {
@@ -2259,6 +2260,7 @@ def apply_leave_v2(data: dict, user=Depends(get_authenticated_user)):
                 "leave_count": len(inserted_ids),
                 "leave_dates": date_text,
                 "group_name": groups,
+                "reason": reason or "Not specified",
             },
         )
 
@@ -2277,6 +2279,7 @@ def apply_leave_v2(data: dict, user=Depends(get_authenticated_user)):
                 "employee_name": employee.get("name"), "employee_id": employee_id,
                 "leave_count": len(inserted_ids), "leave_dates": date_text,
                 "group_name": "Organization hierarchy",
+                "reason": reason or "Not specified",
             },
         )
 
@@ -2461,6 +2464,7 @@ def sic_forward_bulk(data: dict, user=Depends(get_authenticated_user)):
                 "leave_dates": date_text,
                 "leave_count": len(grouped_leaves),
                 "leave_type": leave_type_text,
+                "reason": first_leave.get("reason") or "Not specified",
             },
         )
 
@@ -2515,7 +2519,7 @@ def sic_reject_bulk(data: dict, user=Depends(get_authenticated_user)):
                 subject="Leave rejected by Reporting Officer",
                 message=f"Your leave for {leave.get('date')} has been rejected by the Reporting Officer.\nComment: {comment or 'No comment provided'}",
                 ref_id=str(leave["_id"]), action="VIEW_LEAVE", type="LEAVE", template_key="leave_reporting_rejected",
-                template_values={"employee_name": leave.get("name"), "employee_id": leave.get("employeeId"), "leave_date": leave.get("date"), "leave_type": leave.get("leaveType"), "comment": comment or "No comment provided"},
+                template_values={"employee_name": leave.get("name"), "employee_id": leave.get("employeeId"), "leave_date": leave.get("date"), "leave_type": leave.get("leaveType"), "reason": leave.get("reason") or "Not specified", "comment": comment or "No comment provided"},
             )
             updated += 1
             continue
@@ -2603,6 +2607,7 @@ def sic_reject_bulk(data: dict, user=Depends(get_authenticated_user)):
                 "employee_id": leave.get("employeeId"),
                 "leave_date": leave.get("date"),
                 "leave_type": leave.get("leaveType"),
+                "reason": leave.get("reason") or "Not specified",
                 "comment": comment or "No comment provided",
             },
         )
@@ -2668,7 +2673,7 @@ def approve_leave_bulk(data: dict, user=Depends(get_authenticated_user)):
                     message=f"{leave.get('name')} ({leave.get('employeeId')}) leave for {leave.get('date')} awaits your approval.",
                     ref_id=leave.get("leaveGroupId") or str(leave["_id"]), action="VIEW_LEAVE", type="LEAVE",
                     template_key="leave_reporting_forwarded",
-                    template_values={"employee_name": leave.get("name"), "employee_id": leave.get("employeeId"), "leave_date": leave.get("date"), "leave_dates": leave.get("date"), "leave_count": 1, "leave_type": leave.get("leaveType")},
+                    template_values={"employee_name": leave.get("name"), "employee_id": leave.get("employeeId"), "leave_date": leave.get("date"), "leave_dates": leave.get("date"), "leave_count": 1, "leave_type": leave.get("leaveType"), "reason": leave.get("reason") or "Not specified",},
                 )
                 advanced_count += 1
                 continue
@@ -2795,6 +2800,7 @@ def approve_leave_bulk(data: dict, user=Depends(get_authenticated_user)):
                 "leave_dates": date_text,
                 "leave_count": len(grouped_leaves),
                 "leave_type": leave_type_text,
+                "reason": first_leave.get("reason") or "Not specified",
             },
         )
 
@@ -2903,6 +2909,7 @@ def reject_bulk(data: dict, user=Depends(get_authenticated_user)):
                 "employee_id": leave.get("employeeId"),
                 "leave_date": leave.get("date"),
                 "leave_type": leave.get("leaveType"),
+                "reason": leave.get("reason") or "Not specified",
                 "comment": comment or "No comment provided",
             },
         )
