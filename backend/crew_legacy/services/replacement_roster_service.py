@@ -73,6 +73,74 @@ def get_employee_roles(emp: dict) -> Tuple[bool, bool]:
     return is_sic, is_se
 
 
+def is_sic_place_vacant(leave: dict, daily: dict = None) -> Tuple[bool, bool, bool]:
+    """
+    Evaluates whether the SIC place is vacant for an approved leave request on a specific date/shift.
+    User Rule:
+      - Check whether the employee on leave is an SIC (he_is_sic).
+      - Check whether an acting SIC is already assigned for that shift/group on that date (has_acting_sic).
+      - If he_is_sic is True AND has_acting_sic is False, then SIC place is vacant (is_vacant = True).
+        -> An SIC Category replacement will be assigned from the SIC Pool.
+      - Otherwise (he is not SIC, OR an acting SIC is already assigned), is_vacant = False.
+        -> A Shift Engineer Category replacement will be deployed from the Shift Engineer Pool.
+    Returns: (is_vacant, he_is_sic, has_acting_sic)
+    """
+    if not leave:
+        return False, False, False
+
+    leave_emp_id = clean_id(leave.get("employeeId"))
+    leave_date = clean_id(leave.get("date"))
+    group_name = clean_id(leave.get("groupName") or (daily or {}).get("groupName"))
+
+    # 1. Determine if employee taking leave is SIC (he_is_sic)
+    he_is_sic = False
+    if (daily or {}).get("isSIC") or leave.get("isSIC"):
+        he_is_sic = True
+    else:
+        applicant_emp = employee_collection.find_one({
+            "$or": [{"userId": leave_emp_id}, {"employeeId": leave_emp_id}]
+        }) or {}
+        emp_has_sic, emp_has_se = get_employee_roles(applicant_emp)
+        if emp_has_sic and not emp_has_se:
+            he_is_sic = True
+        elif emp_has_sic and emp_has_se:
+            assigned = str((daily or {}).get("assignedDuty") or leave.get("assignedDuty") or "").lower()
+            he_is_sic = "sic" in assigned or bool((daily or {}).get("isSIC")) or bool(applicant_emp.get("isShiftGroupSic"))
+        elif emp_has_sic:
+            he_is_sic = True
+
+    # Check designated roster groups if groupName exists
+    if not he_is_sic and group_name and leave_emp_id:
+        group_doc = roster_group_collection.find_one({"name": group_name}) or {}
+        sic_member_id = clean_id(group_doc.get("sicEmployeeId") or group_doc.get("shiftInChargeId"))
+        if sic_member_id and sic_member_id == leave_emp_id:
+            he_is_sic = True
+
+    # 2. Check if an acting SIC is already assigned for that shift/group on that date (has_acting_sic)
+    has_acting_sic = False
+    acting_sic_obj = leave.get("actingSIC")
+    if isinstance(acting_sic_obj, dict) and clean_id(acting_sic_obj.get("employeeId")):
+        has_acting_sic = True
+    elif clean_id(leave.get("actingSICId") or leave.get("actingSICEmpId")):
+        has_acting_sic = True
+
+    if not has_acting_sic and leave_date:
+        query: Dict[str, Any] = {
+            "date": leave_date,
+            "isActingSIC": True,
+            "leaveStatus": {"$nin": ["Rejected", "Withdrawn", "Cancelled", "Canceled"]},
+        }
+        if group_name:
+            query["$or"] = [{"groupName": group_name}, {"actingSICGroup": group_name}]
+        existing_acting = employee_daily_collection.find_one(query)
+        if existing_acting and clean_id(existing_acting.get("employeeId")) != leave_emp_id:
+            has_acting_sic = True
+
+    # 3. SIC place is vacant only if he is SIC AND no acting SIC is assigned
+    is_vacant = bool(he_is_sic and not has_acting_sic)
+    return is_vacant, he_is_sic, has_acting_sic
+
+
 def init_default_pools() -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
     """
     Seeds the SIC and Shift Engineer pools ONLY from active employees marked as Replacement in the Employee database.
@@ -678,23 +746,17 @@ def auto_allocate_d5_replacements(force: bool = False, test_mode: bool = None) -
             })
             continue
 
-        # Determine target pool based on Role leave (SIC or Shift Engineer)
+        # Determine target pool based on Role leave & Acting SIC status:
+        # Check whether applicant is SIC, and whether an acting SIC is already assigned.
+        # If both true (he is SIC and no acting SIC assigned), SIC place is vacant -> SIC Category replacement from SIC pool.
+        # Otherwise -> Shift Engineer Category replacement deployed.
         duty_doc = employee_daily_collection.find_one({
             "employeeId": applicant_id,
             "date": leave_date,
         }) or {}
-        applicant_doc = employee_collection.find_one({
-            "$or": [{"userId": applicant_id}, {"employeeId": applicant_id}]
-        }) or {}
-        applicant_has_sic, applicant_has_se = get_employee_roles(applicant_doc)
 
-        is_sic_duty = bool(duty_doc.get("isSIC") or leave.get("isSIC"))
-        if not is_sic_duty:
-            if applicant_has_sic and not applicant_has_se:
-                is_sic_duty = True
-            elif applicant_has_sic and applicant_has_se:
-                assigned_duty = str(duty_doc.get("assignedDuty") or leave.get("assignedDuty") or "").lower()
-                is_sic_duty = "sic" in assigned_duty or duty_doc.get("isSIC") is True
+        sic_place_vacant, he_is_sic, has_acting_sic = is_sic_place_vacant(leave, duty_doc)
+        is_sic_duty = sic_place_vacant
 
         target_duty = clean_id(duty_doc.get("assignedDuty") or leave.get("assignedDuty") or "Shift")
 

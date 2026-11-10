@@ -3174,25 +3174,21 @@ def replacement_candidates(
     require_replacement_authority(user, leave)
 
     leave_date = leave.get("date")
-    is_sic = leave.get("isSIC", False)
     leave_daily = employee_daily_collection.find_one({
         "employeeId": leave.get("employeeId"),
         "date": leave_date,
     }) or {}
-    is_sic = bool(leave_daily.get("isSIC", is_sic))
     required_duty = leave_daily.get("assignedDuty") or leave.get("assignedDuty") or ""
 
     applicant_emp = employee_collection.find_one({
         "$or": [{"userId": leave.get("employeeId")}, {"employeeId": leave.get("employeeId")}]
     }) or {}
-    from crew_legacy.services.replacement_roster_service import get_employee_roles
+    from crew_legacy.services.replacement_roster_service import get_employee_roles, is_sic_place_vacant
     applicant_has_sic, applicant_has_se = get_employee_roles(applicant_emp)
-    if not is_sic:
-        if applicant_has_sic and not applicant_has_se:
-            is_sic = True
-        elif applicant_has_sic and applicant_has_se:
-            assigned_str = str(required_duty).lower()
-            is_sic = "sic" in assigned_str or bool(leave_daily.get("isSIC"))
+
+    # Evaluate whether SIC place is vacant (he is SIC and no acting SIC assigned)
+    sic_place_vacant, he_is_sic, has_acting_sic = is_sic_place_vacant(leave, leave_daily)
+    is_sic = sic_place_vacant
     next_date = (
         datetime.strptime(leave_date, "%Y-%m-%d") + timedelta(days=1)
     ).strftime("%Y-%m-%d")
@@ -3209,7 +3205,7 @@ def replacement_candidates(
     result = []
     effective_role_filter = (roleFilter or "auto").strip().lower()
     if effective_role_filter == "auto":
-        effective_role_filter = "sic" if is_sic else "shift_engineer"
+        effective_role_filter = "sic" if sic_place_vacant else "shift_engineer"
 
     # ==========================================
     # GET CANDIDATES
@@ -3557,31 +3553,28 @@ def assign_replacement(leave_id: str, payload: dict, user=Depends(get_authentica
             "designation": daily_emp["designation"]
         }
 
-    # USER REQUIREMENT: Enforce registered Category eligibility
-    # If employee is registered "SIC" under "Category" he will be placed for SIC leave,
-    # "Shift Engineer" then for other person in the shift.
-    leave_is_sic = bool(leave.get("isSIC"))
-    if not leave_is_sic:
-        leave_daily_rec = employee_daily_collection.find_one({
-            "employeeId": leave.get("employeeId"),
-            "date": leave.get("date")
-        }) or {}
-        leave_is_sic = bool(leave_daily_rec.get("isSIC"))
+    # USER REQUIREMENT: Enforce registered Category eligibility based on SIC vacancy & acting SIC status:
+    # Check whether employee on leave is SIC, and whether an acting SIC is already assigned.
+    # If both true (he is SIC and no acting SIC assigned), SIC place is vacant -> SIC Category replacement required.
+    # Otherwise -> Shift Engineer Category replacement deployed.
+    from crew_legacy.services.replacement_roster_service import is_sic_place_vacant
+    sic_place_vacant, he_is_sic, has_acting_sic = is_sic_place_vacant(leave)
 
     rep_category = normalized_categories(replacement_emp.get("category"))
     allow_override = bool(payload.get("force") or payload.get("overrideCategory"))
     if not allow_override:
-        if leave_is_sic and not category_matches(rep_category, "sic"):
+        if sic_place_vacant and not category_matches(rep_category, "sic"):
             cat_disp = ", ".join(rep_category) if rep_category else "None"
             raise HTTPException(
                 400,
-                f"Cannot assign {replacement_emp.get('name')}: Registered Category is '{cat_disp}'. Only employees registered as 'SIC' under Category can be placed for SIC leave."
+                f"Cannot assign {replacement_emp.get('name')}: Registered Category is '{cat_disp}'. SIC place is vacant (applicant is SIC with no acting SIC assigned), so only employees registered as 'SIC' under Category can be placed."
             )
-        if not leave_is_sic and not category_matches(rep_category, "shift engineer"):
+        if not sic_place_vacant and not category_matches(rep_category, "shift engineer"):
             cat_disp = ", ".join(rep_category) if rep_category else "None"
+            acting_note = " (acting SIC is already assigned for this shift)" if (he_is_sic and has_acting_sic) else ""
             raise HTTPException(
                 400,
-                f"Cannot assign {replacement_emp.get('name')}: Registered Category is '{cat_disp}'. Only employees registered as 'Shift Engineer' under Category can be placed for this shift member."
+                f"Cannot assign {replacement_emp.get('name')}: Registered Category is '{cat_disp}'. Only employees registered as 'Shift Engineer' under Category can be placed for this duty{acting_note}."
             )
 
     existing_replacement = leave.get("replacement") or {}

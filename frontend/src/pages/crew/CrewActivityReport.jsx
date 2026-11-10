@@ -13,7 +13,15 @@ import AppShell from "../../components/layout/AppShell";
 import api from "../../crewLegacy/api";
 
 const TrainingReports = lazy(() => import("../../crewLegacy/TrainingHolidayMaster"));
-const reportTabs = { detail: {label:"Detailed activity report",color:"#0057B7",tint:"#EAF3FC"}, matrix: {label:"Consolidated activity matrix",color:"#0F766E",tint:"#E5F4F0"}, crms: {label:"CRMS duty reconciliation",color:"#B45309",tint:"#FFF3E3"}, "training-history": {label:"Training nomination history",color:"#7C3AED",tint:"#F3EBFF"}, "training-matrix": {label:"Training nomination matrix",color:"#5B21B6",tint:"#EEE8FF"} };
+const ReplacementRosterPanel = lazy(() => import("../../components/crew/ReplacementRosterPanel"));
+const reportTabs = {
+  detail: { label: "Detailed activity report", color: "#0057B7", tint: "#EAF3FC" },
+  matrix: { label: "Consolidated activity matrix", color: "#0F766E", tint: "#E5F4F0" },
+  crms: { label: "CRMS duty reconciliation", color: "#B45309", tint: "#FFF3E3" },
+  "training-history": { label: "Training nomination history", color: "#7C3AED", tint: "#F3EBFF" },
+  "training-matrix": { label: "Training nomination matrix", color: "#5B21B6", tint: "#EEE8FF" },
+  "replacement-pool": { label: "Replacement pool record", color: "#0284C7", tint: "#E0F2FE" },
+};
 const activityTone = kind => TILE[{Leave:"leave",Training:"training",Sports:"sports","C-OFF":"coff","Replacement duty":"replacement"}[kind]] || {tint:"#F1F5F9",color:"#475569"};
 
 const today = () => new Date().toISOString().slice(0, 10);
@@ -83,7 +91,7 @@ export default function CrewActivityReport() {
   const setReportMode = value => setSearchParams(previous => { const next = new URLSearchParams(previous); next.set("tab", value); return next; }, { replace: true });
   const isTrainingReport = reportMode.startsWith("training-");
   const [trainingRefresh, setTrainingRefresh] = useState(0);
-  const reportTone = reportTabs[reportMode];
+  const reportTone = reportTabs[reportMode] || reportTabs.detail;
   const [report, setReport] = useState({ summary: {}, rows: [], employees: [], canViewAll: false });
   const [matrix, setMatrix] = useState({ dutyCategories: [], shiftDutyCategories: [], leaveCategories: [], otherCategories: [], departments: [], subDepartments: [], departmentSubDepartments: {}, subDepartmentGroups: {}, groupNames: [], rows: [] });
   const [crms, setCrms] = useState({ summary: {}, rows: [], details: [], rosterEntries: [], statuses: [], deskRoles: [] });
@@ -288,7 +296,15 @@ export default function CrewActivityReport() {
       </Tabs>
     </Paper>
 
-    {isTrainingReport ? <Suspense fallback={<Box sx={{ p: 4, textAlign: "center" }}><CircularProgress /></Box>}><TrainingReports embeddedReport reportView={reportMode === "training-history" ? "history" : "matrix"} reportRefresh={trainingRefresh} /></Suspense> : <>
+    {isTrainingReport ? (
+      <Suspense fallback={<Box sx={{ p: 4, textAlign: "center" }}><CircularProgress /></Box>}>
+        <TrainingReports embeddedReport reportView={reportMode === "training-history" ? "history" : "matrix"} reportRefresh={trainingRefresh} />
+      </Suspense>
+    ) : reportMode === "replacement-pool" ? (
+      <Suspense fallback={<Box sx={{ minHeight: 320, display: "grid", placeItems: "center" }}><CircularProgress /></Box>}>
+        <ReplacementRosterPanel />
+      </Suspense>
+    ) : <>
     <Paper elevation={0} sx={{ p: 2, borderRadius: 3 }}>
       <Stack direction="row" spacing={1}  useFlexGap sx={{ ...({ flexWrap: "wrap", gap: 1.5, "& .MuiTextField-root": { minWidth: 130 } }), alignItems: "center" }}>
         {reportMode === "detail" && report.canViewAll && <EmployeeMultiSelect options={report.employees || []} value={employeeIds} onChange={setEmployeeIds} allOption />}

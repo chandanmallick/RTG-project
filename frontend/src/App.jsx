@@ -15,7 +15,7 @@ const RTGDashboard = lazy(() => import("./pages/RTGDashboard"));
 const PSPDashboard = lazy(() => import("./pages/PSPDashboard"));
 const PSPAdmin = lazy(() => import("./pages/PSPAdmin"));
 const PSPReportChecking = lazy(() => import("./pages/PSPReportChecking"));
-const FrequencyReport = lazy(() => import("./pages/FrequencyReport"));
+const FrequencyReport = lazy(() => import("./pages/FrequencyReport/index"));
 const DataValidation = lazy(() => import("./pages/DataValidation"));
 const MISReport = lazy(() => import("./pages/MISReport"));
 const NLDCPlots = lazy(() => import("./pages/NLDCPlots"));

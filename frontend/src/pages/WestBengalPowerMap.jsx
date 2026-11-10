@@ -1,4 +1,4 @@
-﻿import { useEffect, useRef, useState, useMemo } from "react";
+import { useEffect, useRef, useState, useMemo, useCallback } from "react";
 import { Map, NavigationControl, Marker, Popup, setWorkerUrl } from "../vendor/maplibre-gl/maplibre-gl.mjs";
 import maplibreWorkerUrl from "../vendor/maplibre-gl/maplibre-gl-worker.mjs?url";
 import "../vendor/maplibre-gl/maplibre-gl.css";
@@ -43,6 +43,18 @@ import defaultGridGeoJson from "../data/power_map/eastern_region_power_grid.json
 import easternRegionBoundaries from "../data/power_map/eastern_region_boundaries.json";
 import easternRegionDistricts from "../data/power_map/eastern_region_districts.json";
 import NasaWeatherModal from "../components/weather/NasaWeatherModal";
+
+const DEFAULT_OPENINFRA_LINE_COLORS = {
+  765: "#CA8A04",
+  400: "#DC2626",
+  220: "#16A34A",
+  132: "#0284C7",
+};
+
+const openInfraLineColorExpression = (colors) => [
+  "step", ["to-number", ["get", "voltage"], 0], "#64748B",
+  50, colors[132], 190, colors[220], 350, colors[400], 650, colors[765],
+];
 
 // The vendored ESM build needs a separate, matching worker. Let Vite emit its
 // asset URL explicitly; the library's relative default breaks after bundling.
@@ -213,6 +225,16 @@ export default function WestBengalPowerMap() {
   const [isFullScreen, setIsFullScreen] = useState(false);
   const [mapLoaded, setMapLoaded] = useState(false);
   const [mapError, setMapError] = useState(null);
+  const [openInfraLineColors, setOpenInfraLineColors] = useState(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem("rtg_openinfra_line_colors") || "{}");
+      return Object.fromEntries(Object.entries(DEFAULT_OPENINFRA_LINE_COLORS).map(([voltage, color]) => [
+        voltage, /^#[0-9a-f]{6}$/i.test(saved[voltage]) ? saved[voltage] : color,
+      ]));
+    } catch {
+      return { ...DEFAULT_OPENINFRA_LINE_COLORS };
+    }
+  });
 
   // NASA POWER Weather & Temperature state
   const [weatherModalOpen, setWeatherModalOpen] = useState(false);
@@ -1615,11 +1637,25 @@ export default function WestBengalPowerMap() {
       // Click on OpenInfra Live Substations (Exact GIS features)
       const handleOpenInfraSubClick = (e) => {
         if (!e.features || e.features.length === 0) return;
+        if (e.features[0].geometry?.type !== "Point" &&
+          map.queryRenderedFeatures(e.point, { layers: ["openinfra-substation-point"] }).length) return;
         const feat = e.features[0];
         const props = feat.properties || {};
+        const pointFeatures = feat.geometry?.type === "Point" ? [feat] : map.querySourceFeatures("openinframap", { sourceLayer: "power_substation_point" });
+        const mappedPoint = pointFeatures.find((point) => point.geometry?.type === "Point" &&
+          ((feat.id != null && point.id === feat.id) || (props.name && point.properties?.name === props.name)));
+        const exactCoords = mappedPoint?.geometry?.coordinates || (feat.geometry?.type === "Point" ? feat.geometry.coordinates : null);
         const rawV = parseFloat(props.voltage) || 0;
         const vDisplay = rawV >= 1000 ? Math.round(rawV / 1000) + " kV" : (rawV > 0 ? rawV + " kV" : "Transmission Substation");
         const subName = props.name || `${vDisplay} Substation`;
+        if (exactCoords) {
+          setSelectedEntity({
+            type: "substation", id: `osm-${mappedPoint?.id ?? feat.id ?? subName}`,
+            name: subName, voltage: vDisplay, operator: props.operator || "", coords: exactCoords,
+            exactLocation: true, source: "OpenInfraMap"
+          });
+        } else setSelectedEntity(null);
+        const escape = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
 
         new Popup({ offset: 12, className: "power-popup" })
           .setLngLat(e.lngLat)
@@ -1627,12 +1663,12 @@ export default function WestBengalPowerMap() {
             <div style="font-family: inherit; font-size: 13px; line-height: 1.45; padding: 4px; min-width: 230px;">
               <div style="display: flex; align-items: center; gap: 6px; font-weight: 800; color: #0F172A; margin-bottom: 6px;">
                 <span style="display: inline-block; width: 12px; height: 12px; border-radius: 2px; background: #7C3AED; border: 1.5px solid #FFFFFF;"></span>
-                <span>⚡ ${subName}</span>
+                <span>⚡ ${escape(subName)}</span>
               </div>
               <div style="font-size: 11.5px; color: #475569; display: flex; flex-direction: column; gap: 3px;">
                 <div><b>Operating Voltage:</b> <span style="color:#7C3AED; font-weight:800;">${vDisplay}</span></div>
-                <div><b>Substation Type:</b> ${props.substation || 'Transmission Grid Substation'}</div>
-                <div><b>Exact Coordinates:</b> ${e.lngLat.lat.toFixed(5)}° N, ${e.lngLat.lng.toFixed(5)}° E</div>
+                <div><b>Substation Type:</b> ${escape(props.substation || 'Transmission Grid Substation')}</div>
+                <div><b>Mapped Coordinates:</b> ${exactCoords ? `${exactCoords[1].toFixed(5)}° N, ${exactCoords[0].toFixed(5)}° E` : 'Select the mapped point for coordinates'}</div>
                 <div><b>Source:</b> OpenStreetMap / OpenInfraMap (MVT)</div>
               </div>
             </div>
@@ -1661,16 +1697,16 @@ export default function WestBengalPowerMap() {
         "oi-line-765-core", "oi-line-400-core", "oi-line-220-core", "oi-line-132-core"
       ].forEach((lineId) => {
         map.on("click", lineId, (e) => {
-        if (!e.features || e.features.length === 0) return;
-        const feat = e.features[0];
-        const props = feat.properties || {};
-        const escape = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
-        const rawV = parseFloat(props.voltage) || 0;
-        const vDisplay = rawV >= 1000 ? Math.round(rawV / 1000) + " kV" : (rawV > 0 ? rawV + " kV" : "Transmission Line");
+          if (!e.features || e.features.length === 0) return;
+          const feat = e.features[0];
+          const props = feat.properties || {};
+          const escape = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
+          const rawV = parseFloat(props.voltage) || 0;
+          const vDisplay = rawV >= 1000 ? Math.round(rawV / 1000) + " kV" : (rawV > 0 ? rawV + " kV" : "Transmission Line");
 
-        new Popup({ offset: 12, className: "power-popup" })
-          .setLngLat(e.lngLat)
-          .setHTML(`
+          new Popup({ offset: 12, className: "power-popup" })
+            .setLngLat(e.lngLat)
+            .setHTML(`
             <div style="font-family: inherit; font-size: 13px; line-height: 1.45; padding: 4px; min-width: 220px;">
               <div style="display: flex; align-items: center; gap: 6px; font-weight: 800; color: #0F172A; margin-bottom: 6px;">
                 <span style="font-size: 14px;">🌐</span>
@@ -1686,7 +1722,7 @@ export default function WestBengalPowerMap() {
               </div>
             </div>
           `)
-          .addTo(map);
+            .addTo(map);
         });
       });
 
@@ -1855,10 +1891,10 @@ export default function WestBengalPowerMap() {
         const beforeId = map.getLayer("er-state-outline")
           ? "er-state-outline"
           : map.getLayer("oi-line-132-casing")
-          ? "oi-line-132-casing"
-          : map.getLayer("wb-line-casing")
-          ? "wb-line-casing"
-          : undefined;
+            ? "oi-line-132-casing"
+            : map.getLayer("wb-line-casing")
+              ? "wb-line-casing"
+              : undefined;
 
         const isOsm = baseConfig.id === "osm";
         map.addLayer(
@@ -1881,6 +1917,16 @@ export default function WestBengalPowerMap() {
       }
     }
   }, [activeBaseMap, cartoApiKey, muteCivilInfra, mapLoaded]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (mapLoaded && map?.getLayer("openinfra-line-core")) {
+      map.setPaintProperty("openinfra-line-core", "line-color", openInfraLineColorExpression(openInfraLineColors));
+    }
+    try {
+      localStorage.setItem("rtg_openinfra_line_colors", JSON.stringify(openInfraLineColors));
+    } catch { /* Colour changes still apply for this session. */ }
+  }, [mapLoaded, openInfraLineColors]);
 
   // Update layer visibility
   useEffect(() => {
@@ -1960,7 +2006,7 @@ export default function WestBengalPowerMap() {
     setVis("openinfra-plant-label", livePlants && layersVisibility.labels);
   }, [layersVisibility, mapLoaded]);
 
-  // Render HTML Markers for Substations & Plants
+  // City weather markers are independent of the mapped electrical network.
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapLoaded) return;
@@ -1988,10 +2034,10 @@ export default function WestBengalPowerMap() {
           sub.voltage_class >= 765
             ? "#CA8A04"
             : sub.voltage_class >= 400
-            ? "#DC2626"
-            : sub.voltage_class >= 220
-            ? "#16A34A"
-            : "#0284C7";
+              ? "#DC2626"
+              : sub.voltage_class >= 220
+                ? "#16A34A"
+                : "#0284C7";
 
         el.innerHTML = `
           <div style="
@@ -2156,7 +2202,8 @@ export default function WestBengalPowerMap() {
 
   // Fly to Entity (Substation, Power Plant, or Line)
   const flyToEntity = (type, entity) => {
-    setSelectedEntity({ type, ...entity });
+    // Catalog positions locate a vicinity only. Weather requires a mapped OSM point.
+    setSelectedEntity(entity.exactLocation ? { type, ...entity } : null);
     const map = mapRef.current;
     if (!map) return;
 
@@ -2321,7 +2368,7 @@ export default function WestBengalPowerMap() {
               Eastern Region Power System Grid Map
             </h4>
             <div className="text-muted small mt-1">
-              Visualizing <b>{allLines.length} Transmission Corridors</b>, <b>{allPlants.length} Generating Stations ({totalCapacityMW.toLocaleString()} MW)</b>, and <b>{allSubstations.length} Grid Substations</b> across West Bengal, Odisha, Bihar, Jharkhand & Sikkim.
+              OpenInfraMap electrical network across West Bengal, Odisha, Bihar, Jharkhand & Sikkim. Select a mapped substation for its coordinates and NASA weather.
             </div>
 
             {/* Quick State Zoom Pills */}
@@ -2338,9 +2385,8 @@ export default function WestBengalPowerMap() {
                 <button
                   key={st.id}
                   onClick={() => handleStateZoom(st.id)}
-                  className={`btn btn-xs py-0.5 px-2 rounded-pill fw-bold ${
-                    activeState === st.id ? "btn-primary" : "btn-outline-secondary"
-                  }`}
+                  className={`btn btn-xs py-0.5 px-2 rounded-pill fw-bold ${activeState === st.id ? "btn-primary" : "btn-outline-secondary"
+                    }`}
                   style={{ fontSize: "11px" }}
                 >
                   {st.label}
@@ -2413,9 +2459,8 @@ export default function WestBengalPowerMap() {
                 setTempKeyInput(cartoApiKey);
                 setKeyModalOpen(true);
               }}
-              className={`btn btn-sm d-flex align-items-center gap-1 ${
-                cartoApiKey ? "btn-outline-success" : "btn-outline-secondary"
-              }`}
+              className={`btn btn-sm d-flex align-items-center gap-1 ${cartoApiKey ? "btn-outline-success" : "btn-outline-secondary"
+                }`}
               title="Basemap Styles & API Key Settings"
             >
               <Key size={14} />
@@ -2445,6 +2490,9 @@ export default function WestBengalPowerMap() {
             <div className="col-12 col-lg-4 col-xl-3 d-flex flex-column" style={{ height: "100%" }}>
               <div className="card h-100 border-0 shadow-sm rounded-3 d-flex flex-column">
                 <div className="card-header bg-white border-bottom p-3">
+                  <div className="text-muted mb-2" style={{ fontSize: "10px" }}>
+                    Reference directory: rows zoom to an approximate area. Map geometry and station weather use OpenInfraMap positions.
+                  </div>
                   {/* Category Tabs: Substations, Power Plants, Transmission Lines */}
                   <div className="btn-group w-100 btn-group-sm mb-2" role="group">
                     <button
@@ -2506,12 +2554,12 @@ export default function WestBengalPowerMap() {
                         vf === "765"
                           ? "#CA8A04"
                           : vf === "400"
-                          ? "#DC2626"
-                          : vf === "220"
-                          ? "#16A34A"
-                          : vf === "132"
-                          ? "#0284C7"
-                          : "#1E293B";
+                            ? "#DC2626"
+                            : vf === "220"
+                              ? "#16A34A"
+                              : vf === "132"
+                                ? "#0284C7"
+                                : "#1E293B";
                       const isActive = voltageFilter === vf;
                       return (
                         <button
@@ -2539,9 +2587,8 @@ export default function WestBengalPowerMap() {
                     {["all", "WBSETCL", "POWERGRID", "WBPDCL", "DVC", "CESC"].map((op) => (
                       <button
                         key={op}
-                        className={`btn btn-xs px-1 py-0 ${
-                          operatorFilter === op ? "text-primary fw-bold text-decoration-underline" : "text-muted"
-                        }`}
+                        className={`btn btn-xs px-1 py-0 ${operatorFilter === op ? "text-primary fw-bold text-decoration-underline" : "text-muted"
+                          }`}
                         style={{ fontSize: "11px" }}
                         onClick={() => setOperatorFilter(op)}
                       >
@@ -2571,11 +2618,10 @@ export default function WestBengalPowerMap() {
                             <div
                               key={plant.id}
                               onClick={() => flyToEntity("plant", plant)}
-                              className={`p-2 rounded-2 border transition-all ${
-                                isSelected
+                              className={`p-2 rounded-2 border transition-all ${isSelected
                                   ? "shadow-sm"
                                   : "bg-white hover-bg-light cursor-pointer"
-                              }`}
+                                }`}
                               style={{
                                 cursor: "pointer",
                                 backgroundColor: isSelected ? "#FEF3C7" : undefined,
@@ -2621,20 +2667,19 @@ export default function WestBengalPowerMap() {
                             sub.voltage_class >= 765
                               ? "#CA8A04"
                               : sub.voltage_class >= 400
-                              ? "#DC2626"
-                              : sub.voltage_class >= 220
-                              ? "#16A34A"
-                              : "#0284C7";
+                                ? "#DC2626"
+                                : sub.voltage_class >= 220
+                                  ? "#16A34A"
+                                  : "#0284C7";
 
                           return (
                             <div
                               key={sub.id}
                               onClick={() => flyToEntity("substation", sub)}
-                              className={`p-2 rounded-2 border transition-all ${
-                                isSelected
+                              className={`p-2 rounded-2 border transition-all ${isSelected
                                   ? "bg-light border-primary shadow-sm"
                                   : "bg-white hover-bg-light cursor-pointer"
-                              }`}
+                                }`}
                               style={{
                                 cursor: "pointer",
                                 borderLeft: `4px solid ${vColor}`,
@@ -2694,11 +2739,10 @@ export default function WestBengalPowerMap() {
                             <div
                               key={line.id}
                               onClick={() => flyToEntity("line", line)}
-                              className={`p-2 rounded-2 border transition-all ${
-                                isSelected
+                              className={`p-2 rounded-2 border transition-all ${isSelected
                                   ? "bg-warning-subtle border-warning shadow-sm"
                                   : "bg-white hover-bg-light cursor-pointer"
-                              }`}
+                                }`}
                               style={{ cursor: "pointer" }}
                             >
                               <div className="d-flex align-items-center justify-content-between">
@@ -2751,9 +2795,8 @@ export default function WestBengalPowerMap() {
 
           {/* Interactive MapLibre GL Map View */}
           <div
-            className={`${
-              sidebarOpen ? "col-12 col-lg-8 col-xl-9" : "col-12"
-            } d-flex flex-column position-relative`}
+            className={`${sidebarOpen ? "col-12 col-lg-8 col-xl-9" : "col-12"
+              } d-flex flex-column position-relative`}
             style={{ height: "100%" }}
           >
             <div
@@ -2792,11 +2835,10 @@ export default function WestBengalPowerMap() {
                     {BASEMAP_PROVIDERS.filter((b) => !b.requiresKey || cartoApiKey).map((prov) => (
                       <button
                         key={prov.id}
-                        className={`btn btn-xs px-2 py-0.5 rounded-1 ${
-                          activeBaseMap === prov.id
+                        className={`btn btn-xs px-2 py-0.5 rounded-1 ${activeBaseMap === prov.id
                             ? "btn-dark fw-bold text-white shadow-xs"
                             : "btn-outline-secondary"
-                        }`}
+                          }`}
                         style={{ fontSize: "11px" }}
                         onClick={() => setActiveBaseMap(prov.id)}
                         title={prov.label}
@@ -3174,14 +3216,14 @@ export default function WestBengalPowerMap() {
                           {selectedEntity.type === "plant"
                             ? "Power Plant"
                             : selectedEntity.type === "line"
-                            ? "Corridor"
-                            : "Substation"}
+                              ? "Corridor"
+                              : "Substation"}
                         </span>
                         <span className="badge bg-light text-dark border" style={{ fontSize: "10px" }}>
                           {selectedEntity.voltage || selectedEntity.voltage_label || `${selectedEntity.voltage_class} kV`}
                         </span>
                         <span className="badge bg-light text-secondary border" style={{ fontSize: "10px" }}>
-                          {selectedEntity.operator || "WBSETCL"}
+                          {selectedEntity.operator || "Operator not mapped"}
                         </span>
                       </div>
                       <h6 className="fw-bold text-dark mb-0">{selectedEntity.name}</h6>
@@ -3214,13 +3256,13 @@ export default function WestBengalPowerMap() {
                     {selectedEntity.type === "substation" && (
                       <div>
                         <div><b>Voltage Level:</b> {selectedEntity.voltage}</div>
-                        <div><b>District:</b> {selectedEntity.district}</div>
-                        <div><b>Operator:</b> {selectedEntity.operator}</div>
+                        {selectedEntity.district && <div><b>District:</b> {selectedEntity.district}</div>}
+                        <div><b>Source:</b> {selectedEntity.source || "OpenInfraMap"}</div>
                       </div>
                     )}
                   </div>
 
-                                    {/* CRMS Codebook Mapping Info */}
+                  {/* CRMS Codebook Mapping Info */}
                   <div className="mb-2 p-2 rounded" style={{ backgroundColor: "#EEF2FF", border: "1px solid #C7D2FE" }}>
                     <div className="d-flex align-items-center justify-content-between">
                       <span className="small fw-bold text-primary d-flex align-items-center gap-1">
@@ -3333,29 +3375,25 @@ export default function WestBengalPowerMap() {
               <div className="fw-bold text-dark mb-1.5 d-flex align-items-center justify-content-between gap-3 border-bottom pb-1">
                 <span>Voltage Legend (kV)</span>
                 <span className="badge bg-dark text-white" style={{ fontSize: "9px" }}>
-                  Standard Grid
+                  OpenInfra
                 </span>
               </div>
               <div className="d-flex flex-column gap-1.5">
                 <div className="d-flex align-items-center gap-2">
-                  <span style={{ width: "18px", height: "5px", backgroundColor: "#CA8A04", borderRadius: "2px", border: "1px solid #0F172A", display: "inline-block" }}></span>
-                  <span className="fw-bold" style={{ color: "#CA8A04" }}>765 kV</span>
-                  <span className="text-muted small ms-auto">Dark Yellow</span>
+                  <span style={{ width: "18px", height: "5px", backgroundColor: openInfraLineColors[765], borderRadius: "2px", border: "1px solid #0F172A", display: "inline-block" }}></span>
+                  <span className="fw-bold" style={{ color: openInfraLineColors[765] }}>765 kV</span>
                 </div>
                 <div className="d-flex align-items-center gap-2">
-                  <span style={{ width: "18px", height: "5px", backgroundColor: "#DC2626", borderRadius: "2px", border: "1px solid #0F172A", display: "inline-block" }}></span>
-                  <span className="fw-bold" style={{ color: "#DC2626" }}>400 kV</span>
-                  <span className="text-muted small ms-auto">Red (Main Grid)</span>
+                  <span style={{ width: "18px", height: "5px", backgroundColor: openInfraLineColors[400], borderRadius: "2px", border: "1px solid #0F172A", display: "inline-block" }}></span>
+                  <span className="fw-bold" style={{ color: openInfraLineColors[400] }}>400 kV</span>
                 </div>
                 <div className="d-flex align-items-center gap-2">
-                  <span style={{ width: "18px", height: "5px", backgroundColor: "#16A34A", borderRadius: "2px", border: "1px solid #0F172A", display: "inline-block" }}></span>
-                  <span className="fw-bold" style={{ color: "#16A34A" }}>220 kV</span>
-                  <span className="text-muted small ms-auto">Green</span>
+                  <span style={{ width: "18px", height: "5px", backgroundColor: openInfraLineColors[220], borderRadius: "2px", border: "1px solid #0F172A", display: "inline-block" }}></span>
+                  <span className="fw-bold" style={{ color: openInfraLineColors[220] }}>220 kV</span>
                 </div>
                 <div className="d-flex align-items-center gap-2">
-                  <span style={{ width: "18px", height: "5px", backgroundColor: "#0284C7", borderRadius: "2px", border: "1px solid #0F172A", display: "inline-block" }}></span>
-                  <span className="fw-bold" style={{ color: "#0284C7" }}>132 kV</span>
-                  <span className="text-muted small ms-auto">Blue</span>
+                  <span style={{ width: "18px", height: "5px", backgroundColor: openInfraLineColors[132], borderRadius: "2px", border: "1px solid #0F172A", display: "inline-block" }}></span>
+                  <span className="fw-bold" style={{ color: openInfraLineColors[132] }}>132 kV</span>
                 </div>
                 <div className="d-flex align-items-center gap-2 pt-1.5 mt-0.5 border-top">
                   <span style={{ width: "12px", height: "12px", backgroundColor: "#F59E0B", borderRadius: "50%", border: "2px solid #FFF", boxShadow: "0 0 0 1.5px #B45309", display: "inline-block" }}></span>
@@ -3395,13 +3433,12 @@ export default function WestBengalPowerMap() {
                 {/* Feedback banner */}
                 {syncFeedback && (
                   <div
-                    className={`alert alert-${
-                      syncFeedback.type === "success"
+                    className={`alert alert-${syncFeedback.type === "success"
                         ? "success"
                         : syncFeedback.type === "warning"
-                        ? "warning"
-                        : "danger"
-                    } d-flex align-items-start gap-2 mb-3`}
+                          ? "warning"
+                          : "danger"
+                      } d-flex align-items-start gap-2 mb-3`}
                   >
                     {syncFeedback.type === "success" ? (
                       <CheckCircle2 size={18} className="mt-0.5 flex-shrink-0" />
@@ -3540,7 +3577,7 @@ export default function WestBengalPowerMap() {
         </div>
       )}
 
-            {/* CRMS Codebook Master Data Mapping Modal (Pop-up) */}
+      {/* CRMS Codebook Master Data Mapping Modal (Pop-up) */}
       {crmsModalOpen && (
         <div
           className="modal show d-block"
@@ -3568,9 +3605,8 @@ export default function WestBengalPowerMap() {
 
                 <div className="d-flex align-items-center gap-2">
                   <span
-                    className={`badge ${
-                      crmsIsLive ? "bg-success" : "bg-warning text-dark"
-                    } px-2.5 py-1 fw-bold`}
+                    className={`badge ${crmsIsLive ? "bg-success" : "bg-warning text-dark"
+                      } px-2.5 py-1 fw-bold`}
                   >
                     {crmsIsLive ? "● Live CRMS API Connected" : "● Master Cache Active (Offline)"}
                   </span>
@@ -3706,11 +3742,10 @@ export default function WestBengalPowerMap() {
                                 <td className="text-center text-muted small">{idx + 1}</td>
                                 <td>
                                   <span
-                                    className={`badge rounded-pill ${
-                                      p.category === "power_line"
+                                    className={`badge rounded-pill ${p.category === "power_line"
                                         ? "bg-primary-subtle text-primary"
                                         : "bg-warning-subtle text-dark"
-                                    } fw-semibold`}
+                                      } fw-semibold`}
                                     style={{ fontSize: "10px" }}
                                   >
                                     {p.category === "power_line" ? "Line" : "Substation"}

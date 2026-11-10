@@ -48,6 +48,7 @@ import {
   MessageSquare,
   ClipboardList,
   Smartphone,
+  Repeat2,
 } from "lucide-react";
 import crewApi from "../../crewLegacy/api";
 import { useAuth } from "../../auth/AuthContext";
@@ -726,7 +727,18 @@ export default function TopNavbar() {
                     iconBg="#EAF2FF"
                     path="/crew/reports"
                     alwaysVisible
-                    active={location.pathname === "/crew/reports"}
+                    active={location.pathname === "/crew/reports" && (!location.search || location.search === "?tab=detail")}
+                    onClick={handleNavigate}
+                  />
+                  <DropdownItem
+                    title="Replacement Pool Record"
+                    description="SIC & Shift Engineer pools, sequential roster, duty matrix & allocations"
+                    icon={Repeat2}
+                    iconColor="#0284C7"
+                    iconBg="#E0F2FE"
+                    path="/crew/reports?tab=replacement-pool"
+                    alwaysVisible
+                    active={location.pathname === "/crew/reports" && new URLSearchParams(location.search).get("tab") === "replacement-pool"}
                     onClick={handleNavigate}
                   />
                 </Box>
