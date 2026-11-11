@@ -217,7 +217,7 @@ export default function EmployeeMaster() {
     );
 
     if (editId) {
-      await api.put(`admin/employees/${editId}`, resolvedForm);
+      await api.put(`/admin/employees/${editId}`, resolvedForm);
       setEditId(null);
     } else {
       await api.post(`/admin/employees`, resolvedForm);

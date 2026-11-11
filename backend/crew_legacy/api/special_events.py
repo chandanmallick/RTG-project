@@ -691,9 +691,19 @@ def sequential_allocate_department_manpower(
 
     # Gather candidate pools:
     # USER REQUIREMENT: Sequential--- SIC replacement will be done by SIC pool automatically, rest by shift engineer pool.
+    # Persons associated with ANY group in crew setup must NEVER be counted or included for replacement duty.
+    from crew_legacy.services.replacement_roster_service import get_active_shift_group_member_ids
+    excluded_group_ids = get_active_shift_group_member_ids()
+
     cfg = get_replacement_roster_config()
-    sic_pool = [x for x in (cfg.get("sicPool") or []) if x.get("isActive", True)]
-    se_pool = [x for x in (cfg.get("shiftEngineerPool") or []) if x.get("isActive", True)]
+    sic_pool = [
+        x for x in (cfg.get("sicPool") or [])
+        if x.get("isActive", True) and str(x.get("employeeId") or "").strip() not in excluded_group_ids
+    ]
+    se_pool = [
+        x for x in (cfg.get("shiftEngineerPool") or [])
+        if x.get("isActive", True) and str(x.get("employeeId") or "").strip() not in excluded_group_ids
+    ]
 
     # Strictly preserve defined sequence order in pools
     sic_pool.sort(key=lambda x: int(x.get("seniorityOrder") or 999))
@@ -706,6 +716,11 @@ def sequential_allocate_department_manpower(
             {"department": {"$in": source_depts}},
             {"departments": {"$in": source_depts}},
         ]
+    # Exclude all group members from department candidates for replacement duty
+    dept_query["$and"] = dept_query.get("$and", []) + [
+        {"userId": {"$nin": list(excluded_group_ids)}},
+        {"employeeId": {"$nin": list(excluded_group_ids)}},
+    ]
     dept_cursor = employee_collection.find(dept_query)
     try:
         dept_candidates = list(dept_cursor.sort([("seniorityOrder", 1), ("name", 1), ("employeeId", 1)]))

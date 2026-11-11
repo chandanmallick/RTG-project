@@ -33,24 +33,43 @@ def clean_id(value) -> str:
 
 def get_active_shift_group_member_ids() -> set[str]:
     """
-    Returns the set of employee IDs who are currently in an active shift group
-    (either as Shift In Charge or as a group member).
-    User Requirement: Persons currently in a shift group must NOT be included in either sequential replacement pool.
+    Returns the set of all employee IDs who are associated with ANY group in roster_group_collection
+    (either as Shift In Charge or as a group member) or mapped to a shift group in employee collection.
+    User Requirement: In crew setup page "crew/setup", those persons associated with any group,
+    they shouldn't be counted for the replacement duty.
     """
-    active_ids = set()
-    for group in roster_group_collection.find({"isActive": True}):
+    group_ids = set()
+    # 1. Any group in roster_group_collection (both active and created groups)
+    for group in roster_group_collection.find():
+        sic = group.get("shiftInCharge") or {}
         sic_id = clean_id(
-            (group.get("shiftInCharge") or {}).get("employeeId")
+            sic.get("employeeId")
+            or sic.get("userId")
             or group.get("sicEmployeeId")
             or group.get("shiftInChargeId")
         )
         if sic_id:
-            active_ids.add(sic_id)
+            group_ids.add(sic_id)
         for m in (group.get("members") or []):
             mid = clean_id(m.get("employeeId") or m.get("userId"))
             if mid:
-                active_ids.add(mid)
-    return active_ids
+                group_ids.add(mid)
+
+    # 2. Employees with shift group tags in employee collection
+    for emp in employee_collection.find({
+        "$or": [
+            {"shiftGroupNames": {"$exists": True, "$ne": []}},
+            {"isShiftGroupSic": True},
+            {"shiftGroupSic": True},
+            {"dutyType": {"$regex": "^shift", "$options": "i"}}
+        ]
+    }, {"userId": 1, "employeeId": 1}):
+        eid = clean_id(emp.get("userId") or emp.get("employeeId"))
+        if eid:
+            group_ids.add(eid)
+
+    group_ids.discard("")
+    return group_ids
 
 
 def get_frontend_base_url() -> str:

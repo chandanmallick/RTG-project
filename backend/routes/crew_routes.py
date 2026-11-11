@@ -125,6 +125,7 @@ def list_employees():
             "designation": doc.get("designation"),
             "designationHindi": doc.get("designationHindi"),
             "dutyType": doc.get("dutyType"),
+            "gender": str(doc.get("gender") or "Male").strip(),
             "department": doc.get("department"),
         })
     return output

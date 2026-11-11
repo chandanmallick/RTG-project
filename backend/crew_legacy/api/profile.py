@@ -1158,7 +1158,7 @@ def crms_duty_reconciliation(
                     "date": str(daily.get("date") or ""), "employeeId": employee_id,
                     "employeeName": employees.get(employee_id, {}).get("employeeName") or employee_id,
                     "shift": assigned_duty, "groupName": moved_group,
-                    "replacementDuty": True, "replacementFor": "", "assignmentType": f"Rescheduled duty from {destination_switch.get('sourceDate') or 'another date'}",
+                    "replacementDuty": False, "replacementFor": "", "assignmentType": f"Rescheduled duty from {destination_switch.get('sourceDate') or 'another date'}",
                 },
             ])
             continue

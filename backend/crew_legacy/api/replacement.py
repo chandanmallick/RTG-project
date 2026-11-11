@@ -1615,8 +1615,21 @@ def exchange_employee_duties(
     changed_on = datetime.utcnow()
     first_previous = {"assignedDuty": first.get("assignedDuty"), "groupName": first.get("groupName")}
     second_previous = {"assignedDuty": second.get("assignedDuty"), "groupName": second.get("groupName")}
-    first_updated = {"assignedDuty": second.get("assignedDuty"), "groupName": second.get("groupName")}
-    second_updated = {"assignedDuty": first.get("assignedDuty"), "groupName": first.get("groupName")}
+    # Mutual shift exchange is NOT a replacement or extra duty
+    first_updated = {
+        "assignedDuty": second.get("assignedDuty"),
+        "groupName": second.get("groupName"),
+        "replacementDuty": False,
+        "replacementMode": None,
+        "replacementFor": None,
+    }
+    second_updated = {
+        "assignedDuty": first.get("assignedDuty"),
+        "groupName": first.get("groupName"),
+        "replacementDuty": False,
+        "replacementMode": None,
+        "replacementFor": None,
+    }
     duties_losing_credit = [
         employee_id
         for employee_id, previous, updated_record in (
@@ -1678,26 +1691,8 @@ def exchange_employee_duties(
         },
     ]
     duty_switch_collection.insert_many(audit_records)
+    # USER REQUIREMENT: Duty exchange is a mutual swap, NOT an extra duty (no C-OFF awarded)
     comp_off_ids = {}
-    for employee_id, previous, updated_record in (
-        (first_id, first_previous, first_updated),
-        (second_id, second_previous, second_updated),
-    ):
-        comp_off_id = award_off_day_comp_off(
-            employee_id=employee_id,
-            duty_date=duty_date,
-            previous_duty=previous.get("assignedDuty"),
-            assigned_duty=updated_record.get("assignedDuty"),
-            group_name=updated_record.get("groupName"),
-            switch_id=exchange_id,
-            source=common_switch["source"],
-        )
-        if comp_off_id:
-            comp_off_ids[employee_id] = comp_off_id
-            duty_switch_collection.update_many(
-                {"exchangeId": exchange_id, "employeeId": employee_id},
-                {"$set": {"compOffAwarded": True, "compOffId": comp_off_id}},
-            )
     notify_all(
         employee_ids=[first_id, second_id],
         subject="Shift manpower exchanged",
