@@ -1,3 +1,4 @@
+from collections import defaultdict
 """Department-scoped special-event announcements and separately enabled leave blocks."""
 from datetime import date, datetime, timedelta
 from typing import Optional
@@ -555,6 +556,88 @@ def get_special_roster_matrix(
     }
 
 
+def fetch_denied_duties_list(start_date: str = None, end_date: str = None) -> list:
+    from crew_legacy.database.database_mongo import duty_denial_collection, duty_notification_collection
+
+    denied_duties = []
+    seen_denial_keys = set()
+
+    # 1. Denials in date range from duty_denial_collection
+    if start_date and end_date:
+        try:
+            in_period_docs = list(duty_denial_collection.find({
+                "date": {"$gte": start_date, "$lte": end_date}
+            }).sort("date", -1))
+            for d in in_period_docs:
+                key = f"{d.get('employeeId')}_{d.get('date')}_{d.get('assignedDuty')}"
+                if key not in seen_denial_keys:
+                    seen_denial_keys.add(key)
+                    denied_duties.append({
+                        "employeeId": str(d.get("employeeId") or ""),
+                        "employeeName": str(d.get("employeeName") or ""),
+                        "date": str(d.get("date") or ""),
+                        "shift": str(d.get("assignedDuty") or ""),
+                        "reason": str(d.get("reason") or "Duty denied"),
+                        "deniedBy": str(d.get("deniedBy") or ""),
+                        "deniedByRole": str(d.get("deniedByRole") or "Employee"),
+                        "createdAt": d.get("createdAt").strftime("%Y-%m-%d %H:%M") if isinstance(d.get("createdAt"), datetime) else str(d.get("createdAt") or ""),
+                        "isInPeriod": True,
+                        "status": "Denied"
+                    })
+        except Exception as e:
+            print(f"Error querying duty_denial_collection in period: {e}")
+
+        # 2. Denials in date range from duty_notification_collection
+        try:
+            notif_denials = list(duty_notification_collection.find({
+                "status": "Denied",
+                "date": {"$gte": start_date, "$lte": end_date}
+            }).sort("date", -1))
+            for nd in notif_denials:
+                key = f"{nd.get('employeeId')}_{nd.get('date')}_{nd.get('assignedDuty')}"
+                if key not in seen_denial_keys:
+                    seen_denial_keys.add(key)
+                    denied_duties.append({
+                        "employeeId": str(nd.get("employeeId") or ""),
+                        "employeeName": str(nd.get("employeeName") or ""),
+                        "date": str(nd.get("date") or ""),
+                        "shift": str(nd.get("assignedDuty") or ""),
+                        "reason": str(nd.get("reason") or nd.get("decision") or "Duty denied"),
+                        "deniedBy": str(nd.get("deniedBy") or ""),
+                        "deniedByRole": str(nd.get("deniedByRole") or "Employee"),
+                        "createdAt": nd.get("updatedAt").strftime("%Y-%m-%d %H:%M") if isinstance(nd.get("updatedAt"), datetime) else str(nd.get("createdAt") or ""),
+                        "isInPeriod": True,
+                        "status": "Denied"
+                    })
+        except Exception as e:
+            print(f"Error querying duty_notification_collection denials: {e}")
+
+    # 3. Always include recent denials so the supervisor has full visibility
+    try:
+        all_recent = list(duty_denial_collection.find().sort("date", -1).limit(20))
+        for d in all_recent:
+            key = f"{d.get('employeeId')}_{d.get('date')}_{d.get('assignedDuty')}"
+            if key not in seen_denial_keys:
+                seen_denial_keys.add(key)
+                is_in = bool(start_date and end_date and d.get("date") and start_date <= str(d.get("date")) <= end_date)
+                denied_duties.append({
+                    "employeeId": str(d.get("employeeId") or ""),
+                    "employeeName": str(d.get("employeeName") or ""),
+                    "date": str(d.get("date") or ""),
+                    "shift": str(d.get("assignedDuty") or ""),
+                    "reason": str(d.get("reason") or "Duty denied"),
+                    "deniedBy": str(d.get("deniedBy") or ""),
+                    "deniedByRole": str(d.get("deniedByRole") or "Employee"),
+                    "createdAt": d.get("createdAt").strftime("%Y-%m-%d %H:%M") if isinstance(d.get("createdAt"), datetime) else str(d.get("createdAt") or ""),
+                    "isInPeriod": is_in,
+                    "status": "Denied"
+                })
+    except Exception as e:
+        print(f"Error querying recent denials: {e}")
+
+    return denied_duties
+
+
 @router.post("/sequential-allocate")
 def sequential_allocate_department_manpower(
     payload: dict,
@@ -701,6 +784,7 @@ def sequential_allocate_department_manpower(
     # Fetch daily duties in date range to build group shift map and daily lookups
     daily_query = {"date": {"$gte": start_date, "$lte": end_date}}
     records = list(employee_daily_collection.find(daily_query))
+    emp_to_group = resolve_employee_group_map(records)
     group_shift_on_date = {}
     daily_by_emp_date = {}
     for r in records:
@@ -839,6 +923,7 @@ def sequential_allocate_department_manpower(
     allocations = []
     unallocated_slots = []
     duty_counts = {str(c.get("userId") or c.get("employeeId") or "").strip(): 0 for c in all_candidates}
+    simulated_assigned_dates = defaultdict(set)
     actor_id = str(user.get("employeeId") or "").strip()
 
     for slot in slots_to_fill:
@@ -866,47 +951,66 @@ def sequential_allocate_department_manpower(
             ptr = curr_se_ptr
 
         assigned_candidate = None
-        searched = 0
+        assigned_duty_num = 1
         total_cand_count = len(cand_pool)
 
-        while searched < total_cand_count:
-            candidate = cand_pool[ptr]
-            cand_id = str(candidate.get("userId") or candidate.get("employeeId") or "").strip()
-            cand_name = str(candidate.get("name") or cand_id)
+        if total_cand_count > 0:
+            # USER REQUIREMENT: Complete Duty 1 for all available candidates, then move to Duty 2, Duty 3, etc.
+            for target_level in range(max_duties_per_person):
+                searched = 0
+                temp_ptr = ptr
+                while searched < total_cand_count:
+                    candidate = cand_pool[temp_ptr]
+                    cand_id = str(candidate.get("userId") or candidate.get("employeeId") or "").strip()
+                    next_ptr = (temp_ptr + 1) % total_cand_count
+                    searched += 1
 
-            ptr = (ptr + 1) % total_cand_count
-            searched += 1
+                    if not cand_id or (applicant_id and cand_id == applicant_id):
+                        temp_ptr = next_ptr
+                        continue
 
-            if not cand_id or (applicant_id and cand_id == applicant_id):
-                continue
+                    # Only consider candidates currently at target_level duties
+                    if duty_counts.get(cand_id, 0) != target_level:
+                        temp_ptr = next_ptr
+                        continue
 
-            if duty_counts.get(cand_id, 0) >= max_duties_per_person:
-                continue
+                    # Prevent assigning candidate more than once on the same date during simulation
+                    if sdate in simulated_assigned_dates[cand_id]:
+                        temp_ptr = next_ptr
+                        continue
 
-            # USER REQUIREMENT: Female employees will be deployed ONLY in Morning & Evening duty.
-            # Night shift replacement CANNOT be assigned to female employees!
-            if sshift.strip().lower() in ["night", "n", "n1", "n2"]:
-                cand_gender = str(candidate.get("gender") or "").strip().lower()
-                if not cand_gender:
-                    emp_doc = employee_collection.find_one({"$or": [{"userId": cand_id}, {"employeeId": cand_id}]}) or {}
-                    cand_gender = str(emp_doc.get("gender") or "male").strip().lower()
-                if cand_gender in ["female", "f"]:
-                    continue
+                    # USER REQUIREMENT: Female employees will be deployed ONLY in Morning & Evening duty.
+                    # Night shift replacement CANNOT be assigned to female employees!
+                    if sshift.strip().lower() in ["night", "n", "n1", "n2"]:
+                        cand_gender = str(candidate.get("gender") or "").strip().lower()
+                        if not cand_gender:
+                            emp_doc = employee_collection.find_one({"$or": [{"userId": cand_id}, {"employeeId": cand_id}]}) or {}
+                            cand_gender = str(emp_doc.get("gender") or "male").strip().lower()
+                        if cand_gender in ["female", "f"]:
+                            temp_ptr = next_ptr
+                            continue
 
-            # Verify candidate availability (not on leave, not active shift group member, not on active duty)
-            from crew_legacy.services.replacement_roster_service import is_candidate_available_on_date
-            cand_available, _ = is_candidate_available_on_date(cand_id, sdate, sshift)
-            if not cand_available:
-                continue
+                    # Verify candidate availability (not on leave, not active shift group member, not on active duty)
+                    from crew_legacy.services.replacement_roster_service import is_candidate_available_on_date
+                    cand_available, _ = is_candidate_available_on_date(cand_id, sdate, sshift)
+                    if not cand_available:
+                        temp_ptr = next_ptr
+                        continue
 
-            # Candidate match found!
-            assigned_candidate = candidate
-            duty_counts[cand_id] = duty_counts.get(cand_id, 0) + 1
-            if is_sic:
-                curr_sic_ptr = ptr
-            else:
-                curr_se_ptr = ptr
-            break
+                    # Candidate match found at this duty level!
+                    assigned_candidate = candidate
+                    assigned_duty_num = target_level + 1
+                    duty_counts[cand_id] = duty_counts.get(cand_id, 0) + 1
+                    simulated_assigned_dates[cand_id].add(sdate)
+                    ptr = next_ptr
+                    if is_sic:
+                        curr_sic_ptr = ptr
+                    else:
+                        curr_se_ptr = ptr
+                    break
+
+                if assigned_candidate:
+                    break
 
         if assigned_candidate:
             cand_id = str(assigned_candidate.get("userId") or assigned_candidate.get("employeeId") or "").strip()
@@ -969,6 +1073,7 @@ def sequential_allocate_department_manpower(
                 "allocatedDesignation": cand_desig,
                 "allocatedGroupName": str(assigned_candidate.get("groupName") or "").strip() or emp_to_group.get(cand_id, ""),
                 "sourcePool": pool_label,
+                "dutyNumber": assigned_duty_num,
                 "status": "Simulated" if preview_only else "Allocated",
             })
         else:
@@ -1001,6 +1106,9 @@ def sequential_allocate_department_manpower(
             upsert=True,
         )
 
+    # Query denied replacement duties to display in side panel
+    denied_duties = fetch_denied_duties_list(start_date, end_date)
+
     return {
         "success": True,
         "previewOnly": preview_only,
@@ -1011,7 +1119,19 @@ def sequential_allocate_department_manpower(
         "unallocatedCount": len(unallocated_slots),
         "allocations": allocations,
         "unallocatedSlots": unallocated_slots,
+        "deniedDuties": denied_duties,
     }
+
+
+
+@router.get("/denied-duties")
+def get_denied_duties(
+    startDate: Optional[str] = Query(None),
+    endDate: Optional[str] = Query(None),
+    user=Depends(get_authenticated_user),
+):
+    denied = fetch_denied_duties_list(startDate, endDate)
+    return {"success": True, "deniedDuties": denied, "count": len(denied)}
 
 
 @router.get("/candidates")

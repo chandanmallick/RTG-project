@@ -458,6 +458,34 @@ export default function SpecialRosterMatrix({
   const [previewOnly, setPreviewOnly] = useState(true);
   const [seqRunning, setSeqRunning] = useState(false);
   const [seqResults, setSeqResults] = useState(null);
+  const [deniedDutiesList, setDeniedDutiesList] = useState([]);
+  const [loadingDenied, setLoadingDenied] = useState(false);
+
+  // Load denied duties when sequential dialog opens or dates change
+  useEffect(() => {
+    if (!sequentialDialogOpen) return;
+    let isMounted = true;
+    setLoadingDenied(true);
+    api
+      .get("/special-events/denied-duties", {
+        params: {
+          startDate: seqStartDate || startDate,
+          endDate: seqEndDate || endDate,
+        },
+      })
+      .then((res) => {
+        if (isMounted && res.data?.deniedDuties) {
+          setDeniedDutiesList(res.data.deniedDuties);
+        }
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (isMounted) setLoadingDenied(false);
+      });
+    return () => {
+      isMounted = false;
+    };
+  }, [sequentialDialogOpen, seqStartDate, seqEndDate, startDate, endDate]);
 
   // Load events list (filter out past events for manpower management)
   useEffect(() => {
@@ -965,6 +993,9 @@ export default function SpecialRosterMatrix({
         surgePerShift: Number(surgePerShift) || 1,
       });
       setSeqResults(data);
+      if (data.deniedDuties) {
+        setDeniedDutiesList(data.deniedDuties);
+      }
       if (!previewOnly) {
         const poolLabel = data.sourcePool === "departments"
           ? (data.sourceDepartments?.length ? data.sourceDepartments.join(", ") : "Selected Departments")
@@ -2402,7 +2433,7 @@ export default function SpecialRosterMatrix({
         open={sequentialDialogOpen}
         onClose={() => !seqRunning && setSequentialDialogOpen(false)}
         fullWidth
-        maxWidth="md"
+        maxWidth="xl"
         slotProps={{
           paper: { sx: { borderRadius: "22px !important", background: "#FAF9FF !important" } },
         }}
@@ -2705,178 +2736,340 @@ export default function SpecialRosterMatrix({
 
             {/* Results Display */}
             {seqResults && (
-              <Box sx={{ border: "1.5px solid #E2E8F0", borderRadius: 2.5, bgcolor: "#FFFFFF", overflow: "hidden" }}>
-                <Box sx={{ p: 1.5, bgcolor: "#F8FAFC", borderBottom: "1px solid #E2E8F0" }}>
-                  <Stack direction="row" justifyContent="space-between" alignItems="center" flexWrap="wrap" spacing={1}>
-                    <Box>
-                      <Typography fontWeight={900} fontSize={14} color="#1E293B">
-                        Allocation Results · {seqResults.allocatedCount} of {seqResults.totalRequirements} Allocated
-                      </Typography>
-                      <Typography variant="caption" color="#64748B">
-                        Source Pool: <b>{seqResults.sourcePool || sourcePool}</b> | Departments:{" "}
-                        <b>
-                          {(seqResults.sourceDepartments || sourceDepartments).length > 0
-                            ? (seqResults.sourceDepartments || sourceDepartments).join(", ")
-                            : "All Departments"}
-                        </b>
+              <Grid container spacing={2}>
+                {/* Main Allocations Table */}
+                <Grid item xs={12} lg={8.5}>
+                  <Box
+                    sx={{
+                      border: "1.5px solid #E2E8F0",
+                      borderRadius: 2.5,
+                      bgcolor: "#FFFFFF",
+                      overflow: "hidden",
+                      height: "100%",
+                      display: "flex",
+                      flexDirection: "column",
+                    }}
+                  >
+                    <Box sx={{ p: 1.5, bgcolor: "#F8FAFC", borderBottom: "1px solid #E2E8F0" }}>
+                      <Stack direction="row" justifyContent="space-between" alignItems="center" flexWrap="wrap" spacing={1}>
+                        <Box>
+                          <Typography fontWeight={900} fontSize={14} color="#1E293B">
+                            Allocation Results · {seqResults.allocatedCount} of {seqResults.totalRequirements} Allocated
+                          </Typography>
+                          <Typography variant="caption" color="#64748B">
+                            Source Pool: <b>{seqResults.sourcePool || sourcePool}</b> | Departments:{" "}
+                            <b>
+                              {(seqResults.sourceDepartments || sourceDepartments).length > 0
+                                ? (seqResults.sourceDepartments || sourceDepartments).join(", ")
+                                : "All Departments"}
+                            </b>
+                          </Typography>
+                        </Box>
+                        <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
+                          <Chip
+                            size="small"
+                            label={seqResults.previewOnly ? "Simulation Preview" : "Committed to Live Roster"}
+                            sx={{
+                              bgcolor: seqResults.previewOnly ? "#FEF3C7" : "#DCFCE7",
+                              color: seqResults.previewOnly ? "#B45309" : "#166534",
+                              fontWeight: 800,
+                            }}
+                          />
+                          {seqResults.previewOnly && seqResults.allocatedCount > 0 && (
+                            <Button
+                              size="small"
+                              variant="contained"
+                              disabled={seqRunning}
+                              onClick={async () => {
+                                setPreviewOnly(false);
+                                setSeqRunning(true);
+                                try {
+                                  const { data } = await api.post("/special-events/sequential-allocate", {
+                                    startDate: seqStartDate || startDate,
+                                    endDate: seqEndDate || endDate,
+                                    eventId: selectedEventId || undefined,
+                                    sourcePool,
+                                    sourceDepartments,
+                                    targetShifts: seqTargetShifts,
+                                    maxDutiesPerPerson: Number(maxDuties) || 2,
+                                    previewOnly: false,
+                                    allocationType,
+                                    leaveScope: seqLeaveScope,
+                                    surgePerShift: Number(surgePerShift) || 1,
+                                  });
+                                  setSeqResults(data);
+                                  if (data.deniedDuties) {
+                                    setDeniedDutiesList(data.deniedDuties);
+                                  }
+                                  setNotice({
+                                    severity: "success",
+                                    text: `Sequential allocation committed! ${data.allocatedCount} duties confirmed.`,
+                                  });
+                                  await loadMatrix();
+                                } catch (err) {
+                                  setNotice({
+                                    severity: "error",
+                                    text: err.response?.data?.detail || "Commit failed.",
+                                  });
+                                } finally {
+                                  setSeqRunning(false);
+                                }
+                              }}
+                              sx={{
+                                bgcolor: "#059669 !important",
+                                color: "#FFF",
+                                fontWeight: 850,
+                                fontSize: 11.5,
+                                textTransform: "none",
+                                borderRadius: 1.8,
+                                py: 0.4,
+                              }}
+                            >
+                              ⚡ Accept & Commit to Live Roster
+                            </Button>
+                          )}
+                        </Stack>
+                      </Stack>
+                    </Box>
+
+                    <TableContainer sx={{ flexGrow: 1, maxHeight: 460 }}>
+                      {seqResults.allocations?.length > 0 ? (
+                        <Table size="small" stickyHeader>
+                          <TableHead>
+                            <TableRow sx={{ bgcolor: "#F1F5F9" }}>
+                              <TableCell sx={{ fontWeight: 900 }}>Date</TableCell>
+                              <TableCell sx={{ fontWeight: 900 }}>Shift</TableCell>
+                              <TableCell sx={{ fontWeight: 900 }}>Duty Level</TableCell>
+                              <TableCell sx={{ fontWeight: 900 }}>Slot Type</TableCell>
+                              <TableCell sx={{ fontWeight: 900 }}>Target / Replaced</TableCell>
+                              <TableCell sx={{ fontWeight: 900 }}>Allocated Person</TableCell>
+                              <TableCell sx={{ fontWeight: 900 }}>Group</TableCell>
+                              <TableCell sx={{ fontWeight: 900 }}>Status</TableCell>
+                            </TableRow>
+                          </TableHead>
+                          <TableBody>
+                            {seqResults.allocations.map((a, idx) => {
+                              const allocGrp = (a.allocatedGroupName && String(a.allocatedGroupName).trim()) || "General";
+                              const grp = getGroupStyle(allocGrp);
+                              const dutyNum = a.dutyNumber || 1;
+
+                              return (
+                                <TableRow key={idx} hover>
+                                  <TableCell sx={{ fontWeight: 800 }}>{a.date}</TableCell>
+                                  <TableCell>
+                                    <Chip size="small" label={a.shift} sx={{ fontWeight: 800 }} />
+                                  </TableCell>
+                                  <TableCell>
+                                    <Chip
+                                      size="small"
+                                      label={`Duty ${dutyNum}`}
+                                      sx={{
+                                        fontWeight: 850,
+                                        fontSize: "0.7rem",
+                                        height: 20,
+                                        bgcolor: dutyNum > 1 ? "#FEF3C7" : "#E0F2FE",
+                                        color: dutyNum > 1 ? "#B45309" : "#0369A1",
+                                        border: dutyNum > 1 ? "1px solid #FCD34D" : "1px solid #BAE6FD",
+                                      }}
+                                    />
+                                  </TableCell>
+                                  <TableCell>
+                                    <Chip
+                                      size="small"
+                                      variant="outlined"
+                                      label={a.slotType || "Replacement"}
+                                      sx={{
+                                        fontWeight: 750,
+                                        fontSize: 11,
+                                        borderColor: a.slotType === "Surge Coverage" ? "#93C5FD" : "#FDE68A",
+                                        color: a.slotType === "Surge Coverage" ? "#1D4ED8" : "#B45309",
+                                      }}
+                                    />
+                                  </TableCell>
+                                  <TableCell>{a.replacedEmployee}</TableCell>
+                                  <TableCell sx={{ fontWeight: 850, color: "#6D28D9" }}>
+                                    {a.allocatedEmployeeName} ({a.allocatedEmployeeId})
+                                    {a.allocatedDesignation && (
+                                      <Typography variant="caption" display="block" color="#64748B">
+                                        {a.allocatedDesignation}
+                                      </Typography>
+                                    )}
+                                  </TableCell>
+                                  <TableCell>
+                                    <Chip
+                                      size="small"
+                                      label={allocGrp}
+                                      sx={{
+                                        height: 19,
+                                        fontSize: "0.68rem",
+                                        fontWeight: 900,
+                                        bgcolor: grp.badgeBg,
+                                        color: grp.badgeText,
+                                        border: `1px solid ${grp.badgeBorder}`,
+                                        borderRadius: "4px",
+                                      }}
+                                    />
+                                  </TableCell>
+                                  <TableCell>
+                                    <Chip
+                                      size="small"
+                                      label={a.status}
+                                      sx={{
+                                        bgcolor: a.status === "Allocated" ? "#DCFCE7" : "#FEF3C7",
+                                        color: a.status === "Allocated" ? "#166534" : "#B45309",
+                                        fontWeight: 800,
+                                      }}
+                                    />
+                                  </TableCell>
+                                </TableRow>
+                              );
+                            })}
+                          </TableBody>
+                        </Table>
+                      ) : (
+                        <Box sx={{ p: 3, textAlign: "center", color: "#64748B" }}>
+                          No slots were allocated. Check if replacement requirements exist or surge strength is enabled.
+                        </Box>
+                      )}
+                    </TableContainer>
+
+                    {seqResults.unallocatedSlots?.length > 0 && (
+                      <Box sx={{ p: 1.5, bgcolor: "#FFFBEB", borderTop: "1px solid #FEF3C7" }}>
+                        <Typography fontSize={12} color="#92400E" fontWeight={750}>
+                          ⚠️ {seqResults.unallocatedSlots.length} slot(s) could not be allocated: candidate pool exhausted or staff already on duty.
+                        </Typography>
+                      </Box>
+                    )}
+                  </Box>
+                </Grid>
+
+                {/* Side Panel: Denied / Refused Duties */}
+                <Grid item xs={12} lg={3.5}>
+                  <Box
+                    sx={{
+                      border: "1.5px solid #FECACA",
+                      borderRadius: 2.5,
+                      bgcolor: "#FFFDFD",
+                      overflow: "hidden",
+                      height: "100%",
+                      display: "flex",
+                      flexDirection: "column",
+                    }}
+                  >
+                    <Box sx={{ p: 1.5, bgcolor: "#FEF2F2", borderBottom: "1px solid #FECACA" }}>
+                      <Stack direction="row" justifyContent="space-between" alignItems="center">
+                        <Stack direction="row" spacing={1} alignItems="center">
+                          <ShieldAlert size={18} color="#DC2626" />
+                          <Typography fontWeight={900} fontSize={13.5} color="#991B1B">
+                            Denied / Refused Duties
+                          </Typography>
+                        </Stack>
+                        <Chip
+                          size="small"
+                          label={`${(seqResults.deniedDuties || deniedDutiesList || []).length} Refusals`}
+                          sx={{
+                            height: 20,
+                            fontSize: "0.68rem",
+                            fontWeight: 900,
+                            bgcolor: "#DC2626",
+                            color: "#FFFFFF",
+                          }}
+                        />
+                      </Stack>
+                      <Typography variant="caption" color="#7F1D1D" sx={{ display: "block", mt: 0.3 }}>
+                        Staff who declined / refused replacement allocation
                       </Typography>
                     </Box>
-                    <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
-                      <Chip
-                        size="small"
-                        label={seqResults.previewOnly ? "Simulation Preview" : "Committed to Live Roster"}
-                        sx={{
-                          bgcolor: seqResults.previewOnly ? "#FEF3C7" : "#DCFCE7",
-                          color: seqResults.previewOnly ? "#B45309" : "#166534",
-                          fontWeight: 800,
-                        }}
-                      />
-                      {seqResults.previewOnly && seqResults.allocatedCount > 0 && (
-                        <Button
-                          size="small"
-                          variant="contained"
-                          disabled={seqRunning}
-                          onClick={async () => {
-                            setPreviewOnly(false);
-                            setSeqRunning(true);
-                            try {
-                              const { data } = await api.post("/special-events/sequential-allocate", {
-                                startDate: seqStartDate || startDate,
-                                endDate: seqEndDate || endDate,
-                                eventId: selectedEventId || undefined,
-                                sourcePool,
-                                sourceDepartments,
-                                targetShifts: seqTargetShifts,
-                                maxDutiesPerPerson: Number(maxDuties) || 2,
-                                previewOnly: false,
-                                allocationType,
-                                leaveScope: seqLeaveScope,
-                                surgePerShift: Number(surgePerShift) || 1,
-                              });
-                              setSeqResults(data);
-                              setNotice({
-                                severity: "success",
-                                text: `Sequential allocation committed! ${data.allocatedCount} duties confirmed.`,
-                              });
-                              await loadMatrix();
-                            } catch (err) {
-                              setNotice({
-                                severity: "error",
-                                text: err.response?.data?.detail || "Commit failed.",
-                              });
-                            } finally {
-                              setSeqRunning(false);
-                            }
-                          }}
-                          sx={{
-                            bgcolor: "#059669 !important",
-                            color: "#FFF",
-                            fontWeight: 850,
-                            fontSize: 11.5,
-                            textTransform: "none",
-                            borderRadius: 1.8,
-                            py: 0.4,
-                          }}
-                        >
-                          ⚡ Accept & Commit to Live Roster
-                        </Button>
-                      )}
-                    </Stack>
-                  </Stack>
-                </Box>
 
-                {seqResults.allocations?.length > 0 ? (
-                  <Table size="small">
-                    <TableHead sx={{ bgcolor: "#F1F5F9" }}>
-                      <TableRow>
-                        <TableCell sx={{ fontWeight: 900 }}>Date</TableCell>
-                        <TableCell sx={{ fontWeight: 900 }}>Shift</TableCell>
-                        <TableCell sx={{ fontWeight: 900 }}>Slot Type</TableCell>
-                        <TableCell sx={{ fontWeight: 900 }}>Target / Replaced</TableCell>
-                        <TableCell sx={{ fontWeight: 900 }}>Allocated Person</TableCell>
-                        <TableCell sx={{ fontWeight: 900 }}>Group</TableCell>
-                        <TableCell sx={{ fontWeight: 900 }}>Status</TableCell>
-                      </TableRow>
-                    </TableHead>
-                    <TableBody>
-                      {seqResults.allocations.map((a, idx) => {
-                        const allocGrp = (a.allocatedGroupName && String(a.allocatedGroupName).trim()) || "General";
-                        const grp = getGroupStyle(allocGrp);
+                    <Box sx={{ p: 1.5, flexGrow: 1, maxHeight: 460, overflowY: "auto" }}>
+                      {(seqResults.deniedDuties || deniedDutiesList || []).length > 0 ? (
+                        <Stack spacing={1.2}>
+                          {(seqResults.deniedDuties || deniedDutiesList || []).map((denial, dIdx) => (
+                            <Paper
+                              key={dIdx}
+                              elevation={0}
+                              sx={{
+                                p: 1.4,
+                                borderRadius: 2,
+                                bgcolor: "#FFFFFF",
+                                border: "1px solid #FCA5A5",
+                                boxShadow: "0 1px 3px rgba(220, 38, 38, 0.08)",
+                              }}
+                            >
+                              <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 0.6 }}>
+                                <Chip
+                                  size="small"
+                                  label={`${denial.date} · ${denial.shift}`}
+                                  sx={{
+                                    height: 19,
+                                    fontSize: "0.68rem",
+                                    fontWeight: 800,
+                                    bgcolor: "#FEE2E2",
+                                    color: "#991B1B",
+                                  }}
+                                />
+                                <Chip
+                                  size="small"
+                                  label={denial.isInPeriod ? "In Period" : "Past Record"}
+                                  sx={{
+                                    height: 18,
+                                    fontSize: "0.62rem",
+                                    fontWeight: 800,
+                                    bgcolor: denial.isInPeriod ? "#DC2626" : "#E2E8F0",
+                                    color: denial.isInPeriod ? "#FFFFFF" : "#475569",
+                                  }}
+                                />
+                              </Stack>
 
-                        return (
-                          <TableRow key={idx} hover>
-                            <TableCell sx={{ fontWeight: 800 }}>{a.date}</TableCell>
-                            <TableCell>
-                              <Chip size="small" label={a.shift} sx={{ fontWeight: 800 }} />
-                            </TableCell>
-                            <TableCell>
-                              <Chip
-                                size="small"
-                                variant="outlined"
-                                label={a.slotType || "Replacement"}
-                                sx={{
-                                  fontWeight: 750,
-                                  fontSize: 11,
-                                  borderColor: a.slotType === "Surge Coverage" ? "#93C5FD" : "#FDE68A",
-                                  color: a.slotType === "Surge Coverage" ? "#1D4ED8" : "#B45309",
-                                }}
-                              />
-                            </TableCell>
-                            <TableCell>{a.replacedEmployee}</TableCell>
-                            <TableCell sx={{ fontWeight: 850, color: "#6D28D9" }}>
-                              {a.allocatedEmployeeName} ({a.allocatedEmployeeId})
-                              {a.allocatedDesignation && (
-                                <Typography variant="caption" display="block" color="#64748B">
-                                  {a.allocatedDesignation}
+                              <Typography fontWeight={850} fontSize={13} color="#1E293B">
+                                {denial.employeeName}
+                                <Typography component="span" fontSize={11.5} color="#64748B" sx={{ ml: 0.6 }}>
+                                  ({denial.employeeId})
                                 </Typography>
-                              )}
-                            </TableCell>
-                            <TableCell>
-                              <Chip
-                                size="small"
-                                label={allocGrp}
-                                sx={{
-                                  height: 19,
-                                  fontSize: "0.68rem",
-                                  fontWeight: 900,
-                                  bgcolor: grp.badgeBg,
-                                  color: grp.badgeText,
-                                  border: `1px solid ${grp.badgeBorder}`,
-                                  borderRadius: "4px",
-                                }}
-                              />
-                            </TableCell>
-                            <TableCell>
-                              <Chip
-                                size="small"
-                                label={a.status}
-                                sx={{
-                                  bgcolor: a.status === "Allocated" ? "#DCFCE7" : "#FEF3C7",
-                                  color: a.status === "Allocated" ? "#166534" : "#B45309",
-                                  fontWeight: 800,
-                                }}
-                              />
-                            </TableCell>
-                          </TableRow>
-                        );
-                      })}
-                    </TableBody>
-                  </Table>
-                ) : (
-                  <Box sx={{ p: 3, textAlign: "center", color: "#64748B" }}>
-                    No slots were allocated. Check if replacement requirements exist or surge strength is enabled.
-                  </Box>
-                )}
+                              </Typography>
 
-                {seqResults.unallocatedSlots?.length > 0 && (
-                  <Box sx={{ p: 1.5, bgcolor: "#FFFBEB", borderTop: "1px solid #FEF3C7" }}>
-                    <Typography fontSize={12} color="#92400E" fontWeight={750}>
-                      ⚠️ {seqResults.unallocatedSlots.length} slot(s) could not be allocated: candidate pool exhausted or staff already on duty.
-                    </Typography>
+                              <Box
+                                sx={{
+                                  mt: 0.8,
+                                  p: 0.8,
+                                  bgcolor: "#FEF2F2",
+                                  borderRadius: 1.5,
+                                  borderLeft: "3px solid #EF4444",
+                                }}
+                              >
+                                <Typography fontSize={11.5} color="#991B1B" fontStyle="italic">
+                                  "{denial.reason || "Duty refused / denied without specific note"}"
+                                </Typography>
+                              </Box>
+
+                              <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mt: 0.8 }}>
+                                <Typography variant="caption" color="#94A3B8" fontSize={10.5}>
+                                  By: {denial.deniedByRole || "Staff"} ({denial.deniedBy || denial.employeeId})
+                                </Typography>
+                                {denial.createdAt && (
+                                  <Typography variant="caption" color="#94A3B8" fontSize={10.5}>
+                                    {denial.createdAt}
+                                  </Typography>
+                                )}
+                              </Stack>
+                            </Paper>
+                          ))}
+                        </Stack>
+                      ) : (
+                        <Box sx={{ p: 4, textAlign: "center" }}>
+                          <CheckCircle2 size={32} color="#10B981" style={{ margin: "0 auto 8px" }} />
+                          <Typography fontSize={13} fontWeight={800} color="#065F46">
+                            No Refusals on Record
+                          </Typography>
+                          <Typography variant="caption" color="#64748B" display="block">
+                            No duties were denied or declined during this period.
+                          </Typography>
+                        </Box>
+                      )}
+                    </Box>
                   </Box>
-                )}
-              </Box>
-            )}
+                </Grid>
+              </Grid>            )}
           </Stack>
         </DialogContent>
 

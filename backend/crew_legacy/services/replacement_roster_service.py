@@ -751,6 +751,11 @@ def is_candidate_available_on_date(candidate_id: str, target_date: str, target_s
     if daily.get("replacementDuty"):
         return False, "Already assigned replacement on this date"
 
+    # Check if candidate previously denied replacement duty on this date
+    from crew_legacy.database.database_mongo import duty_denial_collection
+    if duty_denial_collection.find_one({"employeeId": candidate_id, "date": target_date}):
+        return False, "Candidate previously denied duty on this date"
+
     assigned = clean_id(daily.get("assignedDuty"))
     # In shift operations, candidates on OFF / General duty are preferred for replacement
     if assigned and assigned not in {"OFF", "O1", "O2", "General", "H", "Holiday", ""}:
