@@ -344,10 +344,38 @@ export default function SpecialRosterMatrix({
   const [shiftSicSaving, setShiftSicSaving] = useState(false);
 
   const openShiftSicModal = (dateStr, shiftKey, candidates = [], movedSIC = null) => {
-    let list = Array.isArray(candidates) && candidates.length > 0 ? candidates : [];
+    let list = Array.isArray(candidates) && candidates.length > 0 ? [...candidates] : [];
     if (list.length === 0) {
       list = (matrixData.grid?.[dateStr]?.[shiftKey] || []).filter((p) => !p.onLeave);
     }
+
+    // Always include any replacement employees on duty in this shift
+    const shiftLeaves = (matrixData.grid?.[dateStr]?.["Leave"] || []).filter((l) => {
+      const normDuty = (l.assignedDuty || "").toUpperCase();
+      const sk = (shiftKey || "").toLowerCase();
+      return (
+        (sk === "morning" && ["MORNING", "M1", "M2"].includes(normDuty)) ||
+        (sk === "evening" && ["EVENING", "E1", "E2"].includes(normDuty)) ||
+        (sk === "night" && ["NIGHT", "N1", "N2"].includes(normDuty))
+      );
+    });
+
+    shiftLeaves.forEach((l) => {
+      if ((l.replacementAssigned || l.replacement?.name) && l.replacement?.employeeId) {
+        const repId = String(l.replacement.employeeId);
+        if (!list.some((c) => String(c.employeeId) === repId)) {
+          const rawMatch = (matrixData.grid?.[dateStr]?.[shiftKey] || []).find((p) => String(p.employeeId) === repId);
+          list.unshift({
+            employeeId: repId,
+            name: l.replacement.name || rawMatch?.name || repId,
+            designation: rawMatch?.designation || l.replacement.designation || "Replacement Staff",
+            groupName: rawMatch?.groupName || l.replacement.groupName || l.groupName || "",
+            isReplacement: true,
+          });
+        }
+      }
+    });
+
     const primaryGroup = list.find((c) => c.groupName)?.groupName || "";
     setShiftSicTarget({ date: dateStr, shift: shiftKey, groupName: primaryGroup, movedSIC });
     setShiftSicCandidates(list);
@@ -1461,7 +1489,9 @@ export default function SpecialRosterMatrix({
                               "&:hover": { bgcolor: "#FDE68A", textDecoration: "underline" },
                             }}
                           >
-                            (Acting SIC)
+                            {l.actingSIC?.name ? (
+                              l.actingSIC.name === l.replacement?.name ? "(Acting SIC)" : `(Acting: ${l.actingSIC.name})`
+                            ) : "(Assign Acting SIC)"}
                           </Box>
                         </Tooltip>
                       )}
@@ -1945,7 +1975,7 @@ export default function SpecialRosterMatrix({
                               {/* If shift is SIC-less (no active SIC and no SIC on leave), show banner at top */}
                               {shiftKey !== "Leave" && shiftKey !== "Off" && activeSics.length === 0 && sicLeaves.length === 0 && eligibleActiveList.length > 0 && (
                                 <Box
-                                  onClick={() => openShiftSicModal(dateStr, shiftKey, eligibleActiveList, null)}
+                                  onClick={() => openShiftSicModal(dateStr, shiftKey, rawShiftList.filter((p) => !p.onLeave), null)}
                                   sx={{
                                     p: 0.7,
                                     border: "1.5px dashed #F59E0B",
@@ -3386,13 +3416,22 @@ export default function SpecialRosterMatrix({
                           ID: {cand.employeeId} &bull; {cand.designation || "Staff"}
                         </Typography>
                       </Box>
-                      {cand.groupName && (
-                        <Chip
-                          size="small"
-                          label={cand.groupName}
-                          sx={{ height: 18, fontSize: "0.65rem", fontWeight: 800 }}
-                        />
-                      )}
+                      <Stack direction="row" spacing={0.5} alignItems="center">
+                        {cand.isReplacement && (
+                          <Chip
+                            size="small"
+                            label="Replacement"
+                            sx={{ height: 18, fontSize: "0.62rem", fontWeight: 800, bgcolor: "#DCFCE7", color: "#166534", border: "1px solid #86EFAC" }}
+                          />
+                        )}
+                        {cand.groupName && (
+                          <Chip
+                            size="small"
+                            label={cand.groupName}
+                            sx={{ height: 18, fontSize: "0.65rem", fontWeight: 800 }}
+                          />
+                        )}
+                      </Stack>
                     </Stack>
                   </MenuItem>
                 ))}

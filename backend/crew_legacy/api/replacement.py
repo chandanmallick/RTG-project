@@ -873,6 +873,38 @@ def assign_acting_sic_for_duty_move(
         }},
     )
 
+    # Synchronize acting SIC onto active leave record if present
+    sic_leave_query = {
+        "date": duty_date,
+        "isSIC": True,
+        "finalStatus": {"$in": list(ACTIVE_LEAVE_STATUSES)},
+    }
+    if moved_sic_id:
+        sic_leave_query["employeeId"] = employee_id_filter(moved_sic_id)
+    elif group_name:
+        sic_leave_query["groupName"] = group_name
+
+    leave_doc = leave_request_collection.find_one(sic_leave_query)
+    if leave_doc:
+        leave_acting_sic = {
+            "employeeId": acting_sic_id,
+            "name": acting_sic["name"],
+            "designation": acting_sic["designation"],
+            "groupName": group_name,
+            "date": duty_date,
+            "assignedBy": actor,
+            "assignedOn": now,
+            "source": reason or "Acting SIC assignment",
+            "scope": "shift",
+        }
+        leave_request_collection.update_one(
+            {"_id": leave_doc["_id"]},
+            {
+                "$set": {"actingSIC": leave_acting_sic},
+                "$push": {"actingSICHistory": leave_acting_sic},
+            }
+        )
+
     duty_switch_collection.insert_one({
         "date": duty_date,
         "employeeId": acting_sic_id,

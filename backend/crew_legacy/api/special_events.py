@@ -417,7 +417,7 @@ def get_special_roster_matrix(
 
             from crew_legacy.services.replacement_roster_service import is_sic_place_vacant
             sic_place_vacant, he_is_sic, has_acting_sic = is_sic_place_vacant(l, d_rec)
-            is_leave_sic = sic_place_vacant
+            is_leave_sic = he_is_sic
             is_marked_for_rep = bool(
                 is_leave_sic
                 or l.get("replacementRequired")
@@ -454,7 +454,8 @@ def get_special_roster_matrix(
                 "leaveType": str(l.get("leaveType") or "Leave"),
                 "leaveId": str(l.get("_id")),
                 "onLeave": True,
-                "isSIC": is_leave_sic,
+                "isSIC": he_is_sic,
+                "isSicPlaceVacant": sic_place_vacant,
                 "actingSIC": l.get("actingSIC"),
                 "isShiftPerson": is_shift_person,
                 "replacementRequired": req_flag,
@@ -473,7 +474,8 @@ def get_special_roster_matrix(
                     "groupName": emp_group,
                     "leaveId": entry["leaveId"],
                     "leaveType": entry["leaveType"],
-                    "isSIC": is_leave_sic,
+                    "isSIC": sic_place_vacant,
+                    "heIsSIC": he_is_sic,
                     "actingSIC": l.get("actingSIC"),
                     "status": "Covered" if is_covered else "Uncovered",
                 })
