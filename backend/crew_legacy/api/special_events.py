@@ -726,7 +726,7 @@ def sequential_allocate_department_manpower(
     if allocation_type in ["leave", "both"]:
         leave_query = {
             "date": {"$gte": start_date, "$lte": end_date},
-            "finalStatus": "Approved",
+            "finalStatus": {"$in": list(ACTIVE_LEAVE_STATUSES)},
             "$and": [
                 {"$or": [{"replacementAssigned": {"$ne": True}}, {"replacement": None}]},
             ],
@@ -738,6 +738,7 @@ def sequential_allocate_department_manpower(
                 {"sicReplacementRequired": True},
                 {"dicReplacementRequired": True},
                 {"isSIC": True},
+                {"employeeId": {"$in": list(sic_emp_ids)}},
             ]
 
         leaves = list(leave_request_collection.find(leave_query).sort("date", 1))
@@ -745,10 +746,6 @@ def sequential_allocate_department_manpower(
         for leave in leaves:
             eid = str(leave.get("employeeId") or "").strip()
             ldate = str(leave.get("date") or "").strip()
-
-            # USER REQUIREMENT: If replacement is explicitly not required, skip!
-            if leave.get("replacementRequired") is False:
-                continue
 
             d_rec = daily_by_emp_date.get((eid, ldate)) or {}
             emp_group = (
@@ -792,6 +789,14 @@ def sequential_allocate_department_manpower(
             from crew_legacy.services.replacement_roster_service import is_sic_place_vacant
             sic_place_vacant, he_is_sic, has_acting_sic = is_sic_place_vacant(leave, d_rec)
             is_leave_sic = sic_place_vacant
+
+            # USER REQUIREMENT:
+            # For Shift Engineers: if replacement is explicitly marked not required, skip.
+            # For SICs: an SIC post is mandatory in control room operations. If no acting SIC is assigned,
+            # it MUST be filled from the SIC pool; if acting SIC is assigned, it requires a Shift Engineer.
+            # SIC leaves must never be skipped when vacant!
+            if not he_is_sic and leave.get("replacementRequired") is False:
+                continue
 
             slots_to_fill.append({
                 "type": "leave_replacement",
@@ -878,9 +883,19 @@ def sequential_allocate_department_manpower(
             if duty_counts.get(cand_id, 0) >= max_duties_per_person:
                 continue
 
+            # USER REQUIREMENT: Female employees will be deployed ONLY in Morning & Evening duty.
+            # Night shift replacement CANNOT be assigned to female employees!
+            if sshift.strip().lower() in ["night", "n", "n1", "n2"]:
+                cand_gender = str(candidate.get("gender") or "").strip().lower()
+                if not cand_gender:
+                    emp_doc = employee_collection.find_one({"$or": [{"userId": cand_id}, {"employeeId": cand_id}]}) or {}
+                    cand_gender = str(emp_doc.get("gender") or "male").strip().lower()
+                if cand_gender in ["female", "f"]:
+                    continue
+
             # Verify candidate availability (not on leave, not active shift group member, not on active duty)
             from crew_legacy.services.replacement_roster_service import is_candidate_available_on_date
-            cand_available, _ = is_candidate_available_on_date(cand_id, sdate)
+            cand_available, _ = is_candidate_available_on_date(cand_id, sdate, sshift)
             if not cand_available:
                 continue
 

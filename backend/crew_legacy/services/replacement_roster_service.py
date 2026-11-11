@@ -214,6 +214,7 @@ def init_default_pools() -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
                 "name": clean_id(emp.get("name") or eid),
                 "designation": clean_id(emp.get("designation") or "SIC"),
                 "category": "SIC & Shift Engineer" if is_se_registered else "SIC",
+                "gender": clean_id(emp.get("gender") or "Male"),
                 "isActive": True,
             })
 
@@ -224,6 +225,7 @@ def init_default_pools() -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
                 "name": clean_id(emp.get("name") or eid),
                 "designation": clean_id(emp.get("designation") or "Shift Engineer"),
                 "category": "SIC & Shift Engineer" if is_sic_registered else "Shift Engineer",
+                "gender": clean_id(emp.get("gender") or "Male"),
                 "isActive": True,
             })
 
@@ -709,7 +711,7 @@ def set_long_duration_policy(leave_group_id: str, policy: str, permanent_employe
 # D-5 AUTOMATED ALLOCATION
 # =========================================================
 
-def is_candidate_available_on_date(candidate_id: str, target_date: str) -> Tuple[bool, str]:
+def is_candidate_available_on_date(candidate_id: str, target_date: str, target_shift: str = None) -> Tuple[bool, str]:
     """
     Verifies candidate is not on approved or proposed leave, not an active shift group member,
     and not already scheduled for duty on target date.
@@ -753,6 +755,12 @@ def is_candidate_available_on_date(candidate_id: str, target_date: str) -> Tuple
     # In shift operations, candidates on OFF / General duty are preferred for replacement
     if assigned and assigned not in {"OFF", "O1", "O2", "General", "H", "Holiday", ""}:
         return False, f"Already assigned active shift ({assigned})"
+
+    # 5. USER REQUIREMENT: Female employees deployed only on Morning & Evening duties (restricted from Night shifts)
+    if target_shift and str(target_shift).strip().lower() in ["night", "n", "n1", "n2"]:
+        emp_doc = employee_collection.find_one({"$or": [{"userId": candidate_id}, {"employeeId": candidate_id}]}) or {}
+        if str(emp_doc.get("gender") or "").strip().lower() in ["female", "f"]:
+            return False, "Female employee restricted from Night shift replacement"
 
     return True, "Available"
 

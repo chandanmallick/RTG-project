@@ -698,6 +698,7 @@ def map_employee_designation(designation_id: str, data: dict):
 @router.post("/employees")  #### save employee entry to database
 def create_employee(employee: dict):
     employee.setdefault("isActive", True)
+    employee.setdefault("gender", "Male")
     employee.setdefault("organizationAssignedOn", datetime.utcnow())
     employee.update(resolve_employee_organization(
         employee.get("manualFunctionIds", employee.get("functionIds")),
@@ -1161,6 +1162,7 @@ def update_employee(employee_id: str, data: dict):
         "gmail": data.get("gmail"),
         "dutyType": data.get("dutyType"),
         "category": normalize_list(data.get("category")),
+        "gender": str(data.get("gender") or existing.get("gender") or "Male").strip(),
         "verticals": verticals,
         "vertical": verticals[0] if verticals else None,
         "verticalIds": organization["verticalIds"],

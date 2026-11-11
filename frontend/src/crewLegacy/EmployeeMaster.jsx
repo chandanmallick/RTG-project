@@ -44,6 +44,7 @@ export default function EmployeeMaster() {
     gmail: "",
     dutyType: "",
     category: [],
+    gender: "Male",
 
     // Organization hierarchy
     verticals: [],
@@ -154,6 +155,7 @@ export default function EmployeeMaster() {
     gmail: "",
     dutyType: "",
     category: [],
+    gender: "Male",
     verticals: [],
     department: "",
     reportingOfficerIds: [],
@@ -238,6 +240,7 @@ export default function EmployeeMaster() {
       ...employee,
       password: "",
       category: normalizeListValue(employee.category),
+      gender: employee.gender || "Male",
       verticals: normalizeListValue(employee.verticals || employee.vertical),
       reportingOfficerIds: normalizeListValue(
         employee.reportingOfficerIds || employee.reportingOfficerId
@@ -420,6 +423,21 @@ export default function EmployeeMaster() {
               ))}
             </TextField>
 
+            <TextField
+              size="small"
+              select
+              label="Gender"
+              name="gender"
+              fullWidth
+              InputLabelProps={{ shrink: true }}
+              value={formData.gender || "Male"}
+              onChange={handleChange}
+            >
+              <MenuItem value="Male">Male</MenuItem>
+              <MenuItem value="Female">Female</MenuItem>
+              <MenuItem value="Other">Other</MenuItem>
+            </TextField>
+
             <FormControl size="small" fullWidth>
               <InputLabel shrink>Category</InputLabel>
               <Select
@@ -584,6 +602,7 @@ export default function EmployeeMaster() {
               <TableCell onClick={() => handleSort("userId")} sx={{ cursor: "pointer" }}>
                 <strong>User ID</strong> {orderBy === "userId" ? (orderDirection === "asc" ? "â†‘" : "â†“") : ""}
               </TableCell>
+              <TableCell><strong>Gender</strong></TableCell>
               <TableCell><strong>Duty Type</strong></TableCell>
               <TableCell><strong>Phone No</strong></TableCell>
               <TableCell><strong>Category</strong></TableCell>
@@ -596,7 +615,7 @@ export default function EmployeeMaster() {
 
             {/* ðŸ”Ž Search Row */}
             <TableRow>
-              <TableCell colSpan={14}>
+              <TableCell colSpan={15}>
                 <TextField
                   fullWidth
                   size="small"
@@ -620,6 +639,14 @@ export default function EmployeeMaster() {
                 <TableCell>{emp.nameHindi}</TableCell>
                 <TableCell>{emp.designationHindi}</TableCell>
                 <TableCell>{emp.userId}</TableCell>
+                <TableCell>
+                  <Chip
+                    size="small"
+                    label={emp.gender || "Male"}
+                    color={emp.gender === "Female" ? "secondary" : "default"}
+                    sx={{ height: 20, fontSize: "0.72rem", fontWeight: 700 }}
+                  />
+                </TableCell>
                 <TableCell>{emp.dutyType}</TableCell>
                 <TableCell>{emp.phone}</TableCell>
                 <TableCell>{normalizeListValue(emp.category).join(", ") || "-"}</TableCell>

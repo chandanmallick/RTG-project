@@ -3609,6 +3609,20 @@ def assign_replacement(leave_id: str, payload: dict, user=Depends(get_authentica
                 f"Cannot assign {replacement_emp.get('name')}: Registered Category is '{cat_disp}'. Only employees registered as 'Shift Engineer' under Category can be placed for this duty{acting_note}."
             )
 
+    # USER REQUIREMENT: Female employees will be deployed ONLY in Morning & Evening duty.
+    # Night shift replacement cannot be assigned to female employees!
+    assigned_shift_str = str(payload.get("assignedDuty") or (target_daily or {}).get("assignedDuty") or leave.get("assignedDuty") or "").strip().lower()
+    if assigned_shift_str in ["night", "n", "n1", "n2"]:
+        cand_gender = str(replacement_emp.get("gender") or "").strip().lower()
+        if not cand_gender:
+            emp_lookup = employee_collection.find_one({"$or": [{"userId": replacement_id}, {"employeeId": replacement_id}]}) or {}
+            cand_gender = str(emp_lookup.get("gender") or "male").strip().lower()
+        if cand_gender in ["female", "f"]:
+            raise HTTPException(
+                400,
+                f"Cannot assign {replacement_emp.get('name')}: Female employees can only be deployed on Morning and Evening duties as per company policy."
+            )
+
     existing_replacement = leave.get("replacement") or {}
     if existing_replacement.get("employeeId"):
         release_replacement_assignment(
