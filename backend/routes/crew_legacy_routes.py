@@ -17,6 +17,7 @@ from crew_legacy.api.audit_trail import router as audit_trail_router
 from crew_legacy.api.sports_api import router as sports_router
 from crew_legacy.api.special_events import router as special_events_router
 from crew_legacy.api.operations_api import router as operations_router
+from crew_legacy.api.google_sheet_api import router as google_sheet_router
 
 
 router = APIRouter(prefix="/api/crew")
@@ -38,3 +39,4 @@ router.include_router(sports_router, prefix="/sports")
 router.include_router(operations_router, prefix="/operations")
 
 router.include_router(special_events_router, prefix="/special-events")
+router.include_router(google_sheet_router)

@@ -532,6 +532,12 @@ def save_roster(data: dict):
         "distribution": data.get("distribution"),
     }).inserted_id
 
+    try:
+        from crew_legacy.services.google_sheet_sync_service import sync_roster_draft_or_final_to_sheet
+        sync_roster_draft_or_final_to_sheet(str(roster_id))
+    except Exception:
+        pass
+
     return {
         "message": "Roster saved",
         "rosterId": str(roster_id)
@@ -1257,6 +1263,12 @@ def push_roster_to_calendar(roster_id: str):
         {"_id": object_id},
         {"$set": {"calendarPushed": True}}
     )
+
+    try:
+        from crew_legacy.services.google_sheet_sync_service import sync_roster_draft_or_final_to_sheet
+        sync_roster_draft_or_final_to_sheet(str(object_id))
+    except Exception:
+        pass
 
     return {
         "message": "Roster pushed successfully",

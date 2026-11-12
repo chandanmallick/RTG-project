@@ -292,6 +292,12 @@ def save_roster(payload: dict):
     else:
         document.update({"createdOn": datetime.now(timezone.utc), "calendarPushed": False})
         result_id = rosters.insert_one(document).inserted_id
+    try:
+        from crew_legacy.services.google_sheet_sync_service import sync_roster_draft_or_final_to_sheet
+        sync_roster_draft_or_final_to_sheet(str(result_id))
+    except Exception:
+        pass
+
     return {"message": "Roster saved as final" if is_final else "Draft roster saved", "rosterId": str(result_id)}
 
 
@@ -433,6 +439,12 @@ def push_roster(roster_id: str):
         {"$set": {"calendarPushed": False}},
     )
     rosters.update_one({"_id": object_id}, {"$set": {"calendarPushed": True, "pushedOn": datetime.now(timezone.utc)}})
+    try:
+        from crew_legacy.services.google_sheet_sync_service import sync_roster_draft_or_final_to_sheet
+        sync_roster_draft_or_final_to_sheet(str(object_id))
+    except Exception:
+        pass
+
     return {"message": f"{roster_type.title()} roster published to the duty calendar"}
 
 

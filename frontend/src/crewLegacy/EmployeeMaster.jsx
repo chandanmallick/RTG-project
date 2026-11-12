@@ -166,10 +166,11 @@ export default function EmployeeMaster() {
   };
 
   const handleChange = (e) => {
-    setFormData({
-      ...formData,
-      [e.target.name]: e.target.value
-    });
+    const { name, value } = e.target;
+    setFormData((prev) => ({
+      ...prev,
+      [name]: value
+    }));
   };
 
   const handleDesignationChange = (event) => {
@@ -197,7 +198,13 @@ export default function EmployeeMaster() {
         verticals: normalizeListValue(resolved.verticals),
         reportingOfficerIds: normalizeListValue(resolved.reportingOfficerIds),
       };
-      setFormData(next);
+      setFormData((prev) => ({
+        ...prev,
+        ...resolved,
+        functionIds: normalizeListValue(resolved.functionIds),
+        verticals: normalizeListValue(resolved.verticals),
+        reportingOfficerIds: normalizeListValue(resolved.reportingOfficerIds),
+      }));
       return next;
     } finally {
       setOrganizationResolving(false);
@@ -210,23 +217,27 @@ export default function EmployeeMaster() {
   };
 
   const handleSubmit = async () => {
-    const resolvedForm = await resolveOrganization(
-      formData.functionIds,
-      formData.userId,
-      formData
-    );
+    try {
+      const payload = {
+        ...formData,
+        gender: formData.gender || "Male",
+      };
 
-    if (editId) {
-      await api.put(`/admin/employees/${editId}`, resolvedForm);
-      setEditId(null);
-    } else {
-      await api.post(`/admin/employees`, resolvedForm);
+      if (editId) {
+        await api.put(`/admin/employees/${editId}`, payload);
+        setEditId(null);
+      } else {
+        await api.post(`/admin/employees`, payload);
+      }
+
+      await fetchEmployees();
+
+      setFormData(emptyForm);
+      setFormOpen(false);
+    } catch (err) {
+      console.error("Failed to save employee:", err);
+      alert(err.response?.data?.detail || err.message || "Failed to save employee");
     }
-
-    fetchEmployees();
-
-    setFormData(emptyForm);
-    setFormOpen(false);
   };
 
   const openNewEmployeeForm = () => {
@@ -248,7 +259,7 @@ export default function EmployeeMaster() {
       functionIds: normalizeListValue(employee.functionIds)
     };
     setFormData(employeeForm);
-    setEditId(employee.id);
+    setEditId(employee.id || employee._id || employee.userId);
     setFormOpen(true);
     await resolveOrganization(employeeForm.functionIds, employeeForm.userId, employeeForm);
   };

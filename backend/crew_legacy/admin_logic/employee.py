@@ -59,6 +59,7 @@ def create_employee_logic(data):
         "gmail": data.get("gmail"),
         "dutyType": data.get("dutyType"),
         "category": _normalize_list(data.get("category")),
+        "gender": "Female" if str(data.get("gender") or "").strip().lower() == "female" else ("Other" if str(data.get("gender") or "").strip().lower() == "other" else "Male"),
 
         # Organization hierarchy. The singular fields are retained as aliases
         # for older roster/leave code while the arrays are the source of truth.

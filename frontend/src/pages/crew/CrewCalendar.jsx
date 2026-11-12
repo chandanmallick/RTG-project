@@ -3,7 +3,7 @@ import {
   Alert, Box, Button, Chip, CircularProgress, Dialog, DialogActions, DialogContent, DialogTitle,
   FormControl, InputLabel, IconButton, MenuItem, Paper, Select, Stack, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, TextField, Tooltip, Typography,
 } from "@mui/material";
-import { ArrowLeftRight, CalendarDays, CheckCircle2, ChevronLeft, ChevronRight, GraduationCap, Medal, MousePointer2, RefreshCw, Umbrella, X } from "lucide-react";
+import { ArrowLeftRight, CalendarDays, CheckCircle2, ChevronLeft, ChevronRight, Download, GraduationCap, Medal, MousePointer2, RefreshCw, Umbrella, X } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
 import AppShell from "../../components/layout/AppShell";
@@ -850,6 +850,45 @@ export default function CrewCalendar({ publicView = false, applicationOnly = fal
           <input aria-label="End date" type="date" min={startDate} value={endDate} onChange={(event) => setEndDate(event.target.value)} style={{ width: 126, border: "1px solid rgba(255,255,255,.55)", borderRadius: 8, padding: "5px 8px", fontSize: 11, fontWeight: 750 }} />
         </Stack>}
         <Button size="small" startIcon={<RefreshCw size={15} />} onClick={load} sx={{ minHeight: 30, color: "#FFF", border: "1px solid rgba(255,255,255,.55)", borderRadius: 2, textTransform: "none", fontWeight: 850 }}>Refresh</Button>
+        {calendarView === "matrix_alternate" && (
+          <Button
+            size="small"
+            startIcon={<Download size={15} />}
+            onClick={async () => {
+              try {
+                const res = await api.get("/special-events/matrix/export-excel", {
+                  params: { startDate, endDate },
+                  responseType: "blob",
+                });
+                const blob = new Blob([res.data], {
+                  type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                });
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement("a");
+                a.href = url;
+                a.download = `Duty_Matrix_${startDate}_to_${endDate}.xlsx`;
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+                window.URL.revokeObjectURL(url);
+              } catch (e) {
+                console.error("Failed to download excel", e);
+              }
+            }}
+            sx={{
+              minHeight: 30,
+              color: "#073B75",
+              background: "#FFF",
+              borderRadius: 2,
+              textTransform: "none",
+              fontWeight: 900,
+              whiteSpace: "nowrap",
+              "&:hover": { background: "#F1F5F9" },
+            }}
+          >
+            Download Excel
+          </Button>
+        )}
         {calendarView === "duty" && <><Button size="small" startIcon={<MousePointer2 size={15} />} onClick={openCalendarApplication} sx={{ minHeight: 30, color: applicationMode ? "#073B75" : "#FFF", background: applicationMode ? "#FFF" : "transparent", border: "1px solid rgba(255,255,255,.65)", borderRadius: 2, textTransform: "none", fontWeight: 900 }}>{applicationMode ? `Continue application${applicationSelections.length ? ` (${applicationSelections.length})` : ""}` : "Apply from calendar"}</Button>
         {applicationMode && <Tooltip title="Cancel application selection"><IconButton size="small" onClick={() => { setApplicationMode(false); setApplicationSelections([]); setApplicationNotice(""); }} sx={{ color: "#FFF", border: "1px solid rgba(255,255,255,.55)" }}><X size={16} /></IconButton></Tooltip>}
         <Button size="small" startIcon={<ArrowLeftRight size={15} />} onClick={() => { setReassignmentContext({ mode: "exchange", date: selectedColumn || today, employeeId: "" }); setExchangeOpen(true); }} sx={{ minHeight: 30, color: "#0755A5", background: "#FFF", borderRadius: 2, textTransform: "none", fontWeight: 900, whiteSpace: "nowrap", "&:hover": { background: "#F1F5F9" } }}>Duty exchange / reassignment</Button></>}</>}

@@ -275,6 +275,69 @@ export default function SpecialRosterMatrix({
   });
 
   const [selectedGroupFilter, setSelectedGroupFilter] = useState("all");
+  const [syncingGoogleSheet, setSyncingGoogleSheet] = useState(false);
+
+  const handleSyncGoogleSheet = async () => {
+    setSyncingGoogleSheet(true);
+    try {
+      const d = dayjs(startDate || new Date());
+      const res = await api.post("/google-sheet/sync-month", {
+        year: d.year(),
+        month: d.month() + 1,
+      });
+      setNotice({
+        severity: "success",
+        text: res.data?.message || "Google Sheet updated successfully!",
+      });
+    } catch (err) {
+      setNotice({
+        severity: "error",
+        text: err.response?.data?.detail || "Google Sheet sync failed.",
+      });
+    } finally {
+      setSyncingGoogleSheet(false);
+    }
+  };
+
+  const [exportingExcel, setExportingExcel] = useState(false);
+
+  const handleExportExcel = async () => {
+    setExportingExcel(true);
+    try {
+      const response = await api.get("/special-events/matrix/export-excel", {
+        params: {
+          startDate,
+          endDate,
+          eventId: selectedEventId || undefined,
+          groupFilter: selectedGroupFilter !== "all" ? selectedGroupFilter : undefined,
+        },
+        responseType: "blob",
+      });
+      const blob = new Blob([response.data], {
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      });
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `Duty_Matrix_${startDate}_to_${endDate}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+      setNotice({
+        severity: "success",
+        text: `Excel downloaded successfully for ${startDate} to ${endDate}!`,
+      });
+    } catch (err) {
+      console.error("Failed to export Excel:", err);
+      setNotice({
+        severity: "error",
+        text: err.response?.data?.detail || "Failed to download Excel file.",
+      });
+    } finally {
+      setExportingExcel(false);
+    }
+  };
 
   // Compute active groups present in matrix data for legend and filter
   const presentGroups = useMemo(() => {
@@ -1767,6 +1830,42 @@ export default function SpecialRosterMatrix({
               Refresh
             </Button>
 
+            <Button
+              variant="contained"
+              startIcon={exportingExcel ? <CircularProgress size={13} color="inherit" /> : <Download size={14} />}
+              onClick={handleExportExcel}
+              disabled={exportingExcel || loading}
+              sx={{
+                bgcolor: "#0284C7",
+                color: "#FFF",
+                fontWeight: 850,
+                borderRadius: 2.5,
+                textTransform: "none",
+                boxShadow: "0 2px 8px rgba(2, 132, 199, 0.25)",
+                "&:hover": { bgcolor: "#0369A1" },
+              }}
+            >
+              {exportingExcel ? "Generating Excel..." : "Download Excel"}
+            </Button>
+
+            <Button
+              variant="outlined"
+              startIcon={syncingGoogleSheet ? <CircularProgress size={13} color="inherit" /> : <ExternalLink size={14} />}
+              onClick={handleSyncGoogleSheet}
+              disabled={syncingGoogleSheet}
+              sx={{
+                borderColor: "#059669",
+                color: "#059669",
+                fontWeight: 800,
+                borderRadius: 2.5,
+                textTransform: "none",
+                bgcolor: "#F0FDF4",
+                "&:hover": { bgcolor: "#DCFCE7", borderColor: "#047857" },
+              }}
+            >
+              {syncingGoogleSheet ? "Syncing..." : "Sync Google Sheet"}
+            </Button>
+
             <Tooltip title="Drag any employee card to rearrange shifts on that day. Drop onto another employee to swap. Click '+ Add Person' to fill vacancies.">
               <IconButton size="small" sx={{ bgcolor: "#F1F5F9" }}>
                 <HelpCircle size={18} color="#64748B" />
@@ -2862,14 +2961,14 @@ export default function SpecialRosterMatrix({
                                   <TableCell>
                                     <Chip
                                       size="small"
-                                      label={`Duty ${dutyNum}`}
+                                      label={a.dutyDisplay || `Duty ${dutyNum} (${a.rejectionCount || 0} Rej)`}
                                       sx={{
                                         fontWeight: 850,
                                         fontSize: "0.7rem",
                                         height: 20,
-                                        bgcolor: dutyNum > 1 ? "#FEF3C7" : "#E0F2FE",
-                                        color: dutyNum > 1 ? "#B45309" : "#0369A1",
-                                        border: dutyNum > 1 ? "1px solid #FCD34D" : "1px solid #BAE6FD",
+                                        bgcolor: (a.rejectionCount > 0) ? "#FEE2E2" : (dutyNum > 1 ? "#FEF3C7" : "#E0F2FE"),
+                                        color: (a.rejectionCount > 0) ? "#B91C1C" : (dutyNum > 1 ? "#B45309" : "#0369A1"),
+                                        border: (a.rejectionCount > 0) ? "1px solid #FCA5A5" : (dutyNum > 1 ? "1px solid #FCD34D" : "1px solid #BAE6FD"),
                                       }}
                                     />
                                   </TableCell>

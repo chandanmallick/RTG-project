@@ -1141,7 +1141,8 @@ def get_organization_tree():
 
 @router.put("/employees/{employee_id}")
 def update_employee(employee_id: str, data: dict):
-    existing = employee_collection.find_one({"_id": ObjectId(employee_id)})
+    query = {"_id": ObjectId(employee_id)} if ObjectId.is_valid(employee_id) else {"$or": [{"userId": employee_id}, {"employeeId": employee_id}]}
+    existing = employee_collection.find_one(query)
     if not existing:
         raise HTTPException(404, "Employee not found")
     organization = resolve_employee_organization(
@@ -1163,7 +1164,7 @@ def update_employee(employee_id: str, data: dict):
         "gmail": data.get("gmail"),
         "dutyType": data.get("dutyType"),
         "category": normalize_list(data.get("category")),
-        "gender": "Female" if str(data.get("gender") or existing.get("gender") or "").strip().lower() == "female" else ("Other" if str(data.get("gender") or existing.get("gender") or "").strip().lower() == "other" else "Male"),
+        "gender": "Female" if str(data.get("gender") or "").strip().lower() == "female" else ("Other" if str(data.get("gender") or "").strip().lower() == "other" else ("Male" if str(data.get("gender") or "").strip().lower() == "male" else str(existing.get("gender") or "Male").strip())),
         "verticals": verticals,
         "vertical": verticals[0] if verticals else None,
         "verticalIds": organization["verticalIds"],
@@ -1203,7 +1204,7 @@ def update_employee(employee_id: str, data: dict):
     mutation = {"$set": update_data}
     if organization_changed:
         mutation["$push"] = {"organizationHistory": organization_snapshot(existing, end_date=datetime.utcnow(), reason="Organization mapping changed")}
-    employee_collection.update_one({"_id": ObjectId(employee_id)}, mutation)
+    employee_collection.update_one({"_id": existing["_id"]}, mutation)
 
     return {"message": "Employee updated successfully"}
 

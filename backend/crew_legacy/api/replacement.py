@@ -26,6 +26,7 @@ from crew_legacy.database.database_mongo import (
     organization_shift_group_collection,
     organization_unit_collection,
     roster_group_collection,
+    system_settings_collection,
 )
 
 router = APIRouter()
@@ -949,6 +950,20 @@ def assign_acting_sic_for_duty_move(
     except Exception as notify_err:
         pass
 
+    try:
+        from crew_legacy.services.google_sheet_sync_service import sync_leave_or_replacement_update
+        sync_leave_or_replacement_update(
+            date_str=duty_date,
+            employee_id=acting_sic_id,
+            duty_or_leave=shift_val or "Morning",
+            is_leave=False,
+            is_replacement=True,
+            employee_name=acting_sic.get("name"),
+            note=f"Acting SIC for {group_name or shift_val}",
+        )
+    except Exception:
+        pass
+
     return {"message": "Acting SIC assigned successfully", "actingSIC": acting_sic}
 
 
@@ -977,9 +992,11 @@ def vacated_duty_candidates(
     }
     result = []
     seen = set()
+    from crew_legacy.services.replacement_roster_service import get_active_shift_group_member_ids
+    excluded_group_ids = get_active_shift_group_member_ids()
     for employee in employee_collection.find({"isActive": {"$ne": False}}).sort("name", 1):
         employee_id = str(employee.get("userId") or employee.get("employeeId") or "").strip()
-        if not employee_id or employee_id in seen:
+        if not employee_id or employee_id in seen or employee_id in excluded_group_ids:
             continue
         seen.add(employee_id)
         daily = daily_records.get(employee_id) or {}
@@ -1153,6 +1170,20 @@ def assign_vacated_duty(
                  f"{vacant_name}. Reason: {reason}"),
         ref_id=switch_id, action="VIEW_CALENDAR", type="DUTY",
     )
+    try:
+        from crew_legacy.services.google_sheet_sync_service import sync_leave_or_replacement_update
+        sync_leave_or_replacement_update(
+            date_str=duty_date,
+            employee_id=replacement_id,
+            duty_or_leave=vacant_duty,
+            is_leave=False,
+            is_replacement=True,
+            employee_name=replacement_name,
+            note=f"Vacancy cover for {vacant_name}",
+        )
+    except Exception:
+        pass
+
     return {
         "message": "Vacant duty assigned successfully", "switchId": switch_id,
         "vacantEmployeeId": vacant_employee_id, "vacatedDuty": vacant_duty,
@@ -1331,6 +1362,20 @@ def deploy_additional_manpower(
         type="DUTY",
     )
 
+    try:
+        from crew_legacy.services.google_sheet_sync_service import sync_leave_or_replacement_update
+        sync_leave_or_replacement_update(
+            date_str=duty_date,
+            employee_id=employee_id,
+            duty_or_leave=assigned_duty,
+            is_leave=False,
+            is_replacement=True,
+            employee_name=emp_name,
+            note=f"Additional manpower: {reason}",
+        )
+    except Exception:
+        pass
+
     return {
         "message": f"Additional manpower {emp_name} deployed to {assigned_duty} on {duty_date}.",
         "deployed": True,
@@ -1449,6 +1494,19 @@ def switch_employee_duty(
         action="VIEW_CALENDAR",
         type="DUTY",
     )
+    try:
+        from crew_legacy.services.google_sheet_sync_service import sync_leave_or_replacement_update
+        sync_leave_or_replacement_update(
+            date_str=duty_date,
+            employee_id=employee_id,
+            duty_or_leave=assigned_duty,
+            is_leave=False,
+            is_replacement=False,
+            employee_name=current.get("name") or employee.get("name"),
+            note=reason,
+        )
+    except Exception:
+        pass
     return {
         "message": "Duty changed successfully",
         "auditId": str(inserted.inserted_id),
@@ -1704,6 +1762,29 @@ def exchange_employee_duties(
         action="VIEW_CALENDAR",
         type="DUTY",
     )
+    try:
+        from crew_legacy.services.google_sheet_sync_service import sync_leave_or_replacement_update
+        sync_leave_or_replacement_update(
+            date_str=duty_date,
+            employee_id=first_id,
+            duty_or_leave=first_updated.get("assignedDuty") or "OFF",
+            is_leave=False,
+            is_replacement=False,
+            employee_name=first.get("name"),
+            note="Exchanged duty",
+        )
+        sync_leave_or_replacement_update(
+            date_str=duty_date,
+            employee_id=second_id,
+            duty_or_leave=second_updated.get("assignedDuty") or "OFF",
+            is_leave=False,
+            is_replacement=False,
+            employee_name=second.get("name"),
+            note="Exchanged duty",
+        )
+    except Exception:
+        pass
+
     return {
         "message": "Manpower exchanged successfully",
         "exchangeId": exchange_id,
@@ -2785,19 +2866,8 @@ def move_employee_duty_to_another_date(
         },
     ]
     duty_switch_collection.insert_many(audit_records)
-    comp_off_id = (
-        award_off_day_comp_off(
-            employee_id=employee_id,
-            duty_date=destination_date,
-            previous_duty=destination_duty,
-            assigned_duty=moved_duty,
-            group_name=destination_updated["groupName"],
-            switch_id=switch_id,
-            source=common_switch["source"],
-        )
-        if additional_off_day_duty
-        else None
-    )
+    # USER REQUIREMENT: Moving a duty across dates is NOT an extra duty (no C-OFF awarded)
+    comp_off_id = None
     if comp_off_id:
         duty_switch_collection.update_many(
             {"switchId": switch_id, "direction": "destination"},
@@ -3240,12 +3310,18 @@ def replacement_candidates(
     group_context = group_organization_context(leave.get("groupName"))
     past_shift_roles = historical_shift_roles()
     current_shift_memberships = active_shift_memberships()
+    from crew_legacy.services.replacement_roster_service import get_active_shift_group_member_ids
+    excluded_group_ids = get_active_shift_group_member_ids()
     candidates = list(employee_collection.find({"isActive": {"$ne": False}}))
 
     for c in candidates:
 
         candidate_id = c.get("userId")
         if not candidate_id or candidate_id == leave.get("employeeId"):
+            continue
+        # USER REQUIREMENT: In crew setup page "crew/setup", persons associated with ANY group
+        # must never be counted or included for replacement duty.
+        if str(candidate_id).strip() in excluded_group_ids:
             continue
 
         category = normalized_categories(c.get("category"))
@@ -4002,6 +4078,20 @@ def assign_replacement(leave_id: str, payload: dict, user=Depends(get_authentica
     # =============================
     # FINAL RETURN
     # =============================
+    try:
+        from crew_legacy.services.google_sheet_sync_service import sync_leave_or_replacement_update
+        sync_leave_or_replacement_update(
+            date_str=leave_date,
+            employee_id=replacement_emp["userId"],
+            duty_or_leave=assigned_duty,
+            is_leave=False,
+            is_replacement=True,
+            employee_name=replacement_emp.get("name"),
+            note=f"Replacement for {leave.get('name')}",
+        )
+    except Exception:
+        pass
+
     return {"message": "Replacement processed successfully"}
 
 
@@ -4074,6 +4164,19 @@ def delete_replacement_assignment(
         action="VIEW_CALENDAR",
         type="DUTY",
     )
+    try:
+        from crew_legacy.services.google_sheet_sync_service import sync_leave_or_replacement_update
+        sync_leave_or_replacement_update(
+            date_str=leave.get("date"),
+            employee_id=replacement_id,
+            duty_or_leave="",
+            is_leave=False,
+            is_replacement=True,
+            employee_name=replacement.get("name") or replacement_daily.get("name"),
+            note="Replacement cancelled",
+        )
+    except Exception:
+        pass
     return {"message": "Replacement assignment deleted and original duty restored"}
 
 # =========================================================

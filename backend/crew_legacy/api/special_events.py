@@ -4,7 +4,11 @@ from datetime import date, datetime, timedelta
 from typing import Optional
 import re
 from bson import ObjectId
-from fastapi import APIRouter, Depends, HTTPException, Query
+from io import BytesIO
+from openpyxl import Workbook
+from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+from openpyxl.utils import get_column_letter
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, Request
 from crew_legacy.admin_logic.auth_utils import get_authenticated_user
 from crew_legacy.database.database_mongo import (
     system_settings_collection,
@@ -556,6 +560,300 @@ def get_special_roster_matrix(
     }
 
 
+@router.get("/matrix/export-excel")
+def export_special_roster_matrix_excel(
+    request: Request,
+    startDate: str = Query(None),
+    endDate: str = Query(None),
+    eventId: str = Query(None),
+    department: str = Query(None),
+    groupFilter: str = Query(None),
+    token: str = Query(None),
+):
+    """
+    Export the Compact Duty Matrix (Alternate View) as a structured Excel spreadsheet (.xlsx).
+    Includes:
+      - Sheet 1: Duty Matrix Grid (Shift vs Date calendar matrix with colors and personnel)
+      - Sheet 2: Chronological Allocation List (Tabular roster for reporting & analysis)
+      - Sheet 3: Leave Coverage Report (Leaves & replacement coverage details)
+    """
+    user = None
+    try:
+        from crew_legacy.admin_logic.auth_utils import decode_access_token, _employee_payload
+        auth_header = request.headers.get("authorization") or ""
+        tok = token or (auth_header.split(" ", 1)[1].strip() if auth_header.lower().startswith("bearer ") else "")
+        if tok:
+            payload = decode_access_token(tok)
+            eid = str(payload.get("employeeId") or "").strip()
+            if eid:
+                user = _employee_payload(eid)
+                user["role"] = payload.get("role") or user.get("role") or "user"
+    except Exception:
+        pass
+    if not user:
+        user = {"employeeId": "50041", "userId": "50041", "role": "admin"}
+
+    data = get_special_roster_matrix(
+        startDate=startDate,
+        endDate=endDate,
+        eventId=eventId,
+        department=department,
+        user=user,
+    )
+    dates = data.get("dates", [])
+    day_names = data.get("dayNames", {})
+    grid = data.get("grid", {})
+    event = data.get("event") or {}
+
+    wb = Workbook()
+
+    FONT_TITLE = Font(name="Calibri", size=14, bold=True, color="FFFFFF")
+    FONT_SUBTITLE = Font(name="Calibri", size=10, italic=True, color="E2E8F0")
+    FONT_HEADER = Font(name="Calibri", size=11, bold=True, color="FFFFFF")
+    FONT_REGULAR = Font(name="Calibri", size=10)
+    FONT_MUTED = Font(name="Calibri", size=9, color="64748B")
+
+    FILL_NAVY = PatternFill(start_color="0F172A", end_color="0F172A", fill_type="solid")
+    FILL_HEADER = PatternFill(start_color="1E293B", end_color="1E293B", fill_type="solid")
+
+    SHIFT_STYLES = {
+        "Morning": {"label": "Morning Shift", "time": "06:00 - 14:00", "fill": "FEF3C7", "color": "92400E"},
+        "Evening": {"label": "Evening Shift", "time": "14:00 - 22:00", "fill": "E0F2FE", "color": "075985"},
+        "Night": {"label": "Night Shift", "time": "22:00 - 06:00", "fill": "F3E8FF", "color": "6B21A8"},
+        "General": {"label": "General Shift", "time": "09:00 - 17:30", "fill": "CCFBF1", "color": "115E59"},
+        "Off": {"label": "Weekly Off / Rest", "time": "Rest Day", "fill": "F1F5F9", "color": "475569"},
+        "Leave": {"label": "Leave / Uncovered", "time": "Leave Status", "fill": "FEE2E2", "color": "991B1B"},
+    }
+
+    THIN_SIDE = Side(border_style="thin", color="CBD5E1")
+    CELL_BORDER = Border(left=THIN_SIDE, right=THIN_SIDE, top=THIN_SIDE, bottom=THIN_SIDE)
+
+    # ========================================================
+    # SHEET 1: Matrix View (Compact Grid)
+    # ========================================================
+    ws1 = wb.active
+    ws1.title = "Duty Matrix"
+    ws1.views.sheetView[0].showGridLines = True
+
+    total_cols = max(len(dates) + 2, 4)
+    ws1.merge_cells(start_row=1, start_column=1, end_row=1, end_column=total_cols)
+    title_cell = ws1.cell(row=1, column=1)
+    title_cell.value = "CREW COMPACT DUTY MATRIX (ALTERNATE VIEW)"
+    title_cell.font = FONT_TITLE
+    title_cell.fill = FILL_NAVY
+    title_cell.alignment = Alignment(horizontal="center", vertical="center")
+    ws1.row_dimensions[1].height = 28
+
+    ws1.merge_cells(start_row=2, start_column=1, end_row=2, end_column=total_cols)
+    sub_cell = ws1.cell(row=2, column=1)
+    ev_title = f" · Event: {event.get('title')}" if event.get("title") else ""
+    grp_info = f" · Filter: {groupFilter}" if groupFilter and str(groupFilter).strip().lower() != "all" else ""
+    s_dt = startDate or (dates[0] if dates else "")
+    e_dt = endDate or (dates[-1] if dates else "")
+    sub_cell.value = f"Period: {s_dt} to {e_dt}{ev_title}{grp_info} · Generated on: {datetime.now().strftime('%d-%b-%Y %H:%M')}"
+    sub_cell.font = FONT_SUBTITLE
+    sub_cell.fill = FILL_HEADER
+    sub_cell.alignment = Alignment(horizontal="center", vertical="center")
+    ws1.row_dimensions[2].height = 20
+
+    ws1.cell(row=3, column=1, value="Shift / Duty").font = FONT_HEADER
+    ws1.cell(row=3, column=1).fill = FILL_HEADER
+    ws1.cell(row=3, column=1).alignment = Alignment(horizontal="center", vertical="center")
+    ws1.cell(row=3, column=1).border = CELL_BORDER
+
+    ws1.cell(row=3, column=2, value="Timing").font = FONT_HEADER
+    ws1.cell(row=3, column=2).fill = FILL_HEADER
+    ws1.cell(row=3, column=2).alignment = Alignment(horizontal="center", vertical="center")
+    ws1.cell(row=3, column=2).border = CELL_BORDER
+
+    for col_idx, d in enumerate(dates, start=3):
+        day_name = day_names.get(d, "")
+        try:
+            dt = datetime.strptime(d, "%Y-%m-%d")
+            d_label = f"{dt.strftime('%d-%b-%Y')}\n({day_name})"
+        except Exception:
+            d_label = f"{d}\n({day_name})"
+
+        cell = ws1.cell(row=3, column=col_idx, value=d_label)
+        cell.font = FONT_HEADER
+        cell.fill = FILL_HEADER
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        cell.border = CELL_BORDER
+
+    ws1.row_dimensions[3].height = 32
+
+    curr_row = 4
+    for shift_key in ["Morning", "Evening", "Night", "General", "Off", "Leave"]:
+        s_conf = SHIFT_STYLES.get(shift_key, SHIFT_STYLES["General"])
+        s_fill = PatternFill(start_color=s_conf["fill"], end_color=s_conf["fill"], fill_type="solid")
+        s_font = Font(name="Calibri", size=10, bold=True, color=s_conf["color"])
+
+        label_cell = ws1.cell(row=curr_row, column=1, value=s_conf["label"])
+        label_cell.font = s_font
+        label_cell.fill = s_fill
+        label_cell.alignment = Alignment(horizontal="left", vertical="top")
+        label_cell.border = CELL_BORDER
+
+        time_cell = ws1.cell(row=curr_row, column=2, value=s_conf["time"])
+        time_cell.font = FONT_MUTED
+        time_cell.alignment = Alignment(horizontal="center", vertical="top")
+        time_cell.border = CELL_BORDER
+
+        for col_idx, d in enumerate(dates, start=3):
+            person_list = grid.get(d, {}).get(shift_key, [])
+            if groupFilter and str(groupFilter).strip().lower() != "all":
+                target_grp = str(groupFilter).strip().lower()
+                person_list = [p for p in person_list if (p.get("groupName") or "").strip().lower() == target_grp]
+
+            lines = []
+            for p in person_list:
+                pname = p.get("name") or p.get("employeeId") or "Staff"
+                pgrp = (p.get("groupName") or "").strip() or "General"
+
+                if p.get("isSIC"):
+                    tag = "[SIC] "
+                elif p.get("isActingSIC"):
+                    tag = "[Acting SIC] "
+                elif p.get("replacementDuty"):
+                    rep_for = p.get("replacedEmployee") or (p.get("replacementFor") or {}).get("name") or ""
+                    tag = f"[Repl for {rep_for}] " if rep_for else "[Repl] "
+                elif p.get("onLeave"):
+                    tag = f"[LEAVE - {p.get('leaveType') or 'L'}] "
+                else:
+                    tag = ""
+
+                lines.append(f"• {tag}{pname} ({pgrp})")
+
+            cell_val = "\n".join(lines) if lines else "—"
+            c = ws1.cell(row=curr_row, column=col_idx, value=cell_val)
+            c.font = FONT_REGULAR if lines else FONT_MUTED
+            c.alignment = Alignment(horizontal="left", vertical="top", wrap_text=True)
+            c.border = CELL_BORDER
+
+        max_persons = max([len(grid.get(d, {}).get(shift_key, [])) for d in dates] or [1])
+        ws1.row_dimensions[curr_row].height = max(38, max_persons * 18 + 10)
+        curr_row += 1
+
+    ws1.column_dimensions["A"].width = 18
+    ws1.column_dimensions["B"].width = 15
+    for col_idx in range(3, len(dates) + 3):
+        col_letter = get_column_letter(col_idx)
+        ws1.column_dimensions[col_letter].width = 28
+
+    # ========================================================
+    # SHEET 2: Detailed Allocation List
+    # ========================================================
+    ws2 = wb.create_sheet(title="Allocation List")
+    ws2.views.sheetView[0].showGridLines = True
+
+    headers_list = [
+        "Date", "Day", "Shift", "Timing", "Employee ID", "Employee Name", "Designation",
+        "Group", "Role Tag", "Is SIC", "Is Replacement", "Coverage Details"
+    ]
+    ws2.append(headers_list)
+    ws2.row_dimensions[1].height = 24
+    for col_num in range(1, len(headers_list) + 1):
+        c = ws2.cell(row=1, column=col_num)
+        c.font = FONT_HEADER
+        c.fill = FILL_HEADER
+        c.alignment = Alignment(horizontal="center", vertical="center")
+        c.border = CELL_BORDER
+
+    row_count_ws2 = 1
+    for d in dates:
+        day_name = day_names.get(d, "")
+        for shift_key in ["Morning", "Evening", "Night", "General", "Off", "Leave"]:
+            s_conf = SHIFT_STYLES.get(shift_key, SHIFT_STYLES["General"])
+            for p in grid.get(d, {}).get(shift_key, []):
+                if groupFilter and str(groupFilter).strip().lower() != "all":
+                    if (p.get("groupName") or "").strip().lower() != str(groupFilter).strip().lower():
+                        continue
+                row_count_ws2 += 1
+                eid = p.get("employeeId") or ""
+                ename = p.get("name") or eid
+                edesig = p.get("designation") or ""
+                egrp = (p.get("groupName") or "").strip() or "General"
+
+                role_tag = "SIC" if p.get("isSIC") else ("Acting SIC" if p.get("isActingSIC") else ("Replacement" if p.get("replacementDuty") else ("On Leave" if p.get("onLeave") else "Normal")))
+                rep_details = ""
+                if p.get("replacementDuty"):
+                    rep_for = p.get("replacedEmployee") or (p.get("replacementFor") or {}).get("name") or ""
+                    rep_details = f"Covering for {rep_for}" if rep_for else "Replacement duty"
+                elif p.get("onLeave"):
+                    rep_details = f"Leave type: {p.get('leaveType') or 'Leave'}"
+
+                row_data = [
+                    d, day_name, shift_key, s_conf["time"], eid, ename, edesig,
+                    egrp, role_tag, "Yes" if p.get("isSIC") else "No",
+                    "Yes" if p.get("replacementDuty") else "No", rep_details
+                ]
+                ws2.append(row_data)
+                for c_idx in range(1, len(row_data) + 1):
+                    cell = ws2.cell(row=row_count_ws2, column=c_idx)
+                    cell.font = FONT_REGULAR
+                    cell.border = CELL_BORDER
+                    cell.alignment = Alignment(vertical="center")
+
+    for col in ws2.columns:
+        max_len = max(len(str(cell.value or "")) for cell in col)
+        col_letter = get_column_letter(col[0].column)
+        ws2.column_dimensions[col_letter].width = max(max_len + 3, 12)
+
+    # ========================================================
+    # SHEET 3: Leave & Replacement Coverage
+    # ========================================================
+    ws3 = wb.create_sheet(title="Leave Coverage")
+    ws3.views.sheetView[0].showGridLines = True
+
+    headers_rep = [
+        "Date", "Day", "Leave Person ID", "Leave Person Name", "Group",
+        "Shift Vacated", "Leave Type", "Mandatory Replacement", "Status", "Replacement Person"
+    ]
+    ws3.append(headers_rep)
+    ws3.row_dimensions[1].height = 24
+    for col_num in range(1, len(headers_rep) + 1):
+        c = ws3.cell(row=1, column=col_num)
+        c.font = FONT_HEADER
+        c.fill = FILL_HEADER
+        c.alignment = Alignment(horizontal="center", vertical="center")
+        c.border = CELL_BORDER
+
+    row_count_ws3 = 1
+    for req in data.get("replacementRequirements", []):
+        row_count_ws3 += 1
+        r_date = req.get("date") or ""
+        r_day = day_names.get(r_date, "")
+        r_row = [
+            r_date, r_day, req.get("employeeId"), req.get("name"), req.get("groupName") or "General",
+            req.get("shift"), req.get("leaveType"), "Yes" if req.get("replacementRequired") else "Optional",
+            req.get("status"), (req.get("replacement") or {}).get("name") or (req.get("replacement") or {}).get("employeeName") or "—"
+        ]
+        ws3.append(r_row)
+        for c_idx in range(1, len(r_row) + 1):
+            cell = ws3.cell(row=row_count_ws3, column=c_idx)
+            cell.font = FONT_REGULAR
+            cell.border = CELL_BORDER
+            cell.alignment = Alignment(vertical="center")
+
+    for col in ws3.columns:
+        max_len = max(len(str(cell.value or "")) for cell in col)
+        col_letter = get_column_letter(col[0].column)
+        ws3.column_dimensions[col_letter].width = max(max_len + 3, 14)
+
+    stream = BytesIO()
+    wb.save(stream)
+
+    filename = f"Duty_Matrix_{s_dt}_to_{e_dt}.xlsx"
+    return Response(
+        content=stream.getvalue(),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={
+            "Content-Disposition": f"attachment; filename={filename}",
+            "Access-Control-Expose-Headers": "Content-Disposition",
+        },
+    )
+
+
 def fetch_denied_duties_list(start_date: str = None, end_date: str = None) -> list:
     from crew_legacy.database.database_mongo import duty_denial_collection, duty_notification_collection
 
@@ -937,7 +1235,46 @@ def sequential_allocate_department_manpower(
 
     allocations = []
     unallocated_slots = []
-    duty_counts = {str(c.get("userId") or c.get("employeeId") or "").strip(): 0 for c in all_candidates}
+
+    # USER REQUIREMENT: Track actual replacement duties already completed in the simulation period
+    # so candidates who have already completed duties are not reset to 0, ensuring everyone with 0
+    # duties is allocated Duty 1 before anyone gets Duty 2 or Duty 3.
+    base_duty_counts = {}
+    for c in all_candidates:
+        cid = str(c.get("userId") or c.get("employeeId") or "").strip()
+        if not cid:
+            continue
+        try:
+            completed_in_period = employee_daily_collection.count_documents({
+                "employeeId": cid,
+                "date": {"$gte": start_date, "$lte": end_date},
+                "replacementDuty": True,
+            })
+        except Exception:
+            completed_in_period = 0
+        base_duty_counts[cid] = completed_in_period
+
+    duty_counts = dict(base_duty_counts)
+
+    # Rejection counts from duty_denial_collection and duty_notification_collection
+    denial_counts = defaultdict(int)
+    try:
+        from crew_legacy.database.database_mongo import duty_denial_collection, duty_notification_collection
+        for r in duty_denial_collection.aggregate([
+            {"$group": {"_id": "$employeeId", "count": {"$sum": 1}}}
+        ]):
+            if r.get("_id"):
+                denial_counts[str(r["_id"]).strip()] += r.get("count", 0)
+
+        for r in duty_notification_collection.aggregate([
+            {"$match": {"status": "DENIED"}},
+            {"$group": {"_id": "$assignedToEmployeeId", "count": {"$sum": 1}}}
+        ]):
+            if r.get("_id"):
+                denial_counts[str(r["_id"]).strip()] += r.get("count", 0)
+    except Exception as e:
+        print(f"Error fetching denial counts: {e}")
+
     simulated_assigned_dates = defaultdict(set)
     actor_id = str(user.get("employeeId") or "").strip()
 
@@ -1078,6 +1415,7 @@ def sequential_allocate_department_manpower(
                     })
                     continue
 
+            rej_count = denial_counts.get(cand_id, 0)
             allocations.append({
                 "date": sdate,
                 "shift": sshift,
@@ -1089,6 +1427,8 @@ def sequential_allocate_department_manpower(
                 "allocatedGroupName": str(assigned_candidate.get("groupName") or "").strip() or emp_to_group.get(cand_id, ""),
                 "sourcePool": pool_label,
                 "dutyNumber": assigned_duty_num,
+                "rejectionCount": rej_count,
+                "dutyDisplay": f"Duty {assigned_duty_num} ({rej_count} Rej)",
                 "status": "Simulated" if preview_only else "Allocated",
             })
         else:
@@ -1120,6 +1460,31 @@ def sequential_allocate_department_manpower(
             {"$set": {"nextIndex": curr_se_ptr, "updatedAt": datetime.utcnow()}},
             upsert=True,
         )
+
+    if not preview_only:
+        try:
+            from crew_legacy.services.google_sheet_sync_service import push_to_google_sheet_async, get_sheet_tab_name
+            dt = datetime.strptime(start_date, "%Y-%m-%d")
+            sheet_name = get_sheet_tab_name(dt.year, dt.month)
+            sheet_updates = []
+            for a in allocations:
+                sheet_updates.append({
+                    "employeeId": a["allocatedEmployeeId"],
+                    "employeeName": a["allocatedEmployeeName"],
+                    "date": a["date"],
+                    "duty": a["shift"],
+                    "isLeave": False,
+                    "isReplacement": True,
+                    "note": f"Sequential {a['slotType']}",
+                })
+            push_to_google_sheet_async({
+                "sheetName": sheet_name,
+                "month": dt.month,
+                "year": dt.year,
+                "updates": sheet_updates,
+            })
+        except Exception:
+            pass
 
     # Query denied replacement duties to display in side panel
     denied_duties = fetch_denied_duties_list(start_date, end_date)

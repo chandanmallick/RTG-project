@@ -1028,21 +1028,63 @@ def clear_leave_operational_effects(leave: dict):
     if consumed_replacement_credit:
         raise HTTPException(409, "Cancellation is blocked because the replacement C-OFF credit is already reserved or used")
 
-    employee_daily_collection.update_one(
+    # Restore applicant's original duty if assignedDuty was overwritten with a leave status/code
+    applicant_daily = employee_daily_collection.find_one(
+        {"employeeId": employee_id_filter(employee_id), "date": leave_date}
+    ) or {}
+    restored_duty = applicant_daily.get("dutyAsPerLogbook") or applicant_daily.get("assignedDuty") or "OFF"
+    if str(restored_duty).strip().lower() in ["leave", "cl", "el", "hpl", "c-off", "station leave", "station leave only"]:
+        restored_duty = applicant_daily.get("dutyAsPerLogbook") or "OFF"
+
+    employee_daily_collection.update_many(
         {"employeeId": employee_id_filter(employee_id), "date": leave_date},
-        {"$unset": {
-            "leaveStatus": "", "leaveType": "", "leaveRequestId": "", "replacementAssigned": "",
-            "stationLeave": "", "stationLeaveOnly": "",
-        }},
+        {
+            "$unset": {
+                "leaveStatus": "", "leaveType": "", "leaveRequestId": "",
+                "replacementRequired": "", "replacementAssigned": "",
+                "replacement": "", "replacementEmployee": "",
+                "stationLeave": "", "stationLeaveOnly": "",
+            },
+            "$set": {
+                "assignedDuty": restored_duty,
+            }
+        },
     )
 
-    replacement_id = clean_id(replacement.get("employeeId"))
+    replacement_id = clean_id(replacement.get("employeeId") or leave.get("replacementEmployeeId"))
     if replacement_id:
-        employee_daily_collection.update_one(
+        rep_daily = employee_daily_collection.find_one(
+            {"employeeId": employee_id_filter(replacement_id), "date": leave_date}
+        ) or {}
+        rep_orig = (rep_daily.get("replacementOriginal") or {}).get("assignedDuty")
+        rep_restored = rep_orig or rep_daily.get("dutyAsPerLogbook") or "OFF"
+        employee_daily_collection.update_many(
             {"employeeId": employee_id_filter(replacement_id), "date": leave_date},
-            {"$unset": {
-                "replacementDuty": "", "replacementFor": "", "replacementMode": "", "halfDuty": "",
-            }},
+            {
+                "$unset": {
+                    "replacementDuty": "", "replacementFor": "", "replacementMode": "", "halfDuty": "",
+                    "replacementOriginal": "",
+                },
+                "$set": {
+                    "assignedDuty": rep_restored,
+                }
+            },
+        )
+        try:
+            from crew_legacy.database.database_mongo import duty_notification_collection
+            duty_notification_collection.update_many(
+                {"leaveRequestId": leave_id},
+                {"$set": {"status": "CANCELLED", "cancelledOn": datetime.utcnow()}}
+            )
+        except Exception:
+            pass
+
+    # Clean acting SIC flags if assigned for this leave
+    acting_sic_id = clean_id((leave.get("actingSIC") or {}).get("employeeId"))
+    if acting_sic_id:
+        employee_daily_collection.update_many(
+            {"employeeId": employee_id_filter(acting_sic_id), "date": leave_date},
+            {"$unset": {"isActingSIC": "", "actingSICFor": "", "actingSICGroup": ""}}
         )
 
     compensatory_off_collection.delete_many({
@@ -2748,6 +2790,19 @@ def approve_leave_bulk(data: dict, user=Depends(get_authenticated_user)):
         )
 
         mark_comp_off_used(leave)
+        try:
+            from crew_legacy.services.google_sheet_sync_service import sync_leave_or_replacement_update
+            sync_leave_or_replacement_update(
+                date_str=leave["date"],
+                employee_id=leave["employeeId"],
+                duty_or_leave=leave.get("leaveType", "CL"),
+                is_leave=True,
+                is_replacement=False,
+                employee_name=leave.get("name"),
+                note=leave.get("reason", ""),
+            )
+        except Exception:
+            pass
 
         # After DIC final approval: notify the employee, group SIC/acting SIC,
         # the DIC's direct reporting officer(s), and administrator(s).
@@ -3596,6 +3651,23 @@ def cancel_single_leave(leave: dict, user: dict) -> str:
         },
     )
     clear_leave_operational_effects(leave)
+    try:
+        from crew_legacy.services.google_sheet_sync_service import sync_leave_or_replacement_update
+        restored = employee_daily_collection.find_one({
+            "employeeId": leave["employeeId"],
+            "date": leave["date"]
+        }) or {}
+        sync_leave_or_replacement_update(
+            date_str=leave["date"],
+            employee_id=leave["employeeId"],
+            duty_or_leave=restored.get("assignedDuty") or "OFF",
+            is_leave=False,
+            is_replacement=False,
+            employee_name=leave.get("name"),
+            note="Leave cancelled",
+        )
+    except Exception:
+        pass
     return actor_role
 
 
@@ -3875,48 +3947,23 @@ def withdraw_leave(leave_id: str, user=Depends(get_authenticated_user)):
     if not leave:
         raise HTTPException(404, "Leave not found")
 
-    emp_id = user["employeeId"].strip()
+    emp_id = clean_id(user.get("employeeId"))
 
-    # ðŸ”’ Only owner can withdraw
-    if leave["employeeId"] != emp_id:
-        raise HTTPException(403, "Not allowed")
+    # Only owner, admin or authorised authority can withdraw/cancel
+    if clean_id(leave.get("employeeId")) != emp_id and not cancellation_role(user, leave):
+        raise HTTPException(403, "Not allowed to withdraw this leave")
 
-    # Withdrawal is available only while the request is still waiting for SIC review.
-    first_stage_pending = (
-        current_organization_approval(leave)[0] == 0
-        and (current_organization_approval(leave)[1] or {}).get("status") == "Pending"
-    ) if is_organization_leave(leave) else leave.get("sicApprovalStatus") == "Pending"
-    if leave.get("finalStatus") != "Applied" or not first_stage_pending:
-        raise HTTPException(400, "Leave cannot be withdrawn after the first approver has acted")
-
-    # âœ… UPDATE LEAVE
-    update_reviewed_leave(leave,
-        {
-            "$set": {
-                "finalStatus": "Withdrawn",
-                "updatedOn": datetime.utcnow()
-            }
-        }
+    # USER REQUIREMENT: When leave is withdrawn, it must be completely cleared from database
+    # and calendar frontend, and must not stay available for replacement assignment.
+    # We call cancel_single_leave which clears operational effects, resets daily records,
+    # and synchronizes with Google Sheets.
+    actor_role = cancel_single_leave(leave, user)
+    # Also mark finalStatus as Withdrawn in leave_request_collection if requested by owner
+    leave_request_collection.update_one(
+        {"_id": leave["_id"]},
+        {"$set": {"finalStatus": "Withdrawn", "replacementRequired": False, "updatedOn": datetime.utcnow()}}
     )
-
-    # âœ… UPDATE DAILY
-    employee_daily_collection.update_one(
-        {
-            "employeeId": leave["employeeId"],
-            "date": leave["date"]
-        },
-        {
-            "$unset": {
-                "leaveStatus": "",
-                "leaveType": "",
-                "leaveRequestId": "",
-                "stationLeave": "",
-                "stationLeaveOnly": ""
-            }
-        }
-    )
-
-    restore_comp_off(leave)
+    return {"message": f"Leave withdrawn successfully ({actor_role})"}
 
     return {"message": "Leave withdrawn successfully"}
 
