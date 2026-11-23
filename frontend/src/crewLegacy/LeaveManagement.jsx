@@ -31,7 +31,8 @@ import {
   Tooltip,
   Typography,
 } from "@mui/material";
-import { CalendarDays, CheckCircle2, ChevronDown, ChevronUp, ClipboardList, GraduationCap, GripVertical, RefreshCw, Send, ShieldCheck, User } from "lucide-react";
+import { CalendarDays, CheckCircle2, ChevronDown, ChevronUp, ClipboardList, GraduationCap, GripVertical, Plane, RefreshCw, Send, ShieldCheck, User } from "lucide-react";
+import TravelOffManager from "../components/crew/TravelOffManager";
 import api from "./api";
 import DutyReassignmentPanel from "../components/crew/DutyReassignmentPanel";
 import groupLeaveApplications from "../components/crew/groupLeaveApplications";
@@ -1525,9 +1526,59 @@ export default function LeaveManagement({ embeddedApproval = false, embeddedAppl
     </Box>
   );
 
-        const groupedTrackingTable = (applications) => (
-        <TableContainer sx={{ maxHeight: 520, border: "1px solid #E2E8F0", borderRadius: 2 }}>
-          <Table size="small" stickyHeader>
+  const getReplacementSummary = (application) => {
+    const anchor = application?.anchor || application;
+    const history = anchor?.replacementDecisionHistory || [];
+    const latestDecision = history.length > 0 ? history[history.length - 1] : null;
+    const isRequired = anchor?.replacement_required === true || anchor?.replacementRequired === true || latestDecision?.required === true;
+    const replacementAssigned = anchor?.replacement_employee_name || anchor?.replacementEmployeeName || anchor?.assignedReplacementName;
+
+    if (replacementAssigned) {
+      return {
+        label: `Cover: ${replacementAssigned}`,
+        status: "assigned",
+        officer: latestDecision?.decidedByName || latestDecision?.decidedBy || null,
+        stage: latestDecision?.stage || null,
+        required: true,
+      };
+    }
+
+    if (latestDecision) {
+      return {
+        label: latestDecision.required ? "Required" : "Not required",
+        status: latestDecision.required ? "required" : "not_required",
+        officer: latestDecision.decidedByName || latestDecision.decidedBy || "Approver",
+        stage: latestDecision.stage || "Approver",
+        required: latestDecision.required,
+      };
+    }
+
+    if (isRequired) {
+      return {
+        label: "Required",
+        status: "required",
+        officer: anchor.deptApprovedByName || anchor.sicApprovedByName || null,
+        stage: anchor.deptApprovedByName ? "DIC" : anchor.sicApprovedByName ? "SIC" : null,
+        required: true,
+      };
+    }
+
+    if (["Approved", "Forwarded", "Forwarded by SIC"].includes(anchor?.finalStatus)) {
+      return {
+        label: "Not required",
+        status: "not_required",
+        officer: anchor.deptApprovedByName || anchor.sicApprovedByName || null,
+        stage: anchor.deptApprovedByName ? "DIC" : anchor.sicApprovedByName ? "SIC" : null,
+        required: false,
+      };
+    }
+
+    return null;
+  };
+
+  const groupedTrackingTable = (applications) => (
+    <TableContainer sx={{ maxHeight: 520, border: "1px solid #E2E8F0", borderRadius: 2 }}>
+      <Table size="small" stickyHeader>
         <TableHead>
           <TableRow>
             <TableCell sx={{ fontWeight: 900 }}>Employee</TableCell>
@@ -1538,29 +1589,52 @@ export default function LeaveManagement({ embeddedApproval = false, embeddedAppl
             <TableCell sx={{ fontWeight: 900 }}>Group</TableCell>
             <TableCell sx={{ fontWeight: 900 }}>Status</TableCell>
             <TableCell sx={{ fontWeight: 900 }}>Approval progress</TableCell>
+            <TableCell sx={{ fontWeight: 900 }}>Replacement Option</TableCell>
             <TableCell align="right" sx={{ fontWeight: 900, minWidth: 220 }}>Action</TableCell>
           </TableRow>
         </TableHead>
         <TableBody>
-          {applications.map((application) => (
-            <TableRow key={application.id} hover>
-              <TableCell><Typography sx={{ fontSize: 12.5, fontWeight: 850 }}>{application.name}</Typography><Typography sx={{ fontSize: 10.5, color: "#64748B" }}>{application.employeeId}</Typography></TableCell>
-              <TableCell sx={{ whiteSpace: "nowrap" }}>{application.dayCount > 1 ? `${dayjs(application.startDate).format("DD MMM YYYY")} → ${dayjs(application.endDate).format("DD MMM YYYY")}` : dayjs(application.startDate).format("DD MMM YYYY")}</TableCell>
-              <TableCell><Chip size="small" label={application.dayCount} sx={{ fontWeight: 900 }} /></TableCell>
-              <TableCell sx={{ fontWeight: 800 }}>{application.stationLeaveOnly ? "Station Leave" : `${application.leaveType || "-"}${application.stationLeave ? " + Station Leave" : ""}`}</TableCell>
-              <TableCell><UrgencyChip value={application.urgencyTag || application.anchor?.urgencyTag} /></TableCell>
-              <TableCell>{application.groupName}</TableCell>
-              <TableCell><StatusChip value={application.finalStatus} /></TableCell>
-              <TableCell><Typography sx={{ fontSize: 11, color: "#64748B", fontWeight: 750 }}>{application.rows.map((row) => `${dayjs(row.date).format("DD MMM")}: ${row.finalStatus}`).join(" · ")}</Typography></TableCell>
-              <TableCell align="right">
-                <Stack direction="row" spacing={.7} justifyContent="flex-end">
-                  <LeaveTracking leave={application.anchor} onCancel={cancelLeave} onCancelGroup={cancelLeaveGroup} groupRows={application.rows} busy={working} />
-                  {application.canCancel && <Button size="small" color="warning" variant="outlined" onClick={() => cancelLeaveGroup({ leave: application.anchor, scope: "all" })}>Cancel all</Button>}
-                </Stack>
-              </TableCell>
-            </TableRow>
-          ))}
-          {!applications.length && <TableRow><TableCell colSpan={9} align="center" sx={{ py: 4, color: "#94A3B8" }}>No leave records</TableCell></TableRow>}
+          {applications.map((application) => {
+            const rep = getReplacementSummary(application);
+            return (
+              <TableRow key={application.id} hover>
+                <TableCell><Typography sx={{ fontSize: 12.5, fontWeight: 850 }}>{application.name}</Typography><Typography sx={{ fontSize: 10.5, color: "#64748B" }}>{application.employeeId}</Typography></TableCell>
+                <TableCell sx={{ whiteSpace: "nowrap" }}>{application.dayCount > 1 ? `${dayjs(application.startDate).format("DD MMM YYYY")} → ${dayjs(application.endDate).format("DD MMM YYYY")}` : dayjs(application.startDate).format("DD MMM YYYY")}</TableCell>
+                <TableCell><Chip size="small" label={application.dayCount} sx={{ fontWeight: 900 }} /></TableCell>
+                <TableCell sx={{ fontWeight: 800 }}>{application.stationLeaveOnly ? "Station Leave" : `${application.leaveType || "-"}${application.stationLeave ? " + Station Leave" : ""}`}</TableCell>
+                <TableCell><UrgencyChip value={application.urgencyTag || application.anchor?.urgencyTag} /></TableCell>
+                <TableCell>{application.groupName}</TableCell>
+                <TableCell><StatusChip value={application.finalStatus} /></TableCell>
+                <TableCell><Typography sx={{ fontSize: 11, color: "#64748B", fontWeight: 750 }}>{application.rows.map((row) => `${dayjs(row.date).format("DD MMM")}: ${row.finalStatus}`).join(" · ")}</Typography></TableCell>
+                <TableCell sx={{ minWidth: 160 }}>
+                  {rep ? (
+                    <Box>
+                      <Chip
+                        size="small"
+                        label={rep.label}
+                        color={rep.status === "assigned" ? "success" : rep.required ? "warning" : "default"}
+                        sx={{ height: 21, fontSize: 10.5, fontWeight: 850 }}
+                      />
+                      {rep.officer && (
+                        <Typography sx={{ fontSize: 10.5, color: "#64748B", fontWeight: 700, mt: 0.3 }}>
+                          by {rep.officer}{rep.stage ? ` (${rep.stage})` : ""}
+                        </Typography>
+                      )}
+                    </Box>
+                  ) : (
+                    <Typography sx={{ fontSize: 11, color: "#94A3B8" }}>-</Typography>
+                  )}
+                </TableCell>
+                <TableCell align="right">
+                  <Stack direction="row" spacing={.7} justifyContent="flex-end">
+                    <LeaveTracking leave={application.anchor} onCancel={cancelLeave} onCancelGroup={cancelLeaveGroup} groupRows={application.rows} busy={working} />
+                    {application.canCancel && <Button size="small" color="warning" variant="outlined" onClick={() => cancelLeaveGroup({ leave: application.anchor, scope: "all" })}>Cancel all</Button>}
+                  </Stack>
+                </TableCell>
+              </TableRow>
+            );
+          })}
+          {!applications.length && <TableRow><TableCell colSpan={10} align="center" sx={{ py: 4, color: "#94A3B8" }}>No leave records</TableCell></TableRow>}
         </TableBody>
       </Table>
     </TableContainer>
@@ -1570,6 +1644,7 @@ export default function LeaveManagement({ embeddedApproval = false, embeddedAppl
     <Box sx={{ display: "grid", gap: 1.4, gridTemplateColumns: { xs: "1fr", sm: "repeat(2, minmax(0, 1fr))", lg: "repeat(3, minmax(0, 1fr))" } }}>
       {applications.map((application) => {
         const accent = application.finalStatus === "Approved" ? "#15803D" : application.finalStatus === "Rejected" ? "#DC2626" : application.finalStatus === "Applied" ? "#D97706" : "#0057B7";
+        const rep = getReplacementSummary(application);
         return (
           <Paper key={application.id} variant="outlined" sx={{ p: 1.6, borderRadius: 2.5, borderTop: `5px solid ${accent}`, display: "grid", gap: .7 }}>
             <Stack direction="row" alignItems="flex-start" justifyContent="space-between" spacing={1}>
@@ -1587,6 +1662,24 @@ export default function LeaveManagement({ embeddedApproval = false, embeddedAppl
               <Chip size="small" label={`${application.dayCount} day(s)`} variant="outlined" sx={{ fontWeight: 800 }} />
               <Chip size="small" label={application.stationLeaveOnly ? "Station Leave" : `${application.leaveType || "-"}${application.stationLeave ? " + Station Leave" : ""}`} variant="outlined" sx={{ fontWeight: 800 }} />
             </Stack>
+            {rep && (
+              <Stack direction="row" spacing={0.6} alignItems="center" flexWrap="wrap" sx={{ bgcolor: rep.required ? "#FEF3C725" : "#F8FAFC", p: 0.6, px: 1, borderRadius: 1.5, border: "1px dashed #E2E8F0" }}>
+                <Typography sx={{ fontSize: 11, fontWeight: 800, color: rep.required ? "#B45309" : "#475569" }}>
+                  Replacement:
+                </Typography>
+                <Chip
+                  size="small"
+                  label={rep.label}
+                  color={rep.status === "assigned" ? "success" : rep.required ? "warning" : "default"}
+                  sx={{ height: 19, fontSize: 10, fontWeight: 850 }}
+                />
+                {rep.officer && (
+                  <Typography sx={{ fontSize: 10.5, color: "#64748B", fontWeight: 700 }}>
+                    · by {rep.officer}{rep.stage ? ` (${rep.stage})` : ""}
+                  </Typography>
+                )}
+              </Stack>
+            )}
             {application.othersOnLeave.length > 0 && <Typography sx={{ fontSize: 10.5, color: "#B45309", fontWeight: 800 }}>Also on leave: {application.othersOnLeave.join(", ")}</Typography>}
             <Typography sx={{ fontSize: 10.5, color: "#64748B", fontWeight: 700 }}>{application.rows.map((row) => `${dayjs(row.date).format("DD MMM")}: ${row.finalStatus}`).join(" · ")}</Typography>
             <Stack direction="row" spacing={.7} sx={{ mt: .3 }}>
@@ -1649,6 +1742,7 @@ export default function LeaveManagement({ embeddedApproval = false, embeddedAppl
     delegation: { title: "Approval delegation", subtitle: "Temporarily authorize another officer while the configured approver is unavailable.", accent: "#B45309" },
     exchange: { title: "Duty exchange application", subtitle: "Select the affected duty and send the exchange through its approval route.", accent: "#0369A1" },
     training: { title: "Training approval", subtitle: "Training nominations awaiting action and approved adjacent-OFF requests.", accent: "#7C3AED", count: pendingTrainingApprovals.length },
+    travel: { title: "Travel OFF (Training & Sports)", subtitle: "Apply for and track day-before and day-after travel OFF for approved training and sports events.", accent: "#4F46E5" },
   };
     const currentLeaveSection = leaveSectionMeta[activeSection] || leaveSectionMeta.apply;
 
@@ -1738,7 +1832,15 @@ export default function LeaveManagement({ embeddedApproval = false, embeddedAppl
   return (
     <Box className="ui-kit-page" sx={{ display: "grid", gap: embeddedApplication ? 1.5 : 2.5 }}>
       {!embeddedApplication && <>
-        <WorkflowHeader title={currentLeaveSection.title} subtitle={currentLeaveSection.subtitle} accent={currentLeaveSection.accent} count={currentLeaveSection.count} />
+        <WorkflowHeader title={currentLeaveSection.title} subtitle={currentLeaveSection.subtitle} accent={currentLeaveSection.accent} count={currentLeaveSection.count} onRefresh={loadLeaves}>
+          <Stack direction="row" spacing={0.7} flexWrap="wrap">
+            <Button size="small" variant={activeSection === "apply" ? "contained" : "outlined"} onClick={() => window.location.assign("/crew/leave?section=apply")} sx={{ textTransform: "none", fontWeight: 800 }}>Apply</Button>
+            <Button size="small" variant={activeSection === "tracking" ? "contained" : "outlined"} onClick={() => window.location.assign("/crew/leave?section=tracking")} sx={{ textTransform: "none", fontWeight: 800 }}>Track Leave</Button>
+            <Button size="small" variant={activeSection === "pending" ? "contained" : "outlined"} onClick={() => window.location.assign("/crew/leave?section=pending")} sx={{ textTransform: "none", fontWeight: 800 }}>Inbox {pending.length ? `(${pending.length})` : ""}</Button>
+            <Button size="small" variant={activeSection === "travel" ? "contained" : "outlined"} startIcon={<Plane size={14} />} onClick={() => window.location.assign("/crew/leave?section=travel")} sx={{ textTransform: "none", fontWeight: 850 }}>Travel OFF</Button>
+            <Button size="small" variant={activeSection === "training" ? "contained" : "outlined"} onClick={() => window.location.assign("/crew/leave?section=training")} sx={{ textTransform: "none", fontWeight: 800 }}>Training</Button>
+          </Stack>
+        </WorkflowHeader>
         {!embeddedApproval && <Paper variant="outlined" sx={{ px: 1.5, py: 1, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 1.5, borderColor: "#86EFAC", background: "#F0FDF4" }}>
           <Box><Typography sx={{ color: "#166534", fontSize: 12.5, fontWeight: 950 }}>Approved leave</Typography><Typography sx={{ color: "#475569", fontSize: 10.5 }}>Open the approved list and cancel a whole application or only selected dates.</Typography></Box>
           <Button color="success" variant="contained" startIcon={<CheckCircle2 size={15} />} onClick={openApprovedLeaveList} sx={{ flexShrink: 0, textTransform: "none", fontWeight: 900 }}>View approved leave</Button>
@@ -1798,6 +1900,12 @@ export default function LeaveManagement({ embeddedApproval = false, embeddedAppl
       </Box>
       </Collapse>
 
+      <Collapse in={activeSection === "travel"} timeout={420} unmountOnExit>
+      <Box id="leave-workspace-travel" sx={{ scrollMarginTop: 110 }}>
+        <TravelOffManager defaultScope="all" />
+      </Box>
+      </Collapse>
+
       <Collapse in={activeSection === "training"} timeout={420} unmountOnExit>
       <Box id="leave-workspace-training" sx={{ scrollMarginTop: 110 }}>
       {!!pendingTrainingApprovals.length && <Paper sx={{ p: 2.5, mb: 2.5, borderColor: "#DDD6FE", background: "#FCFAFF" }}>
@@ -1840,7 +1948,8 @@ export default function LeaveManagement({ embeddedApproval = false, embeddedAppl
         <Alert severity="info" sx={{ mb: 1.5 }}>
           OFF can be requested only after training is finally approved. The approved OFF is written to the duty roster and does not consume a leave balance.
         </Alert>
-        <TableContainer sx={{ border: "1px solid #CBD5E1", borderRadius: 2 }}>
+        <TravelOffManager defaultScope="training" />
+        <Box sx={{ display: "none" }}><TableContainer sx={{ border: "1px solid #CBD5E1", borderRadius: 2 }}>
           <Table size="small">
             <TableHead><TableRow sx={{ background: "#F5F3FF" }}>
               <TableCell sx={{ fontWeight: 900 }}>Training</TableCell>
@@ -1869,7 +1978,7 @@ export default function LeaveManagement({ embeddedApproval = false, embeddedAppl
               {!approvedTraining.length && <TableRow><TableCell colSpan={5} align="center" sx={{ py: 4, color: "#94A3B8" }}>No approved training is available for your employee account.</TableCell></TableRow>}
             </TableBody>
           </Table>
-        </TableContainer>
+        </TableContainer></Box>
         <Box sx={{ mt: 1.5, display: "flex", justifyContent: "flex-end" }}><Button variant="outlined" onClick={() => window.location.assign("/crew/training")}>Open full Training module</Button></Box>
       </Paper>
       </Box>

@@ -39,6 +39,7 @@ import {
 
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import ExpandLessIcon from "@mui/icons-material/ExpandLess";
+import { Mail, RefreshCw, AlertCircle, ExternalLink } from "lucide-react";
 import DutyReassignmentPanel from "../components/crew/DutyReassignmentPanel";
 import WorkflowHeader from "../components/crew/WorkflowHeader";
 import ReplacementRosterPanel from "../components/crew/ReplacementRosterPanel";
@@ -87,11 +88,115 @@ export default function ReplacementManagement({ initialWorkflow } = {}) {
   const [showOlderAssignments, setShowOlderAssignments] = useState(false);
   const [futureLeaveOnly, setFutureLeaveOnly] = useState(true);
   const [requiredReplacementOnly, setRequiredReplacementOnly] = useState(true);
+  const [adminCancelDialog, setAdminCancelDialog] = useState({
+    open: false,
+    row: null,
+    reason: "",
+    submitting: false,
+    error: "",
+  });
+
+  const openAdminCancelDialog = (row) => {
+    setAdminCancelDialog({
+      open: true,
+      row,
+      reason: "",
+      submitting: false,
+      error: "",
+    });
+  };
+
+  const submitAdminCancelWithRemarks = async () => {
+    const row = adminCancelDialog.row;
+    const trimmed = String(adminCancelDialog.reason || "").trim();
+    if (!row || !trimmed) return;
+    setAdminCancelDialog((prev) => ({ ...prev, submitting: true, error: "" }));
+    try {
+      const targetId = row.id || row.leaveId || "by-employee";
+      await api.put(`/replacement/notifications/deny/${targetId}`, {
+        reason: trimmed,
+        employeeId: row.employeeId,
+        date: row.date,
+      });
+      setAdminCancelDialog({ open: false, row: null, reason: "", submitting: false, error: "" });
+      await Promise.all([
+        fetchPendingLeaves(),
+        fetchPendingSIC(),
+        fetchAssignedReplacements(),
+        fetchDecisionAudit(),
+      ]);
+      setSwitchNotice({
+        severity: "success",
+        text: `Duty for ${row.employeeName || row.employeeId} on ${row.date} cancelled/denied with remarks. Revocation mail triggered and denial logged.`,
+      });
+    } catch (err) {
+      setAdminCancelDialog((prev) => ({
+        ...prev,
+        submitting: false,
+        error: err.response?.data?.detail || "Failed to cancel/deny duty assignment.",
+      }));
+    }
+  };
+  const [triggeringMailKey, setTriggeringMailKey] = useState(null);
+  const [historyStatusFilter, setHistoryStatusFilter] = useState("ALL");
+
+  const handleTriggerCancellationMail = async (item) => {
+    const key = item.id || `${item.employeeId}-${item.date}`;
+    setTriggeringMailKey(key);
+    try {
+      const res = await api.post("/replacement/trigger-cancellation-mail", {
+        notificationId: item.id,
+        employeeId: item.employeeId,
+        date: item.date,
+        shift: item.assignedDuty,
+        reason: item.reason,
+      });
+      setSwitchNotice({
+        severity: "success",
+        text: res.data?.message || `Cancellation notification email sent for ${item.employeeName || item.employeeId}.`,
+      });
+      await fetchDecisionAudit();
+    } catch (err) {
+      setSwitchNotice({
+        severity: "error",
+        text: err.response?.data?.detail || `Failed to send cancellation email for ${item.employeeName || item.employeeId}.`,
+      });
+    } finally {
+      setTriggeringMailKey(null);
+    }
+  };
+
+  const handleTriggerDutyMail = async (item) => {
+    const key = item.id || `${item.employeeId}-${item.date}`;
+    setTriggeringMailKey(key);
+    try {
+      const res = await api.post("/replacement/trigger-duty-mail", {
+        notificationId: item.id,
+        employeeId: item.employeeId,
+        date: item.date,
+        shift: item.assignedDuty,
+      });
+      setSwitchNotice({
+        severity: "success",
+        text: res.data?.message || `Duty notification email sent to ${item.employeeName || item.employeeId}.`,
+      });
+      await fetchDecisionAudit();
+    } catch (err) {
+      setSwitchNotice({
+        severity: "error",
+        text: err.response?.data?.detail || `Failed to send duty email to ${item.employeeName || item.employeeId}.`,
+      });
+    } finally {
+      setTriggeringMailKey(null);
+    }
+  };
+
   const sicShortcutHandled = React.useRef(false);
   const [activeWorkflow, setActiveWorkflow] = useState(() => {
     const params = new URLSearchParams(window.location.search);
     const tabParam = params.get("tab") || params.get("section");
     if (["duty", "matrix", "leave", "board", "sic", "roster"].includes(tabParam)) return tabParam;
+    if (["history", "audit"].includes(tabParam)) return "board";
     if (["duty", "matrix", "leave", "board", "sic", "roster"].includes(initialWorkflow)) return initialWorkflow;
     if (params.get("action") === "assign-sic") return "sic";
     if (params.get("action") === "leave") return "leave";
@@ -478,6 +583,26 @@ export default function ReplacementManagement({ initialWorkflow } = {}) {
   const visibleReplacementRows = showOlderAssignments
     ? mergedReplacementRows
     : mergedReplacementRows.filter((item) => !item.date || item.date >= dayjs().format("YYYY-MM-DD"));
+
+  const statusFilteredReplacementRows = visibleReplacementRows.filter((item) => {
+    if (historyStatusFilter === "DENIED") return item.status === "Denied" || item.status === "Cancelled";
+    if (historyStatusFilter === "AUTO") return Boolean(item.autoAccepted);
+    if (historyStatusFilter === "ACCEPTED") return item.status === "Accepted";
+    if (historyStatusFilter === "PENDING") return item.status === "Pending" || !item.status;
+    if (historyStatusFilter === "MAIL_FAILED") {
+      return (
+        item.mailDelivery?.status === "failed" ||
+        item.cancellationMailDelivery?.status === "failed"
+      );
+    }
+    return true;
+  });
+
+  const countDenied = visibleReplacementRows.filter((r) => r.status === "Denied" || r.status === "Cancelled").length;
+  const countAuto = visibleReplacementRows.filter((r) => r.autoAccepted).length;
+  const countAccepted = visibleReplacementRows.filter((r) => r.status === "Accepted").length;
+  const countPending = visibleReplacementRows.filter((r) => r.status === "Pending" || !r.status).length;
+  const countMailFailed = visibleReplacementRows.filter((r) => r.mailDelivery?.status === "failed" || r.cancellationMailDelivery?.status === "failed").length;
   const visiblePendingLeaves = pendingLeaves.filter((item) => (
     (!futureLeaveOnly || String(item.date || "") >= dayjs().format("YYYY-MM-DD"))
     && (!requiredReplacementOnly || item.replacementRequired)
@@ -510,7 +635,7 @@ export default function ReplacementManagement({ initialWorkflow } = {}) {
             { id: "matrix", label: "Drag & Drop Grid", badge: "Special Roster", icon: "⚡" },
             { id: "roster", label: "Replacement Roster & Matrix", badge: "Sequential D-5", icon: "✨" },
             { id: "leave", label: "Leave Replacements", badge: pendingLeaves.length, icon: "📋" },
-            { id: "board", label: "Replacement Board", badge: assignedReplacements.length, icon: "📊" },
+            { id: "board", label: "Duty & Decision History", badge: assignedReplacements.length, icon: "📜" },
             { id: "sic", label: "SIC Coverage", badge: pendingSIC.length, icon: "🛡️" },
             { id: "events", label: "Special Event Coverage", badge: "Event Roster", icon: "⭐", link: "/crew/special-events" },
           ].map((tab) => {
@@ -585,26 +710,26 @@ export default function ReplacementManagement({ initialWorkflow } = {}) {
       </Collapse>
 
       <Collapse in={activeWorkflow === "duty"} timeout={420} unmountOnExit>
-      <Box id="replacement-workflow-duty" sx={{ scrollMarginTop: 110 }}>
-        <DutyReassignmentPanel
-          key={sicExchangeContext?.token || new URLSearchParams(window.location.search).get("date") || "default-duty-reassignment"}
-          initialDate={sicExchangeContext?.leave?.date || new URLSearchParams(window.location.search).get("date")}
-          initialMode={sicExchangeContext?.leave ? "exchange" : (new URLSearchParams(window.location.search).get("mode") || "additional")}
-          initialEmployeeId={new URLSearchParams(window.location.search).get("employeeId") || ""}
-          initialLeave={sicExchangeContext?.leave || null}
-          onChanged={async () => {
-            fetchPendingLeaves();
-            fetchAssignedReplacements();
-            fetchDecisionAudit();
-            fetchPendingSIC();
-            if (sicExchangeContext?.leave) {
-              const leave = sicExchangeContext.leave;
-              setSicExchangeContext(null);
-              await openSICDialog(leave, "Duty exchange workflow");
-            }
-          }}
-        />
-      </Box>
+        <Box id="replacement-workflow-duty" sx={{ scrollMarginTop: 110 }}>
+          <DutyReassignmentPanel
+            key={sicExchangeContext?.token || new URLSearchParams(window.location.search).get("date") || "default-duty-reassignment"}
+            initialDate={sicExchangeContext?.leave?.date || new URLSearchParams(window.location.search).get("date")}
+            initialMode={sicExchangeContext?.leave ? "exchange" : (new URLSearchParams(window.location.search).get("mode") || "additional")}
+            initialEmployeeId={new URLSearchParams(window.location.search).get("employeeId") || ""}
+            initialLeave={sicExchangeContext?.leave || null}
+            onChanged={async () => {
+              fetchPendingLeaves();
+              fetchAssignedReplacements();
+              fetchDecisionAudit();
+              fetchPendingSIC();
+              if (sicExchangeContext?.leave) {
+                const leave = sicExchangeContext.leave;
+                setSicExchangeContext(null);
+                await openSICDialog(leave, "Duty exchange workflow");
+              }
+            }}
+          />
+        </Box>
       </Collapse>
 
       {false && canSwitchDuty && (
@@ -754,354 +879,543 @@ export default function ReplacementManagement({ initialWorkflow } = {}) {
       {/* ========================= */}
 
       <Collapse in={activeWorkflow === "leave"} timeout={420} unmountOnExit>
-      <Box id="replacement-workflow-leave" sx={{ scrollMarginTop: 110 }}>
-      <Accordion
-        defaultExpanded
-        sx={{
-          borderRadius: 3,
-          boxShadow: "0 4px 20px rgba(0,0,0,0.08)",
-          overflow: "hidden",
-          mb: 3
-        }}
-      >
-        <AccordionSummary
-          expandIcon={<ExpandMoreIcon />}
-          sx={{
-            background: "linear-gradient(90deg,#2e7d32,#66bb6a)",
-            color: "white",
-            px: 3
-          }}
-        >
-          <Typography variant="h6" fontWeight={600}>
-            Leaves Requiring Replacement
-          </Typography>
-        </AccordionSummary>
+        <Box id="replacement-workflow-leave" sx={{ scrollMarginTop: 110 }}>
+          <Accordion
+            defaultExpanded
+            sx={{
+              borderRadius: 3,
+              boxShadow: "0 4px 20px rgba(0,0,0,0.08)",
+              overflow: "hidden",
+              mb: 3
+            }}
+          >
+            <AccordionSummary
+              expandIcon={<ExpandMoreIcon />}
+              sx={{
+                background: "linear-gradient(90deg,#2e7d32,#66bb6a)",
+                color: "white",
+                px: 3
+              }}
+            >
+              <Typography variant="h6" fontWeight={600}>
+                Leaves Requiring Replacement
+              </Typography>
+            </AccordionSummary>
 
-        <AccordionDetails>
-          <Paper elevation={0} sx={{ p: 2 }}>
+            <AccordionDetails>
+              <Paper elevation={0} sx={{ p: 2 }}>
 
-            <Box sx={{ mb: 1.4, px: 1.2, py: .7, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 1, flexWrap: "wrap", borderRadius: 2, background: "#F4FAF5", border: "1px solid #D5E8D8" }}>
-              <Typography sx={{ fontSize: 11, color: "#475569", fontWeight: 800 }}>{visiblePendingLeaves.length} of {pendingLeaves.length} approved leave duties shown</Typography>
-              <Stack direction="row" spacing={1.5} useFlexGap flexWrap="wrap">
-                <FormControlLabel control={<Switch size="small" checked={futureLeaveOnly} onChange={(event) => setFutureLeaveOnly(event.target.checked)} />} label="Future leave only" sx={{ m: 0, "& .MuiFormControlLabel-label": { fontSize: 11, fontWeight: 850 } }} />
-                <FormControlLabel control={<Switch size="small" checked={requiredReplacementOnly} onChange={(event) => setRequiredReplacementOnly(event.target.checked)} />} label="Required replacement only" sx={{ m: 0, "& .MuiFormControlLabel-label": { fontSize: 11, fontWeight: 850 } }} />
-              </Stack>
-            </Box>
+                <Box sx={{ mb: 1.4, px: 1.2, py: .7, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 1, flexWrap: "wrap", borderRadius: 2, background: "#F4FAF5", border: "1px solid #D5E8D8" }}>
+                  <Typography sx={{ fontSize: 11, color: "#475569", fontWeight: 800 }}>{visiblePendingLeaves.length} of {pendingLeaves.length} approved leave duties shown</Typography>
+                  <Stack direction="row" spacing={1.5} useFlexGap flexWrap="wrap">
+                    <FormControlLabel control={<Switch size="small" checked={futureLeaveOnly} onChange={(event) => setFutureLeaveOnly(event.target.checked)} />} label="Future leave only" sx={{ m: 0, "& .MuiFormControlLabel-label": { fontSize: 11, fontWeight: 850 } }} />
+                    <FormControlLabel control={<Switch size="small" checked={requiredReplacementOnly} onChange={(event) => setRequiredReplacementOnly(event.target.checked)} />} label="Required replacement only" sx={{ m: 0, "& .MuiFormControlLabel-label": { fontSize: 11, fontWeight: 850 } }} />
+                  </Stack>
+                </Box>
 
-            <TableContainer sx={{ maxHeight: 380, minHeight: visiblePendingLeaves.length ? 150 : 72, border: "1px solid #D7E3F4", borderRadius: 2 }}>
-              <Table size="small" stickyHeader>
+                <TableContainer sx={{ maxHeight: 380, minHeight: visiblePendingLeaves.length ? 150 : 72, border: "1px solid #D7E3F4", borderRadius: 2 }}>
+                  <Table size="small" stickyHeader>
 
-                <TableHead>
-                  <TableRow sx={{ background: "#1b5e20" }}>
-                    <TableCell sx={{ color: "white" }}>Employee</TableCell>
-                    <TableCell sx={{ color: "white" }}>Group</TableCell>
-                    <TableCell sx={{ color: "white" }}>Date</TableCell>
-                    <TableCell sx={{ color: "white" }}>Leave Type</TableCell>
-                    <TableCell sx={{ color: "white" }}>Replacement required</TableCell>
-                    <TableCell sx={{ color: "white" }}>Action</TableCell>
-                  </TableRow>
-                </TableHead>
+                    <TableHead>
+                      <TableRow sx={{ background: "#1b5e20" }}>
+                        <TableCell sx={{ color: "white" }}>Employee</TableCell>
+                        <TableCell sx={{ color: "white" }}>Group</TableCell>
+                        <TableCell sx={{ color: "white" }}>Date</TableCell>
+                        <TableCell sx={{ color: "white" }}>Leave Type</TableCell>
+                        <TableCell sx={{ color: "white" }}>Replacement required</TableCell>
+                        <TableCell sx={{ color: "white" }}>Action</TableCell>
+                      </TableRow>
+                    </TableHead>
 
-                <TableBody>
+                    <TableBody>
 
-                  {visiblePendingLeaves.length === 0 && (
-                    <TableRow>
-                      <TableCell colSpan={6} align="center">
-                        No approved leave matches the selected filters
-                      </TableCell>
-                    </TableRow>
-                  )}
+                      {visiblePendingLeaves.length === 0 && (
+                        <TableRow>
+                          <TableCell colSpan={6} align="center">
+                            No approved leave matches the selected filters
+                          </TableCell>
+                        </TableRow>
+                      )}
 
-                  {visiblePendingLeaves.map((l) => (
-                    <TableRow key={l.id} hover>
+                      {visiblePendingLeaves.map((l) => (
+                        <TableRow key={l.id} hover>
 
-                      <TableCell>{l.name}</TableCell>
-                      <TableCell>{l.groupName}</TableCell>
-                      <TableCell>{dayjs(l.date).format("DD MMM YYYY")}</TableCell>
-                      <TableCell>{l.leaveType}</TableCell>
+                          <TableCell>{l.name}</TableCell>
+                          <TableCell>{l.groupName}</TableCell>
+                          <TableCell>{dayjs(l.date).format("DD MMM YYYY")}</TableCell>
+                          <TableCell>{l.leaveType}</TableCell>
 
-                      <TableCell>
-                        <Chip label={l.replacementRequired ? "R · Mandatory" : "Optional"} size="small" color={l.replacementRequired ? "error" : "default"} variant={l.replacementRequired ? "filled" : "outlined"} />
-                      </TableCell>
+                          <TableCell>
+                            <Chip label={l.replacementRequired ? "R · Mandatory" : "Optional"} size="small" color={l.replacementRequired ? "error" : "default"} variant={l.replacementRequired ? "filled" : "outlined"} />
+                          </TableCell>
 
-                      <TableCell>
+                          <TableCell>
 
-                        <Button
-                          size="small"
-                          variant="contained"
-                          sx={{ background: "#6a1b9a" }}
-                          onClick={() => openCandidateDialog(l)}
-                        >
-                          Assign
-                        </Button>
+                            <Button
+                              size="small"
+                              variant="contained"
+                              sx={{ background: "#6a1b9a" }}
+                              onClick={() => openCandidateDialog(l)}
+                            >
+                              Assign
+                            </Button>
 
-                        {l.isSIC && (
-                          <Button
-                            size="small"
-                            variant="outlined"
-                            color="warning"
-                            sx={{ ml: 1 }}
-                            onClick={() => openSICDialog(l)}
-                          >
-                            Acting SIC
-                          </Button>
-                        )}
+                            {l.isSIC && (
+                              <Button
+                                size="small"
+                                variant="outlined"
+                                color="warning"
+                                sx={{ ml: 1 }}
+                                onClick={() => openSICDialog(l)}
+                              >
+                                Acting SIC
+                              </Button>
+                            )}
 
-                      </TableCell>
+                          </TableCell>
 
-                    </TableRow>
-                  ))}
+                        </TableRow>
+                      ))}
 
-                </TableBody>
-              </Table>
-            </TableContainer>
+                    </TableBody>
+                  </Table>
+                </TableContainer>
 
-          </Paper>
-        </AccordionDetails>
-      </Accordion>
+              </Paper>
+            </AccordionDetails>
+          </Accordion>
 
-      </Box>
+        </Box>
       </Collapse>
 
       <Collapse in={activeWorkflow === "board"} timeout={420} unmountOnExit>
-      <Box id="replacement-workflow-board" sx={{ scrollMarginTop: 110 }}>
-      <Accordion
-        defaultExpanded
-        sx={{ borderRadius: 3, boxShadow: "0 4px 20px rgba(0,0,0,0.08)", overflow: "hidden", mb: 3 }}
-      >
-        <AccordionSummary
-          expandIcon={<ExpandMoreIcon />}
-          sx={{ background: "linear-gradient(90deg,#08103A,#0057B7)", color: "white", px: 3 }}
-        >
-          <Typography variant="h6" fontWeight={600}>Replacement Duties &amp; Decision Board</Typography>
-        </AccordionSummary>
-        <AccordionDetails>
-          <Box sx={{ display: "flex", gap: 1, mb: 2, flexWrap: "wrap" }}>
-            <TextField type="date" size="small" label="From" InputLabelProps={{ shrink: true }} value={startDate} onChange={(e) => setStartDate(e.target.value)} />
-            <TextField type="date" size="small" label="To" InputLabelProps={{ shrink: true }} value={endDate} onChange={(e) => setEndDate(e.target.value)} />
-            <TextField size="small" label="Replacement employee ID" value={employeeId} onChange={(e) => setEmployeeId(e.target.value)} />
-            <Button variant="contained" onClick={fetchDecisionAudit}>Refresh Board</Button>
-          </Box>
-            <Box sx={{ mb: 1, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 1, flexWrap: "wrap" }}>
-              <Typography variant="caption" color="text.secondary">Showing active and upcoming assignments by default.</Typography>
-              <Button size="small" variant="outlined" onClick={() => setShowOlderAssignments((value) => !value)} sx={{ textTransform: "none", fontWeight: 850 }}>
-                {showOlderAssignments ? "Hide older assignments" : "Show older assignments"}
-              </Button>
-            </Box>
-            <TableContainer sx={{ maxHeight: 520, minHeight: visibleReplacementRows.length ? 180 : 72, border: "1px solid #D7E3F4", borderRadius: 2 }}>
-            <Table size="small" stickyHeader>
-              <TableHead>
-                <TableRow sx={{ background: "#EAF2FF" }}>
-                  <TableCell><strong>Date / Duty</strong></TableCell>
-                  <TableCell><strong>Replacement Employee</strong></TableCell>
-                  <TableCell><strong>Replaced Employee</strong></TableCell>
-                  <TableCell><strong>Reporting Officer(s)</strong></TableCell>
-                  <TableCell><strong>Decision</strong></TableCell>
-                  <TableCell><strong>Decision Audit</strong></TableCell>
-                  <TableCell align="right"><strong>Action</strong></TableCell>
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {visibleReplacementRows.map((item) => {
-                  const shownStatus = item.status === "Denied" ? "Declined" : item.status;
-                  const statusColor = item.status === "Denied" ? "error" : item.status === "Accepted" ? "success" : item.status === "Pending" ? "warning" : "default";
-                  const current = item.currentAssignment;
-                  const isCurrentReplacement = current && String(current.replacement?.employeeId || "") === String(item.employeeId || "");
-                  return (
-                    <TableRow key={item.rowKey} hover>
-                      <TableCell>
-                        <Typography variant="body2" fontWeight={800}>{item.date ? dayjs(item.date).format("DD MMM YYYY") : "-"}</Typography>
-                        <Typography variant="caption">{item.assignedDuty || "-"} · {item.assignmentMode || "normal"}</Typography>
-                      </TableCell>
-                      <TableCell>
-                        <Typography variant="body2" fontWeight={700}>{item.employeeName || "-"}</Typography>
-                        <Typography variant="caption" color="text.secondary">{item.employeeId || "-"}</Typography>
-                      </TableCell>
-                      <TableCell>
-                        <Typography variant="body2">{item.replacedEmployeeName || "-"}</Typography>
-                        <Typography variant="caption" color="text.secondary">{item.groupName || "-"} · {item.leaveType || "-"}</Typography>
-                      </TableCell>
-                      <TableCell>
-                        <Typography variant="caption">{(item.controllerNames || []).join(", ") || "Not mapped"}</Typography>
-                      </TableCell>
-                      <TableCell>
-                        <Chip size="small" label={shownStatus || "Pending"} color={statusColor} />
-                        {item.autoAccepted && <Typography display="block" variant="caption" color="success.main" fontWeight={800}>Auto-accepted at cutoff</Typography>}
-                        {item.reason && <Typography display="block" variant="caption" color="error.main">{item.reason}</Typography>}
-                        {item.mailDelivery?.status && (
-                          <Typography display="block" variant="caption" color={item.mailDelivery.status === "sent" ? "success.main" : item.mailDelivery.status === "failed" ? "error.main" : "text.secondary"} fontWeight={700}>
-                            Mail: {item.mailDelivery.status} ({item.mailDelivery.recipientCount || 0} recipients)
-                          </Typography>
-                        )}
-                        {item.mailDelivery?.status === "failed" && item.mailDelivery?.error && (
-                          <Typography display="block" variant="caption" color="error.main" sx={{ maxWidth: 230, lineHeight: 1.25 }}>
-                            {item.mailDelivery.error}
-                          </Typography>
-                        )}
-                      </TableCell>
-                      <TableCell sx={{ minWidth: 260 }}>
-                        {(item.decisionHistory || []).length ? (item.decisionHistory || []).map((entry, index) => (
-                          <Typography key={`${item.rowKey}-${index}`} variant="caption" display="block" sx={{ mb: .35 }}>
-                            <strong>{entry.action === "Denied" ? "Declined" : entry.action}</strong> by {entry.actedByName || entry.actedBy || "-"} ({entry.actorRole || "-"})
-                            {entry.actedAt ? ` · ${dayjs(entry.actedAt).format("DD MMM YYYY HH:mm")}` : ""}
-                            {entry.reason ? ` · ${entry.reason}` : ""}
-                          </Typography>
-                        )) : <Typography variant="caption" color="text.secondary">Awaiting employee decision</Typography>}
-                      </TableCell>
-                      <TableCell align="right" sx={{ whiteSpace: "nowrap" }}>
-                        {isCurrentReplacement ? (
-                          <Box sx={{ display: "flex", justifyContent: "flex-end", gap: .75 }}>
-                            {current.isSIC && <Button size="small" color="warning" variant="contained" onClick={() => openSICDialog(current, "Assigned replacement board")}>{current.actingSIC?.employeeId ? "Change acting SIC" : "Assign acting SIC"}</Button>}
-                            {current.canChange !== false && (
-                              <Button size="small" variant="outlined" onClick={() => openCandidateDialog(current)}>
-                                Change assignment
-                              </Button>
-                            )}
-                            <Button size="small" color="error" variant="outlined" onClick={() => deleteReplacementAssignment(current)}>
-                              Delete
-                            </Button>
-                          </Box>
-                        ) : (
-                          <Typography variant="caption" color="text.secondary">{current ? "Previous assignment" : "Audit only"}</Typography>
-                        )}
-                      </TableCell>
+        <Box id="replacement-workflow-board" sx={{ scrollMarginTop: 110 }}>
+          <Accordion
+            defaultExpanded
+            sx={{ borderRadius: 3, boxShadow: "0 4px 20px rgba(0,0,0,0.08)", overflow: "hidden", mb: 3 }}
+          >
+            <AccordionSummary
+              expandIcon={<ExpandMoreIcon />}
+              sx={{ background: "linear-gradient(90deg,#08103A,#0057B7)", color: "white", px: 3 }}
+            >
+              <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%", pr: 2 }}>
+                <Typography variant="h6" fontWeight={700}>Replacement Duties &amp; Decision History Board</Typography>
+                <Chip size="small" label={`${visibleReplacementRows.length} Total Assignments`} sx={{ bgcolor: "rgba(255,255,255,0.25)", color: "#FFFFFF", fontWeight: 800 }} />
+              </Box>
+            </AccordionSummary>
+            <AccordionDetails>
+              {/* Central History Navigation Banner */}
+              <Paper
+                elevation={0}
+                sx={{
+                  p: 1.5,
+                  mb: 2,
+                  borderRadius: 2.5,
+                  bgcolor: "#F0F7FF",
+                  border: "1px solid #BAE6FD",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  flexWrap: "wrap",
+                  gap: 1.5,
+                }}
+              >
+                <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                  <Typography variant="subtitle2" sx={{ fontWeight: 800, color: "#0369A1" }}>
+                    📍 Portal History Tracking Locations:
+                  </Typography>
+                  <Typography variant="caption" sx={{ color: "#475569" }}>
+                    View complete records across duty allocations, rejections, mail delivery, and shift roles.
+                  </Typography>
+                </Box>
+                <Stack direction="row" spacing={1} flexWrap="wrap">
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    component="a"
+                    href="/crew/reports?tab=replacement-pool"
+                    sx={{ textTransform: "none", fontWeight: 700, fontSize: "0.78rem", bgcolor: "#fff", borderColor: "#7DD3FC", color: "#0284C7" }}
+                  >
+                    📋 Employee Rejection Matrix &amp; Pool History
+                  </Button>
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    component="a"
+                    href="/crew/reports?tab=detail"
+                    sx={{ textTransform: "none", fontWeight: 700, fontSize: "0.78rem", bgcolor: "#fff", borderColor: "#93C5FD", color: "#1D4ED8" }}
+                  >
+                    📊 Comprehensive Activity Log (Leaves/Duties)
+                  </Button>
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    component="a"
+                    href="/crew/shift-history"
+                    sx={{ textTransform: "none", fontWeight: 700, fontSize: "0.78rem", bgcolor: "#fff", borderColor: "#C7D2FE", color: "#4338CA" }}
+                  >
+                    🔄 Shift History Admin
+                  </Button>
+                </Stack>
+              </Paper>
+
+              <Box sx={{ display: "flex", gap: 1, mb: 1.5, flexWrap: "wrap", alignItems: "center" }}>
+                <TextField type="date" size="small" label="From" InputLabelProps={{ shrink: true }} value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+                <TextField type="date" size="small" label="To" InputLabelProps={{ shrink: true }} value={endDate} onChange={(e) => setEndDate(e.target.value)} />
+                <TextField size="small" label="Replacement employee ID" value={employeeId} onChange={(e) => setEmployeeId(e.target.value)} />
+                <Button variant="contained" onClick={fetchDecisionAudit} sx={{ textTransform: "none", fontWeight: 800 }}>Refresh Board</Button>
+              </Box>
+
+              {/* Quick Status Filter Tabs */}
+              <Box sx={{ mb: 1.5, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 1, flexWrap: "wrap" }}>
+                <Stack direction="row" spacing={0.8} flexWrap="wrap" alignItems="center">
+                  <Typography variant="caption" sx={{ fontWeight: 800, color: "#64748B", mr: 0.5 }}>Quick Filter:</Typography>
+                  <Chip
+                    size="small"
+                    label={`All (${visibleReplacementRows.length})`}
+                    color={historyStatusFilter === "ALL" ? "primary" : "default"}
+                    onClick={() => setHistoryStatusFilter("ALL")}
+                    sx={{ fontWeight: 800, cursor: "pointer" }}
+                  />
+                  <Chip
+                    size="small"
+                    label={`Denied / Cancelled (${countDenied})`}
+                    color={historyStatusFilter === "DENIED" ? "error" : "default"}
+                    onClick={() => setHistoryStatusFilter("DENIED")}
+                    sx={{ fontWeight: 800, cursor: "pointer" }}
+                  />
+                  <Chip
+                    size="small"
+                    label={`Auto-accepted (${countAuto})`}
+                    color={historyStatusFilter === "AUTO" ? "success" : "default"}
+                    onClick={() => setHistoryStatusFilter("AUTO")}
+                    sx={{ fontWeight: 800, cursor: "pointer" }}
+                  />
+                  <Chip
+                    size="small"
+                    label={`Accepted (${countAccepted})`}
+                    color={historyStatusFilter === "ACCEPTED" ? "success" : "default"}
+                    onClick={() => setHistoryStatusFilter("ACCEPTED")}
+                    sx={{ fontWeight: 800, cursor: "pointer" }}
+                  />
+                  <Chip
+                    size="small"
+                    label={`Pending (${countPending})`}
+                    color={historyStatusFilter === "PENDING" ? "warning" : "default"}
+                    onClick={() => setHistoryStatusFilter("PENDING")}
+                    sx={{ fontWeight: 800, cursor: "pointer" }}
+                  />
+                  {countMailFailed > 0 && (
+                    <Chip
+                      size="small"
+                      label={`Mail Issues (${countMailFailed})`}
+                      color={historyStatusFilter === "MAIL_FAILED" ? "error" : "default"}
+                      onClick={() => setHistoryStatusFilter("MAIL_FAILED")}
+                      sx={{ fontWeight: 900, cursor: "pointer", border: "1px solid #EF4444" }}
+                    />
+                  )}
+                </Stack>
+                <Button size="small" variant="outlined" onClick={() => setShowOlderAssignments((value) => !value)} sx={{ textTransform: "none", fontWeight: 850 }}>
+                  {showOlderAssignments ? "Hide older assignments" : "Show older assignments"}
+                </Button>
+              </Box>
+
+              <TableContainer sx={{ maxHeight: 560, minHeight: statusFilteredReplacementRows.length ? 180 : 72, border: "1px solid #D7E3F4", borderRadius: 2 }}>
+                <Table size="small" stickyHeader>
+                  <TableHead>
+                    <TableRow sx={{ background: "#EAF2FF" }}>
+                      <TableCell><strong>Date / Duty</strong></TableCell>
+                      <TableCell><strong>Replacement Employee</strong></TableCell>
+                      <TableCell><strong>Replaced Employee</strong></TableCell>
+                      <TableCell><strong>Reporting Officer(s)</strong></TableCell>
+                      <TableCell><strong>Decision &amp; Mail Status</strong></TableCell>
+                      <TableCell><strong>Decision Audit</strong></TableCell>
+                      <TableCell align="right"><strong>Action</strong></TableCell>
                     </TableRow>
-                  );
-                })}
-                {!visibleReplacementRows.length && <TableRow><TableCell colSpan={7} align="center">No active replacement assignments. Use “Show older assignments” to view history.</TableCell></TableRow>}
-              </TableBody>
-            </Table>
-          </TableContainer>
-        </AccordionDetails>
-      </Accordion>
-      </Box>
+                  </TableHead>
+                  <TableBody>
+                    {statusFilteredReplacementRows.map((item) => {
+                      const isDeniedOrCancelled = item.status === "Denied" || item.status === "Cancelled";
+                      const shownStatus = item.status === "Denied" ? "Declined / Denied" : item.status === "Cancelled" ? "Cancelled" : item.status;
+                      const statusColor = isDeniedOrCancelled ? "error" : item.status === "Accepted" ? "success" : item.status === "Pending" ? "warning" : "default";
+                      const current = item.currentAssignment;
+                      const isCurrentReplacement = current && String(current.replacement?.employeeId || "") === String(item.employeeId || "");
+                      const mailInfo = isDeniedOrCancelled
+                        ? (item.cancellationMailDelivery || item.mailDelivery)
+                        : item.mailDelivery;
+                      const mailIsFailed = mailInfo?.status === "failed";
+                      const isSendingMail = triggeringMailKey === (item.id || `${item.employeeId}-${item.date}`);
+
+                      return (
+                        <TableRow key={item.rowKey} hover sx={isDeniedOrCancelled ? { bgcolor: "#FFF5F5" } : {}}>
+                          <TableCell>
+                            <Typography variant="body2" fontWeight={800}>{item.date ? dayjs(item.date).format("DD MMM YYYY") : "-"}</Typography>
+                            <Typography variant="caption">{item.assignedDuty || "-"} · {item.assignmentMode || "normal"}</Typography>
+                          </TableCell>
+                          <TableCell>
+                            <Typography variant="body2" fontWeight={700}>{item.employeeName || "-"}</Typography>
+                            <Typography variant="caption" color="text.secondary">{item.employeeId || "-"}</Typography>
+                          </TableCell>
+                          <TableCell>
+                            <Typography variant="body2">{item.replacedEmployeeName || "-"}</Typography>
+                            <Typography variant="caption" color="text.secondary">{item.groupName || "-"} · {item.leaveType || "-"}</Typography>
+                          </TableCell>
+                          <TableCell>
+                            <Typography variant="caption">{(item.controllerNames || []).join(", ") || "Not mapped"}</Typography>
+                          </TableCell>
+                          <TableCell sx={{ minWidth: 200 }}>
+                            <Chip size="small" label={shownStatus || "Pending"} color={statusColor} sx={{ fontWeight: 800 }} />
+                            {item.autoAccepted && <Typography display="block" variant="caption" color="success.main" fontWeight={800}>Auto-accepted at cutoff</Typography>}
+                            {item.reason && (
+                              <Typography display="block" variant="caption" color="error.main" sx={{ mt: 0.3, fontWeight: 700 }}>
+                                Remarks: {item.reason}
+                              </Typography>
+                            )}
+
+                            {/* Mail Delivery Status and Resend Button */}
+                            <Box sx={{ mt: 0.8, p: 0.8, bgcolor: isDeniedOrCancelled ? "#FEF2F2" : "#F8FAFC", borderRadius: 1.5, border: "1px solid", borderColor: isDeniedOrCancelled ? "#FECACA" : "#E2E8F0" }}>
+                              {mailInfo?.status ? (
+                                <>
+                                  <Typography
+                                    display="block"
+                                    variant="caption"
+                                    fontWeight={800}
+                                    color={mailInfo.status === "sent" ? "success.main" : mailIsFailed ? "error.main" : "text.secondary"}
+                                  >
+                                    {isDeniedOrCancelled ? "Revocation Mail" : "Duty Mail"}: {mailInfo.status} ({mailInfo.recipientCount || 0} recipients)
+                                  </Typography>
+                                  {mailIsFailed && mailInfo.error && (
+                                    <Typography display="block" variant="caption" color="error.main" sx={{ maxWidth: 220, fontSize: "0.7rem", lineHeight: 1.2, mt: 0.2 }}>
+                                      ⚠️ {mailInfo.error}
+                                    </Typography>
+                                  )}
+                                </>
+                              ) : (
+                                <Typography display="block" variant="caption" color="text.secondary" fontWeight={700}>
+                                  Mail: Not recorded
+                                </Typography>
+                              )}
+
+                              <Button
+                                size="small"
+                                color={mailIsFailed ? "error" : isDeniedOrCancelled ? "secondary" : "primary"}
+                                variant={mailIsFailed ? "contained" : "outlined"}
+                                onClick={() => isDeniedOrCancelled ? handleTriggerCancellationMail(item) : handleTriggerDutyMail(item)}
+                                disabled={isSendingMail}
+                                startIcon={<Mail size={12} />}
+                                sx={{ mt: 0.6, textTransform: "none", fontSize: "0.72rem", py: 0.2, px: 0.8, fontWeight: 800 }}
+                              >
+                                {isSendingMail
+                                  ? "Sending..."
+                                  : mailIsFailed
+                                    ? (isDeniedOrCancelled ? "Retry Revocation Mail" : "Retry Duty Mail")
+                                    : (isDeniedOrCancelled ? "Resend Revocation Mail" : "Resend Duty Mail")}
+                              </Button>
+                            </Box>
+                          </TableCell>
+                          <TableCell sx={{ minWidth: 260 }}>
+                            {(item.decisionHistory || []).length ? (item.decisionHistory || []).map((entry, index) => (
+                              <Typography key={`${item.rowKey}-${index}`} variant="caption" display="block" sx={{ mb: .35 }}>
+                                <strong>{entry.action === "Denied" ? "Declined / Denied" : entry.action}</strong> by {entry.actedByName || entry.actedBy || "-"} ({entry.actorRole || "-"})
+                                {entry.actedAt ? ` · ${dayjs(entry.actedAt).format("DD MMM YYYY HH:mm")}` : ""}
+                                {entry.reason ? ` · "${entry.reason}"` : ""}
+                              </Typography>
+                            )) : <Typography variant="caption" color="text.secondary">Awaiting employee decision</Typography>}
+                          </TableCell>
+                          <TableCell align="right" sx={{ whiteSpace: "nowrap" }}>
+                            {isCurrentReplacement ? (
+                              <Box sx={{ display: "flex", justifyContent: "flex-end", gap: .75 }}>
+                                {current.isSIC && <Button size="small" color="warning" variant="contained" onClick={() => openSICDialog(current, "Assigned replacement board")}>{current.actingSIC?.employeeId ? "Change acting SIC" : "Assign acting SIC"}</Button>}
+                                {current.canChange !== false && (
+                                  <Button size="small" variant="outlined" onClick={() => openCandidateDialog(current)}>
+                                    Change assignment
+                                  </Button>
+                                )}
+                                {["Pending", "Accepted", ""].includes(String(item.status || "")) && (
+                                  <Button
+                                    size="small"
+                                    color="warning"
+                                    variant="contained"
+                                    onClick={() => openAdminCancelDialog(item)}
+                                    sx={{ textTransform: "none", fontWeight: 800 }}
+                                  >
+                                    Cancel / Deny (Remarks)
+                                  </Button>
+                                )}
+                                <Button size="small" color="error" variant="outlined" onClick={() => deleteReplacementAssignment(current)}>
+                                  Delete
+                                </Button>
+                              </Box>
+                            ) : isDeniedOrCancelled ? (
+                              <Box sx={{ display: "flex", justifyContent: "flex-end", gap: .75 }}>
+                                <Button
+                                  size="small"
+                                  color="secondary"
+                                  variant="outlined"
+                                  onClick={() => handleTriggerCancellationMail(item)}
+                                  disabled={isSendingMail}
+                                  sx={{ textTransform: "none", fontWeight: 700, fontSize: "0.75rem" }}
+                                >
+                                  Resend Mail
+                                </Button>
+                              </Box>
+                            ) : ["Pending", "Accepted"].includes(String(item.status || "")) && (item.id || item.leaveId) ? (
+                              <Button
+                                size="small"
+                                color="warning"
+                                variant="contained"
+                                onClick={() => openAdminCancelDialog(item)}
+                                sx={{ textTransform: "none", fontWeight: 800 }}
+                              >
+                                Cancel / Deny (Remarks)
+                              </Button>
+                            ) : (
+                              <Typography variant="caption" color="text.secondary">{current ? "Previous assignment" : "Audit record"}</Typography>
+                            )}
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                    {!statusFilteredReplacementRows.length && (
+                      <TableRow>
+                        <TableCell colSpan={7} align="center" sx={{ py: 3, color: "#64748B" }}>
+                          No replacement records found for the selected filter.
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </TableBody>
+                </Table>
+              </TableContainer>
+            </AccordionDetails>
+          </Accordion>
+        </Box>
       </Collapse>
 
-    {/* ################# SIC Section ################### */}
+      {/* ################# SIC Section ################### */}
 
 
       <Collapse in={activeWorkflow === "sic" || (["leave", "board"].includes(activeWorkflow) && pendingSIC.length > 0)} timeout={420} unmountOnExit>
-      <Box id="replacement-workflow-sic" sx={{ scrollMarginTop: 110 }}>
-      <Accordion
-        defaultExpanded
-        sx={{
-          borderRadius: 3,
-          boxShadow: "0 4px 20px rgba(0,0,0,0.08)",
-          overflow: "hidden",
-          mb: 3
-        }}
-      >
+        <Box id="replacement-workflow-sic" sx={{ scrollMarginTop: 110 }}>
+          <Accordion
+            defaultExpanded
+            sx={{
+              borderRadius: 3,
+              boxShadow: "0 4px 20px rgba(0,0,0,0.08)",
+              overflow: "hidden",
+              mb: 3
+            }}
+          >
 
-        <AccordionSummary
-          expandIcon={<ExpandMoreIcon />}
-          sx={{
-            background: "linear-gradient(90deg,#ef6c00,#ffb74d)",
-            color: "white",
-            px: 3
-          }}
-        >
+            <AccordionSummary
+              expandIcon={<ExpandMoreIcon />}
+              sx={{
+                background: "linear-gradient(90deg,#ef6c00,#ffb74d)",
+                color: "white",
+                px: 3
+              }}
+            >
 
-          <Typography variant="h6" fontWeight={600}>
-            SIC Assignment Pending
-          </Typography>
+              <Typography variant="h6" fontWeight={600}>
+                SIC Assignment Pending
+              </Typography>
 
-        </AccordionSummary>
+            </AccordionSummary>
 
-        <AccordionDetails>
+            <AccordionDetails>
 
-          <Paper elevation={0} sx={{ p: 2 }}>
+              <Paper elevation={0} sx={{ p: 2 }}>
 
-            <TableContainer sx={{ maxHeight: 380, minHeight: pendingSIC.length ? 150 : 72, border: "1px solid #D7E3F4", borderRadius: 2 }}>
+                <TableContainer sx={{ maxHeight: 380, minHeight: pendingSIC.length ? 150 : 72, border: "1px solid #D7E3F4", borderRadius: 2 }}>
 
-              <Table size="small" stickyHeader>
+                  <Table size="small" stickyHeader>
 
-                <TableHead>
-                  <TableRow sx={{ background: "#e65100" }}>
-                    <TableCell sx={{ color: "white" }}>Employee</TableCell>
-                    <TableCell sx={{ color: "white" }}>Group</TableCell>
-                    <TableCell sx={{ color: "white" }}>Date</TableCell>
-                    <TableCell sx={{ color: "white" }}>Leave Type</TableCell>
-                    <TableCell sx={{ color: "white" }}>Manpower replacement</TableCell>
-                    <TableCell sx={{ color: "white" }}>SIC coverage action</TableCell>
-                  </TableRow>
-                </TableHead>
+                    <TableHead>
+                      <TableRow sx={{ background: "#e65100" }}>
+                        <TableCell sx={{ color: "white" }}>Employee</TableCell>
+                        <TableCell sx={{ color: "white" }}>Group</TableCell>
+                        <TableCell sx={{ color: "white" }}>Date</TableCell>
+                        <TableCell sx={{ color: "white" }}>Leave Type</TableCell>
+                        <TableCell sx={{ color: "white" }}>Manpower replacement</TableCell>
+                        <TableCell sx={{ color: "white" }}>SIC coverage action</TableCell>
+                      </TableRow>
+                    </TableHead>
 
-                <TableBody>
+                    <TableBody>
 
-                  {pendingSIC.length === 0 && (
-                    <TableRow>
-                      <TableCell colSpan={6} align="center">
-                        No SIC assignment pending
-                      </TableCell>
-                    </TableRow>
-                  )}
+                      {pendingSIC.length === 0 && (
+                        <TableRow>
+                          <TableCell colSpan={6} align="center">
+                            No SIC assignment pending
+                          </TableCell>
+                        </TableRow>
+                      )}
 
-                  {pendingSIC.map((l) => (
+                      {pendingSIC.map((l) => (
 
-                    <TableRow key={l.id} hover>
+                        <TableRow key={l.id} hover>
 
-                      <TableCell>{l.name}</TableCell>
-                      <TableCell>{l.groupName}</TableCell>
-                      <TableCell>
-                        {dayjs(l.date).format("DD MMM YYYY")}
-                      </TableCell>
-                      <TableCell>{l.leaveType}</TableCell>
+                          <TableCell>{l.name}</TableCell>
+                          <TableCell>{l.groupName}</TableCell>
+                          <TableCell>
+                            {dayjs(l.date).format("DD MMM YYYY")}
+                          </TableCell>
+                          <TableCell>{l.leaveType}</TableCell>
 
-                      <TableCell>
-                        {l.replacementAssigned ? (
-                          <Chip
-                            size="small"
-                            color="success"
-                            label={`Assigned: ${l.replacement?.name || l.replacement?.employeeId || "Replacement"}`}
-                          />
-                        ) : (
-                          <Button
-                            variant="outlined"
-                            size="small"
-                            onClick={() => openCandidateDialog(l)}
-                          >
-                            Assign replacement
-                          </Button>
-                        )}
-                      </TableCell>
+                          <TableCell>
+                            {l.replacementAssigned ? (
+                              <Chip
+                                size="small"
+                                color="success"
+                                label={`Assigned: ${l.replacement?.name || l.replacement?.employeeId || "Replacement"}`}
+                              />
+                            ) : (
+                              <Button
+                                variant="outlined"
+                                size="small"
+                                onClick={() => openCandidateDialog(l)}
+                              >
+                                Assign replacement
+                              </Button>
+                            )}
+                          </TableCell>
 
-                      <TableCell>
-                        <Box sx={{ display: "flex", gap: 1, flexWrap: "wrap" }}>
-                          <Button
-                            variant="contained"
-                            size="small"
-                            color="warning"
-                            onClick={() => openSICDialog(l, "Same-shift acting-SIC assignment")}
-                          >
-                            Assign from this shift
-                          </Button>
-                          <Button
-                            variant="outlined"
-                            size="small"
-                            onClick={() => openSICExchange(l)}
-                          >
-                            Use duty exchange
-                          </Button>
-                        </Box>
+                          <TableCell>
+                            <Box sx={{ display: "flex", gap: 1, flexWrap: "wrap" }}>
+                              <Button
+                                variant="contained"
+                                size="small"
+                                color="warning"
+                                onClick={() => openSICDialog(l, "Same-shift acting-SIC assignment")}
+                              >
+                                Assign from this shift
+                              </Button>
+                              <Button
+                                variant="outlined"
+                                size="small"
+                                onClick={() => openSICExchange(l)}
+                              >
+                                Use duty exchange
+                              </Button>
+                            </Box>
 
-                      </TableCell>
+                          </TableCell>
 
-                    </TableRow>
+                        </TableRow>
 
-                  ))}
+                      ))}
 
-                </TableBody>
+                    </TableBody>
 
-              </Table>
+                  </Table>
 
-            </TableContainer>
+                </TableContainer>
 
-          </Paper>
+              </Paper>
 
-        </AccordionDetails>
+            </AccordionDetails>
 
-      </Accordion>
-      </Box>
+          </Accordion>
+        </Box>
       </Collapse>
 
       {/* ========================= */}
@@ -1109,76 +1423,76 @@ export default function ReplacementManagement({ initialWorkflow } = {}) {
       {/* ========================= */}
 
       <Collapse in={historyVisible} unmountOnExit>
-      <Accordion
-        defaultExpanded
-        sx={{
-          borderRadius: 3,
-          boxShadow: "0 4px 20px rgba(0,0,0,0.08)",
-          overflow: "hidden",
-          mb: 3
-        }}
-      >
-        <AccordionSummary
-          expandIcon={<ExpandMoreIcon />}
+        <Accordion
+          defaultExpanded
           sx={{
-            background: "linear-gradient(90deg,#004d40,#26a69a)",
-            color: "white",
-            px: 3
+            borderRadius: 3,
+            boxShadow: "0 4px 20px rgba(0,0,0,0.08)",
+            overflow: "hidden",
+            mb: 3
           }}
         >
-          <Typography variant="h6" fontWeight={600}>
-            Replacement History
-          </Typography>
-        </AccordionSummary>
+          <AccordionSummary
+            expandIcon={<ExpandMoreIcon />}
+            sx={{
+              background: "linear-gradient(90deg,#004d40,#26a69a)",
+              color: "white",
+              px: 3
+            }}
+          >
+            <Typography variant="h6" fontWeight={600}>
+              Replacement History
+            </Typography>
+          </AccordionSummary>
 
-        <AccordionDetails>
+          <AccordionDetails>
 
-          <Paper elevation={0} sx={{ p: 2 }}>
+            <Paper elevation={0} sx={{ p: 2 }}>
 
-            <Box sx={{ display: "flex", gap: 2, mb: 2 }}>
+              <Box sx={{ display: "flex", gap: 2, mb: 2 }}>
 
-              <TextField type="date" size="small" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
-              <TextField type="date" size="small" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
-              <TextField size="small" label="Employee ID" value={employeeId} onChange={(e) => setEmployeeId(e.target.value)} />
+                <TextField type="date" size="small" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+                <TextField type="date" size="small" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
+                <TextField size="small" label="Employee ID" value={employeeId} onChange={(e) => setEmployeeId(e.target.value)} />
 
-              <Button variant="contained" onClick={fetchHistory}>
-                Search
-              </Button>
+                <Button variant="contained" onClick={fetchHistory}>
+                  Search
+                </Button>
 
-            </Box>
+              </Box>
 
-            <Table size="small">
+              <Table size="small">
 
-              <TableHead>
-                <TableRow sx={{ background: "#004d40" }}>
-                  <TableCell sx={{ color: "white" }}>Date</TableCell>
-                  <TableCell sx={{ color: "white" }}>Replacement Employee</TableCell>
-                  <TableCell sx={{ color: "white" }}>Replaced Employee</TableCell>
-                  <TableCell sx={{ color: "white" }}>Group</TableCell>
-                  <TableCell sx={{ color: "white" }}>Leave Type</TableCell>
-                </TableRow>
-              </TableHead>
-
-              <TableBody>
-
-                {history.map((h, i) => (
-                  <TableRow key={i}>
-                    <TableCell>{dayjs(h.date).format("DD MMM YYYY")}</TableCell>
-                    <TableCell>{h.employeeName}</TableCell>
-                    <TableCell>{h.replacedEmployee}</TableCell>
-                    <TableCell>{h.groupName}</TableCell>
-                    <TableCell>{h.leaveType}</TableCell>
+                <TableHead>
+                  <TableRow sx={{ background: "#004d40" }}>
+                    <TableCell sx={{ color: "white" }}>Date</TableCell>
+                    <TableCell sx={{ color: "white" }}>Replacement Employee</TableCell>
+                    <TableCell sx={{ color: "white" }}>Replaced Employee</TableCell>
+                    <TableCell sx={{ color: "white" }}>Group</TableCell>
+                    <TableCell sx={{ color: "white" }}>Leave Type</TableCell>
                   </TableRow>
-                ))}
+                </TableHead>
 
-              </TableBody>
+                <TableBody>
 
-            </Table>
+                  {history.map((h, i) => (
+                    <TableRow key={i}>
+                      <TableCell>{dayjs(h.date).format("DD MMM YYYY")}</TableCell>
+                      <TableCell>{h.employeeName}</TableCell>
+                      <TableCell>{h.replacedEmployee}</TableCell>
+                      <TableCell>{h.groupName}</TableCell>
+                      <TableCell>{h.leaveType}</TableCell>
+                    </TableRow>
+                  ))}
 
-          </Paper>
+                </TableBody>
 
-        </AccordionDetails>
-      </Accordion>
+              </Table>
+
+            </Paper>
+
+          </AccordionDetails>
+        </Accordion>
       </Collapse>
 
       {/* ========================= */}
@@ -1187,7 +1501,7 @@ export default function ReplacementManagement({ initialWorkflow } = {}) {
 
       <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} fullWidth maxWidth="lg">
 
-        <DialogTitle sx={{background: "linear-gradient(90deg,#4a148c,#7b1fa2)", color: "#fff"}}>Smart Replacement Selection</DialogTitle>
+        <DialogTitle sx={{ background: "linear-gradient(90deg,#4a148c,#7b1fa2)", color: "#fff" }}>Smart Replacement Selection</DialogTitle>
         <DialogContent sx={{ pt: 2 }}>
           <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: { xs: "stretch", md: "center" }, flexDirection: { xs: "column", md: "row" }, gap: 2, mb: 2 }}>
             <Typography variant="body2" color="text.secondary">
@@ -1339,6 +1653,68 @@ export default function ReplacementManagement({ initialWorkflow } = {}) {
 
         </DialogActions>
 
+      </Dialog>
+
+      {/* Admin Cancel / Deny with Remarks Dialog (supports Auto-Accepted duties) */}
+      <Dialog
+        open={adminCancelDialog.open}
+        onClose={() => !adminCancelDialog.submitting && setAdminCancelDialog((prev) => ({ ...prev, open: false }))}
+        fullWidth
+        maxWidth="sm"
+      >
+        <DialogTitle sx={{ fontWeight: 900, color: "#9A3412" }}>
+          Cancel / Deny Replacement Duty with Remarks
+        </DialogTitle>
+        <DialogContent dividers>
+          {adminCancelDialog.row && (
+            <Box sx={{ mb: 2, p: 1.5, borderRadius: 2, bgcolor: "#FFF7ED", border: "1px solid #FED7AA" }}>
+              <Typography variant="body2" fontWeight={800}>
+                {adminCancelDialog.row.employeeName || adminCancelDialog.row.employeeId} ({adminCancelDialog.row.employeeId})
+              </Typography>
+              <Typography variant="caption" display="block" color="text.secondary">
+                Duty: <strong>{adminCancelDialog.row.assignedDuty || "-"}</strong> on{" "}
+                <strong>{adminCancelDialog.row.date ? dayjs(adminCancelDialog.row.date).format("DD-MMM-YYYY") : "-"}</strong>
+                {adminCancelDialog.row.replacedEmployeeName ? ` · In place of ${adminCancelDialog.row.replacedEmployeeName}` : ""}
+              </Typography>
+              {adminCancelDialog.row.autoAccepted && (
+                <Chip size="small" label="Auto-accepted at cutoff — Admin override enabled" color="warning" sx={{ mt: 0.8, fontWeight: 800, fontSize: 10 }} />
+              )}
+            </Box>
+          )}
+          {adminCancelDialog.error && (
+            <Alert severity="error" sx={{ mb: 1.5 }}>{adminCancelDialog.error}</Alert>
+          )}
+          <TextField
+            autoFocus
+            fullWidth
+            multiline
+            minRows={3}
+            required
+            label="Cancellation / Denial Remarks"
+            placeholder="e.g., Parallel SAT in progress in SCADA/EMS and Infra"
+            value={adminCancelDialog.reason}
+            onChange={(e) => setAdminCancelDialog((prev) => ({ ...prev, reason: e.target.value }))}
+          />
+          <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: "block" }}>
+            This will mark the duty as Denied with your remarks, log it in the Sequential Duty Pool record, release the duty slot, and send a revocation email.
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button
+            disabled={adminCancelDialog.submitting}
+            onClick={() => setAdminCancelDialog((prev) => ({ ...prev, open: false }))}
+          >
+            Close
+          </Button>
+          <Button
+            variant="contained"
+            color="error"
+            disabled={!adminCancelDialog.reason.trim() || adminCancelDialog.submitting}
+            onClick={submitAdminCancelWithRemarks}
+          >
+            {adminCancelDialog.submitting ? "Processing..." : "Confirm Cancel / Deny"}
+          </Button>
+        </DialogActions>
       </Dialog>
 
     </Box>

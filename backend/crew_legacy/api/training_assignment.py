@@ -15,6 +15,7 @@ from crew_legacy.database.database_mongo import (
     roster_group_collection,
     holiday_master_collection,
     training_nomination_history_collection,
+    training_nominations_collection,
     training_master_collection,
     page_access_collection,
     leave_request_collection,
@@ -107,6 +108,29 @@ def validate_nomination_change(record: dict, employee_id: str, dates: list[str])
         raise HTTPException(409, "The employee already has training during these dates")
 
 
+def training_record_dates(record: dict) -> list:
+    if not record:
+        return []
+    if record.get("workflowKind") == "Adjacent OFF":
+        if record.get("selectedDates"):
+            return list(record.get("selectedDates"))
+        adjacent = record.get("adjacentOff") or {}
+        st = record.get("startDate") or record.get("trainingDate")
+        en = record.get("endDate") or record.get("trainingDate")
+        dates = []
+        try:
+            if adjacent.get("before") and st:
+                dates.append((datetime.strptime(st, "%Y-%m-%d") - timedelta(days=1)).strftime("%Y-%m-%d"))
+            if adjacent.get("after") and en:
+                dates.append((datetime.strptime(en, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d"))
+        except Exception:
+            pass
+        return dates
+    st = record.get("startDate") or record.get("trainingDate")
+    en = record.get("endDate") or record.get("trainingDate")
+    return list(date_range(st, en)) if (st and en) else ([st] if st else [])
+
+
 def has_training_permission(user: dict, permission: str) -> bool:
     actor_id = clean_id(user.get("employeeId") or user.get("userId"))
     if actor_id == "50041":
@@ -117,8 +141,19 @@ def has_training_permission(user: dict, permission: str) -> bool:
     return bool((((access.get("pages") or {}).get("crew_training") or {}).get(permission)))
 
 
+def is_admin(user: dict) -> bool:
+    if not user:
+        return False
+    actor = clean_id(user.get("employeeId") or user.get("userId"))
+    return str(user.get("role") or "").lower() == "admin" or bool(user.get("isAdmin")) or actor in ["50041", "admin"]
+
+
 def is_training_hr(user: dict) -> bool:
     return has_training_permission(user, "approve")
+
+
+def can_manage_training(user: dict) -> bool:
+    return is_admin(user) or has_training_permission(user, "write") or has_training_permission(user, "approve") or is_training_hr(user)
 
 
 def hr_final_step():
@@ -461,7 +496,15 @@ def serialize_nomination(
     training_summary = training_financial_year_summary(
         record.get("employeeId"), record.get("startDate") or record.get("trainingDate")
     )
+    from crew_legacy.api.replacement import OFF_DUTIES, normalized_duty
+    date_duties = {}
+    for d in training_record_dates(record):
+        d_rec = employee_daily_collection.find_one({"employeeId": record.get("employeeId"), "date": d}) or {}
+        orig = d_rec.get("trainingOriginalAssignment") or d_rec.get("trainingAdjacentOffOriginalAssignment") or {}
+        duty_val = orig.get("assignedDuty") or d_rec.get("dutyAsPerLogbook") or d_rec.get("assignedDuty") or "General"
+        date_duties[d] = duty_val
     return {
+        "dateDuties": date_duties,
         "id": str(record["_id"]),
         "workflowKind": record.get("workflowKind") or "Training",
         "requestType": record.get("requestType") or "Assigned",
@@ -481,6 +524,8 @@ def serialize_nomination(
         "isShiftEmployee": bool(group_context.get("isShiftEmployee")),
         "isGroupSIC": bool(group_context.get("isGroupSIC")),
         "replacementRequired": bool(record.get("replacementRequired")),
+        "replacementRequiredDates": record.get("replacementRequiredDates") or [],
+        "dates": training_record_dates(record),
         "replacementEmployee": record.get("replacementEmployee"),
         "actingSICEmployee": record.get("actingSICEmployee"),
         "adjacentOff": record.get("adjacentOff") or {"before": False, "after": False},
@@ -539,6 +584,14 @@ def finalize_daily_records(record: dict):
         }
         original_duty = original_assignment.get("assignedDuty")
         group_name = original_assignment.get("groupName") or record.get("groupName")
+        from crew_legacy.api.replacement import OFF_DUTIES, normalized_duty
+        norm_orig = normalized_duty(original_duty)
+        is_off_day = norm_orig in OFF_DUTIES or norm_orig in ["OFF", "REST", "WO", "W-OFF", "W_OFF", "WEEKLY OFF", "WEEKLY_OFF", "C-OFF", "COMP-OFF", "NONE", ""] or not original_duty
+        if is_off_day:
+            date_rep_required = False
+        else:
+            rep_dates = set(record.get("replacementRequiredDates") or [])
+            date_rep_required = (date in rep_dates) if ("replacementRequiredDates" in record and record.get("replacementRequiredDates") is not None) else bool(record.get("replacementRequired"))
         operations.append(UpdateOne(
             {"employeeId": record.get("employeeId"), "date": date},
             {
@@ -546,12 +599,12 @@ def finalize_daily_records(record: dict):
                     "assignedDuty": "Training",
                     "actualStatus": "Training",
                     "trainingName": record.get("trainingName"),
-                    "replacementRequired": bool(record.get("replacementRequired")),
+                    "replacementRequired": date_rep_required,
                     "trainingFinal": {
                         "trainingName": record.get("trainingName"),
                         "status": "Approved",
                         "nominationId": str(record["_id"]),
-                        "replacementRequired": bool(record.get("replacementRequired")),
+                        "replacementRequired": date_rep_required,
                     },
                     "trainingOriginalAssignment": original_assignment,
                     "updatedOn": datetime.utcnow(),
@@ -571,7 +624,15 @@ def finalize_daily_records(record: dict):
             },
             upsert=True,
         ))
-        if record.get("replacementRequired") and replacement_id:
+        if is_off_day and replacement_id:
+            # Trainee is OFF on this date -> NEVER assign a replacement for an OFF day! Clean up if any exists
+            employee_daily_collection.delete_one({
+                "employeeId": replacement_id,
+                "date": date,
+                "replacementDuty": True,
+                "assignedDuty": "OFF",
+            })
+        if date_rep_required and replacement_id and not is_off_day:
             replacement_daily = employee_daily_collection.find_one({
                 "employeeId": replacement_id,
                 "date": date,
@@ -652,14 +713,64 @@ def finalize_daily_records(record: dict):
     if operations:
         employee_daily_collection.bulk_write(operations)
 
+    # USER REQUIREMENT: When replacement is assigned for training, insert duty notification so reporting officer can review/deny
+    if replacement_id:
+        from crew_legacy.api.replacement import controlling_officer_ids, duty_notification_collection
+        from zoneinfo import ZoneInfo
+        for d in training_dates:
+            d_rec = employee_daily_collection.find_one({"employeeId": replacement_id, "date": d}) or {}
+            if d_rec.get("replacementDuty") and d_rec.get("assignedDuty") not in ["OFF", "REST", "WO", "W-OFF", "W_OFF", "WEEKLY OFF", "WEEKLY_OFF", "C-OFF", "COMP-OFF", "NONE", ""]:
+                ctrl_ids = controlling_officer_ids(replacement_id, d, group_name)
+                existing_n = duty_notification_collection.find_one({
+                    "employeeId": replacement_id,
+                    "date": d,
+                    "assignedDuty": d_rec.get("assignedDuty"),
+                    "status": {"$in": ["Pending", "Accepted"]},
+                })
+                if not existing_n:
+                    try:
+                        cutoff = datetime.strptime(f"{d} 16:00:00", "%Y-%m-%d %H:%M:%S").replace(tzinfo=ZoneInfo("Asia/Kolkata")).astimezone(ZoneInfo("UTC")).replace(tzinfo=None)
+                    except Exception:
+                        cutoff = datetime.strptime(f"{d} 10:30:00", "%Y-%m-%d %H:%M:%S")
+                    duty_notification_collection.insert_one({
+                        "employeeId": replacement_id,
+                        "employeeName": replacement.get("name"),
+                        "assignedBy": clean_id(record.get("nominatedBy") or "ADMIN"),
+                        "controllerIds": ctrl_ids,
+                        "leaveId": str(record["_id"]),
+                        "date": d,
+                        "groupName": group_name,
+                        "assignedDuty": d_rec.get("assignedDuty"),
+                        "assignmentMode": record.get("replacementMode") or "normal",
+                        "status": "Pending",
+                        "decision": None,
+                        "autoAccepted": False,
+                        "reason": None,
+                        "source": "Training",
+                        "cutoffTime": cutoff,
+                        "createdAt": datetime.utcnow(),
+                        "decisionHistory": [],
+                    })
+
     adjacent_off = record.get("adjacentOff") or {}
     boundary_dates = []
     if adjacent_off.get("before"):
         boundary_dates.append((datetime.strptime(record.get("startDate"), "%Y-%m-%d") - timedelta(days=1)).strftime("%Y-%m-%d"))
     if adjacent_off.get("after"):
         boundary_dates.append((datetime.strptime(record.get("endDate"), "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d"))
+    
+    rep_dates = set(record.get("replacementRequiredDates") or [])
+    is_adj_workflow = record.get("workflowKind") == "Adjacent OFF"
+    group_name = record.get("groupName") or shift_group_context(record.get("employeeId")).get("groupName") or "Other Employees"
+
     for off_date in boundary_dates:
         current = employee_daily_collection.find_one({"employeeId": record.get("employeeId"), "date": off_date}) or {}
+        orig_assignment = current.get("trainingAdjacentOffOriginalAssignment") or {
+            "assignedDuty": current.get("assignedDuty"),
+            "actualStatus": current.get("actualStatus"),
+            "groupName": current.get("groupName"),
+        }
+        date_rep_required = (off_date in rep_dates) if ("replacementRequiredDates" in record and record.get("replacementRequiredDates") is not None) else bool(record.get("replacementRequired"))
         employee_daily_collection.update_one(
             {"employeeId": record.get("employeeId"), "date": off_date},
             {
@@ -671,22 +782,71 @@ def finalize_daily_records(record: dict):
                         "trainingName": record.get("trainingName"),
                         "status": "Approved",
                     },
-                    "trainingAdjacentOffOriginalAssignment": current.get("trainingAdjacentOffOriginalAssignment") or {
-                        "assignedDuty": current.get("assignedDuty"),
-                        "actualStatus": current.get("actualStatus"),
-                        "groupName": current.get("groupName"),
-                    },
+                    "trainingAdjacentOffOriginalAssignment": orig_assignment,
+                    "replacementRequired": date_rep_required,
                     "updatedOn": datetime.utcnow(),
                 },
                 "$setOnInsert": {
                     "employeeId": record.get("employeeId"), "name": record.get("employeeName"),
                     "designation": record.get("employeeDesignation"), "date": off_date,
                     "year": int(off_date[:4]), "month": int(off_date[5:7]),
-                    "groupName": record.get("groupName") or "Other Employees", "createdOn": datetime.utcnow(),
+                    "groupName": group_name, "createdOn": datetime.utcnow(),
                 },
             },
             upsert=True,
         )
+
+        if is_adj_workflow and date_rep_required and replacement_id:
+            rep_daily = employee_daily_collection.find_one({
+                "employeeId": replacement_id,
+                "date": off_date,
+            }) or {}
+            prev_rep_assignment = (
+                rep_daily.get("trainingReplacementPreviousAssignment")
+                if (rep_daily.get("trainingReplacement") or {}).get("nominationId") == str(record["_id"])
+                else {
+                    "assignedDuty": rep_daily.get("assignedDuty"),
+                    "groupName": rep_daily.get("groupName"),
+                }
+            )
+            orig_duty = (orig_assignment.get("assignedDuty") or "G") if orig_assignment.get("assignedDuty") not in ["OFF", "TR", "S"] else "G"
+            employee_daily_collection.update_one(
+                {"employeeId": replacement_id, "date": off_date},
+                {
+                    "$set": {
+                        "assignedDuty": orig_duty,
+                        "actualStatus": orig_duty,
+                        "groupName": group_name,
+                        "replacementDuty": True,
+                        "replacementMode": record.get("replacementMode") or "normal",
+                        "replacementFor": {
+                            "employeeId": record.get("employeeId"),
+                            "name": record.get("employeeName"),
+                            "reason": "Training Travel OFF",
+                        },
+                        "trainingReplacement": {
+                            "nominationId": str(record["_id"]),
+                            "trainingName": record.get("trainingName"),
+                            "traineeEmployeeId": record.get("employeeId"),
+                            "isAdjacentOff": True,
+                        },
+                        "replacementCreatedDaily": not bool(rep_daily),
+                        "trainingReplacementPreviousAssignment": prev_rep_assignment,
+                        "updatedOn": datetime.utcnow(),
+                    },
+                    "$setOnInsert": {
+                        "employeeId": replacement_id,
+                        "name": replacement.get("name"),
+                        "designation": replacement.get("designation"),
+                        "date": off_date,
+                        "year": int(off_date[:4]),
+                        "month": int(off_date[5:7]),
+                        "flag": "Training Replacement",
+                        "createdOn": datetime.utcnow(),
+                    },
+                },
+                upsert=True,
+            )
 
 
 def release_training_replacement(record: dict, replacement: dict | None = None):
@@ -696,10 +856,7 @@ def release_training_replacement(record: dict, replacement: dict | None = None):
     if not replacement_id:
         return
     nomination_id = str(record.get("_id") or "")
-    for date in date_range(
-        record.get("startDate") or record.get("trainingDate"),
-        record.get("endDate") or record.get("trainingDate"),
-    ):
+    for date in training_record_dates(record):
         daily = employee_daily_collection.find_one({
             "employeeId": replacement_id,
             "date": date,
@@ -1270,6 +1427,14 @@ def request_training_adjacent_off(
     if not chain:
         raise HTTPException(409, "Organization reporting hierarchy is not mapped")
     now = datetime.utcnow()
+    target_dates = []
+    try:
+        if adjacent_off["before"]:
+            target_dates.append((datetime.strptime(parent["startDate"], "%Y-%m-%d") - timedelta(days=1)).strftime("%Y-%m-%d"))
+        if adjacent_off["after"]:
+            target_dates.append((datetime.strptime(parent["endDate"], "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d"))
+    except Exception:
+        pass
     linked = {
         **{key: parent.get(key) for key in (
             "trainingName", "trainingLocation", "trainingDate", "startDate", "endDate",
@@ -1278,6 +1443,7 @@ def request_training_adjacent_off(
         )},
         "workflowKind": "Adjacent OFF",
         "parentNominationId": nomination_id,
+        "selectedDates": target_dates,
         "adjacentOff": adjacent_off,
         "replacementRequired": False,
         "replacementEmployee": None,
@@ -1344,8 +1510,9 @@ def get_training_replacement_candidates(
 
     trainee_id = clean_id(record.get("employeeId"))
     trainee_context = shift_group_context(trainee_id)
-    start_date = record.get("startDate") or record.get("trainingDate")
-    end_date = record.get("endDate") or start_date
+    target_dates = training_record_dates(record)
+    start_date = target_dates[0] if target_dates else (record.get("startDate") or record.get("trainingDate"))
+    end_date = target_dates[-1] if target_dates else (record.get("endDate") or start_date)
     employees = list(employee_collection.find(
         {
             "$and": [
@@ -1369,7 +1536,7 @@ def get_training_replacement_candidates(
     duties = list(employee_daily_collection.find(
         {
             "employeeId": {"$in": candidate_ids},
-            "date": {"$gte": start_date, "$lte": end_date},
+            "date": {"$in": target_dates} if target_dates else {"$gte": start_date, "$lte": end_date},
         },
         {
             "employeeId": 1,
@@ -1446,8 +1613,8 @@ def assign_training_replacement(
     record = training_nomination_history_collection.find_one({"_id": ObjectId(nomination_id)})
     if not record:
         raise HTTPException(404, "Training nomination not found")
-    if record.get("status") != "Approved" or record.get("workflowKind") == "Adjacent OFF":
-        raise HTTPException(409, "Replacement can only be assigned to an approved training nomination")
+    if record.get("status") != "Approved":
+        raise HTTPException(409, "Replacement can only be assigned to an approved training nomination or travel OFF request")
 
     actor_id = clean_id(user.get("employeeId") or user.get("userId"))
     is_admin = str(user.get("role") or "").lower() == "admin" or actor_id == "50041"
@@ -1782,8 +1949,8 @@ def approve_training(data: dict, user=Depends(get_authenticated_user)):
         )
         if not is_shift_employee and (replacement_required or acting_sic_id):
             raise HTTPException(409, f"{record.get('employeeName')} is not attached to an active shift group")
-        if replacement_required and not replacement_id:
-            raise HTTPException(400, f"Select a replacement for {record.get('employeeName')}")
+#         if replacement_required and not replacement_id:
+#             raise HTTPException(400, f"Select a replacement for {record.get('employeeName')}")
         if acting_sic_id and not is_group_sic:
             raise HTTPException(400, f"Acting SIC can only be assigned when the trainee is the group SIC")
         selected_ids = [value for value in dict.fromkeys([replacement_id, acting_sic_id]) if value]
@@ -1802,11 +1969,24 @@ def approve_training(data: dict, user=Depends(get_authenticated_user)):
         missing = [value for value in selected_ids if value not in selected_employees]
         if missing:
             raise HTTPException(404, f"Selected replacement employee not found: {', '.join(missing)}")
+        decision_rep_dates = decision.get("replacementRequiredDates")
+        if decision_rep_dates is not None:
+            final_rep_dates = list(dict.fromkeys(clean_id(d) for d in decision_rep_dates if clean_id(d)))
+            replacement_required = bool(final_rep_dates)
+        else:
+            if record.get("workflowKind") == "Adjacent OFF":
+                final_rep_dates = list(record.get("replacementRequiredDates") or record.get("selectedDates") or [])
+            else:
+                final_rep_dates = list(date_range(
+                    record.get("startDate") or record.get("trainingDate"),
+                    record.get("endDate") or record.get("trainingDate"),
+                )) if replacement_required else []
         record["_replacement_update"] = {
             "groupName": record.get("groupName") or group_context.get("groupName"),
             "isShiftEmployee": is_shift_employee,
             "isGroupSIC": is_group_sic,
             "replacementRequired": replacement_required,
+            "replacementRequiredDates": final_rep_dates,
             "replacementEmployee": (
                 employee_snapshot(selected_employees.get(replacement_id))
                 if replacement_required and replacement_id
@@ -2039,3 +2219,104 @@ def get_training_nomination_history(
         serialize_nomination(item, actor_id, user.get("role") == "admin")
         for item in data
     ]
+
+
+
+@router.put("/set-replacement-required/{nomination_id}")
+def set_training_replacement_required(nomination_id: str, data: dict, user=Depends(get_authenticated_user)):
+    if not ObjectId.is_valid(nomination_id):
+        raise HTTPException(400, "Invalid nomination")
+    record = training_nomination_history_collection.find_one({"_id": ObjectId(nomination_id)})
+    if not record:
+        record = training_nominations_collection.find_one({"_id": ObjectId(nomination_id)})
+    if not record:
+        raise HTTPException(404, "Training nomination not found")
+
+    user_role = str(user.get("role") or "").lower()
+    actor = clean_id(user.get("employeeId") or user.get("userId"))
+    is_administrator = is_admin(user) or actor in ["50041", "admin"]
+    chain_approvers = [clean_id(step.get("employeeId")) for step in (record.get("approvalChain") or []) if clean_id(step.get("employeeId"))]
+    is_approver = actor in chain_approvers
+    from crew_legacy.api.leave_api import get_my_role
+    my_role = get_my_role(user=user)
+    has_authority = is_administrator or can_manage_training(user) or is_approver or bool(my_role.get("isLeaveAuthority") or my_role.get("isSIC") or my_role.get("isDeptIC"))
+    if not has_authority:
+        raise HTTPException(403, "Administrator, reporting officer, or training management permission is required")
+
+    rep_dates_input = data.get("replacementRequiredDates")
+    single_date = clean_id(data.get("date"))
+    start_d = record.get("startDate") or record.get("trainingDate") or record.get("proposedStartDate")
+    end_d = record.get("endDate") or record.get("trainingDate") or record.get("proposedEndDate") or start_d
+    all_tr_dates = date_range(start_d, end_d) if (start_d and end_d) else ([start_d] if start_d else [])
+    if single_date and rep_dates_input is None:
+        current_dates = set(record.get("replacementRequiredDates") if "replacementRequiredDates" in record else (all_tr_dates if record.get("replacementRequired") else []))
+        if bool(data.get("replacementRequired")):
+            current_dates.add(single_date)
+        else:
+            current_dates.discard(single_date)
+        rep_dates_list = sorted(current_dates)
+        replacement_required = bool(rep_dates_list)
+    elif rep_dates_input is not None:
+        from crew_legacy.api.replacement import OFF_DUTIES, normalized_duty
+        raw_list = list(dict.fromkeys(clean_id(d) for d in rep_dates_input if clean_id(d)))
+        valid_dates = []
+        for d in raw_list:
+            t_daily = employee_daily_collection.find_one({"employeeId": record.get("employeeId"), "date": d}) or {}
+            t_orig = t_daily.get("trainingOriginalAssignment") or t_daily.get("trainingAdjacentOffOriginalAssignment") or {}
+            t_duty = t_orig.get("assignedDuty") or t_daily.get("dutyAsPerLogbook") or t_daily.get("assignedDuty")
+            if normalized_duty(t_duty) not in OFF_DUTIES and t_duty not in ["OFF", "REST", "WO", "W-OFF", "W_OFF", "WEEKLY OFF", "WEEKLY_OFF", "C-OFF", "COMP-OFF", "NONE", ""]:
+                valid_dates.append(d)
+        rep_dates_list = valid_dates
+        replacement_required = bool(rep_dates_list)
+    else:
+        rep_dates_list = None
+        replacement_required = bool(data.get("replacementRequired"))
+    replacement_id = clean_id(data.get("replacementEmployeeId"))
+
+    update_fields = {
+        "replacementRequired": replacement_required,
+        "updatedOn": datetime.utcnow(),
+    }
+    if rep_dates_list is not None:
+        update_fields["replacementRequiredDates"] = rep_dates_list
+
+    previous_replacement = record.get("replacementEmployee") or {}
+    if not replacement_required and clean_id(previous_replacement.get("employeeId")):
+        release_training_replacement(record, previous_replacement)
+        update_fields["replacementEmployee"] = None
+        update_fields["replacementMode"] = None
+    elif replacement_required and replacement_id:
+        replacement = employee_by_id(replacement_id)
+        if not replacement:
+            raise HTTPException(404, "Selected replacement employee was not found")
+        if clean_id(previous_replacement.get("employeeId")) and clean_id(previous_replacement.get("employeeId")) != replacement_id:
+            release_training_replacement(record, previous_replacement)
+        update_fields["replacementEmployee"] = employee_snapshot(replacement)
+        update_fields["replacementMode"] = clean_id(data.get("mode")) or "normal"
+
+    training_nomination_history_collection.update_one({"_id": record["_id"]}, {"$set": update_fields})
+    try:
+        training_nominations_collection.update_one({"_id": record["_id"]}, {"$set": update_fields})
+    except Exception:
+        pass
+    dates_list = training_record_dates(record)
+    for d in dates_list:
+        d_req = (d in rep_dates_list) if rep_dates_list is not None else replacement_required
+        update_doc = {
+            "replacementRequired": d_req,
+            "updatedOn": datetime.utcnow(),
+        }
+        if record.get("workflowKind") != "Adjacent OFF":
+            update_doc["trainingFinal.replacementRequired"] = d_req
+        employee_daily_collection.update_one(
+            {"employeeId": record.get("employeeId"), "date": d},
+            {"$set": update_doc}
+        )
+    if record.get("status") == "Approved":
+        finalize_daily_records({**record, **update_fields})
+
+    return {
+        "message": f"Training replacement requirement set to {'Required' if replacement_required else 'Not Required'}",
+        "replacementRequired": replacement_required,
+        "replacementEmployee": update_fields.get("replacementEmployee")
+    }

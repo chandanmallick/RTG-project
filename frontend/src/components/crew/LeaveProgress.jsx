@@ -4,18 +4,30 @@ import { Check, Clock3, X } from "lucide-react";
 export function leaveSteps(leave) {
   const terminal = ["Rejected", "Cancelled", "Withdrawn"].includes(leave.finalStatus);
   const chain = leave.approvalChain?.length ? leave.approvalChain : [
-    { name: leave.firstApproverNames?.join(", ") || "Shift-in-Charge", status: leave.sicApprovalStatus },
-    { name: leave.finalApproverNames?.join(", ") || "Final authority", status: leave.deptApprovalStatus },
+    { name: leave.firstApproverNames?.join(", ") || "Shift-in-Charge", status: leave.sicApprovalStatus, stage: "SIC" },
+    { name: leave.finalApproverNames?.join(", ") || "Final authority", status: leave.deptApprovalStatus, stage: "DIC" },
   ];
-  const steps = [{ name: "Application submitted", status: "Approved", actedOn: leave.createdOn }, ...chain.map(step => ({ ...step,
+  const steps = [{ name: "Application submitted", status: "Approved", actedOn: leave.createdOn }, ...chain.map((step, idx) => ({ ...step,
     name: step.name || step.names?.join(", ") || step.approverNames?.join(", ") || step.level || "Reporting authority",
+    stage: step.stage || (idx === 0 ? "SIC" : "DIC"),
   }))];
   const firstPending = steps.findIndex(step => !["Approved", "Forwarded", "Not Applicable"].includes(step.status));
-  return steps.map((step, index) => ({ ...step,
-    completed: ["Approved", "Forwarded", "Not Applicable"].includes(step.status) || (!terminal && leave.finalStatus === "Approved"),
-    current: !terminal && index === firstPending,
-    stopped: terminal && index === firstPending,
-  }));
+  return steps.map((step, index) => {
+    const repDecision = index === 0 ? null : (leave.replacementDecisionHistory || []).find((d) => {
+      if (step.stage && String(d.stage).toUpperCase() === String(step.stage).toUpperCase()) return true;
+      if (step.level && String(d.stage).toLowerCase() === String(step.level).toLowerCase()) return true;
+      if (d.decidedBy && step.actedBy && String(d.decidedBy) === String(step.actedBy)) return true;
+      if (index === 1 && String(d.stage).toUpperCase() === "SIC") return true;
+      if (index === 2 && String(d.stage).toUpperCase() === "DIC") return true;
+      return false;
+    });
+    return { ...step,
+      completed: ["Approved", "Forwarded", "Not Applicable"].includes(step.status) || (!terminal && leave.finalStatus === "Approved"),
+      current: !terminal && index === firstPending,
+      stopped: terminal && index === firstPending,
+      repDecision,
+    };
+  });
 }
 
 export default function LeaveProgress({ leave, compact = false }) {
@@ -31,7 +43,7 @@ export default function LeaveProgress({ leave, compact = false }) {
           </Box>
           <Box><Typography sx={{ fontSize: compact ? 10 : 10, color, fontWeight: 800, textTransform: "uppercase", letterSpacing: .8 }}>Step {index + 1} · {step.completed ? "Completed" : step.stopped ? leave.finalStatus : step.current ? "In progress" : "Upcoming"}</Typography>
             <Typography sx={{ fontSize: compact ? 11 : 14, mt: .3, fontWeight: 750, color: "#344057" }}>{step.name}</Typography>
-            {!compact && <Typography sx={{ fontSize: 12, mt: .5, color: "#7B8498" }}>{step.level}{step.actedOn || step.approvedOn ? ` · ${new Date(step.actedOn || step.approvedOn).toLocaleString()}` : ""}{step.comment || step.reason ? ` · ${step.comment || step.reason}` : ""}</Typography>}
+            {!compact && <Typography sx={{ fontSize: 12, mt: .5, color: "#7B8498" }}>{step.level}{step.actedOn || step.approvedOn ? ` · ${new Date(step.actedOn || step.approvedOn).toLocaleString()}` : ""}{step.comment || step.reason ? ` · ${step.comment || step.reason}` : ""}{step.repDecision && <Box component="span" sx={{ ml: 0.5, fontWeight: 750, color: step.repDecision.required ? "#D97706" : "#475569" }}>{` · Replacement: ${step.repDecision.required ? "Required" : "Not required"}${step.repDecision.decidedByName ? ` (by ${step.repDecision.decidedByName})` : ""}`}</Box>}</Typography>}
           </Box>
         </Stack>
       </Box>;

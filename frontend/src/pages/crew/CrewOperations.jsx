@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Alert, Box, Button, Chip, CircularProgress, Dialog, DialogContent, DialogTitle, Stack, Tooltip, Typography } from "@mui/material";
-import { ArrowLeftRight, ArrowRight, BarChart3, CalendarDays, CheckCircle2, ChevronRight, ClipboardList, GraduationCap, LockKeyhole, Medal, RefreshCw, Settings2, Umbrella, Users } from "lucide-react";
+import { ArrowLeftRight, ArrowRight, BarChart3, CalendarDays, CheckCircle2, ChevronRight, ClipboardList, GraduationCap, LockKeyhole, Medal, Plane, RefreshCw, Settings2, Umbrella, Users } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import AppShell from "../../components/layout/AppShell";
 import { useAuth } from "../../auth/AuthContext";
@@ -22,7 +22,7 @@ const stages = [
 const categories = [
   { id: "leave", title: "Leave", subtitle: "Holiday to final reporting", icon: Umbrella, color: "#0369A1", tint: "#F0F9FF", actions: {
     prepare: [{ key: "holidays", title: "Holiday calendar", note: "Create and maintain holidays", icon: CalendarDays, to: "/crew/training?section=holiday" }, { key: "specialEventRoster", title: "Special Event roster", note: "Block leave and review staffing", icon: Users, to: "/crew/roster" }],
-    request: [{ key: "applyLeave", title: "Apply leave", note: "Leave and station leave", icon: Umbrella, to: "/crew/leave?section=apply" }],
+    request: [{ key: "applyLeave", title: "Apply leave", note: "Leave and station leave", icon: Umbrella, to: "/crew/leave?section=apply" }, { key: "travelOff", title: "Travel OFF", note: "Training & Sports travel days", icon: Plane, to: "/crew/leave?section=travel" }],
     decide: [{ key: "leaveApproval", title: "Approve leave", note: "Requests awaiting decision", icon: CheckCircle2, to: "/crew/leave?section=pending" }, { key: "delegate", title: "Delegate approval", note: "Temporary approval power", icon: Settings2, to: "/crew/leave?section=delegation" }],
     cover: [{ key: "leaveReplacement", title: "Replacement", note: "Assign leave duty cover", icon: Users, to: "/crew/replacement?section=leave" }],
     track: [{ key: "leaveTracking", title: "Track leave", note: "Status, cancellation and history", icon: ClipboardList, to: "/crew/leave?section=tracking" }],
@@ -38,7 +38,7 @@ const categories = [
   } },
   { id: "sports", title: "Sports", subtitle: "Event to final reporting", icon: Medal, color: "#B45309", tint: "#FFF7ED", actions: {
     prepare: [{ key: "sportsEvents", title: "Sports programme", note: "Create and publish events", icon: Medal, to: "/crew/sports?section=events" }],
-    request: [{ key: "applySports", title: "Apply sports", note: "Apply and request related OFF", icon: Medal, to: "/crew/sports?section=apply" }],
+    request: [{ key: "applySports", title: "Apply sports", note: "Apply sports vacation", icon: Medal, to: "/crew/sports?section=apply" }, { key: "sportsTravel", title: "Sports Travel OFF", note: "Day-before/after travel OFF", icon: Plane, to: "/crew/sports?section=travel" }],
     decide: [{ key: "sportsApproval", title: "Sports & OFF approval", note: "Requests at your approval stage", icon: CheckCircle2, to: "/crew/sports?section=approval" }],
     cover: [{ key: "calendarCoverage", title: "Replacement", note: "Assign cover from duty calendar", icon: Users, to: "/crew/calendar?filter=coverage" }],
     track: [{ key: "sportsTracking", title: "Track sports", note: "Application status and history", icon: ClipboardList, to: "/crew/sports?section=approval" }],

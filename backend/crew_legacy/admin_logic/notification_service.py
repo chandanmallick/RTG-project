@@ -78,6 +78,22 @@ WORKFLOW_MAIL_DEFAULTS = {
         "subjectTemplate": DEFAULT_REPLACEMENT_SUBJECT,
         "bodyTemplate": DEFAULT_REPLACEMENT_BODY,
     },
+    "replacement_revoked": {
+        "label": "Replacement duty revoked / cancelled",
+        "enabled": True,
+        "subjectTemplate": "Replacement Duty Revoked / Cancelled - {shift_name} - {date}",
+        "bodyTemplate": (
+            "Dear {replacement_name},\n\n"
+            "Please be informed that your previously assigned replacement duty has been revoked / cancelled.\n\n"
+            "Employee: {replacement_person}\n"
+            "Revoked Duty: {shift_name}\n"
+            "Date: {date}\n"
+            "Originally in place of: {leave_person}\n"
+            "Group: {group_name}\n"
+            "Reason: {reason}\n\n"
+            "You are not required to perform this replacement duty. Please check the COMPASS Portal Duty Calendar for the updated schedule: {dashboard_url}"
+        ),
+    },
     "leave_applied": {
         "label": "Leave application submitted to SIC",
         "enabled": True,
@@ -88,13 +104,13 @@ WORKFLOW_MAIL_DEFAULTS = {
         "label": "Leave approved and forwarded by SIC",
         "enabled": True,
         "subjectTemplate": "Leave Approved and Forwarded by SIC",
-        "bodyTemplate": "Leave approved by SIC and forwarded for final approval.\n\nName: {employee_name}\nEmployee ID: {employee_id}\nDate: {leave_date}\nType: {leave_type}\nReason: {reason}",
+        "bodyTemplate": "Leave approved by SIC and forwarded for final approval.\n\nName: {employee_name}\nEmployee ID: {employee_id}\nDate: {leave_date}\nType: {leave_type}\nReason: {reason}\nRemarks: {comment}",
     },
     "leave_sic_rejected": {
         "label": "Leave rejected by SIC",
         "enabled": True,
         "subjectTemplate": "Leave Rejected by SIC",
-        "bodyTemplate": "Your leave has been rejected by SIC.\n\nDate: {leave_date}\nType: {leave_type}\nReason: {reason}\nComment: {comment}",
+        "bodyTemplate": "Your leave has been rejected by SIC.\n\nDate: {leave_date}\nType: {leave_type}\nReason: {reason}\nRejection Remarks: {comment}",
     },
     "leave_reporting_applied": {
         "label": "Non-shift leave submitted to Reporting Officer",
@@ -106,37 +122,37 @@ WORKFLOW_MAIL_DEFAULTS = {
         "label": "Non-shift leave forwarded in reporting hierarchy",
         "enabled": True,
         "subjectTemplate": "Leave forwarded for organization approval",
-        "bodyTemplate": "Leave for {employee_name} ({employee_id}) on {leave_date} awaits the next configured approval.\nReason: {reason}",
+        "bodyTemplate": "Leave for {employee_name} ({employee_id}) on {leave_date} awaits the next configured approval.\nReason: {reason}\nRemarks: {comment}",
     },
     "leave_reporting_rejected": {
         "label": "Non-shift leave rejected by Reporting Officer",
         "enabled": True,
         "subjectTemplate": "Leave Rejected by Reporting Officer",
-        "bodyTemplate": "Your leave has been rejected by the Reporting Officer.\n\nDate: {leave_date}\nType: {leave_type}\nReason: {reason}\nComment: {comment}",
+        "bodyTemplate": "Your leave has been rejected by the Reporting Officer.\n\nDate: {leave_date}\nType: {leave_type}\nReason: {reason}\nRejection Remarks: {comment}",
     },
     "leave_hierarchy_approved": {
         "label": "Non-shift leave finally approved",
         "enabled": True,
         "subjectTemplate": "Leave Finally Approved",
-        "bodyTemplate": "Leave has received final approval from the reporting hierarchy.\n\nName: {employee_name}\nEmployee ID: {employee_id}\nDate: {leave_date}\nType: {leave_type}\nReason: {reason}",
+        "bodyTemplate": "Leave has received final approval from the reporting hierarchy.\n\nName: {employee_name}\nEmployee ID: {employee_id}\nDate: {leave_date}\nType: {leave_type}\nReason: {reason}\nRemarks: {comment}",
     },
     "leave_hierarchy_rejected": {
         "label": "Non-shift leave rejected in reporting hierarchy",
         "enabled": True,
         "subjectTemplate": "Leave Rejected",
-        "bodyTemplate": "Your leave has been rejected in the reporting hierarchy.\n\nDate: {leave_date}\nType: {leave_type}\nReason: {reason}\nComment: {comment}",
+        "bodyTemplate": "Your leave has been rejected in the reporting hierarchy.\n\nDate: {leave_date}\nType: {leave_type}\nReason: {reason}\nRejection Remarks: {comment}",
     },
     "leave_dic_approved": {
         "label": "Leave finally approved by DIC",
         "enabled": True,
         "subjectTemplate": "Leave Finally Approved by DIC",
-        "bodyTemplate": "Leave has received final approval from the DIC.\n\nName: {employee_name}\nEmployee ID: {employee_id}\nDate: {leave_date}\nType: {leave_type}\nReason: {reason}",
+        "bodyTemplate": "Leave has received final approval from the DIC.\n\nName: {employee_name}\nEmployee ID: {employee_id}\nDate: {leave_date}\nType: {leave_type}\nReason: {reason}\nRemarks: {comment}",
     },
     "leave_dic_rejected": {
         "label": "Leave rejected by DIC",
         "enabled": True,
         "subjectTemplate": "Leave Rejected",
-        "bodyTemplate": "Your leave has been rejected.\n\nDate: {leave_date}\nType: {leave_type}\nReason: {reason}\nComment: {comment}",
+        "bodyTemplate": "Your leave has been rejected.\n\nDate: {leave_date}\nType: {leave_type}\nReason: {reason}\nRejection Remarks: {comment}",
     },
     "training_approved": {
         "label": "Training nomination finally approved",
@@ -484,6 +500,30 @@ def send_replacement_duty_email(to_list, values):
         body,
         sender=settings.get("sender"),
         enabled=bool(settings.get("enabled")) and bool(template.get("enabled")),
+    )
+
+
+def send_replacement_revoked_email(to_list, values):
+    settings = replacement_mail_settings()
+    template = workflow_mail_templates().get("replacement_revoked") or WORKFLOW_MAIL_DEFAULTS["replacement_revoked"]
+    rendered_dict = dict(values or {})
+    if not rendered_dict.get("dashboard_url"):
+        base_url = os.getenv("CREW_FRONTEND_URL", "http://10.3.230.60:3001").rstrip("/")
+        rendered_dict["dashboard_url"] = f"{base_url}/crew/dashboard"
+    if not rendered_dict.get("reason"):
+        rendered_dict["reason"] = "Duty revoked / roster reallocated by Administrator"
+    rendered_values = _TemplateValues({key: str(value or "") for key, value in rendered_dict.items()})
+    try:
+        subject = str(template["subjectTemplate"]).format_map(rendered_values)
+        body = str(template["bodyTemplate"]).format_map(rendered_values)
+    except (KeyError, ValueError):
+        return {"status": "failed", "recipientCount": len(_clean_recipients(to_list)), "error": "Mail template is invalid"}
+    return send_email(
+        to_list,
+        subject,
+        body,
+        sender=settings.get("sender"),
+        enabled=bool(settings.get("enabled")) and bool(template.get("enabled", True)),
     )
 
 

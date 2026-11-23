@@ -33,11 +33,18 @@ api.interceptors.request.use((config) => {
         requestUrl.includes("/replacement/roster/") ||
         requestUrl.includes("/special-events/")
       )
-    ) || (method === "DELETE" && requestUrl.includes("/replacement/assign/"));
+    ) || (
+      method === "DELETE" && (
+        requestUrl.includes("/replacement/assign/") ||
+        requestUrl.includes("/special-events/daily-assignment")
+      )
+    );
   // Training approval is a reporting-hierarchy workflow action, not a page edit.
   // The API verifies that the logged-in employee is the nomination's current
   // approver, so Crew Training Write access must not be required.
-  const isTrainingApproval = (["PUT", "DELETE"].includes(method) && /^\/training-assign\/nomination\/[^/]+$/.test(requestUrl)) || method === "POST" && (
+  const isTrainingApproval = (["PUT", "DELETE"].includes(method) && /^\/training-assign\/nomination\/[^/]+$/.test(requestUrl)) || ["POST", "PUT"].includes(method) && (
+    requestUrl.includes("/training-assign/set-replacement-required") ||
+    requestUrl.includes("/training-assign/assign-replacement") ||
     requestUrl.includes("/training-assign/approve") ||
     requestUrl.includes("/training-assign/reject") ||
     requestUrl.includes("/training-assign/request-adjacent-off/") ||
@@ -45,7 +52,7 @@ api.interceptors.request.use((config) => {
     requestUrl.includes("/training-assign/delegation")
   );
   // Leave approval is likewise controlled by the live SIC/DIC/reporting hierarchy.
-    const isLeaveApproval = method === "PUT" && (
+    const isLeaveApproval = (method === "PUT" || method === "POST") && (
     requestUrl.includes("/leave/cancel/") ||
     requestUrl.includes("/leave/withdraw/") ||
     requestUrl.includes("/leave/period/") ||
@@ -53,11 +60,13 @@ api.interceptors.request.use((config) => {
     requestUrl.includes("/leave/sic-forward-bulk") ||
     requestUrl.includes("/leave/sic-reject-bulk") ||
     requestUrl.includes("/leave/approve-bulk") ||
-    requestUrl.includes("/leave/reject-bulk")
+    requestUrl.includes("/leave/reject-bulk") ||
+    requestUrl.includes("/leave/review-replacement-requirement")
   );
   // As with leave/training, sports decisions use the current-stage authority
   // enforced by the server, including explicitly delegated approvers.
-  const isSportsApproval = method === "POST" && /^\/sports\/applications\/[^/]+\/(approve|reject)$/.test(requestUrl);
+  const isSportsApproval = (method === "POST" || method === "PUT") && (/^\/sports\/applications\/[^/]+\/(approve|reject|set-replacement-required|assign-replacement)$/.test(requestUrl) || requestUrl.includes("/sports/applications/"));
+  const isSportsApplication = method === "POST" && /^\/sports\/apply$/.test(requestUrl);
   // Calendar applications use the target workflow's server-side employee and
   // reporting-authority checks, independent of calendar layout edit access.
   const isSpecialEventManagement = ["POST", "PUT"].includes(method) && /^\/special-events(?:\/.*)?$/.test(requestUrl);
@@ -74,7 +83,7 @@ api.interceptors.request.use((config) => {
   // binds it to the authenticated employee, so page-level Write access is not
   // needed to choose a post-login landing page.
   const isLandingPagePreference = ["POST", "PUT"].includes(method) && requestUrl.includes("/profile/landing-page");
-  if (!["GET", "HEAD", "OPTIONS"].includes(method) && permissions[pageKeyForPath()]?.write === false && !isMasterDelete && !isDutyDecision && !isTrainingApproval && !isLeaveApproval && !isSportsApproval && !isLeaveApplication && !isLeaveBlockAdministration && !isSpecialEventManagement && !isTrainingMaster && !isSportsEventManagement && !isLandingPagePreference) {
+  if (!["GET", "HEAD", "OPTIONS"].includes(method) && permissions[pageKeyForPath()]?.write === false && !isMasterDelete && !isDutyDecision && !isTrainingApproval && !isLeaveApproval && !isSportsApproval && !isSportsApplication && !isLeaveApplication && !isLeaveBlockAdministration && !isSpecialEventManagement && !isTrainingMaster && !isSportsEventManagement && !isLandingPagePreference) {
     return Promise.reject(new Error("This page is read-only for your account."));
   }
   return config;

@@ -21,6 +21,7 @@ export const LANDING_PAGE_OPTIONS = [
   { value: "/crew/roster", label: "Duty Roster", pageKey: "crew_roster" },
   { value: "/crew/morning-presentation", label: "Morning Presentation Roster", pageKey: "crew_presentation" },
   { value: "/crew/replacement", label: "Replacement Management", pageKey: "crew_replacement", workflow: true },
+  { value: "/crew/sports", label: "Sports Application & Workflow", pageKey: "crew_sports", workflow: true },
   { value: "/crew/training", label: "Training Management", pageKey: "crew_training", workflow: true },
   { value: "/crew/threads", label: "Crew Notices", pageKey: "crew_threads" },
   { value: "/crew/reports", label: "Crew Reports", pageKey: "crew_reports", alwaysAvailable: true },

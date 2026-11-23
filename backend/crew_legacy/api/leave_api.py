@@ -1207,7 +1207,7 @@ def calculate_expiry(earned_date_str):
 @router.get("/my-role")
 def get_my_role(user=Depends(get_authenticated_user)):
 
-    emp_id = user["employeeId"].strip()
+    emp_id = str(user.get("employeeId") or user.get("userId") or "").strip()
     today = datetime.now().strftime("%Y-%m-%d")
 
     # Check if user is SIC
@@ -1302,6 +1302,42 @@ def get_leave_delegations(user=Depends(get_authenticated_user)):
     for record in records:
         delegator = employee_by_id(record.get("delegatorEmployeeId"))
         delegate = employee_by_id(record.get("delegateEmployeeId"))
+        resolved_replacement_decisions = []
+        for d in r.get("replacementDecisionHistory") or []:
+            dec = dict(d)
+            if not dec.get("decidedByName"):
+                by_id = dec.get("decidedBy")
+                if by_id:
+                    emp = employee_by_id(by_id)
+                    dec["decidedByName"] = emp.get("name") or by_id
+            if isinstance(dec.get("decidedOn"), datetime):
+                dec["decidedOn"] = dec["decidedOn"].isoformat()
+            resolved_replacement_decisions.append(dec)
+
+        if not resolved_replacement_decisions:
+            if r.get("sicApprovalStatus") == "Forwarded" and r.get("sicReplacementRequired") is not None:
+                sic_actor = r.get("sicApprovedBy")
+                emp = employee_by_id(sic_actor) if sic_actor else {}
+                sic_name = emp.get("name") or (first_approver_names[0] if first_approver_names else "Shift-in-Charge")
+                resolved_replacement_decisions.append({
+                    "stage": "SIC",
+                    "required": bool(r.get("sicReplacementRequired")),
+                    "decidedBy": sic_actor or "",
+                    "decidedByName": sic_name,
+                    "comment": r.get("sicComment") or "",
+                })
+            if r.get("deptApprovalStatus") == "Approved" and r.get("replacementRequired") is not None:
+                dic_actor = r.get("approvedBy")
+                emp = employee_by_id(dic_actor) if dic_actor else {}
+                dic_name = emp.get("name") or (final_approver_names[0] if final_approver_names else "Department In-Charge")
+                resolved_replacement_decisions.append({
+                    "stage": "DIC",
+                    "required": bool(r.get("dicReplacementRequired", r.get("replacementRequired"))),
+                    "decidedBy": dic_actor or "",
+                    "decidedByName": dic_name,
+                    "comment": r.get("approvalComment") or "",
+                })
+
         result.append({
             "id": str(record["_id"]), "delegatorEmployeeId": clean_id(record.get("delegatorEmployeeId")),
             "delegatorName": delegator.get("name") or record.get("delegatorEmployeeId"),
@@ -1536,6 +1572,42 @@ def get_leave_types(user=Depends(get_authenticated_user)):
             continue  # skip bad records
         if "".join(str(name).split()).upper() == "STATIONLEAVE":
             continue
+
+        resolved_replacement_decisions = []
+        for d in r.get("replacementDecisionHistory") or []:
+            dec = dict(d)
+            if not dec.get("decidedByName"):
+                by_id = dec.get("decidedBy")
+                if by_id:
+                    emp = employee_by_id(by_id)
+                    dec["decidedByName"] = emp.get("name") or by_id
+            if isinstance(dec.get("decidedOn"), datetime):
+                dec["decidedOn"] = dec["decidedOn"].isoformat()
+            resolved_replacement_decisions.append(dec)
+
+        if not resolved_replacement_decisions:
+            if r.get("sicApprovalStatus") == "Forwarded" and r.get("sicReplacementRequired") is not None:
+                sic_actor = r.get("sicApprovedBy")
+                emp = employee_by_id(sic_actor) if sic_actor else {}
+                sic_name = emp.get("name") or (first_approver_names[0] if first_approver_names else "Shift-in-Charge")
+                resolved_replacement_decisions.append({
+                    "stage": "SIC",
+                    "required": bool(r.get("sicReplacementRequired")),
+                    "decidedBy": sic_actor or "",
+                    "decidedByName": sic_name,
+                    "comment": r.get("sicComment") or "",
+                })
+            if r.get("deptApprovalStatus") == "Approved" and r.get("replacementRequired") is not None:
+                dic_actor = r.get("approvedBy")
+                emp = employee_by_id(dic_actor) if dic_actor else {}
+                dic_name = emp.get("name") or (final_approver_names[0] if final_approver_names else "Department In-Charge")
+                resolved_replacement_decisions.append({
+                    "stage": "DIC",
+                    "required": bool(r.get("dicReplacementRequired", r.get("replacementRequired"))),
+                    "decidedBy": dic_actor or "",
+                    "decidedByName": dic_name,
+                    "comment": r.get("approvalComment") or "",
+                })
 
         result.append({
             "label": name,
@@ -2354,6 +2426,42 @@ def get_all_leave(fromDate: str = Query(...), toDate: str = Query(...), user=Dep
     result = []
 
     for r in records:
+        resolved_replacement_decisions = []
+        for d in r.get("replacementDecisionHistory") or []:
+            dec = dict(d)
+            if not dec.get("decidedByName"):
+                by_id = dec.get("decidedBy")
+                if by_id:
+                    emp = employee_by_id(by_id)
+                    dec["decidedByName"] = emp.get("name") or by_id
+            if isinstance(dec.get("decidedOn"), datetime):
+                dec["decidedOn"] = dec["decidedOn"].isoformat()
+            resolved_replacement_decisions.append(dec)
+
+        if not resolved_replacement_decisions:
+            if r.get("sicApprovalStatus") == "Forwarded" and r.get("sicReplacementRequired") is not None:
+                sic_actor = r.get("sicApprovedBy")
+                emp = employee_by_id(sic_actor) if sic_actor else {}
+                sic_name = emp.get("name") or (first_approver_names[0] if first_approver_names else "Shift-in-Charge")
+                resolved_replacement_decisions.append({
+                    "stage": "SIC",
+                    "required": bool(r.get("sicReplacementRequired")),
+                    "decidedBy": sic_actor or "",
+                    "decidedByName": sic_name,
+                    "comment": r.get("sicComment") or "",
+                })
+            if r.get("deptApprovalStatus") == "Approved" and r.get("replacementRequired") is not None:
+                dic_actor = r.get("approvedBy")
+                emp = employee_by_id(dic_actor) if dic_actor else {}
+                dic_name = emp.get("name") or (final_approver_names[0] if final_approver_names else "Department In-Charge")
+                resolved_replacement_decisions.append({
+                    "stage": "DIC",
+                    "required": bool(r.get("dicReplacementRequired", r.get("replacementRequired"))),
+                    "decidedBy": dic_actor or "",
+                    "decidedByName": dic_name,
+                    "comment": r.get("approvalComment") or "",
+                })
+
         result.append({
             "id": str(r["_id"]),
             "name": r.get("name"),
@@ -2428,10 +2536,14 @@ def sic_forward_bulk(data: dict, user=Depends(get_authenticated_user)):
             raise HTTPException(409, f"Leave for {leave.get('date')} is no longer pending SIC review")
 
         sic_replacement_required = bool(item.get("replacementRequired", False))
+        user_emp_id = clean_id(user.get("employeeId"))
+        user_name = user.get("name") or user_emp_id
         decision = {
             "stage": "SIC",
             "required": sic_replacement_required,
-            "decidedBy": clean_id(user.get("employeeId")),
+            "decidedBy": user_emp_id,
+            "decidedByName": user_name,
+            "decidedByName": user.get("name") or clean_id(user.get("employeeId")),
             "decidedOn": datetime.utcnow(),
             "comment": comment,
         }
@@ -2523,7 +2635,7 @@ def sic_reject_bulk(data: dict, user=Depends(get_authenticated_user)):
     if not leave_ids:
         raise HTTPException(400, "No leave selected")
 
-    emp_id = user["employeeId"].strip()
+    emp_id = str(user.get("employeeId") or user.get("userId") or "").strip()
 
     updated = 0
 
@@ -2743,12 +2855,16 @@ def approve_leave_bulk(data: dict, user=Depends(get_authenticated_user)):
         )
         organization_route = is_organization_leave(leave)
         current_index, current_step = current_organization_approval(leave) if organization_route else (None, None)
+        user_emp_id = clean_id(user.get("employeeId"))
+        user_name = user.get("name") or user_emp_id
         decision = {
             "stage": current_step.get("level") if current_step else "DIC",
             "required": dic_replacement_required,
             "sicRequired": bool(leave.get("sicReplacementRequired", leave.get("replacementRequired", False))),
             "changedFromSIC": dic_replacement_required != bool(leave.get("sicReplacementRequired", leave.get("replacementRequired", False))),
-            "decidedBy": clean_id(user.get("employeeId")),
+            "decidedBy": user_emp_id,
+            "decidedByName": user_name,
+            "decidedByName": user.get("name") or clean_id(user.get("employeeId")),
             "decidedOn": datetime.utcnow(),
             "comment": comment,
         }
@@ -2978,6 +3094,145 @@ def reject_bulk(data: dict, user=Depends(get_authenticated_user)):
 # Get all list
 #######################################
 
+@router.post("/review-replacement-requirement")
+@router.put("/review-replacement-requirement")
+def review_replacement_requirement(data: dict, user=Depends(get_authenticated_user)):
+    """
+    Allows authorized officers (DIC, SIC, Admin, Leave Authority, or reporting officers)
+    to review and update whether replacement is required for specific leave dates or an entire leave.
+    Appends full audit tracking to replacementDecisionHistory and updates employee_daily_collection.
+    """
+    leave_ids = data.get("leaveIds") or []
+    dates = data.get("dates") or []
+    leave_group_id = data.get("leaveGroupId")
+    employee_id = clean_id(data.get("employeeId"))
+    leave_id = data.get("leaveId")
+
+    new_required = bool(data.get("replacementRequired"))
+    comment = clean_id(data.get("comment") or "")[:1000]
+    user_emp_id = clean_id(user.get("employeeId"))
+    user_name = user.get("name") or user_emp_id
+
+    query = None
+    if leave_ids:
+        query = {"_id": {"$in": [ObjectId(lid) for lid in leave_ids if ObjectId.is_valid(lid)]}}
+    elif leave_id and ObjectId.is_valid(leave_id):
+        query = {"_id": ObjectId(leave_id)}
+    elif leave_group_id and dates:
+        query = {"leaveGroupId": leave_group_id, "date": {"$in": dates}}
+    elif leave_group_id:
+        query = {"leaveGroupId": leave_group_id}
+    elif employee_id and dates:
+        query = {"employeeId": employee_id, "date": {"$in": dates}}
+
+    if not query:
+        raise HTTPException(400, "No leave records or dates specified")
+
+    targets = list(leave_request_collection.find(query))
+    if not targets:
+        raise HTTPException(404, "No matching leave records found")
+
+    user_role = str(user.get("role") or "").lower()
+    is_administrator = is_admin(user) or user_emp_id in ["50041", "admin"]
+
+    for leave in targets:
+        can_act = (
+            is_administrator or
+            user_role in ["dic", "dept_ic", "hod"] or
+            bool(user.get("isDeptIC")) or
+            bool(user.get("isLeaveAuthority")) or
+            can_authority_act(user, leave) or
+            can_dic_act(user, leave) or
+            can_sic_act(user, leave) or
+            user_emp_id in leave_authority_ids(leave)
+        )
+        if not can_act:
+            raise HTTPException(403, f"Not authorized to review replacement requirement for {leave.get('date')}")
+
+    updated_count = 0
+    now = datetime.utcnow()
+
+    for leave in targets:
+        prev_required = bool(leave.get("replacementRequired", leave.get("dicReplacementRequired", False)))
+        decision = {
+            "stage": "Review",
+            "required": new_required,
+            "previousRequired": prev_required,
+            "decidedBy": user_emp_id,
+            "decidedByName": user_name,
+            "decidedOn": now,
+            "comment": comment,
+            "isReview": True,
+        }
+
+        update_set = {
+            "replacementRequired": new_required,
+            "dicReplacementRequired": new_required,
+            "sicReplacementRequired": new_required,
+            "replacementMarked": new_required,
+            "updatedOn": now,
+        }
+
+        # If changed to Not Required, safely release existing replacement assignment if any
+        if not new_required and (leave.get("replacement") or leave.get("replacementEmployee")):
+            try:
+                from crew_legacy.api.replacement import release_replacement_assignment
+                release_replacement_assignment(
+                    leave,
+                    reason=comment or "Replacement marked not required during review",
+                    acted_by=user_emp_id,
+                    actor_role="Reviewer",
+                )
+                update_set["replacement"] = None
+                update_set["replacementEmployee"] = None
+                update_set["replacementAssigned"] = False
+                update_set["replacementAssignedName"] = None
+            except Exception as exc:
+                logger.warning(f"Could not release replacement assignment on review: {exc}")
+
+        leave_request_collection.update_one(
+            {"_id": leave["_id"]},
+            {
+                "$set": update_set,
+                "$push": {"replacementDecisionHistory": decision},
+            }
+        )
+
+        daily_update_doc = {
+            "$set": {
+                "replacementRequired": new_required,
+                "replacementMarked": new_required,
+                "updatedOn": now,
+            }
+        }
+        if not new_required:
+            daily_update_doc["$unset"] = {
+                "replacement": "",
+                "replacementEmployee": "",
+                "replacementAssigned": "",
+                "replacementAssignedName": "",
+            }
+        employee_daily_collection.update_one(
+            {"employeeId": leave["employeeId"], "date": leave["date"]},
+            daily_update_doc,
+        )
+
+        try:
+            from crew_legacy.services.google_sheet_sync_service import sync_leave_or_replacement_update
+            sync_leave_or_replacement_update(leave)
+        except Exception:
+            pass
+
+        updated_count += 1
+
+    return {
+        "success": True,
+        "updatedCount": updated_count,
+        "replacementRequired": new_required,
+        "message": f"Updated replacement requirement to {'Required' if new_required else 'Not Required'} for {updated_count} leave date(s).",
+    }
+
+
 @router.get("/list")
 def get_leave_list(
     completedFrom: Optional[str] = Query(None),
@@ -3096,6 +3351,42 @@ def get_leave_list(
             if value
         ]
 
+        resolved_replacement_decisions = []
+        for d in r.get("replacementDecisionHistory") or []:
+            dec = dict(d)
+            if not dec.get("decidedByName"):
+                by_id = dec.get("decidedBy")
+                if by_id:
+                    emp = employee_by_id(by_id)
+                    dec["decidedByName"] = emp.get("name") or by_id
+            if isinstance(dec.get("decidedOn"), datetime):
+                dec["decidedOn"] = dec["decidedOn"].isoformat()
+            resolved_replacement_decisions.append(dec)
+
+        if not resolved_replacement_decisions:
+            if r.get("sicApprovalStatus") == "Forwarded" and r.get("sicReplacementRequired") is not None:
+                sic_actor = r.get("sicApprovedBy")
+                emp = employee_by_id(sic_actor) if sic_actor else {}
+                sic_name = emp.get("name") or (first_approver_names[0] if first_approver_names else "Shift-in-Charge")
+                resolved_replacement_decisions.append({
+                    "stage": "SIC",
+                    "required": bool(r.get("sicReplacementRequired")),
+                    "decidedBy": sic_actor or "",
+                    "decidedByName": sic_name,
+                    "comment": r.get("sicComment") or "",
+                })
+            if r.get("deptApprovalStatus") == "Approved" and r.get("replacementRequired") is not None:
+                dic_actor = r.get("approvedBy")
+                emp = employee_by_id(dic_actor) if dic_actor else {}
+                dic_name = emp.get("name") or (final_approver_names[0] if final_approver_names else "Department In-Charge")
+                resolved_replacement_decisions.append({
+                    "stage": "DIC",
+                    "required": bool(r.get("dicReplacementRequired", r.get("replacementRequired"))),
+                    "decidedBy": dic_actor or "",
+                    "decidedByName": dic_name,
+                    "comment": r.get("approvalComment") or "",
+                })
+
         result.append({
             "id": str(r["_id"]),
             "leaveGroupId": r.get("leaveGroupId"),
@@ -3128,7 +3419,7 @@ def get_leave_list(
             "replacementEmployee": ({"employeeId": clean_id(replacement.get("employeeId")), "name": replacement.get("name")} if replacement else None),
             "sicReplacementRequired": r.get("sicReplacementRequired", r.get("replacementRequired", False)),
             "dicReplacementRequired": r.get("dicReplacementRequired"),
-            "replacementDecisionHistory": r.get("replacementDecisionHistory", []),
+            "replacementDecisionHistory": resolved_replacement_decisions,
             "rejectionHistory": r.get("rejectionHistory", []),
             "rejectionComment": r.get("rejectionComment"),
             "rejectedBy": r.get("rejectedBy"),
@@ -3228,7 +3519,43 @@ def get_duty_detailed(
                 ))
             )
 
-            result.append({
+            resolved_replacement_decisions = []
+        for d in r.get("replacementDecisionHistory") or []:
+            dec = dict(d)
+            if not dec.get("decidedByName"):
+                by_id = dec.get("decidedBy")
+                if by_id:
+                    emp = employee_by_id(by_id)
+                    dec["decidedByName"] = emp.get("name") or by_id
+            if isinstance(dec.get("decidedOn"), datetime):
+                dec["decidedOn"] = dec["decidedOn"].isoformat()
+            resolved_replacement_decisions.append(dec)
+
+        if not resolved_replacement_decisions:
+            if r.get("sicApprovalStatus") == "Forwarded" and r.get("sicReplacementRequired") is not None:
+                sic_actor = r.get("sicApprovedBy")
+                emp = employee_by_id(sic_actor) if sic_actor else {}
+                sic_name = emp.get("name") or (first_approver_names[0] if first_approver_names else "Shift-in-Charge")
+                resolved_replacement_decisions.append({
+                    "stage": "SIC",
+                    "required": bool(r.get("sicReplacementRequired")),
+                    "decidedBy": sic_actor or "",
+                    "decidedByName": sic_name,
+                    "comment": r.get("sicComment") or "",
+                })
+            if r.get("deptApprovalStatus") == "Approved" and r.get("replacementRequired") is not None:
+                dic_actor = r.get("approvedBy")
+                emp = employee_by_id(dic_actor) if dic_actor else {}
+                dic_name = emp.get("name") or (final_approver_names[0] if final_approver_names else "Department In-Charge")
+                resolved_replacement_decisions.append({
+                    "stage": "DIC",
+                    "required": bool(r.get("dicReplacementRequired", r.get("replacementRequired"))),
+                    "decidedBy": dic_actor or "",
+                    "decidedByName": dic_name,
+                    "comment": r.get("approvalComment") or "",
+                })
+
+        result.append({
                 "date": date_str,
                 "assignedDuty": rec.get("assignedDuty"),
                 "groupName": rec.get("groupName"),
@@ -3603,6 +3930,42 @@ def comp_off_history(
 
     for r in records:
 
+        resolved_replacement_decisions = []
+        for d in r.get("replacementDecisionHistory") or []:
+            dec = dict(d)
+            if not dec.get("decidedByName"):
+                by_id = dec.get("decidedBy")
+                if by_id:
+                    emp = employee_by_id(by_id)
+                    dec["decidedByName"] = emp.get("name") or by_id
+            if isinstance(dec.get("decidedOn"), datetime):
+                dec["decidedOn"] = dec["decidedOn"].isoformat()
+            resolved_replacement_decisions.append(dec)
+
+        if not resolved_replacement_decisions:
+            if r.get("sicApprovalStatus") == "Forwarded" and r.get("sicReplacementRequired") is not None:
+                sic_actor = r.get("sicApprovedBy")
+                emp = employee_by_id(sic_actor) if sic_actor else {}
+                sic_name = emp.get("name") or (first_approver_names[0] if first_approver_names else "Shift-in-Charge")
+                resolved_replacement_decisions.append({
+                    "stage": "SIC",
+                    "required": bool(r.get("sicReplacementRequired")),
+                    "decidedBy": sic_actor or "",
+                    "decidedByName": sic_name,
+                    "comment": r.get("sicComment") or "",
+                })
+            if r.get("deptApprovalStatus") == "Approved" and r.get("replacementRequired") is not None:
+                dic_actor = r.get("approvedBy")
+                emp = employee_by_id(dic_actor) if dic_actor else {}
+                dic_name = emp.get("name") or (final_approver_names[0] if final_approver_names else "Department In-Charge")
+                resolved_replacement_decisions.append({
+                    "stage": "DIC",
+                    "required": bool(r.get("dicReplacementRequired", r.get("replacementRequired"))),
+                    "decidedBy": dic_actor or "",
+                    "decidedByName": dic_name,
+                    "comment": r.get("approvalComment") or "",
+                })
+
         result.append({
             "id": str(r["_id"]),
             "employeeId": r.get("employeeId"),
@@ -3927,6 +4290,42 @@ def get_available_comp_off(employeeId: Optional[str] = Query(None), user=Depends
     for r in records:
         earned_date = r.get("earnedDate") or r.get("date")
         expiry_date = r.get("expiryDate") or (calculate_expiry(earned_date) if earned_date else None)
+        resolved_replacement_decisions = []
+        for d in r.get("replacementDecisionHistory") or []:
+            dec = dict(d)
+            if not dec.get("decidedByName"):
+                by_id = dec.get("decidedBy")
+                if by_id:
+                    emp = employee_by_id(by_id)
+                    dec["decidedByName"] = emp.get("name") or by_id
+            if isinstance(dec.get("decidedOn"), datetime):
+                dec["decidedOn"] = dec["decidedOn"].isoformat()
+            resolved_replacement_decisions.append(dec)
+
+        if not resolved_replacement_decisions:
+            if r.get("sicApprovalStatus") == "Forwarded" and r.get("sicReplacementRequired") is not None:
+                sic_actor = r.get("sicApprovedBy")
+                emp = employee_by_id(sic_actor) if sic_actor else {}
+                sic_name = emp.get("name") or (first_approver_names[0] if first_approver_names else "Shift-in-Charge")
+                resolved_replacement_decisions.append({
+                    "stage": "SIC",
+                    "required": bool(r.get("sicReplacementRequired")),
+                    "decidedBy": sic_actor or "",
+                    "decidedByName": sic_name,
+                    "comment": r.get("sicComment") or "",
+                })
+            if r.get("deptApprovalStatus") == "Approved" and r.get("replacementRequired") is not None:
+                dic_actor = r.get("approvedBy")
+                emp = employee_by_id(dic_actor) if dic_actor else {}
+                dic_name = emp.get("name") or (final_approver_names[0] if final_approver_names else "Department In-Charge")
+                resolved_replacement_decisions.append({
+                    "stage": "DIC",
+                    "required": bool(r.get("dicReplacementRequired", r.get("replacementRequired"))),
+                    "decidedBy": dic_actor or "",
+                    "decidedByName": dic_name,
+                    "comment": r.get("approvalComment") or "",
+                })
+
         result.append({
             "id": str(r["_id"]),
             "earnedDate": earned_date,

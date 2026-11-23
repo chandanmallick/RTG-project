@@ -67,6 +67,16 @@ const crewApi = {
   assignSportsReplacement: (applicationId, payload) => client.put(url(`/sports/applications/${applicationId}/assign-replacement`), payload, {
     allowCrossPageWrite: true,
   }).then((response) => response.data),
+  setSportsReplacementRequired: (applicationId, payload) => client.put(url(`/sports/applications/${applicationId}/set-replacement-required`), payload, {
+    allowCrossPageWrite: true,
+  }).then((response) => response.data),
+  setTrainingReplacementRequired: (nominationId, payload) => client.put(url(`/training-assign/set-replacement-required/${nominationId}`), payload, {
+    allowCrossPageWrite: true,
+  }).then((response) => response.data),
+  myApprovedTraining: () => client.get(url("/training-assign/my-approved")).then((response) => response.data),
+  requestTrainingAdjacentOff: (nominationId, payload) => client.post(url(`/training-assign/request-adjacent-off/${nominationId}`), payload).then((response) => response.data),
+  myApprovedSports: () => client.get(url("/sports/my-approved")).then((response) => response.data),
+  requestSportsAdjacentOff: (applicationId, payload) => client.post(url(`/sports/applications/${applicationId}/request-adjacent-off`), payload).then((response) => response.data),
 };
 
 export default crewApi;

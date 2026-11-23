@@ -9,7 +9,9 @@ from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, Request
+import uuid
 from crew_legacy.admin_logic.auth_utils import get_authenticated_user
+from crew_legacy.api.replacement import employee_id_filter
 from crew_legacy.database.database_mongo import (
     system_settings_collection,
     employee_collection,
@@ -18,10 +20,37 @@ from crew_legacy.database.database_mongo import (
     leave_request_collection,
     duty_switch_collection,
     roster_group_collection,
+    training_nomination_history_collection,
+    sports_application_collection,
+    replacement_roster_config_collection,
 )
 from crew_legacy.api.leave_api import is_admin, validate_block_dates, blocked_period_staffing, export_blocked_period_staffing
 
 router = APIRouter()
+
+
+def clean_id(value) -> str:
+    return str(value or "").strip()
+
+
+def date_range(start_str: str, end_str: str) -> list:
+    cur = datetime.strptime(start_str, "%Y-%m-%d")
+    end = datetime.strptime(end_str, "%Y-%m-%d")
+    out = []
+    while cur <= end:
+        out.append(cur.strftime("%Y-%m-%d"))
+        cur += timedelta(days=1)
+    return out
+
+
+def employee_snapshot(employee: dict | None) -> dict:
+    employee = employee or {}
+    eid = str(employee.get("employeeId") or employee.get("userId") or "").strip()
+    return {
+        "employeeId": eid,
+        "name": employee.get("name"),
+        "designation": employee.get("designation"),
+    }
 
 
 def is_shift_or_control_room_employee(eid: str, group_name: str, assigned_duty: str, emp_to_group: dict = None) -> bool:
@@ -347,18 +376,15 @@ def get_special_roster_matrix(
     leaves = list(leave_request_collection.find(leave_query))
     leave_by_emp_date = {(str(l.get("employeeId") or "").strip(), str(l.get("date") or "").strip()): l for l in leaves}
 
-    # Department list
-    dept_names = set()
-    for unit in organization_unit_collection.find({"unitType": "department", "isActive": {"$ne": False}}):
-        dname = str(unit.get("name") or "").strip()
-        if dname:
-            dept_names.add(dname)
-    for emp in employee_collection.find({"isActive": {"$ne": False}}, {"departments": 1, "department": 1}):
-        for value in (emp.get("departments") or [emp.get("department")]):
-            dname = str(value or "").strip()
-            if dname:
-                dept_names.add(dname)
-    departments = sorted(dept_names)
+    # Base 5 Departments in Options
+    BASE_5_DEPARTMENTS = [
+        "System Operation",
+        "Market Operation",
+        "SCADA",
+        "Communication",
+        "Contracts",
+    ]
+    departments = list(BASE_5_DEPARTMENTS)
 
     # Initialize grid: Rows = shifts/duty types, Columns = dates
     grid = {
@@ -379,7 +405,7 @@ def get_special_roster_matrix(
 
     # Shift-In-Charge employee IDs from roster groups
     sic_emp_ids = set()
-    for grp in roster_group_collection.find({}, {"shiftInCharge": 1}):
+    for grp in roster_group_collection.find({"isActive": True}, {"shiftInCharge": 1}):
         sic = grp.get("shiftInCharge") or {}
         sid = str(sic.get("employeeId") or "").strip()
         if sid:
@@ -423,13 +449,38 @@ def get_special_roster_matrix(
             from crew_legacy.services.replacement_roster_service import is_sic_place_vacant
             sic_place_vacant, he_is_sic, has_acting_sic = is_sic_place_vacant(l, d_rec)
             is_leave_sic = he_is_sic
-            is_marked_for_rep = bool(
-                is_leave_sic
-                or l.get("replacementRequired")
-                or l.get("sicReplacementRequired")
-                or l.get("dicReplacementRequired")
-                or d_rec.get("replacementRequired")
+
+            # USER REQUIREMENT:
+            # If SIC on leave and DIC didn't mark for replacement (or DIC has not yet approved),
+            # then replacement requirement should NOT be there!
+            # Simplified SIC replacement requirement:
+            is_approved = (
+                str(l.get("finalStatus") or "").strip().lower() == "approved"
+                or str(l.get("deptApprovalStatus") or "").strip().lower() == "approved"
             )
+
+            if he_is_sic:
+                # SIC on leave: replacement requirement exists ONLY if DIC approved AND explicitly marked replacement!
+                is_marked_for_rep = bool(
+                    is_approved and (
+                        l.get("dicReplacementRequired") is True
+                        or (l.get("replacementRequired") is True and l.get("dicReplacementRequired") is not False)
+                    )
+                )
+            else:
+                # Regular crew member on leave:
+                # Authoritative hierarchy: DIC/Review decision overrides advisory SIC recommendation!
+                if l.get("dicReplacementRequired") is not None:
+                    is_marked_for_rep = bool(is_approved and l.get("dicReplacementRequired"))
+                elif l.get("replacementRequired") is not None:
+                    is_marked_for_rep = bool(is_approved and l.get("replacementRequired"))
+                else:
+                    is_marked_for_rep = bool(
+                        is_approved and (
+                            l.get("sicReplacementRequired") is True
+                            or d_rec.get("replacementRequired") is True
+                        )
+                    )
 
             if norm_duty in ["MORNING", "M1", "M2"]:
                 shift_bucket = "Morning"
@@ -485,12 +536,258 @@ def get_special_roster_matrix(
                     "status": "Covered" if is_covered else "Uncovered",
                 })
 
+    # Also collect Training & Sports shift absences requiring replacement into replacement_requirements and grid
+    matrix_dates_window = date_range(start_date, end_date)
+    special_shift_absences = set()
+
+    for nom in training_nomination_history_collection.find({
+        "status": {"$in": ["Approved", "Pending Approval"]},
+        "$or": [
+            {"startDate": {"$lte": end_date}, "endDate": {"$gte": start_date}},
+            {"trainingDate": {"$gte": start_date, "$lte": end_date}},
+            {"selectedDates": {"$in": matrix_dates_window}},
+            {"replacementRequiredDates": {"$in": matrix_dates_window}},
+        ]
+    }):
+        n_eid = clean_id(nom.get("employeeId"))
+        is_adj = nom.get("workflowKind") == "Adjacent OFF"
+        if is_adj:
+            nom_dates = list(nom.get("selectedDates") or [])
+            if not nom_dates:
+                adj = nom.get("adjacentOff") or {}
+                if adj.get("before") and nom.get("startDate"):
+                    nom_dates.append((datetime.strptime(nom["startDate"], "%Y-%m-%d") - timedelta(days=1)).strftime("%Y-%m-%d"))
+                if adj.get("after") and nom.get("endDate"):
+                    nom_dates.append((datetime.strptime(nom["endDate"], "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d"))
+        else:
+            s_d = nom.get("startDate") or nom.get("trainingDate")
+            e_d = nom.get("endDate") or nom.get("trainingDate")
+            nom_dates = date_range(s_d, e_d) if (s_d and e_d) else []
+            adj = nom.get("adjacentOff") or {}
+            if adj.get("before") and s_d:
+                nom_dates.append((datetime.strptime(s_d, "%Y-%m-%d") - timedelta(days=1)).strftime("%Y-%m-%d"))
+            if adj.get("after") and e_d:
+                nom_dates.append((datetime.strptime(e_d, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d"))
+
+        rep_dates_set = set(nom.get("replacementRequiredDates") or [])
+        has_explicit = "replacementRequiredDates" in nom and nom.get("replacementRequiredDates") is not None
+        for ndate in nom_dates:
+            if not (start_date <= ndate <= end_date):
+                continue
+            d_rec = daily_by_emp_date.get((n_eid, ndate)) or {}
+            date_rep = (ndate in rep_dates_set) if has_explicit else bool(nom.get("replacementRequired"))
+            if not date_rep and d_rec.get("replacementRequired"):
+                date_rep = True
+
+            emp_group = str(nom.get("groupName") or d_rec.get("groupName") or emp_to_group.get(n_eid, "")).strip()
+            orig = d_rec.get("trainingOriginalAssignment") or d_rec.get("trainingAdjacentOffOriginalAssignment") or {}
+            raw_d = str(orig.get("assignedDuty") or d_rec.get("dutyAsPerLogbook") or "").strip()
+            if not raw_d or raw_d in ["Training", "TR", "OFF", "None"]:
+                raw_d = group_shift_on_date.get((emp_group, ndate)) or "Off"
+
+            norm_d = normalized_duty(raw_d)
+            if norm_d in ["MORNING", "M1", "M2"]:
+                shift_bucket = "Morning"
+            elif norm_d in ["EVENING", "E1", "E2"]:
+                shift_bucket = "Evening"
+            elif norm_d in ["NIGHT", "N1", "N2"]:
+                shift_bucket = "Night"
+            else:
+                continue
+
+            # Check if replacement is assigned for this training shift on this specific date
+            tr_rep_snap = None
+            rep_daily = next(
+                (r for r in records if clean_id(r.get("date")) == ndate and r.get("replacementDuty") and clean_id((r.get("replacementFor") or {}).get("employeeId")) == n_eid),
+                None
+            )
+            if rep_daily:
+                tr_rep_snap = {
+                    "employeeId": clean_id(rep_daily.get("employeeId")),
+                    "name": rep_daily.get("name"),
+                    "designation": rep_daily.get("designation"),
+                    "groupName": rep_daily.get("groupName") or "",
+                    "isActingSIC": bool(rep_daily.get("isActingSIC")),
+                }
+            elif d_rec.get("replacementAssigned") and d_rec.get("replacementEmployee"):
+                tr_rep_snap = d_rec.get("replacementEmployee")
+            elif not is_adj and len(nom_dates) == 1 and clean_id((nom.get("replacementEmployee") or {}).get("employeeId")):
+                tr_rep_snap = nom.get("replacementEmployee")
+            elif not is_adj and len(nom_dates) == 1 and clean_id((nom.get("actingSICEmployee") or {}).get("employeeId")):
+                tr_rep_snap = nom.get("actingSICEmployee")
+
+            is_covered = bool(tr_rep_snap)
+            is_nom_sic = bool(nom.get("isGroupSIC") or n_eid in sic_emp_ids or d_rec.get("isSIC"))
+
+            tr_entry = {
+                "employeeId": n_eid,
+                "name": str(nom.get("employeeName") or nom.get("name") or n_eid),
+                "designation": str(nom.get("employeeDesignation") or d_rec.get("designation") or "Staff"),
+                "department": str(nom.get("department") or d_rec.get("department") or ""),
+                "groupName": emp_group,
+                "assignedDuty": shift_bucket,
+                "leaveType": "Training",
+                "leaveId": str(nom["_id"]),
+                "onLeave": True,
+                "isSIC": is_nom_sic,
+                "isSicPlaceVacant": is_nom_sic and not is_covered,
+                "actingSIC": tr_rep_snap if (tr_rep_snap and tr_rep_snap.get("isActingSIC")) else nom.get("actingSICEmployee"),
+                "isShiftPerson": True,
+                "replacementRequired": date_rep,
+                "replacementMarked": date_rep,
+                "replacementAssigned": is_covered,
+                "replacement": tr_rep_snap,
+                "trainingName": nom.get("trainingName"),
+            }
+            if ndate in grid and "Leave" in grid[ndate]:
+                grid[ndate]["Leave"].append(tr_entry)
+            special_shift_absences.add((n_eid, ndate))
+
+            if date_rep:
+                replacement_requirements.append({
+                    "date": ndate,
+                    "shift": shift_bucket,
+                    "assignedDuty": shift_bucket,
+                    "employeeId": n_eid,
+                    "name": str(nom.get("employeeName") or n_eid),
+                    "groupName": emp_group,
+                    "leaveId": str(nom["_id"]),
+                    "leaveType": "Training",
+                    "trainingName": nom.get("trainingName"),
+                    "isSIC": is_nom_sic,
+                    "heIsSIC": is_nom_sic,
+                    "status": "Covered" if is_covered else "Uncovered",
+                })
+
+    for sp in sports_application_collection.find({
+        "status": {"$in": ["Approved", "Pending Approval"]},
+        "$or": [
+            {"startDate": {"$lte": end_date}, "endDate": {"$gte": start_date}},
+            {"selectedDates": {"$in": matrix_dates_window}},
+            {"replacementRequiredDates": {"$in": matrix_dates_window}},
+        ]
+    }):
+        sp_eid = clean_id(sp.get("employeeId"))
+        s_d = sp.get("startDate")
+        e_d = sp.get("endDate")
+        if sp.get("selectedDates") and isinstance(sp.get("selectedDates"), list):
+            sp_dates = list(sp.get("selectedDates"))
+        elif s_d and e_d:
+            sp_dates = date_range(s_d, e_d)
+        else:
+            sp_dates = []
+        adj = sp.get("adjacentOff") or {}
+        if not sp.get("parentApplicationId") and str(sp.get("workflowKind") or "").strip() != "Adjacent OFF":
+            if adj.get("before") and s_d:
+                sp_dates.append((datetime.strptime(s_d, "%Y-%m-%d") - timedelta(days=1)).strftime("%Y-%m-%d"))
+            if adj.get("after") and e_d:
+                sp_dates.append((datetime.strptime(e_d, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d"))
+
+        rep_dates_set = set(sp.get("replacementRequiredDates") or [])
+        has_explicit = "replacementRequiredDates" in sp and sp.get("replacementRequiredDates") is not None
+        for sdate_i in sp_dates:
+            if not (start_date <= sdate_i <= end_date):
+                continue
+            d_rec = daily_by_emp_date.get((sp_eid, sdate_i)) or {}
+            date_rep = (sdate_i in rep_dates_set) if has_explicit else bool(sp.get("replacementRequired"))
+            if not date_rep and not d_rec.get("replacementRequired"):
+                continue
+
+            emp_group = str(sp.get("groupName") or d_rec.get("groupName") or emp_to_group.get(sp_eid, "")).strip()
+            orig = d_rec.get("sportsOriginalAssignment") or d_rec.get("sportsAdjacentOffOriginalAssignment") or {}
+            raw_d = str(orig.get("assignedDuty") or d_rec.get("dutyAsPerLogbook") or "").strip()
+            if not raw_d or raw_d in ["Sports", "S", "OFF", "None"]:
+                raw_d = group_shift_on_date.get((emp_group, sdate_i)) or "Off"
+
+            norm_d = normalized_duty(raw_d)
+            if norm_d in ["MORNING", "M1", "M2"]:
+                shift_bucket = "Morning"
+            elif norm_d in ["EVENING", "E1", "E2"]:
+                shift_bucket = "Evening"
+            elif norm_d in ["NIGHT", "N1", "N2"]:
+                shift_bucket = "Night"
+            else:
+                continue
+
+            # Check if replacement is assigned for this sports shift on this specific date
+            sp_rep_snap = None
+            rep_daily = next(
+                (r for r in records if clean_id(r.get("date")) == sdate_i and r.get("replacementDuty") and clean_id((r.get("replacementFor") or {}).get("employeeId")) == sp_eid),
+                None
+            )
+            if rep_daily:
+                sp_rep_snap = {
+                    "employeeId": clean_id(rep_daily.get("employeeId")),
+                    "name": rep_daily.get("name"),
+                    "designation": rep_daily.get("designation"),
+                    "groupName": rep_daily.get("groupName") or "",
+                    "isActingSIC": bool(rep_daily.get("isActingSIC")),
+                }
+            elif d_rec.get("replacementAssigned") and d_rec.get("replacementEmployee"):
+                sp_rep_snap = d_rec.get("replacementEmployee")
+            elif len(sp_dates) == 1 and clean_id((sp.get("replacementEmployee") or {}).get("employeeId")):
+                sp_rep_snap = sp.get("replacementEmployee")
+
+            is_covered = bool(sp_rep_snap)
+            is_sp_sic = bool(sp_eid in sic_emp_ids or d_rec.get("isSIC"))
+
+            sp_entry = {
+                "employeeId": sp_eid,
+                "name": str(sp.get("employeeName") or sp_eid),
+                "designation": str(sp.get("employeeDesignation") or d_rec.get("designation") or "Staff"),
+                "department": str(sp.get("department") or d_rec.get("department") or ""),
+                "groupName": emp_group,
+                "assignedDuty": shift_bucket,
+                "leaveType": "Sports",
+                "leaveId": str(sp["_id"]),
+                "onLeave": True,
+                "isSIC": is_sp_sic,
+                "isSicPlaceVacant": is_sp_sic and not is_covered,
+                "actingSIC": sp_rep_snap if (sp_rep_snap and sp_rep_snap.get("isActingSIC")) else None,
+                "isShiftPerson": True,
+                "replacementRequired": date_rep,
+                "replacementMarked": date_rep,
+                "replacementAssigned": is_covered,
+                "replacement": sp_rep_snap,
+                "eventName": sp.get("eventName"),
+            }
+            if sdate_i in grid and "Leave" in grid[sdate_i]:
+                # USER REQUIREMENT: Deduplicate cards by (date, employeeId) so an employee on sports is never duplicated
+                existing_leave_idx = next((idx for idx, e in enumerate(grid[sdate_i]["Leave"]) if clean_id(e.get("employeeId")) == sp_eid), -1)
+                if existing_leave_idx >= 0:
+                    # Update existing card if current record has assignment
+                    if is_covered and not grid[sdate_i]["Leave"][existing_leave_idx].get("replacementAssigned"):
+                        grid[sdate_i]["Leave"][existing_leave_idx] = sp_entry
+                else:
+                    grid[sdate_i]["Leave"].append(sp_entry)
+            special_shift_absences.add((sp_eid, sdate_i))
+
+            if date_rep:
+                replacement_requirements.append({
+                    "date": sdate_i,
+                    "shift": shift_bucket,
+                    "assignedDuty": shift_bucket,
+                    "employeeId": sp_eid,
+                    "name": str(sp.get("employeeName") or sp_eid),
+                    "groupName": emp_group,
+                    "leaveId": str(sp["_id"]),
+                    "leaveType": "Sports",
+                    "eventName": sp.get("eventName"),
+                    "isSIC": is_sp_sic,
+                    "heIsSIC": is_sp_sic,
+                    "status": "Covered" if is_covered else "Uncovered",
+                })
+
     for r in records:
         rdate = str(r.get("date") or "").strip()
         if rdate not in grid:
             continue
         eid = str(r.get("employeeId") or "").strip()
-        on_leave = (eid, rdate) in leave_by_emp_date or r.get("leaveStatus") in ACTIVE_LEAVE_STATUSES
+        on_leave = (
+            (eid, rdate) in leave_by_emp_date
+            or r.get("leaveStatus") in ACTIVE_LEAVE_STATUSES
+            or (eid, rdate) in special_shift_absences
+        )
         if on_leave:
             continue
 
@@ -572,9 +869,10 @@ def export_special_roster_matrix_excel(
 ):
     """
     Export the Compact Duty Matrix (Alternate View) as a structured Excel spreadsheet (.xlsx).
+    Aligns shift timings, date headers, and places SIC on top of every shift cell.
     Includes:
-      - Sheet 1: Duty Matrix Grid (Shift vs Date calendar matrix with colors and personnel)
-      - Sheet 2: Chronological Allocation List (Tabular roster for reporting & analysis)
+      - Sheet 1: Duty Matrix Grid (Shift vs Date calendar matrix with colors, aligned shift timings, SIC on top)
+      - Sheet 2: Chronological Allocation List (Tabular roster for reporting & analysis with SIC sorted first)
       - Sheet 3: Leave Coverage Report (Leaves & replacement coverage details)
     """
     user = None
@@ -616,17 +914,69 @@ def export_special_roster_matrix_excel(
     FILL_NAVY = PatternFill(start_color="0F172A", end_color="0F172A", fill_type="solid")
     FILL_HEADER = PatternFill(start_color="1E293B", end_color="1E293B", fill_type="solid")
 
+    # Shift definitions and timings aligned exactly with frontend SHIFT_CONFIG
     SHIFT_STYLES = {
-        "Morning": {"label": "Morning Shift", "time": "06:00 - 14:00", "fill": "FEF3C7", "color": "92400E"},
-        "Evening": {"label": "Evening Shift", "time": "14:00 - 22:00", "fill": "E0F2FE", "color": "075985"},
-        "Night": {"label": "Night Shift", "time": "22:00 - 06:00", "fill": "F3E8FF", "color": "6B21A8"},
-        "General": {"label": "General Shift", "time": "09:00 - 17:30", "fill": "CCFBF1", "color": "115E59"},
-        "Off": {"label": "Weekly Off / Rest", "time": "Rest Day", "fill": "F1F5F9", "color": "475569"},
-        "Leave": {"label": "Leave / Uncovered", "time": "Leave Status", "fill": "FEE2E2", "color": "991B1B"},
+        "Morning": {
+            "label": "Morning Shift",
+            "time": "08:30 - 14:30",
+            "fill": "FEF3C7",
+            "color": "D97706",
+        },
+        "Evening": {
+            "label": "Evening Shift",
+            "time": "14:30 - 20:30",
+            "fill": "EDE9FE",
+            "color": "7C3AED",
+        },
+        "Night": {
+            "label": "Night Shift",
+            "time": "20:30 - 08:30",
+            "fill": "DBEAFE",
+            "color": "2563EB",
+        },
+        "General": {
+            "label": "General / Other",
+            "time": "09:00 - 17:30",
+            "fill": "F1F5F9",
+            "color": "475569",
+        },
+        "Off": {
+            "label": "Available / Rest Pool",
+            "time": "Off Duty / Rest",
+            "fill": "D1FAE5",
+            "color": "059669",
+        },
+        "Leave": {
+            "label": "Employees on Leave",
+            "time": "On Leave",
+            "fill": "FEE2E2",
+            "color": "DC2626",
+        },
     }
 
     THIN_SIDE = Side(border_style="thin", color="CBD5E1")
     CELL_BORDER = Border(left=THIN_SIDE, right=THIN_SIDE, top=THIN_SIDE, bottom=THIN_SIDE)
+
+    def person_sort_priority(p):
+        """
+        Sort priority:
+          0: Shift In-Charge (isSIC) at the very top
+          1: Acting SIC (isActingSIC)
+          2: Regular working crew members
+          3: Replacement duty members
+          4: Leaves
+        """
+        if p.get("isSIC"):
+            rank = 0
+        elif p.get("isActingSIC"):
+            rank = 1
+        elif p.get("onLeave"):
+            rank = 4
+        elif p.get("replacementDuty") or p.get("isReplacement"):
+            rank = 3
+        else:
+            rank = 2
+        return (rank, str(p.get("name") or "").lower())
 
     # ========================================================
     # SHEET 1: Matrix View (Compact Grid)
@@ -646,11 +996,19 @@ def export_special_roster_matrix_excel(
 
     ws1.merge_cells(start_row=2, start_column=1, end_row=2, end_column=total_cols)
     sub_cell = ws1.cell(row=2, column=1)
-    ev_title = f" · Event: {event.get('title')}" if event.get("title") else ""
-    grp_info = f" · Filter: {groupFilter}" if groupFilter and str(groupFilter).strip().lower() != "all" else ""
+    ev_title = f" | Event: {event.get('title')}" if event.get("title") else ""
+    grp_info = f" | Filter: {groupFilter}" if groupFilter and str(groupFilter).strip().lower() != "all" else ""
     s_dt = startDate or (dates[0] if dates else "")
     e_dt = endDate or (dates[-1] if dates else "")
-    sub_cell.value = f"Period: {s_dt} to {e_dt}{ev_title}{grp_info} · Generated on: {datetime.now().strftime('%d-%b-%Y %H:%M')}"
+    try:
+        s_formatted = datetime.strptime(s_dt, "%Y-%m-%d").strftime("%d-%b-%Y")
+    except Exception:
+        s_formatted = s_dt
+    try:
+        e_formatted = datetime.strptime(e_dt, "%Y-%m-%d").strftime("%d-%b-%Y")
+    except Exception:
+        e_formatted = e_dt
+    sub_cell.value = f"Period: {s_formatted} to {e_formatted}{ev_title}{grp_info}  |  Generated on: {datetime.now().strftime('%d-%b-%Y %H:%M')}"
     sub_cell.font = FONT_SUBTITLE
     sub_cell.fill = FILL_HEADER
     sub_cell.alignment = Alignment(horizontal="center", vertical="center")
@@ -670,9 +1028,9 @@ def export_special_roster_matrix_excel(
         day_name = day_names.get(d, "")
         try:
             dt = datetime.strptime(d, "%Y-%m-%d")
-            d_label = f"{dt.strftime('%d-%b-%Y')}\n({day_name})"
+            d_label = f"{dt.strftime('%d-%b-%Y')}\n{day_name}"
         except Exception:
-            d_label = f"{d}\n({day_name})"
+            d_label = f"{d}\n{day_name}"
 
         cell = ws1.cell(row=3, column=col_idx, value=d_label)
         cell.font = FONT_HEADER
@@ -705,6 +1063,9 @@ def export_special_roster_matrix_excel(
                 target_grp = str(groupFilter).strip().lower()
                 person_list = [p for p in person_list if (p.get("groupName") or "").strip().lower() == target_grp]
 
+            # USER REQUIREMENT: SIC should be on top!
+            person_list = sorted(person_list, key=person_sort_priority)
+
             lines = []
             for p in person_list:
                 pname = p.get("name") or p.get("employeeId") or "Staff"
@@ -714,7 +1075,7 @@ def export_special_roster_matrix_excel(
                     tag = "[SIC] "
                 elif p.get("isActingSIC"):
                     tag = "[Acting SIC] "
-                elif p.get("replacementDuty"):
+                elif p.get("replacementDuty") or p.get("isReplacement"):
                     rep_for = p.get("replacedEmployee") or (p.get("replacementFor") or {}).get("name") or ""
                     tag = f"[Repl for {rep_for}] " if rep_for else "[Repl] "
                 elif p.get("onLeave"):
@@ -722,9 +1083,9 @@ def export_special_roster_matrix_excel(
                 else:
                     tag = ""
 
-                lines.append(f"• {tag}{pname} ({pgrp})")
+                lines.append(f"\u2022 {tag}{pname} ({pgrp})")
 
-            cell_val = "\n".join(lines) if lines else "—"
+            cell_val = "\n".join(lines) if lines else "-"
             c = ws1.cell(row=curr_row, column=col_idx, value=cell_val)
             c.font = FONT_REGULAR if lines else FONT_MUTED
             c.alignment = Alignment(horizontal="left", vertical="top", wrap_text=True)
@@ -734,8 +1095,8 @@ def export_special_roster_matrix_excel(
         ws1.row_dimensions[curr_row].height = max(38, max_persons * 18 + 10)
         curr_row += 1
 
-    ws1.column_dimensions["A"].width = 18
-    ws1.column_dimensions["B"].width = 15
+    ws1.column_dimensions["A"].width = 22
+    ws1.column_dimensions["B"].width = 18
     for col_idx in range(3, len(dates) + 3):
         col_letter = get_column_letter(col_idx)
         ws1.column_dimensions[col_letter].width = 28
@@ -762,30 +1123,44 @@ def export_special_roster_matrix_excel(
     row_count_ws2 = 1
     for d in dates:
         day_name = day_names.get(d, "")
+        try:
+            d_formatted = datetime.strptime(d, "%Y-%m-%d").strftime("%d-%b-%Y")
+        except Exception:
+            d_formatted = d
+
         for shift_key in ["Morning", "Evening", "Night", "General", "Off", "Leave"]:
             s_conf = SHIFT_STYLES.get(shift_key, SHIFT_STYLES["General"])
-            for p in grid.get(d, {}).get(shift_key, []):
-                if groupFilter and str(groupFilter).strip().lower() != "all":
-                    if (p.get("groupName") or "").strip().lower() != str(groupFilter).strip().lower():
-                        continue
+            shift_persons = grid.get(d, {}).get(shift_key, [])
+            if groupFilter and str(groupFilter).strip().lower() != "all":
+                shift_persons = [p for p in shift_persons if (p.get("groupName") or "").strip().lower() == str(groupFilter).strip().lower()]
+
+            # USER REQUIREMENT: SIC should be on top in allocation list too!
+            shift_persons = sorted(shift_persons, key=person_sort_priority)
+
+            for p in shift_persons:
                 row_count_ws2 += 1
                 eid = p.get("employeeId") or ""
                 ename = p.get("name") or eid
                 edesig = p.get("designation") or ""
                 egrp = (p.get("groupName") or "").strip() or "General"
 
-                role_tag = "SIC" if p.get("isSIC") else ("Acting SIC" if p.get("isActingSIC") else ("Replacement" if p.get("replacementDuty") else ("On Leave" if p.get("onLeave") else "Normal")))
+                role_tag = (
+                    "SIC" if p.get("isSIC")
+                    else ("Acting SIC" if p.get("isActingSIC")
+                    else ("Replacement" if (p.get("replacementDuty") or p.get("isReplacement"))
+                    else ("On Leave" if p.get("onLeave") else "Normal")))
+                )
                 rep_details = ""
-                if p.get("replacementDuty"):
+                if p.get("replacementDuty") or p.get("isReplacement"):
                     rep_for = p.get("replacedEmployee") or (p.get("replacementFor") or {}).get("name") or ""
                     rep_details = f"Covering for {rep_for}" if rep_for else "Replacement duty"
                 elif p.get("onLeave"):
                     rep_details = f"Leave type: {p.get('leaveType') or 'Leave'}"
 
                 row_data = [
-                    d, day_name, shift_key, s_conf["time"], eid, ename, edesig,
+                    d_formatted, day_name, s_conf["label"], s_conf["time"], eid, ename, edesig,
                     egrp, role_tag, "Yes" if p.get("isSIC") else "No",
-                    "Yes" if p.get("replacementDuty") else "No", rep_details
+                    "Yes" if (p.get("replacementDuty") or p.get("isReplacement")) else "No", rep_details
                 ]
                 ws2.append(row_data)
                 for c_idx in range(1, len(row_data) + 1):
@@ -819,17 +1194,39 @@ def export_special_roster_matrix_excel(
         c.border = CELL_BORDER
 
     row_count_ws3 = 1
-    for req in data.get("replacementRequirements", []):
+    rep_reqs = data.get("replacementRequirements", [])
+    for rep in rep_reqs:
+        r_dt = rep.get("date") or ""
+        try:
+            r_dt_formatted = datetime.strptime(r_dt, "%Y-%m-%d").strftime("%d-%b-%Y")
+        except Exception:
+            r_dt_formatted = r_dt
+        r_day = day_names.get(r_dt, "")
+        r_eid = rep.get("employeeId") or ""
+        r_name = rep.get("name") or r_eid
+        r_grp = rep.get("groupName") or ""
+        r_shift = rep.get("shift") or rep.get("assignedDuty") or ""
+        r_ltype = rep.get("leaveType") or "Leave"
+        r_is_mand = "Yes" if rep.get("isSIC") else "Standard"
+        r_stat = rep.get("status") or "Uncovered"
+
+        # Check replacement person
+        rep_person_name = ""
+        for p in grid.get(r_dt, {}).get(r_shift, []):
+            if (p.get("replacementDuty") or p.get("isReplacement")) and (
+                (p.get("replacedEmployee") and p.get("replacedEmployee").lower() in r_name.lower()) or
+                (p.get("replacementFor") and str((p.get("replacementFor") or {}).get("employeeId") or "") == str(r_eid))
+            ):
+                rep_person_name = f"{p.get('name')} ({p.get('groupName') or 'Staff'})"
+                break
+
         row_count_ws3 += 1
-        r_date = req.get("date") or ""
-        r_day = day_names.get(r_date, "")
-        r_row = [
-            r_date, r_day, req.get("employeeId"), req.get("name"), req.get("groupName") or "General",
-            req.get("shift"), req.get("leaveType"), "Yes" if req.get("replacementRequired") else "Optional",
-            req.get("status"), (req.get("replacement") or {}).get("name") or (req.get("replacement") or {}).get("employeeName") or "—"
+        rep_row = [
+            r_dt_formatted, r_day, r_eid, r_name, r_grp,
+            r_shift, r_ltype, r_is_mand, r_stat, rep_person_name or "-"
         ]
-        ws3.append(r_row)
-        for c_idx in range(1, len(r_row) + 1):
+        ws3.append(rep_row)
+        for c_idx in range(1, len(rep_row) + 1):
             cell = ws3.cell(row=row_count_ws3, column=c_idx)
             cell.font = FONT_REGULAR
             cell.border = CELL_BORDER
@@ -840,17 +1237,15 @@ def export_special_roster_matrix_excel(
         col_letter = get_column_letter(col[0].column)
         ws3.column_dimensions[col_letter].width = max(max_len + 3, 14)
 
-    stream = BytesIO()
-    wb.save(stream)
+    output = BytesIO()
+    wb.save(output)
+    output.seek(0)
 
     filename = f"Duty_Matrix_{s_dt}_to_{e_dt}.xlsx"
     return Response(
-        content=stream.getvalue(),
+        content=output.getvalue(),
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={
-            "Content-Disposition": f"attachment; filename={filename}",
-            "Access-Control-Expose-Headers": "Content-Disposition",
-        },
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
 
@@ -961,7 +1356,7 @@ def sequential_allocate_department_manpower(
     preview_only = bool(payload.get("previewOnly", False))
     target_shifts = payload.get("targetShifts") or ["Morning", "Evening", "Night"]
     max_duties_per_person = int(payload.get("maxDutiesPerPerson") or 2)
-    allocation_type = str(payload.get("allocationType") or "both").strip() # "leave", "surge", "both"
+    allocation_type = str(payload.get("allocationType") or "leave").strip() # "leave", "surge", "both"
     leave_scope = str(payload.get("leaveScope") or "mandatory").strip() # "mandatory" (default) or "all"
     surge_per_shift = max(1, int(payload.get("surgePerShift") or 1))
 
@@ -1021,9 +1416,19 @@ def sequential_allocate_department_manpower(
     ]
     dept_cursor = employee_collection.find(dept_query)
     try:
-        dept_candidates = list(dept_cursor.sort([("seniorityOrder", 1), ("name", 1), ("employeeId", 1)]))
+        raw_dept_candidates = list(dept_cursor.sort([("seniorityOrder", 1), ("name", 1), ("employeeId", 1)]))
     except (TypeError, AttributeError):
-        dept_candidates = list(dept_cursor)
+        raw_dept_candidates = list(dept_cursor)
+
+    # USER REQUIREMENT: None option in 'Type of duty' and 'Category' excludes from sequence
+    dept_candidates = []
+    for cand in raw_dept_candidates:
+        dt = str(cand.get("dutyType") or "").strip().lower()
+        rc = cand.get("category")
+        cats = [str(x).strip().lower() for x in (rc if isinstance(rc, list) else [rc])] if rc else []
+        if dt in ["none", ""] or "none" in cats:
+            continue
+        dept_candidates.append(cand)
 
     # Helper to filter candidate lists by department
     def filter_candidates_by_dept(c_list, depts):
@@ -1113,7 +1518,7 @@ def sequential_allocate_department_manpower(
 
     # Shift-In-Charge employee IDs from roster groups
     sic_emp_ids = set()
-    for grp in roster_group_collection.find({}, {"shiftInCharge": 1}):
+    for grp in roster_group_collection.find({"isActive": True}, {"shiftInCharge": 1}):
         sic = grp.get("shiftInCharge") or {}
         sid = str(sic.get("employeeId") or "").strip()
         if sid:
@@ -1126,6 +1531,8 @@ def sequential_allocate_department_manpower(
             "finalStatus": {"$in": list(ACTIVE_LEAVE_STATUSES)},
             "$and": [
                 {"$or": [{"replacementAssigned": {"$ne": True}}, {"replacement": None}]},
+                {"replacementRequired": {"$ne": False}},
+                {"dicReplacementRequired": {"$ne": False}},
             ],
         }
         # If mandatory only: only fill leaves that have mandatory replacement requirement or SIC
@@ -1141,6 +1548,9 @@ def sequential_allocate_department_manpower(
         leaves = list(leave_request_collection.find(leave_query).sort("date", 1))
         emp_to_group = resolve_employee_group_map(records)
         for leave in leaves:
+            # Never re-allocate a leave that already has an active replacement assigned
+            if leave.get("replacementAssigned") or leave.get("replacement"):
+                continue
             eid = str(leave.get("employeeId") or "").strip()
             ldate = str(leave.get("date") or "").strip()
 
@@ -1187,13 +1597,36 @@ def sequential_allocate_department_manpower(
             sic_place_vacant, he_is_sic, has_acting_sic = is_sic_place_vacant(leave, d_rec)
             is_leave_sic = sic_place_vacant
 
+            is_approved = (
+                str(leave.get("finalStatus") or "").strip().lower() == "approved"
+                or str(leave.get("deptApprovalStatus") or "").strip().lower() == "approved"
+            )
+
             # USER REQUIREMENT:
-            # For Shift Engineers: if replacement is explicitly marked not required, skip.
-            # For SICs: an SIC post is mandatory in control room operations. If no acting SIC is assigned,
-            # it MUST be filled from the SIC pool; if acting SIC is assigned, it requires a Shift Engineer.
-            # SIC leaves must never be skipped when vacant!
-            if not he_is_sic and leave.get("replacementRequired") is False:
-                continue
+            # If SIC on leave and DIC didn't mark for replacement, replacement requirement shouldn't be there!
+            if he_is_sic:
+                sic_rep_needed = bool(
+                    is_approved and (
+                        leave.get("dicReplacementRequired") is True
+                        or (leave.get("replacementRequired") is True and leave.get("dicReplacementRequired") is not False)
+                    )
+                )
+                if not sic_rep_needed:
+                    continue
+            else:
+                if leave.get("dicReplacementRequired") is not None:
+                    eng_rep_needed = bool(is_approved and leave.get("dicReplacementRequired"))
+                elif leave.get("replacementRequired") is not None:
+                    eng_rep_needed = bool(is_approved and leave.get("replacementRequired"))
+                else:
+                    eng_rep_needed = bool(
+                        is_approved and (
+                            leave.get("sicReplacementRequired") is True
+                            or d_rec.get("replacementRequired") is True
+                        )
+                    )
+                if not eng_rep_needed:
+                    continue
 
             slots_to_fill.append({
                 "type": "leave_replacement",
@@ -1206,8 +1639,260 @@ def sequential_allocate_department_manpower(
                 "groupName": emp_group,
             })
 
-    # B) Surge coverage if requested or if no leaves found
-    if allocation_type == "surge" or (allocation_type == "both" and not slots_to_fill):
+        # Training vacancies requiring replacement
+        seq_dates_window = date_range(start_date, end_date)
+        nom_date_clause = {
+            "$or": [
+                {"startDate": {"$lte": end_date}, "endDate": {"$gte": start_date}},
+                {"trainingDate": {"$gte": start_date, "$lte": end_date}},
+                {"selectedDates": {"$in": seq_dates_window}},
+                {"replacementRequiredDates": {"$in": seq_dates_window}},
+            ]
+        }
+        nom_query = {
+            "status": {"$in": ["Approved", "Pending Approval"]},
+            "$and": [nom_date_clause],
+        }
+        if leave_scope == "mandatory":
+            nom_query["$and"].append({
+                "$or": [
+                    {"replacementRequired": True},
+                    {"isGroupSIC": True},
+                    {"employeeId": {"$in": list(sic_emp_ids)}},
+                ]
+            })
+
+        noms = list(training_nomination_history_collection.find(nom_query))
+        for nom in noms:
+            n_eid = clean_id(nom.get("employeeId"))
+            nom_id = str(nom.get("_id"))
+            is_adj = nom.get("workflowKind") == "Adjacent OFF"
+            if is_adj:
+                nom_dates = []
+                adj = nom.get("adjacentOff") or {}
+                if adj.get("before") and nom.get("startDate"):
+                    nom_dates.append((datetime.strptime(nom["startDate"], "%Y-%m-%d") - timedelta(days=1)).strftime("%Y-%m-%d"))
+                if adj.get("after") and nom.get("endDate"):
+                    nom_dates.append((datetime.strptime(nom["endDate"], "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d"))
+            else:
+                s_d = nom.get("startDate") or nom.get("trainingDate")
+                e_d = nom.get("endDate") or nom.get("trainingDate")
+                nom_dates = date_range(s_d, e_d) if (s_d and e_d) else []
+                adj = nom.get("adjacentOff") or {}
+                if adj.get("before") and s_d:
+                    nom_dates.append((datetime.strptime(s_d, "%Y-%m-%d") - timedelta(days=1)).strftime("%Y-%m-%d"))
+                if adj.get("after") and e_d:
+                    nom_dates.append((datetime.strptime(e_d, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d"))
+
+            rep_dates_set = set(nom.get("replacementRequiredDates") or [])
+            has_explicit_dates = "replacementRequiredDates" in nom and nom.get("replacementRequiredDates") is not None
+
+            for ndate in sorted(set(nom_dates)):
+                if not (start_date <= ndate <= end_date):
+                    continue
+
+                d_rec = daily_by_emp_date.get((n_eid, ndate)) or {}
+                already_covered = any(
+                    clean_id(other_r.get("date")) == ndate
+                    and other_r.get("replacementDuty")
+                    and clean_id((other_r.get("replacementFor") or {}).get("employeeId")) == n_eid
+                    for other_r in records
+                )
+                if already_covered:
+                    continue
+
+                date_rep_required = (ndate in rep_dates_set) if has_explicit_dates else bool(nom.get("replacementRequired"))
+                if not date_rep_required and not d_rec.get("replacementRequired"):
+                    continue
+
+                emp_group = (
+                    str(nom.get("groupName") or "").strip()
+                    or str(d_rec.get("groupName") or "").strip()
+                    or emp_to_group.get(n_eid, "")
+                )
+
+                orig = (
+                    d_rec.get("trainingOriginalAssignment")
+                    or d_rec.get("trainingAdjacentOffOriginalAssignment")
+                    or {}
+                )
+                raw_duty = str(orig.get("assignedDuty") or d_rec.get("dutyAsPerLogbook") or "").strip()
+                if not raw_duty or raw_duty.lower() == "none" or raw_duty in ["Training", "TR", "OFF"]:
+                    grp_duty = group_shift_on_date.get((emp_group, ndate))
+                    if grp_duty:
+                        raw_duty = grp_duty
+                    elif re.search(r"group[\s_-]*\d+", emp_group, re.I):
+                        raw_duty = "Off"
+                    else:
+                        raw_duty = "General"
+
+                if not is_shift_or_control_room_employee(n_eid, emp_group, raw_duty, emp_to_group):
+                    continue
+
+                norm = normalized_duty(raw_duty)
+                if norm in OFF_DUTY_VALUES or norm in OFF_DUTIES:
+                    continue
+
+                if norm in ["MORNING", "M1", "M2"]:
+                    s = "Morning"
+                elif norm in ["EVENING", "E1", "E2"]:
+                    s = "Evening"
+                elif norm in ["NIGHT", "N1", "N2"]:
+                    s = "Night"
+                else:
+                    continue
+
+                if target_shifts and s not in target_shifts:
+                    continue
+
+                is_nom_sic = bool(
+                    nom.get("isGroupSIC")
+                    or n_eid in sic_emp_ids
+                    or d_rec.get("isSIC")
+                    or group_sic_map.get(emp_group) == n_eid
+                )
+
+                slots_to_fill.append({
+                    "type": "training_replacement",
+                    "date": ndate,
+                    "shift": s,
+                    "record": nom,
+                    "nominationId": nom_id,
+                    "trainingName": nom.get("trainingName"),
+                    "applicantId": n_eid,
+                    "applicantName": str(nom.get("employeeName") or nom.get("name") or n_eid),
+                    "isSIC": is_nom_sic,
+                    "groupName": emp_group,
+                })
+
+        # Sports vacancies requiring replacement
+        sp_date_clause = {
+            "$or": [
+                {"startDate": {"$lte": end_date}, "endDate": {"$gte": start_date}},
+                {"selectedDates": {"$in": seq_dates_window}},
+                {"replacementRequiredDates": {"$in": seq_dates_window}},
+            ]
+        }
+        sp_query = {
+            "status": {"$in": ["Approved", "Pending Approval"]},
+            "$and": [sp_date_clause],
+        }
+        if leave_scope == "mandatory":
+            sp_query["$and"].append({
+                "$or": [
+                    {"replacementRequired": True},
+                    {"employeeId": {"$in": list(sic_emp_ids)}},
+                ]
+            })
+
+        sports_apps = list(sports_application_collection.find(sp_query))
+        for sp in sports_apps:
+            sp_eid = clean_id(sp.get("employeeId"))
+            sp_id = str(sp.get("_id"))
+            s_d = sp.get("startDate")
+            e_d = sp.get("endDate")
+            if sp.get("selectedDates") and isinstance(sp.get("selectedDates"), list):
+                sp_dates = list(sp.get("selectedDates"))
+            elif s_d and e_d:
+                sp_dates = date_range(s_d, e_d)
+            else:
+                sp_dates = []
+            adj = sp.get("adjacentOff") or {}
+            if not sp.get("parentApplicationId") and str(sp.get("workflowKind") or "").strip() != "Adjacent OFF":
+                if adj.get("before") and s_d:
+                    sp_dates.append((datetime.strptime(s_d, "%Y-%m-%d") - timedelta(days=1)).strftime("%Y-%m-%d"))
+                if adj.get("after") and e_d:
+                    sp_dates.append((datetime.strptime(e_d, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d"))
+
+            rep_dates_set = set(sp.get("replacementRequiredDates") or [])
+            has_explicit_dates = "replacementRequiredDates" in sp and sp.get("replacementRequiredDates") is not None
+
+            for sdate_i in sorted(set(sp_dates)):
+                if not (start_date <= sdate_i <= end_date):
+                    continue
+
+                d_rec = daily_by_emp_date.get((sp_eid, sdate_i)) or {}
+                already_covered = any(
+                    clean_id(other_r.get("date")) == sdate_i
+                    and other_r.get("replacementDuty")
+                    and clean_id((other_r.get("replacementFor") or {}).get("employeeId")) == sp_eid
+                    for other_r in records
+                )
+                if already_covered:
+                    continue
+
+                date_rep_required = (sdate_i in rep_dates_set) if has_explicit_dates else bool(sp.get("replacementRequired"))
+                if not date_rep_required and not d_rec.get("replacementRequired"):
+                    continue
+
+                emp_group = (
+                    str(sp.get("groupName") or "").strip()
+                    or str(d_rec.get("groupName") or "").strip()
+                    or emp_to_group.get(sp_eid, "")
+                )
+
+                orig = (
+                    d_rec.get("sportsOriginalAssignment")
+                    or d_rec.get("sportsAdjacentOffOriginalAssignment")
+                    or {}
+                )
+                raw_duty = str(orig.get("assignedDuty") or d_rec.get("dutyAsPerLogbook") or "").strip()
+                if not raw_duty or raw_duty.lower() == "none" or raw_duty in ["Sports", "S", "OFF"]:
+                    grp_duty = group_shift_on_date.get((emp_group, sdate_i))
+                    if grp_duty:
+                        raw_duty = grp_duty
+                    elif re.search(r"group[\s_-]*\d+", emp_group, re.I):
+                        raw_duty = "Off"
+                    else:
+                        raw_duty = "General"
+
+                if not is_shift_or_control_room_employee(sp_eid, emp_group, raw_duty, emp_to_group):
+                    continue
+
+                norm = normalized_duty(raw_duty)
+                if norm in OFF_DUTY_VALUES or norm in OFF_DUTIES:
+                    continue
+
+                if norm in ["MORNING", "M1", "M2"]:
+                    s = "Morning"
+                elif norm in ["EVENING", "E1", "E2"]:
+                    s = "Evening"
+                elif norm in ["NIGHT", "N1", "N2"]:
+                    s = "Night"
+                else:
+                    continue
+
+                if target_shifts and s not in target_shifts:
+                    continue
+
+                is_sp_sic = bool(
+                    sp_eid in sic_emp_ids
+                    or d_rec.get("isSIC")
+                    or group_sic_map.get(emp_group) == sp_eid
+                )
+
+                # USER REQUIREMENT: Deduplicate slots so an absent employee is NEVER allocated multiple replacements on the same date/shift!
+                slot_exists = any(
+                    x.get("date") == sdate_i and x.get("shift") == s and clean_id(x.get("applicantId")) == sp_eid
+                    for x in slots_to_fill
+                )
+                if not slot_exists:
+                    slots_to_fill.append({
+                        "type": "sports_replacement",
+                        "date": sdate_i,
+                        "shift": s,
+                        "record": sp,
+                        "applicationId": sp_id,
+                        "eventName": sp.get("eventName"),
+                        "applicantId": sp_eid,
+                        "applicantName": str(sp.get("employeeName") or sp.get("name") or sp_eid),
+                        "isSIC": is_sp_sic,
+                        "groupName": emp_group,
+                    })
+
+    # B) USER MANDATE: Only replacement marked should be allocated.
+    # Surge coverage is strictly disabled for sequential duty pools to prevent multiple unneeded allocations.
+    if allocation_type == "surge" and event_id:
         dates = []
         curr = datetime.strptime(start_date, "%Y-%m-%d")
         thru = datetime.strptime(end_date, "%Y-%m-%d")
@@ -1245,9 +1930,13 @@ def sequential_allocate_department_manpower(
         if not cid:
             continue
         try:
+            # Count duties across the active month up to simulation end_date
+            # to preserve duty leveling so candidates who already completed duties
+            # earlier in the month are not reset to 0.
+            month_start = f"{start_date[:7]}-01" if start_date else start_date
             completed_in_period = employee_daily_collection.count_documents({
                 "employeeId": cid,
-                "date": {"$gte": start_date, "$lte": end_date},
+                "date": {"$gte": month_start, "$lte": end_date},
                 "replacementDuty": True,
             })
         except Exception:
@@ -1307,10 +1996,12 @@ def sequential_allocate_department_manpower(
         total_cand_count = len(cand_pool)
 
         if total_cand_count > 0:
-            # USER REQUIREMENT: Complete Duty 1 for all available candidates, then move to Duty 2, Duty 3, etc.
+            # USER REQUIREMENT: Clear backlog first in strict A-Z order!
+            # Always start scanning from index 0 at each duty level (Duty 1, then Duty 2, etc.)
+            # so any earlier unallocated / backlog candidate (e.g., 0 duties) is always cleared first.
             for target_level in range(max_duties_per_person):
                 searched = 0
-                temp_ptr = ptr
+                temp_ptr = 0
                 while searched < total_cand_count:
                     candidate = cand_pool[temp_ptr]
                     cand_id = str(candidate.get("userId") or candidate.get("employeeId") or "").strip()
@@ -1342,6 +2033,23 @@ def sequential_allocate_department_manpower(
                             temp_ptr = next_ptr
                             continue
 
+                    # Check denial cooldown deferral (openly displayed in Duty Pool record)
+                    try:
+                        from crew_legacy.services.replacement_roster_service import count_allocations_since_denial
+                        cooldown_target = int(cfg.get("denialCooldownIterations") or 2)
+                        latest_denial = (
+                            duty_denial_collection.find_one({"employeeId": cand_id}, sort=[("createdAt", -1)])
+                            or duty_notification_collection.find_one({"employeeId": cand_id, "status": "Denied"}, sort=[("updatedAt", -1)])
+                        )
+                        if latest_denial:
+                            p_type = "SIC" if is_sic else "Shift Engineer"
+                            allocs_since = count_allocations_since_denial(cand_id, p_type, latest_denial) + len([a for a in allocations if (a.get("sourcePool") == "SIC Pool") == is_sic])
+                            if allocs_since < cooldown_target:
+                                temp_ptr = next_ptr
+                                continue
+                    except Exception:
+                        pass
+
                     # Verify candidate availability (not on leave, not active shift group member, not on active duty)
                     from crew_legacy.services.replacement_roster_service import is_candidate_available_on_date
                     cand_available, _ = is_candidate_available_on_date(cand_id, sdate, sshift)
@@ -1371,7 +2079,10 @@ def sequential_allocate_department_manpower(
 
             if not preview_only:
                 try:
-                    if slot_type == "leave_replacement" and slot["leave"]:
+                    cand_doc = employee_collection.find_one({"$or": [{"userId": cand_id}, {"employeeId": cand_id}]}) or {}
+                    cand_snapshot = employee_snapshot(cand_doc)
+
+                    if slot_type == "leave_replacement" and slot.get("leave"):
                         assign_replacement(
                             leave_id=str(slot["leave"]["_id"]),
                             payload={
@@ -1394,6 +2105,194 @@ def sequential_allocate_department_manpower(
                                     "actingSICFor": slot["leave"].get("name") or slot["leave"].get("employeeName"),
                                 }}
                             )
+                    elif slot_type == "training_replacement":
+                        cand_daily = employee_daily_collection.find_one({"employeeId": cand_id, "date": sdate}) or {}
+                        prev_assignment = {
+                            "assignedDuty": cand_daily.get("assignedDuty"),
+                            "actualStatus": cand_daily.get("actualStatus"),
+                            "groupName": cand_daily.get("groupName"),
+                        }
+                        rep_doc = {
+                            "assignedDuty": sshift,
+                            "actualStatus": sshift,
+                            "groupName": slot["groupName"],
+                            "replacementDuty": True,
+                            "replacementMode": "double",
+                            "replacementFor": {
+                                "employeeId": slot["applicantId"],
+                                "name": slot["applicantName"],
+                                "reason": "Training",
+                            },
+                            "trainingReplacement": {
+                                "nominationId": slot.get("nominationId"),
+                                "trainingName": slot.get("trainingName"),
+                                "traineeEmployeeId": slot["applicantId"],
+                            },
+                            "replacementCreatedDaily": not bool(cand_daily),
+                            "trainingReplacementPreviousAssignment": prev_assignment,
+                            "updatedOn": datetime.utcnow(),
+                        }
+                        if is_sic:
+                            rep_doc["isActingSIC"] = True
+                            rep_doc["actingSICGroup"] = slot["groupName"]
+                            rep_doc["actingSICFor"] = {
+                                "employeeId": slot["applicantId"],
+                                "name": slot["applicantName"],
+                                "nominationId": slot.get("nominationId"),
+                            }
+                            rep_doc["sic"] = {
+                                "employeeId": cand_id,
+                                "name": cand_name,
+                                "designation": cand_desig,
+                                "type": "temporary",
+                            }
+                            rep_doc["actingSICAssignedBy"] = actor_id
+                            rep_doc["actingSICAssignedOn"] = datetime.utcnow()
+
+                        employee_daily_collection.update_one(
+                            {"employeeId": cand_id, "date": sdate},
+                            {
+                                "$set": rep_doc,
+                                "$setOnInsert": {
+                                    "employeeId": cand_id,
+                                    "name": cand_name,
+                                    "designation": cand_desig,
+                                    "date": sdate,
+                                    "year": int(sdate[:4]),
+                                    "month": int(sdate[5:7]),
+                                    "flag": "Training Replacement",
+                                    "createdOn": datetime.utcnow(),
+                                }
+                            },
+                            upsert=True,
+                        )
+
+                        # Update trainee's daily record
+                        employee_daily_collection.update_one(
+                            {"employeeId": slot["applicantId"], "date": sdate},
+                            {"$set": {
+                                "replacementAssigned": True,
+                                "replacementEmployee": cand_snapshot,
+                                "updatedOn": datetime.utcnow(),
+                            }}
+                        )
+
+                        # Update nomination record
+                        nom_id = slot.get("nominationId")
+                        if nom_id and ObjectId.is_valid(nom_id):
+                            nom_update = {
+                                "replacementEmployee": cand_snapshot,
+                                "replacementMode": "double",
+                                "updatedOn": datetime.utcnow(),
+                            }
+                            if is_sic:
+                                nom_update["actingSICEmployee"] = cand_snapshot
+                            training_nomination_history_collection.update_one(
+                                {"_id": ObjectId(nom_id)},
+                                {
+                                    "$set": nom_update,
+                                    "$push": {
+                                        "replacementDecisionHistory": {
+                                            "groupName": slot["groupName"],
+                                            "isShiftEmployee": True,
+                                            "isGroupSIC": is_sic,
+                                            "replacementRequired": True,
+                                            "replacementEmployee": cand_snapshot,
+                                            "actingSICEmployee": cand_snapshot if is_sic else None,
+                                            "replacementMode": "double",
+                                            "actedBy": actor_id,
+                                            "approvalLevel": "Sequential roster allocation",
+                                            "actedAt": datetime.utcnow(),
+                                        }
+                                    }
+                                }
+                            )
+                    elif slot_type == "sports_replacement":
+                        cand_daily = employee_daily_collection.find_one({"employeeId": cand_id, "date": sdate}) or {}
+                        prev_assignment = {
+                            "assignedDuty": cand_daily.get("assignedDuty"),
+                            "actualStatus": cand_daily.get("actualStatus"),
+                            "groupName": cand_daily.get("groupName"),
+                        }
+                        rep_doc = {
+                            "assignedDuty": sshift,
+                            "actualStatus": sshift,
+                            "groupName": slot["groupName"],
+                            "replacementDuty": True,
+                            "replacementMode": "double",
+                            "replacementFor": {
+                                "employeeId": slot["applicantId"],
+                                "name": slot["applicantName"],
+                                "reason": "Sports",
+                            },
+                            "sportsReplacement": {
+                                "applicationId": slot.get("applicationId"),
+                                "eventName": slot.get("eventName"),
+                                "sportsEmployeeId": slot["applicantId"],
+                            },
+                            "replacementCreatedDaily": not bool(cand_daily),
+                            "sportsReplacementPreviousAssignment": prev_assignment,
+                            "updatedOn": datetime.utcnow(),
+                        }
+                        if is_sic:
+                            rep_doc["isActingSIC"] = True
+                            rep_doc["actingSICGroup"] = slot["groupName"]
+                            rep_doc["actingSICFor"] = {
+                                "employeeId": slot["applicantId"],
+                                "name": slot["applicantName"],
+                                "applicationId": slot.get("applicationId"),
+                            }
+                            rep_doc["sic"] = {
+                                "employeeId": cand_id,
+                                "name": cand_name,
+                                "designation": cand_desig,
+                                "type": "temporary",
+                            }
+                            rep_doc["actingSICAssignedBy"] = actor_id
+                            rep_doc["actingSICAssignedOn"] = datetime.utcnow()
+
+                        employee_daily_collection.update_one(
+                            {"employeeId": cand_id, "date": sdate},
+                            {
+                                "$set": rep_doc,
+                                "$setOnInsert": {
+                                    "employeeId": cand_id,
+                                    "name": cand_name,
+                                    "designation": cand_desig,
+                                    "date": sdate,
+                                    "year": int(sdate[:4]),
+                                    "month": int(sdate[5:7]),
+                                    "flag": "Sports Replacement",
+                                    "createdOn": datetime.utcnow(),
+                                }
+                            },
+                            upsert=True,
+                        )
+
+                        # Update sports person daily record
+                        employee_daily_collection.update_one(
+                            {"employeeId": slot["applicantId"], "date": sdate},
+                            {"$set": {
+                                "replacementAssigned": True,
+                                "replacementEmployee": cand_snapshot,
+                                "updatedOn": datetime.utcnow(),
+                            }}
+                        )
+
+                        # Update sports application
+                        app_id = slot.get("applicationId")
+                        if app_id and ObjectId.is_valid(app_id):
+                            sp_update = {
+                                "replacementEmployee": cand_snapshot,
+                                "replacementMode": "double",
+                                "updatedOn": datetime.utcnow(),
+                            }
+                            if is_sic:
+                                sp_update["actingSICEmployee"] = cand_snapshot
+                            sports_application_collection.update_one(
+                                {"_id": ObjectId(app_id)},
+                                {"$set": sp_update}
+                            )
                     else:
                         deploy_additional_manpower(
                             payload={
@@ -1406,6 +2305,56 @@ def sequential_allocate_department_manpower(
                             },
                             user=user,
                         )
+
+                    # Insert duty notification so reporting officers can review / deny sequential allocations
+                    try:
+                        from crew_legacy.api.replacement import controlling_officer_ids, duty_notification_collection
+                        from zoneinfo import ZoneInfo
+                        ctrl_ids = controlling_officer_ids(cand_id, sdate, slot.get("groupName") or "")
+                        existing_n = duty_notification_collection.find_one({
+                            "employeeId": cand_id,
+                            "date": sdate,
+                            "assignedDuty": sshift,
+                            "status": {"$in": ["Pending", "Accepted"]},
+                        })
+                        if not existing_n:
+                            try:
+                                cutoff = datetime.strptime(f"{sdate} 16:00:00", "%Y-%m-%d %H:%M:%S").replace(tzinfo=ZoneInfo("Asia/Kolkata")).astimezone(ZoneInfo("UTC")).replace(tzinfo=None)
+                            except Exception:
+                                cutoff = datetime.strptime(f"{sdate} 10:30:00", "%Y-%m-%d %H:%M:%S")
+                            duty_notification_collection.insert_one({
+                                "employeeId": cand_id,
+                                "employeeName": cand_name,
+                                "assignedBy": actor_id,
+                                "controllerIds": ctrl_ids,
+                                "leaveId": str(slot.get("leaveId") or slot.get("nominationId") or slot.get("applicationId") or ""),
+                                "date": sdate,
+                                "groupName": slot.get("groupName") or "",
+                                "assignedDuty": sshift,
+                                "assignmentMode": "double",
+                                "status": "Pending",
+                                "decision": None,
+                                "autoAccepted": False,
+                                "reason": None,
+                                "source": "Sequential Allocation",
+                                "cutoffTime": cutoff,
+                                "createdAt": datetime.utcnow(),
+                                "decisionHistory": [],
+                            })
+                            # Automatically dispatch notification email via Graph API to candidate and controllers
+                            try:
+                                from crew_legacy.api.replacement import dispatch_replacement_duty_mail
+                                dispatch_replacement_duty_mail(
+                                    employee_id=cand_id,
+                                    duty_date=sdate,
+                                    assigned_duty=sshift,
+                                    leave_or_slot=slot,
+                                    actor_id=actor_id,
+                                )
+                            except Exception as mail_err:
+                                print(f"Sequential duty email notification skipped for {cand_id}: {mail_err}")
+                    except Exception as notif_err:
+                        print(f"Failed to create duty notification for sequential slot: {notif_err}")
                 except Exception as assign_err:
                     unallocated_slots.append({
                         "date": sdate,
@@ -1440,26 +2389,30 @@ def sequential_allocate_department_manpower(
             })
 
     if not preview_only:
-        # Save both pointers in replacement config & system settings
-        replacement_roster_config_collection.update_one(
-            {"_id": "replacement-roster-config"},
-            {"$set": {
-                "nextSicIndex": curr_sic_ptr,
-                "nextShiftEngineerIndex": curr_se_ptr,
-                "updatedAt": datetime.utcnow(),
-            }},
-            upsert=True,
-        )
-        system_settings_collection.update_one(
-            {"type": "sequential_roster_pointer", "pool": "sic"},
-            {"$set": {"nextIndex": curr_sic_ptr, "updatedAt": datetime.utcnow()}},
-            upsert=True,
-        )
-        system_settings_collection.update_one(
-            {"type": "sequential_roster_pointer", "pool": "shift_engineer"},
-            {"$set": {"nextIndex": curr_se_ptr, "updatedAt": datetime.utcnow()}},
-            upsert=True,
-        )
+        # Recalculate backlog-first pointers in replacement config & system settings
+        try:
+            from crew_legacy.services.replacement_roster_service import recalculate_sequential_pointers
+            recalculate_sequential_pointers(start_date[:7] if start_date and len(start_date) >= 7 else None)
+        except Exception:
+            replacement_roster_config_collection.update_one(
+                {"_id": "replacement-roster-config"},
+                {"$set": {
+                    "nextSicIndex": curr_sic_ptr,
+                    "nextShiftEngineerIndex": curr_se_ptr,
+                    "updatedAt": datetime.utcnow(),
+                }},
+                upsert=True,
+            )
+            system_settings_collection.update_one(
+                {"type": "sequential_roster_pointer", "pool": "sic"},
+                {"$set": {"nextIndex": curr_sic_ptr, "updatedAt": datetime.utcnow()}},
+                upsert=True,
+            )
+            system_settings_collection.update_one(
+                {"type": "sequential_roster_pointer", "pool": "shift_engineer"},
+                {"$set": {"nextIndex": curr_se_ptr, "updatedAt": datetime.utcnow()}},
+                upsert=True,
+            )
 
     if not preview_only:
         try:
@@ -1664,5 +2617,288 @@ def get_special_roster_candidates(
         "total": len(candidates),
     }
 
+@router.delete("/daily-assignment")
+def delete_daily_assignment(
+    date: str = Query(..., description="Date of duty in YYYY-MM-DD"),
+    employeeId: str = Query(..., description="Employee ID whose assignment is to be removed"),
+    shift: Optional[str] = Query(None, description="Optional shift name"),
+    user=Depends(get_authenticated_user),
+):
+    """
+    Remove or revert a misfired, replacement, Acting SIC, or additional manpower duty assignment for an employee on a given date.
+    """
+    d_date = str(date or "").strip()
+    emp_id = str(employeeId or "").strip()
+    if not d_date or not emp_id:
+        raise HTTPException(400, "Both 'date' and 'employeeId' are required.")
 
+    actor = str(user.get("employeeId") or user.get("userId") or "ADMIN").strip()
+    actor_role = "Administrator" if str(user.get("role") or "").lower() == "admin" else "Reporting Officer"
 
+    # 1. If assigned as replacement for a leave:
+    leaves_replaced = list(leave_request_collection.find({
+        "date": d_date,
+        "$or": [
+            {"replacement.employeeId": emp_id},
+            {"replacementEmployee.employeeId": emp_id},
+        ]
+    }))
+    for l in leaves_replaced:
+        try:
+            from crew_legacy.api.replacement import release_replacement_assignment
+            release_replacement_assignment(l, "Assignment removed from matrix", actor, actor_role)
+        except Exception:
+            pass
+        leave_request_collection.update_one(
+            {"_id": l["_id"]},
+            {
+                "$set": {
+                    "replacement": None,
+                    "replacementEmployee": None,
+                    "replacementAssigned": False,
+                    "updatedOn": datetime.utcnow(),
+                }
+            }
+        )
+
+    # 2. If assigned as training replacement or acting SIC:
+    tr_replaced = list(training_nomination_history_collection.find({
+        "$or": [
+            {"replacementEmployee.employeeId": emp_id},
+            {"actingSICEmployee.employeeId": emp_id},
+        ],
+        "$and": [
+            {"$or": [
+                {"startDate": {"$lte": d_date}, "endDate": {"$gte": d_date}},
+                {"trainingDate": d_date},
+                {"replacementRequiredDates": d_date},
+                {"selectedDates": d_date},
+            ]}
+        ]
+    }))
+    for tr in tr_replaced:
+        try:
+            from crew_legacy.api.training_assignment import release_training_replacement
+            release_training_replacement(tr, tr.get("replacementEmployee") or {})
+        except Exception:
+            pass
+        training_nomination_history_collection.update_one(
+            {"_id": tr["_id"]},
+            {
+                "$set": {
+                    "replacementEmployee": None,
+                    "actingSICEmployee": None,
+                    "replacementMode": None,
+                    "updatedOn": datetime.utcnow(),
+                }
+            }
+        )
+
+    # 3. If assigned as sports replacement or acting SIC:
+    sp_replaced = list(sports_application_collection.find({
+        "$or": [
+            {"replacementEmployee.employeeId": emp_id},
+            {"actingSICEmployee.employeeId": emp_id},
+        ],
+        "$and": [
+            {"$or": [
+                {"startDate": {"$lte": d_date}, "endDate": {"$gte": d_date}},
+                {"replacementRequiredDates": d_date},
+                {"selectedDates": d_date},
+            ]}
+        ]
+    }))
+    for sp in sp_replaced:
+        sports_application_collection.update_one(
+            {"_id": sp["_id"]},
+            {
+                "$set": {
+                    "replacementEmployee": None,
+                    "actingSICEmployee": None,
+                    "updatedOn": datetime.utcnow(),
+                }
+            }
+        )
+
+    # 4. Cancel duty notifications and compensatory off for this employee on this date
+    from crew_legacy.database.database_mongo import duty_notification_collection, compensatory_off_collection
+    duty_notification_collection.delete_many({
+        "employeeId": emp_id,
+        "date": d_date,
+    })
+    compensatory_off_collection.delete_many({
+        "employeeId": employee_id_filter(emp_id),
+        "earnedDate": d_date,
+    })
+
+    # Clear replacement assignment on absent person's daily record
+    employee_daily_collection.update_many(
+        {
+            "date": d_date,
+            "$or": [
+                {"replacementEmployee.employeeId": emp_id},
+                {"actingSICEmployee.employeeId": emp_id},
+            ],
+        },
+        {
+            "$set": {
+                "replacementAssigned": False,
+                "replacementEmployee": None,
+                "actingSICEmployee": None,
+                "updatedOn": datetime.utcnow(),
+            }
+        }
+    )
+
+    # 5. Handle employee_daily_collection:
+    daily = employee_daily_collection.find_one({"employeeId": employee_id_filter(emp_id), "date": d_date})
+    emp_meta = employee_collection.find_one({"$or": [{"userId": emp_id}, {"employeeId": emp_id}]}) or {}
+    emp_group = emp_meta.get("groupName") or (daily or {}).get("groupName") or ""
+
+    if daily:
+        is_created_for_rep = bool(
+            daily.get("replacementCreatedDaily")
+            or daily.get("additionalManpower")
+            or emp_group in ["Other Employees", "", "None"]
+            or daily.get("groupName") == "Other Employees"
+        )
+
+        prev = (
+            daily.get("sportsReplacementPreviousAssignment")
+            or daily.get("trainingReplacementPreviousAssignment")
+            or daily.get("previousAssignment")
+            or {}
+        )
+        prev_duty = prev.get("assignedDuty") or daily.get("dutyAsPerLogbook")
+
+        if is_created_for_rep and not prev_duty:
+            employee_daily_collection.delete_one({"_id": daily["_id"]})
+        else:
+            restore_duty = prev_duty or "OFF"
+            employee_daily_collection.update_one(
+                {"_id": daily["_id"]},
+                {
+                    "$set": {
+                        "assignedDuty": restore_duty,
+                        "actualStatus": restore_duty,
+                        "replacementDuty": False,
+                        "additionalManpower": False,
+                        "isActingSIC": False,
+                        "updatedOn": datetime.utcnow(),
+                    },
+                    "$unset": {
+                        "replacementFor": "",
+                        "actingSICFor": "",
+                        "actingSICGroup": "",
+                        "sportsReplacement": "",
+                        "trainingReplacement": "",
+                        "sic": "",
+                        "replacementMode": "",
+                        "actingSICFor": "",
+                        "actingSICGroup": "",
+                        "sic": "",
+                        "replacementMode": "",
+                        "eventReason": "",
+                        "specialEventId": "",
+                        "trainingReplacement": "",
+                        "sportsReplacement": "",
+                        "trainingReplacementPreviousAssignment": "",
+                    }
+                }
+            )
+
+    # 5b. Automatically send revocation email if a replacement / acting duty was removed
+    try:
+        if daily and (daily.get("replacementDuty") or daily.get("additionalManpower") or daily.get("isActingSIC")):
+            from crew_legacy.api.replacement import employee_by_id, mail_address, replacement_mail_recipients, display_shift_name
+            from crew_legacy.admin_logic.notification_service import send_replacement_revoked_email
+            revoked_emp = employee_by_id(emp_id) or emp_meta
+            rep_for_obj = daily.get("replacementFor") or daily.get("actingSICFor") or {}
+            leave_stub = {
+                "employeeId": rep_for_obj.get("employeeId") if isinstance(rep_for_obj, dict) else "",
+                "name": (rep_for_obj.get("name") if isinstance(rep_for_obj, dict) else str(rep_for_obj or "Shift Duty")) or "Shift Duty",
+                "groupName": daily.get("groupName") or "",
+            }
+            rev_recipients, _, _ = replacement_mail_recipients(revoked_emp, leave_stub, d_date, leave_stub["groupName"])
+            emp_email = mail_address(revoked_emp)
+            if emp_email and emp_email.lower() not in [r.lower() for r in rev_recipients]:
+                rev_recipients.insert(0, emp_email)
+            if rev_recipients:
+                try:
+                    dt_disp = datetime.strptime(d_date, "%Y-%m-%d")
+                    disp_date = f"{dt_disp.strftime('%d-%b-%Y')}, {dt_disp.strftime('%A')}"
+                except Exception:
+                    disp_date = d_date
+                rev_desig = revoked_emp.get("designation") or ""
+                rev_res = send_replacement_revoked_email(
+                    rev_recipients,
+                    {
+                        "replacement_name": revoked_emp.get("name") or emp_id,
+                        "replacement_person": f"{revoked_emp.get('name') or emp_id} ({rev_desig or 'Staff'}, Employee ID {emp_id})",
+                        "shift_name": display_shift_name(shift or daily.get("assignedDuty") or "Shift"),
+                        "date": disp_date,
+                        "leave_person": leave_stub["name"],
+                        "group_name": leave_stub["groupName"] or "Shift Group",
+                        "reason": f"Duty assignment revoked by {actor}",
+                    },
+                )
+                from crew_legacy.database.database_mongo import duty_notification_collection, duty_denial_collection
+                cancellation_record = {
+                    **(rev_res or {}),
+                    "attemptedAt": datetime.utcnow(),
+                    "recipients": rev_recipients,
+                    "recipientCount": len(rev_recipients),
+                    "reason": f"Duty assignment revoked by {actor}",
+                    "triggeredBy": actor,
+                }
+                duty_notification_collection.update_many(
+                    {"employeeId": emp_id, "date": d_date},
+                    {"$set": {"cancellationMailDelivery": cancellation_record, "mailDelivery": cancellation_record, "status": "Cancelled"}}
+                )
+                duty_denial_collection.update_many(
+                    {"employeeId": emp_id, "date": d_date},
+                    {"$set": {"cancellationMailDelivery": cancellation_record, "mailDelivery": cancellation_record}}
+                )
+    except Exception as rev_mail_err:
+        print(f"Revocation email skipped for {emp_id} on {d_date}: {rev_mail_err}")
+        try:
+            from crew_legacy.database.database_mongo import duty_notification_collection
+            err_record = {
+                "status": "failed",
+                "error": str(rev_mail_err),
+                "attemptedAt": datetime.utcnow(),
+                "reason": f"Duty assignment revoked by {actor}",
+                "triggeredBy": actor,
+            }
+            duty_notification_collection.update_many(
+                {"employeeId": emp_id, "date": d_date},
+                {"$set": {"cancellationMailDelivery": err_record, "mailDelivery": err_record, "status": "Cancelled"}}
+            )
+        except Exception:
+            pass
+
+    # 6. Audit entry in duty_switch_collection
+    from crew_legacy.database.database_mongo import duty_switch_collection
+    duty_switch_collection.insert_one({
+        "switchId": str(uuid.uuid4()),
+        "date": d_date,
+        "employeeId": emp_id,
+        "employeeName": (daily or {}).get("name") or emp_meta.get("name") or emp_id,
+        "direction": "delete_assignment",
+        "reason": f"Assignment removed by {actor}",
+        "changedBy": actor,
+        "changedOn": datetime.utcnow(),
+        "source": "Matrix Delete Assignment Action",
+    })
+
+    # 7. Recalculate sequential pointers so deleted/misfired duties never leave pointers stranded
+    try:
+        from crew_legacy.services.replacement_roster_service import recalculate_sequential_pointers
+        recalculate_sequential_pointers(d_date[:7] if len(d_date) >= 7 else None)
+    except Exception as ptr_err:
+        print(f"Failed to recalculate sequential pointers after delete: {ptr_err}")
+
+    return {
+        "success": True,
+        "message": f"Duty assignment for employee {emp_id} on {d_date} removed successfully."
+    }

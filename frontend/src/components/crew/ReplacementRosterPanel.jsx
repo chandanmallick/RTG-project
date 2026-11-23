@@ -11,6 +11,7 @@ import {
   TableCell,
   TableBody,
   Button,
+  ButtonGroup,
   Divider,
   Dialog,
   DialogTitle,
@@ -41,6 +42,7 @@ import {
 } from "@mui/material";
 import {
   Users,
+  Mail,
   Calendar,
   AlertTriangle,
   CheckCircle2,
@@ -60,6 +62,14 @@ import {
   Zap,
 } from "lucide-react";
 
+const BASE_5_DEPARTMENTS = [
+  "System Operation",
+  "Market Operation",
+  "SCADA",
+  "Communication",
+  "Contracts",
+];
+
 export default function ReplacementRosterPanel({ onRefreshReplacements }) {
   // State
   const [loading, setLoading] = useState(true);
@@ -72,6 +82,10 @@ export default function ReplacementRosterPanel({ onRefreshReplacements }) {
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedPoolFilter, setSelectedPoolFilter] = useState("ALL");
   const [dutySortAsc, setDutySortAsc] = useState(true);
+  const [cooldownIterations, setCooldownIterations] = useState(2);
+  const [updatingCooldown, setUpdatingCooldown] = useState(false);
+  const [selectedDepts, setSelectedDepts] = useState(BASE_5_DEPARTMENTS);
+  const [savingDepts, setSavingDepts] = useState(false);
   const [actionNotice, setActionNotice] = useState(null);
 
   // Auto Allocate state
@@ -97,6 +111,25 @@ export default function ReplacementRosterPanel({ onRefreshReplacements }) {
     employee: null,
     records: [],
   });
+  const [resendingMailDate, setResendingMailDate] = useState(null);
+
+  const handleResendRevocationMail = async (record) => {
+    const eid = auditDialog.employee?.employeeId;
+    setResendingMailDate(record.date);
+    try {
+      const res = await api.post("/replacement/trigger-cancellation-mail", {
+        employeeId: eid,
+        date: record.date,
+        shift: record.duty || record.dutyType || record.assignedDuty || "Shift",
+        reason: record.comment || record.reason || record.denialReason || "Duty denied / revoked by Officer",
+      });
+      alert(res.data?.message || "Revocation notification email sent successfully.");
+    } catch (err) {
+      alert(err.response?.data?.detail || "Failed to send revocation email.");
+    } finally {
+      setResendingMailDate(null);
+    }
+  };
 
   // Long Duration Policy modal state
   const [policyDialog, setPolicyDialog] = useState({
@@ -123,6 +156,7 @@ export default function ReplacementRosterPanel({ onRefreshReplacements }) {
       ]);
       setConfig(cfgRes.data || null);
       setMatrixData(matRes.data?.matrix || []);
+      setCooldownIterations(matRes.data?.denialCooldownIterations || cfgRes.data?.denialCooldownIterations || 2);
       setRejections(matRes.data?.rejections || []);
       setLongLeaves(matRes.data?.longDurationLeaves || []);
     } catch (err) {
@@ -139,6 +173,44 @@ export default function ReplacementRosterPanel({ onRefreshReplacements }) {
   useEffect(() => {
     loadData();
   }, [loadData]);
+
+  useEffect(() => {
+    if (config?.selectedDepartments && Array.isArray(config.selectedDepartments) && config.selectedDepartments.length > 0) {
+      setSelectedDepts(config.selectedDepartments);
+    }
+  }, [config?.selectedDepartments]);
+
+  const handleToggleDepartment = (dept) => {
+    setSelectedDepts((prev) => {
+      if (prev.includes(dept)) {
+        if (prev.length <= 1) return prev; // Keep at least one
+        return prev.filter((d) => d !== dept);
+      } else {
+        return [...prev, dept];
+      }
+    });
+  };
+
+  const handleSaveSelectedDepartments = async () => {
+    setSavingDepts(true);
+    try {
+      const res = await api.put("/replacement/roster/config", {
+        selectedDepartments: selectedDepts,
+      });
+      setConfig(res.data);
+      setActionNotice({
+        severity: "success",
+        text: "Sequential roster candidate pools updated based on selected base departments.",
+      });
+    } catch (err) {
+      setActionNotice({
+        severity: "error",
+        text: err.response?.data?.detail || "Failed to update base departments for sequential roster.",
+      });
+    } finally {
+      setSavingDepts(false);
+    }
+  };
 
   // Deep linking: check URL parameters for action=review & leaveId=...
   useEffect(() => {
@@ -316,6 +388,31 @@ export default function ReplacementRosterPanel({ onRefreshReplacements }) {
   // ==========================================
   // LONG DURATION POLICY
   // ==========================================
+
+  const [triggeringMail, setTriggeringMail] = useState(false);
+
+  const handleTriggerDutyMail = async (employeeId, dutyDate, shift, employeeName) => {
+    setTriggeringMail(true);
+    try {
+      const res = await api.post("/replacement/trigger-duty-mail", {
+        employeeId,
+        date: dutyDate,
+        shift,
+      });
+      setActionNotice({
+        severity: "success",
+        text: res.data?.message || `Duty notification email sent to ${employeeName || employeeId}.`,
+      });
+      loadData();
+    } catch (err) {
+      setActionNotice({
+        severity: "error",
+        text: err.response?.data?.detail || `Failed to trigger email to ${employeeName || employeeId}.`,
+      });
+    } finally {
+      setTriggeringMail(false);
+    }
+  };
 
   const openPolicyDialog = (group) => {
     setPolicyDialog({
@@ -708,6 +805,83 @@ export default function ReplacementRosterPanel({ onRefreshReplacements }) {
         </Paper>
       )}
 
+      {/* Base 5 Department Selector for Sequential Roster */}
+      <Paper
+        elevation={0}
+        sx={{
+          p: 2,
+          mb: 3,
+          borderRadius: 2.5,
+          border: "1px solid #CBD5E1",
+          bgcolor: "#F8FAFC",
+        }}
+      >
+        <Stack
+          direction={{ xs: "column", sm: "row" }}
+          justifyContent="space-between"
+          alignItems={{ xs: "flex-start", sm: "center" }}
+          spacing={1.5}
+        >
+          <Box>
+            <Stack direction="row" spacing={1} alignItems="center">
+              <Typography variant="subtitle2" sx={{ fontWeight: 800, color: "#1E293B" }}>
+                Sequential Roster Included Base Departments:
+              </Typography>
+              <Chip
+                size="small"
+                label={`${selectedDepts.length} of 5 Active`}
+                color="primary"
+                sx={{ height: 20, fontSize: 11, fontWeight: 700 }}
+              />
+            </Stack>
+            <Typography variant="caption" sx={{ color: "#64748B", display: "block", mt: 0.3 }}>
+              Select which of the 5 base departments are included in sequential replacement pools. Employees with 'None' in Duty Type or Category are excluded.
+            </Typography>
+          </Box>
+          <Button
+            variant="contained"
+            size="small"
+            disabled={
+              savingDepts ||
+              (config?.selectedDepartments &&
+                config.selectedDepartments.length === selectedDepts.length &&
+                config.selectedDepartments.every((d) => selectedDepts.includes(d)))
+            }
+            onClick={handleSaveSelectedDepartments}
+            sx={{
+              textTransform: "none",
+              fontWeight: 800,
+              borderRadius: 2,
+              px: 2,
+              whiteSpace: "nowrap",
+            }}
+          >
+            {savingDepts ? "Updating Pools..." : "Save Department Selection"}
+          </Button>
+        </Stack>
+        <Stack direction="row" spacing={1} flexWrap="wrap" sx={{ mt: 1.5, gap: 1 }}>
+          {BASE_5_DEPARTMENTS.map((dept) => {
+            const isSelected = selectedDepts.includes(dept);
+            return (
+              <Chip
+                key={dept}
+                label={dept}
+                clickable
+                color={isSelected ? "primary" : "default"}
+                variant={isSelected ? "filled" : "outlined"}
+                onClick={() => handleToggleDepartment(dept)}
+                sx={{
+                  fontWeight: 700,
+                  fontSize: 12,
+                  py: 1.8,
+                  borderColor: isSelected ? "primary.main" : "#CBD5E1",
+                }}
+              />
+            );
+          })}
+        </Stack>
+      </Paper>
+
       {/* Main Tabs Navigation */}
       <Paper elevation={0} sx={{ borderRadius: 3, border: "1px solid #E2E8F0", overflow: "hidden", mb: 3 }}>
         <Tabs
@@ -882,6 +1056,68 @@ export default function ReplacementRosterPanel({ onRefreshReplacements }) {
               </Stack>
             </Stack>
 
+            {/* Open Logic Banner: Sequential Allocation Denial & Deferral Cooldown Policy */}
+            <Paper
+              elevation={0}
+              sx={{
+                p: 2,
+                mb: 2,
+                borderRadius: 2.5,
+                bgcolor: "#F8FAFC",
+                border: "1px solid #E2E8F0",
+                borderLeft: "5px solid #2563EB",
+              }}
+            >
+              <Stack
+                direction={{ xs: "column", md: "row" }}
+                justifyContent="space-between"
+                alignItems={{ xs: "flex-start", md: "center" }}
+                spacing={1.5}
+              >
+                <Box sx={{ flex: 1 }}>
+                  <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.5 }}>
+                    <Typography
+                      variant="subtitle2"
+                      sx={{ fontWeight: 800, color: "#0F172A", display: "flex", alignItems: "center", gap: 0.8 }}
+                    >
+                      <span>⚖️</span> Sequential Allocation Denial & Deferral Policy
+                    </Typography>
+                    <Chip
+                      size="small"
+                      label={`Active Policy: ${cooldownIterations} Iterations Cooldown`}
+                      color="primary"
+                      sx={{ fontWeight: 800, height: 22, fontSize: 11 }}
+                    />
+                  </Stack>
+                  <Typography variant="body2" sx={{ color: "#475569", fontSize: 12.5, lineHeight: 1.5 }}>
+                    <strong>Open Allocation Rule:</strong> When an assigned replacement duty is denied by an employee or their reporting officer, the denial record is logged in this pool and the candidate enters a <strong>{cooldownIterations}-iteration cooldown</strong>. During the subsequent {cooldownIterations} sequential pool allocations, their name is deferred. Once <strong>{cooldownIterations} iterations</strong> have elapsed, their name is automatically re-considered in standard round-robin sequence order.
+                  </Typography>
+                </Box>
+
+                <Stack direction="row" alignItems="center" spacing={1} sx={{ minWidth: 260, justifyContent: "flex-end" }}>
+                  <Typography variant="caption" sx={{ fontWeight: 800, color: "#64748B", textTransform: "uppercase" }}>
+                    Re-consider After:
+                  </Typography>
+                  <ButtonGroup size="small" variant="outlined" disabled={updatingCooldown}>
+                    <Button
+                      variant={cooldownIterations === 2 ? "contained" : "outlined"}
+                      onClick={() => handleSetCooldown(2)}
+                      sx={{ fontWeight: 800, textTransform: "none", fontSize: 12 }}
+                    >
+                      2 Iterations
+                    </Button>
+                    <Button
+                      variant={cooldownIterations === 3 ? "contained" : "outlined"}
+                      onClick={() => handleSetCooldown(3)}
+                      sx={{ fontWeight: 800, textTransform: "none", fontSize: 12 }}
+                    >
+                      3 Iterations
+                    </Button>
+                  </ButtonGroup>
+                </Stack>
+              </Stack>
+            </Paper>
+
             {/* Simple Matrix Table: Employee vs Duty 1, Duty 2, Duty 3... */}
             <TableContainer
               sx={{
@@ -947,9 +1183,43 @@ export default function ReplacementRosterPanel({ onRefreshReplacements }) {
                             <Typography variant="body2" sx={{ fontWeight: 800, color: "#0F172A", lineHeight: 1.3 }}>
                               {item.employeeName}
                             </Typography>
-                            <Typography variant="caption" sx={{ color: "#64748B", fontSize: 11 }}>
+                            <Typography variant="caption" sx={{ color: "#64748B", fontSize: 11, display: "block" }}>
                               {item.employeeId} &bull; {item.designation || "Shift Crew"}
                             </Typography>
+                            {item.isDeferred && (
+                              <Tooltip title={`Duty denied on ${item.latestDenial?.date || "recent shift"}. Deferral cooldown active: ${item.allocationsSinceDenial || 0} of ${item.denialCooldownIterations || cooldownIterations} sequential allocations completed. Will be automatically re-considered after ${item.deferralRemaining || 1} more allocation(s).`}>
+                                <Chip
+                                  size="small"
+                                  label={`Deferred: ${item.allocationsSinceDenial || 0}/${item.denialCooldownIterations || cooldownIterations} iters (${item.deferralRemaining || 1} left)`}
+                                  sx={{
+                                    mt: 0.4,
+                                    height: 18,
+                                    fontSize: 9.5,
+                                    fontWeight: 800,
+                                    bgcolor: "#FFFBEB",
+                                    color: "#B45309",
+                                    border: "1px solid #FDE68A",
+                                  }}
+                                />
+                              </Tooltip>
+                            )}
+                            {item.hasRecentDenial && !item.isDeferred && (
+                              <Tooltip title={`Cooldown complete (${item.allocationsSinceDenial || 0} sequential allocations elapsed). Candidate is now eligible for round-robin assignment.`}>
+                                <Chip
+                                  size="small"
+                                  label={`Re-eligible (${item.allocationsSinceDenial || 0}/${item.denialCooldownIterations || cooldownIterations} iters)`}
+                                  sx={{
+                                    mt: 0.4,
+                                    height: 18,
+                                    fontSize: 9.5,
+                                    fontWeight: 800,
+                                    bgcolor: "#F0FDF4",
+                                    color: "#15803D",
+                                    border: "1px solid #BBF7D0",
+                                  }}
+                                />
+                              </Tooltip>
+                            )}
                           </TableCell>
 
                           {/* Pool Badge */}
@@ -1005,87 +1275,213 @@ export default function ReplacementRosterPanel({ onRefreshReplacements }) {
 
                             return (
                               <TableCell key={i} align="center" sx={{ p: 0.8 }}>
-                                <Box
-                                  sx={{
-                                    p: 0.7,
-                                    px: 1,
-                                    borderRadius: 1.8,
-                                    bgcolor: "#FFFFFF",
-                                    border: "1px solid #E2E8F0",
-                                    boxShadow: "0 1px 3px rgba(0,0,0,0.03)",
-                                    display: "inline-flex",
-                                    flexDirection: "column",
-                                    gap: 0.3,
-                                    alignItems: "center",
-                                    minWidth: 115,
-                                  }}
-                                >
-                                  {/* Date */}
-                                  <Typography variant="caption" sx={{ fontWeight: 800, color: "#1E293B", fontSize: 11 }}>
-                                    {dutyDateStr}
-                                  </Typography>
+                                {duty.isDenied || duty.status === "Denied" ? (
+                                  <Box
+                                    sx={{
+                                      p: 0.8,
+                                      px: 1,
+                                      borderRadius: 1.8,
+                                      bgcolor: "#FFF1F2",
+                                      border: "1px solid #FECDD3",
+                                      boxShadow: "0 1px 3px rgba(225, 29, 72, 0.08)",
+                                      display: "inline-flex",
+                                      flexDirection: "column",
+                                      gap: 0.35,
+                                      alignItems: "center",
+                                      minWidth: 125,
+                                    }}
+                                  >
+                                    {/* Date */}
+                                    <Typography variant="caption" sx={{ fontWeight: 800, color: "#9F1239", fontSize: 11 }}>
+                                      {dutyDateStr}
+                                    </Typography>
 
-                                  {/* Duty Type Chip */}
-                                  <Stack direction="row" spacing={0.4} alignItems="center">
-                                    <Chip
-                                      size="small"
-                                      label={dutyName}
-                                      sx={{
-                                        height: 18,
-                                        fontSize: 10,
-                                        fontWeight: 800,
-                                        bgcolor: isMorning
-                                          ? "#EFF6FF"
-                                          : isEvening
-                                          ? "#FEF3C7"
-                                          : isNight
-                                          ? "#EDE9FE"
-                                          : "#F1F5F9",
-                                        color: isMorning
-                                          ? "#1D4ED8"
-                                          : isEvening
-                                          ? "#B45309"
-                                          : isNight
-                                          ? "#6D28D9"
-                                          : "#334155",
-                                        border: "1px solid rgba(0,0,0,0.06)",
-                                      }}
-                                    />
-                                    {duty.isSIC && (
+                                    {/* Duty Type Chip */}
+                                    <Stack direction="row" spacing={0.4} alignItems="center">
                                       <Chip
                                         size="small"
-                                        label="SIC"
+                                        label={`${dutyName} · Denied`}
                                         sx={{
-                                          height: 16,
-                                          fontSize: 9,
+                                          height: 18,
+                                          fontSize: 9.5,
                                           fontWeight: 900,
-                                          bgcolor: "#FEF2F2",
-                                          color: "#DC2626",
-                                          border: "1px solid #FCA5A5",
+                                          bgcolor: "#FFE4E6",
+                                          color: "#BE123C",
+                                          border: "1px solid #FDA4AF",
                                         }}
                                       />
-                                    )}
-                                  </Stack>
+                                      {duty.isSIC && (
+                                        <Chip
+                                          size="small"
+                                          label="SIC"
+                                          sx={{
+                                            height: 16,
+                                            fontSize: 9,
+                                            fontWeight: 900,
+                                            bgcolor: "#FEE2E2",
+                                            color: "#B91C1C",
+                                            border: "1px solid #FCA5A5",
+                                          }}
+                                        />
+                                      )}
+                                    </Stack>
 
-                                  {/* Replaced For */}
-                                  {replacedName && (
-                                    <Typography
-                                      variant="caption"
-                                      sx={{
-                                        color: "#64748B",
-                                        fontSize: 9.5,
-                                        display: "block",
-                                        maxWidth: 120,
-                                        whiteSpace: "nowrap",
-                                        overflow: "hidden",
-                                        textOverflow: "ellipsis",
-                                      }}
-                                      title={`Cover for ${replacedName}`}
-                                    >
-                                      For: {replacedName}
+                                    {/* Replaced For */}
+                                    {replacedName && (
+                                      <Typography
+                                        variant="caption"
+                                        sx={{
+                                          color: "#881337",
+                                          fontSize: 9.5,
+                                          fontWeight: 600,
+                                          display: "block",
+                                          maxWidth: 130,
+                                          whiteSpace: "nowrap",
+                                          overflow: "hidden",
+                                          textOverflow: "ellipsis",
+                                        }}
+                                        title={`Cover for ${replacedName}`}
+                                      >
+                                        For: {replacedName}
+                                      </Typography>
+                                    )}
+
+                                    {/* Reason Tooltip / info */}
+                                    {duty.denialReason && (
+                                      <Tooltip
+                                        title={
+                                          <Box sx={{ p: 0.5 }}>
+                                            <Typography variant="caption" sx={{ fontWeight: 800, display: "block" }}>
+                                              Denial Reason:
+                                            </Typography>
+                                            <Typography variant="caption">{duty.denialReason}</Typography>
+                                            {duty.deniedBy && (
+                                              <Typography variant="caption" sx={{ display: "block", mt: 0.5, fontStyle: "italic", color: "#CBD5E1" }}>
+                                                Denied by: {duty.deniedBy} ({duty.deniedByRole || "Reporting Officer"})
+                                              </Typography>
+                                            )}
+                                          </Box>
+                                        }
+                                        arrow
+                                      >
+                                        <Chip
+                                          size="small"
+                                          label="Reason info"
+                                          variant="outlined"
+                                          sx={{
+                                            height: 16,
+                                            fontSize: 8.5,
+                                            fontWeight: 700,
+                                            color: "#9F1239",
+                                            borderColor: "#FECDD3",
+                                            cursor: "pointer",
+                                          }}
+                                        />
+                                      </Tooltip>
+                                    )}
+                                  </Box>
+                                ) : (
+                                  <Box
+                                    sx={{
+                                      p: 0.7,
+                                      px: 1,
+                                      borderRadius: 1.8,
+                                      bgcolor: "#FFFFFF",
+                                      border: "1px solid #E2E8F0",
+                                      boxShadow: "0 1px 3px rgba(0,0,0,0.03)",
+                                      display: "inline-flex",
+                                      flexDirection: "column",
+                                      gap: 0.3,
+                                      alignItems: "center",
+                                      minWidth: 115,
+                                    }}
+                                  >
+                                    {/* Date */}
+                                    <Typography variant="caption" sx={{ fontWeight: 800, color: "#1E293B", fontSize: 11 }}>
+                                      {dutyDateStr}
                                     </Typography>
-                                  )}
-                                </Box>
+
+                                    {/* Duty Type Chip */}
+                                    <Stack direction="row" spacing={0.4} alignItems="center">
+                                      <Tooltip title={`Trigger / Resend Notification Email to ${item.name}`}>
+                                        <IconButton
+                                          size="small"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            handleTriggerDutyMail(item.employeeId, duty.date, duty.shift || duty.assignedDuty, item.name);
+                                          }}
+                                          sx={{
+                                            p: 0.2,
+                                            color: "#2563EB",
+                                            bgcolor: "#EFF6FF",
+                                            border: "1px solid #BFDBFE",
+                                            borderRadius: 1,
+                                            "&:hover": { bgcolor: "#DBEAFE" },
+                                          }}
+                                        >
+                                          <Mail size={10} />
+                                        </IconButton>
+                                      </Tooltip>
+                                      <Chip
+                                        size="small"
+                                        label={dutyName}
+                                        sx={{
+                                          height: 18,
+                                          fontSize: 10,
+                                          fontWeight: 800,
+                                          bgcolor: isMorning
+                                            ? "#EFF6FF"
+                                            : isEvening
+                                            ? "#FEF3C7"
+                                            : isNight
+                                            ? "#EDE9FE"
+                                            : "#F1F5F9",
+                                          color: isMorning
+                                            ? "#1D4ED8"
+                                            : isEvening
+                                            ? "#B45309"
+                                            : isNight
+                                            ? "#6D28D9"
+                                            : "#334155",
+                                          border: "1px solid rgba(0,0,0,0.06)",
+                                        }}
+                                      />
+                                      {duty.isSIC && (
+                                        <Chip
+                                          size="small"
+                                          label="SIC"
+                                          sx={{
+                                            height: 16,
+                                            fontSize: 9,
+                                            fontWeight: 900,
+                                            bgcolor: "#FEF2F2",
+                                            color: "#DC2626",
+                                            border: "1px solid #FCA5A5",
+                                          }}
+                                        />
+                                      )}
+                                    </Stack>
+
+                                    {/* Replaced For */}
+                                    {replacedName && (
+                                      <Typography
+                                        variant="caption"
+                                        sx={{
+                                          color: "#64748B",
+                                          fontSize: 9.5,
+                                          display: "block",
+                                          maxWidth: 120,
+                                          whiteSpace: "nowrap",
+                                          overflow: "hidden",
+                                          textOverflow: "ellipsis",
+                                        }}
+                                        title={`Cover for ${replacedName}`}
+                                      >
+                                        For: {replacedName}
+                                      </Typography>
+                                    )}
+                                  </Box>
+                                )}
                               </TableCell>
                             );
                           })}
@@ -1141,17 +1537,40 @@ export default function ReplacementRosterPanel({ onRefreshReplacements }) {
 
                           {/* Actions */}
                           <TableCell align="center">
-                            <Button
-                              size="small"
-                              variant="text"
-                              onClick={() => {
-                                const empRejections = rejections.filter((r) => r.employeeId === item.employeeId);
-                                setAuditDialog({ open: true, employee: item, records: empRejections });
-                              }}
-                              sx={{ textTransform: "none", fontWeight: 700, fontSize: 11 }}
-                            >
-                              History
-                            </Button>
+                            <Stack direction="row" spacing={0.5} justifyContent="center" alignItems="center">
+                              {item.duties && item.duties.length > 0 && (
+                                <Tooltip title={`Trigger / Send duty email to ${item.name}`}>
+                                  <IconButton
+                                    size="small"
+                                    onClick={() => {
+                                      const d = item.duties.find((x) => !x.isDenied) || item.duties[0];
+                                      handleTriggerDutyMail(item.employeeId, d?.date, d?.shift || d?.assignedDuty, item.name);
+                                    }}
+                                    sx={{
+                                      color: "#2563EB",
+                                      bgcolor: "#EFF6FF",
+                                      border: "1px solid #BFDBFE",
+                                      borderRadius: 1.5,
+                                      p: 0.4,
+                                      "&:hover": { bgcolor: "#DBEAFE" },
+                                    }}
+                                  >
+                                    <Mail size={13} />
+                                  </IconButton>
+                                </Tooltip>
+                              )}
+                              <Button
+                                size="small"
+                                variant="text"
+                                onClick={() => {
+                                  const empRejections = rejections.filter((r) => r.employeeId === item.employeeId);
+                                  setAuditDialog({ open: true, employee: item, records: empRejections });
+                                }}
+                                sx={{ textTransform: "none", fontWeight: 700, fontSize: 11 }}
+                              >
+                                History
+                              </Button>
+                            </Stack>
                           </TableCell>
                         </TableRow>
                       );
@@ -1630,12 +2049,13 @@ export default function ReplacementRosterPanel({ onRefreshReplacements }) {
                   <TableCell>Role</TableCell>
                   <TableCell>Reason / Comment</TableCell>
                   <TableCell>Timestamp</TableCell>
+                  <TableCell align="right">Action</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
                 {auditDialog.records.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={6} align="center" sx={{ py: 3, color: "#64748B" }}>
+                    <TableCell colSpan={7} align="center" sx={{ py: 3, color: "#64748B" }}>
                       No rejection records found for this employee.
                     </TableCell>
                   </TableRow>
@@ -1643,14 +2063,26 @@ export default function ReplacementRosterPanel({ onRefreshReplacements }) {
                   auditDialog.records.map((r, i) => (
                     <TableRow key={i}>
                       <TableCell sx={{ fontWeight: 700 }}>{dayjs(r.date).format("DD MMM YYYY")}</TableCell>
-                      <TableCell>{r.dutyType || r.assignedDuty || "Shift"}</TableCell>
-                      <TableCell sx={{ fontWeight: 700 }}>{r.rejectedByName || r.rejectedBy}</TableCell>
+                      <TableCell>{r.duty || r.dutyType || r.assignedDuty || "Shift"}</TableCell>
+                      <TableCell sx={{ fontWeight: 700 }}>{r.rejectedByName || r.rejectedBy || r.deniedBy || "Officer"}</TableCell>
                       <TableCell>
-                        <Chip size="small" label={r.rejectedByRole || "Approver"} sx={{ height: 20, fontSize: 10 }} />
+                        <Chip size="small" label={r.rejectedByRole || r.deniedByRole || "Approver"} sx={{ height: 20, fontSize: 10 }} />
                       </TableCell>
-                      <TableCell sx={{ color: "#334155" }}>{r.comment || r.reason || "-"}</TableCell>
+                      <TableCell sx={{ color: "#334155" }}>{r.comment || r.reason || r.denialReason || "-"}</TableCell>
                       <TableCell sx={{ color: "#64748B", fontSize: 11 }}>
                         {r.timestamp ? dayjs(r.timestamp).format("DD MMM YYYY, HH:mm") : "-"}
+                      </TableCell>
+                      <TableCell align="right">
+                        <Button
+                          size="small"
+                          variant="outlined"
+                          color="secondary"
+                          disabled={resendingMailDate === r.date}
+                          onClick={() => handleResendRevocationMail(r)}
+                          sx={{ textTransform: "none", fontSize: "0.72rem", py: 0.2, px: 0.8, fontWeight: 700 }}
+                        >
+                          {resendingMailDate === r.date ? "Sending..." : "Resend Revocation Mail"}
+                        </Button>
                       </TableCell>
                     </TableRow>
                   ))

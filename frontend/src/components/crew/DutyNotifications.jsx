@@ -247,7 +247,7 @@ function DutyNotificationItems({ notifications, loading, error, refresh, limit =
                   )}
                   {notification.canDeny && (
                     <Button size="small" variant="outlined" color="error" startIcon={<X size={13} />} disabled={workingId === notification._id} onClick={(event) => { event.stopPropagation(); setSelected(notification); setReason(""); }} sx={{ fontWeight: 900, fontSize: 10.5 }}>
-                      Decline
+                      {notification.status === "Accepted" ? "Cancel / Deny (Remarks)" : "Decline"}
                     </Button>
                   )}
                   {notification.unread && (

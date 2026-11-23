@@ -233,7 +233,7 @@ const EmployeeRow = memo(({ person, groupName, active, dates, selectedColumn, on
             draggable={!readOnly && !applicationMode && Boolean(duty.trainingNominationId) && !duty.trainingAdjacentOffRequestId}
             onDragStart={event => { event.stopPropagation(); event.dataTransfer.setData("application/crew-training", JSON.stringify({ id: duty.trainingNominationId, employeeId: person.employeeId })); event.dataTransfer.effectAllowed = "move"; }}
             onDragOver={event => { if (!readOnly && !applicationMode && event.dataTransfer.types.includes("application/crew-training")) event.preventDefault(); }}
-            onDrop={event => { event.preventDefault(); event.stopPropagation(); if (readOnly || applicationMode) return; try { const item = JSON.parse(event.dataTransfer.getData("application/crew-training")); if(item.employeeId === person.employeeId && item.id) onTrainingDrop({ person, groupName, date, duty: { trainingNominationId: item.id }, proposedStartDate: date }); } catch {} }}
+            onDrop={event => { event.preventDefault(); event.stopPropagation(); if (readOnly || applicationMode) return; try { const item = JSON.parse(event.dataTransfer.getData("application/crew-training")); if (item.employeeId === person.employeeId && item.id) onTrainingDrop({ person, groupName, date, duty: { trainingNominationId: item.id }, proposedStartDate: date }); } catch { } }}
             sx={{ position: "relative", minHeight: 42, width: "100%", boxSizing: "border-box", px: .5, py: .4, display: "grid", placeItems: "center", alignContent: "center", textAlign: "center", cursor: readOnly ? "default" : "pointer", borderRadius: 1.7, backgroundColor: palette.background, backgroundImage: isHoliday ? "linear-gradient(90deg,#A855F7 0 4px,transparent 4px)" : "none", color: palette.color, border: `1px solid ${applicationSelected ? "#0057B7" : isHoliday ? "#A855F7" : palette.border}`, boxShadow: applicationSelected ? "0 0 0 3px rgba(0,87,183,.24)" : "none", "& .MuiTypography-root": { color: "inherit", textAlign: "center" }, "&:hover": readOnly ? {} : { boxShadow: "0 0 0 2px rgba(0,87,183,.18)" } }}
           >
             {applicationMode && <Box sx={{ position: "absolute", top: 2, left: 2, width: 14, height: 14, borderRadius: "50%", display: "grid", placeItems: "center", color: "#FFF", background: applicationSelected ? "#0057B7" : "rgba(100,116,139,.55)", fontSize: 9, fontWeight: 950 }}>{applicationSelected ? "✓" : "+"}</Box>}
@@ -250,6 +250,7 @@ const EmployeeRow = memo(({ person, groupName, active, dates, selectedColumn, on
             {duty.trainingName && <Tooltip title={`Training: ${duty.trainingName}`} arrow><Typography component="span" sx={{ width: "100%", fontSize: 9, fontWeight: 800, textAlign: "center" }}>{duty.trainingName}</Typography></Tooltip>}
             {["Pending Approval", "Nominated"].includes(duty.trainingStatus) && <Typography sx={{ fontSize: 9, fontWeight: 900 }}>Training · Pending approval</Typography>}
             {duty.trainingAdjacentOffStatus && <Tooltip title={`${duty.trainingAdjacentOffPosition || "Training adjacent OFF"} · ${duty.trainingAdjacentOffStatus}${duty.trainingAdjacentOffCurrentApproverName ? ` · awaiting ${duty.trainingAdjacentOffCurrentApproverName}` : ""}`} arrow><Typography component="span" sx={{ width: "100%", fontSize: 9, fontWeight: 950, textAlign: "center", color: duty.trainingAdjacentOffStatus === "Approved" ? "#15803D" : "#C2410C" }}>{`OFF request · ${duty.trainingAdjacentOffStatus}`}</Typography></Tooltip>}
+            {duty.sportsAdjacentOffStatus && <Tooltip title={`${duty.sportsAdjacentOffPosition || "Sports Travel OFF"} · ${duty.sportsAdjacentOffStatus}${duty.sportsAdjacentOffCurrentApproverName ? ` · awaiting ${duty.sportsAdjacentOffCurrentApproverName}` : ""}`} arrow><Typography component="span" sx={{ width: "100%", fontSize: 9, fontWeight: 950, textAlign: "center", color: duty.sportsAdjacentOffStatus === "Approved" ? "#15803D" : "#C2410C" }}>{`Sports OFF · ${duty.sportsAdjacentOffStatus}`}</Typography></Tooltip>}
             {duty.sportsName && <Tooltip title={`Sports: ${duty.sportsName}`} arrow><Typography component="span" sx={{ width: "100%", fontSize: 9, fontWeight: 800, textAlign: "center" }}>{duty.sportsName}</Typography></Tooltip>}
             {replacementPending && <Tooltip title="Replacement required; assignment pending" arrow><Box sx={{ mt: .15, width: 17, height: 17, borderRadius: .7, display: "grid", placeItems: "center", alignSelf: "center", background: "#F59E0B", color: "#FFFFFF", fontSize: 9, fontWeight: 950, animation: "calendarReplacementPulse .9s ease-in-out infinite", "@keyframes calendarReplacementPulse": { "50%": { opacity: .3, transform: "scale(.84)" } } }}>R</Box></Tooltip>}
             {duty.replacementEmployee?.name && (
@@ -349,7 +350,7 @@ export default function CrewCalendar({ publicView = false, applicationOnly = fal
   const dates = useMemo(() => {
     const output = [];
     if (!startDate || !endDate || startDate > endDate) return output;
-    
+
     let current = startDate;
     let limit = 0;
     while (current <= endDate && limit < 60) {
@@ -387,7 +388,7 @@ export default function CrewCalendar({ publicView = false, applicationOnly = fal
           return 0;
         })
       }));
-      
+
       setData(sortedResponse);
       setLeaveApprovalPopup((current) => {
         if (!current) return null;
@@ -571,8 +572,8 @@ export default function CrewCalendar({ publicView = false, applicationOnly = fal
     setReplacementError("");
     setReplacementLoading(true);
     try {
-      const trainingNominationId = String(selection.duty.trainingNominationId || "").trim();
-      if (selection.duty.trainingName) {
+      const trainingNominationId = String(selection.duty.trainingAdjacentOffRequestId || selection.duty.trainingNominationId || "").trim();
+      if (selection.duty.trainingName || selection.duty.trainingAdjacentOffStatus) {
         if (!trainingNominationId) {
           setReplacementError("This approved training entry is missing its nomination reference. Refresh the calendar or open Training Management to review it.");
           return;
@@ -594,8 +595,8 @@ export default function CrewCalendar({ publicView = false, applicationOnly = fal
         setReplacementCandidates(candidates);
         return;
       }
-      const sportsApplicationId = String(selection.duty.sportsApplicationId || "").trim();
-      if (selection.duty.sportsName) {
+      const sportsApplicationId = String(selection.duty.sportsAdjacentOffRequestId || selection.duty.sportsApplicationId || "").trim();
+      if (selection.duty.sportsName || selection.duty.sportsAdjacentOffStatus) {
         if (!sportsApplicationId) {
           setReplacementError("This approved sports entry is missing its application reference. Refresh the calendar or open Sports Management to review it.");
           return;
@@ -816,196 +817,196 @@ export default function CrewCalendar({ publicView = false, applicationOnly = fal
   return (
     <CalendarPageShell viewportLocked={!publicView}>
       {!applicationOnly && <Box sx={{ height: publicView ? "calc(100dvh - 16px)" : "100%", flex: 1, minHeight: 0, overflow: "hidden", display: "flex", flexDirection: "column", gap: 0.85 }}>
-      <Box sx={{ px: { xs: 1.2, md: 1.8 }, py: 0.85, borderRadius: 2.5, background: "linear-gradient(105deg,#081F5C 0%,#075DB8 62%,#1678D4 100%)", color: "#FFF", display: "flex", alignItems: "center", gap: 1, flexWrap: { xs: "wrap", xl: "nowrap" }, flexShrink: 0 }}>
-        <Box sx={{ minWidth: { md: 220 }, mr: { xl: "auto" } }}>
-          <Typography sx={{ fontSize: 18, fontWeight: 950, lineHeight: 1.05 }}>
-            {calendarView === "events"
-              ? "Crew Event Calendar"
-              : calendarView === "matrix_alternate"
-              ? "Compact Duty Matrix (Alternate Test View)"
-              : "Daily Duty Calendar"}
-          </Typography>
-          <Typography sx={{ mt: .2, fontSize: 10, color: "rgba(255,255,255,.82)" }}>
-            {calendarView === "events"
-              ? "Training, holidays and sports in one planning view"
-              : calendarView === "matrix_alternate"
-              ? "Compact 4-group shift view · SIC on top · Names only · Unified leave & replacement"
-              : "Click a duty to apply, review approval or assign cover"}
-          </Typography>
+        <Box sx={{ px: { xs: 1.2, md: 1.8 }, py: 0.85, borderRadius: 2.5, background: "linear-gradient(105deg,#081F5C 0%,#075DB8 62%,#1678D4 100%)", color: "#FFF", display: "flex", alignItems: "center", gap: 1, flexWrap: { xs: "wrap", xl: "nowrap" }, flexShrink: 0 }}>
+          <Box sx={{ minWidth: { md: 220 }, mr: { xl: "auto" } }}>
+            <Typography sx={{ fontSize: 18, fontWeight: 950, lineHeight: 1.05 }}>
+              {calendarView === "events"
+                ? "Crew Event Calendar"
+                : calendarView === "matrix_alternate"
+                  ? "Compact Duty Matrix (Alternate Test View)"
+                  : "Daily Duty Calendar"}
+            </Typography>
+            <Typography sx={{ mt: .2, fontSize: 10, color: "rgba(255,255,255,.82)" }}>
+              {calendarView === "events"
+                ? "Training, holidays and sports in one planning view"
+                : calendarView === "matrix_alternate"
+                  ? "Compact 4-group shift view · SIC on top · Names only · Unified leave & replacement"
+                  : "Click a duty to apply, review approval or assign cover"}
+            </Typography>
+          </Box>
+          {!publicView && <><Stack direction="row" spacing={.35} alignItems="center" sx={{ p: .3, border: "1px solid rgba(255,255,255,.4)", borderRadius: 2 }}>
+            <Button size="small" onClick={() => { setCalendarView("duty"); window.history.replaceState(null, "", `${window.location.pathname}?view=duty`); }} sx={{ minHeight: 28, px: 1, color: calendarView === "duty" ? "#073B75" : "#FFF", background: calendarView === "duty" ? "#FFF" : "transparent", textTransform: "none", fontWeight: 900 }}>Duty view</Button>
+            <Button size="small" onClick={() => { setCalendarView("events"); window.history.replaceState(null, "", `${window.location.pathname}?view=events`); }} sx={{ minHeight: 28, px: 1, color: calendarView === "events" ? "#073B75" : "#FFF", background: calendarView === "events" ? "#FFF" : "transparent", textTransform: "none", fontWeight: 900 }}>Event view</Button>
+            {(!user?.permissions || user?.permissions?.crew_compact_matrix?.view !== false) && (
+              <Button size="small" onClick={() => { setCalendarView("matrix_alternate"); window.history.replaceState(null, "", `${window.location.pathname}?view=matrix_alternate`); }} sx={{ minHeight: 28, px: 1, color: calendarView === "matrix_alternate" ? "#073B75" : "#FFF", background: calendarView === "matrix_alternate" ? "#FFF" : "transparent", textTransform: "none", fontWeight: 900 }}>Compact Matrix View (Test)</Button>
+            )}
+          </Stack><Stack direction="row" spacing={.35} alignItems="center">
+              <Tooltip title={calendarView === "events" ? "Previous month" : "Previous 7 days"}><IconButton size="small" onClick={() => calendarView === "events" ? setEventMonth((value) => shiftMonth(value, -1)) : move(-7)} sx={{ color: "#FFF", border: "1px solid rgba(255,255,255,.35)" }}><ChevronLeft size={17} /></IconButton></Tooltip>
+              <Button onClick={() => calendarView === "events" ? setEventMonth(today.slice(0, 7)) : (setStartDate(addDays(today, -7)), setEndDate(addDays(today, 7)))} startIcon={<CalendarDays size={15} />} size="small" sx={{ minHeight: 30, color: "#073B75", background: "#FFF", borderRadius: 2, textTransform: "none", fontWeight: 900, "&:hover": { background: "#F1F5F9" } }}>Today</Button>
+              <Tooltip title={calendarView === "events" ? "Next month" : "Next 7 days"}><IconButton size="small" onClick={() => calendarView === "events" ? setEventMonth((value) => shiftMonth(value, 1)) : move(7)} sx={{ color: "#FFF", border: "1px solid rgba(255,255,255,.35)" }}><ChevronRight size={17} /></IconButton></Tooltip>
+            </Stack>
+            {calendarView === "events" ? <input aria-label="Event month" type="month" value={eventMonth} onChange={(event) => setEventMonth(event.target.value)} style={{ width: 132, border: "1px solid rgba(255,255,255,.55)", borderRadius: 8, padding: "5px 8px", fontSize: 11, fontWeight: 750 }} /> : <Stack direction="row" spacing={.55} alignItems="center">
+              <input aria-label="Start date" type="date" value={startDate} onChange={(event) => setStartDate(event.target.value)} style={{ width: 126, border: "1px solid rgba(255,255,255,.55)", borderRadius: 8, padding: "5px 8px", fontSize: 11, fontWeight: 750 }} />
+              <Typography sx={{ color: "rgba(255,255,255,.8)", fontSize: 11 }}>to</Typography>
+              <input aria-label="End date" type="date" min={startDate} value={endDate} onChange={(event) => setEndDate(event.target.value)} style={{ width: 126, border: "1px solid rgba(255,255,255,.55)", borderRadius: 8, padding: "5px 8px", fontSize: 11, fontWeight: 750 }} />
+            </Stack>}
+            <Button size="small" startIcon={<RefreshCw size={15} />} onClick={load} sx={{ minHeight: 30, color: "#FFF", border: "1px solid rgba(255,255,255,.55)", borderRadius: 2, textTransform: "none", fontWeight: 850 }}>Refresh</Button>
+            {calendarView === "matrix_alternate" && (
+              <Button
+                size="small"
+                startIcon={<Download size={15} />}
+                onClick={async () => {
+                  try {
+                    const res = await api.get("/special-events/matrix/export-excel", {
+                      params: { startDate, endDate },
+                      responseType: "blob",
+                    });
+                    const blob = new Blob([res.data], {
+                      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    });
+                    const url = window.URL.createObjectURL(blob);
+                    const a = document.createElement("a");
+                    a.href = url;
+                    a.download = `Duty_Matrix_${startDate}_to_${endDate}.xlsx`;
+                    document.body.appendChild(a);
+                    a.click();
+                    a.remove();
+                    window.URL.revokeObjectURL(url);
+                  } catch (e) {
+                    console.error("Failed to download excel", e);
+                  }
+                }}
+                sx={{
+                  minHeight: 30,
+                  color: "#073B75",
+                  background: "#FFF",
+                  borderRadius: 2,
+                  textTransform: "none",
+                  fontWeight: 900,
+                  whiteSpace: "nowrap",
+                  "&:hover": { background: "#F1F5F9" },
+                }}
+              >
+                Download Excel
+              </Button>
+            )}
+            {calendarView === "duty" && <><Button size="small" startIcon={<MousePointer2 size={15} />} onClick={openCalendarApplication} sx={{ minHeight: 30, color: applicationMode ? "#073B75" : "#FFF", background: applicationMode ? "#FFF" : "transparent", border: "1px solid rgba(255,255,255,.65)", borderRadius: 2, textTransform: "none", fontWeight: 900 }}>{applicationMode ? `Continue application${applicationSelections.length ? ` (${applicationSelections.length})` : ""}` : "Apply from calendar"}</Button>
+              {applicationMode && <Tooltip title="Cancel application selection"><IconButton size="small" onClick={() => { setApplicationMode(false); setApplicationSelections([]); setApplicationNotice(""); }} sx={{ color: "#FFF", border: "1px solid rgba(255,255,255,.55)" }}><X size={16} /></IconButton></Tooltip>}
+              <Button size="small" startIcon={<ArrowLeftRight size={15} />} onClick={() => { setReassignmentContext({ mode: "exchange", date: selectedColumn || today, employeeId: "" }); setExchangeOpen(true); }} sx={{ minHeight: 30, color: "#0755A5", background: "#FFF", borderRadius: 2, textTransform: "none", fontWeight: 900, whiteSpace: "nowrap", "&:hover": { background: "#F1F5F9" } }}>Duty exchange / reassignment</Button></>}</>}
         </Box>
-        {!publicView && <><Stack direction="row" spacing={.35} alignItems="center" sx={{ p: .3, border: "1px solid rgba(255,255,255,.4)", borderRadius: 2 }}>
-          <Button size="small" onClick={() => { setCalendarView("duty"); window.history.replaceState(null, "", `${window.location.pathname}?view=duty`); }} sx={{ minHeight: 28, px: 1, color: calendarView === "duty" ? "#073B75" : "#FFF", background: calendarView === "duty" ? "#FFF" : "transparent", textTransform: "none", fontWeight: 900 }}>Duty view</Button>
-          <Button size="small" onClick={() => { setCalendarView("events"); window.history.replaceState(null, "", `${window.location.pathname}?view=events`); }} sx={{ minHeight: 28, px: 1, color: calendarView === "events" ? "#073B75" : "#FFF", background: calendarView === "events" ? "#FFF" : "transparent", textTransform: "none", fontWeight: 900 }}>Event view</Button>
-          {(!user?.permissions || user?.permissions?.crew_compact_matrix?.view !== false) && (
-            <Button size="small" onClick={() => { setCalendarView("matrix_alternate"); window.history.replaceState(null, "", `${window.location.pathname}?view=matrix_alternate`); }} sx={{ minHeight: 28, px: 1, color: calendarView === "matrix_alternate" ? "#073B75" : "#FFF", background: calendarView === "matrix_alternate" ? "#FFF" : "transparent", textTransform: "none", fontWeight: 900 }}>Compact Matrix View (Test)</Button>
-          )}
-        </Stack><Stack direction="row" spacing={.35} alignItems="center">
-          <Tooltip title={calendarView === "events" ? "Previous month" : "Previous 7 days"}><IconButton size="small" onClick={() => calendarView === "events" ? setEventMonth((value) => shiftMonth(value, -1)) : move(-7)} sx={{ color: "#FFF", border: "1px solid rgba(255,255,255,.35)" }}><ChevronLeft size={17} /></IconButton></Tooltip>
-          <Button onClick={() => calendarView === "events" ? setEventMonth(today.slice(0, 7)) : (setStartDate(addDays(today, -7)), setEndDate(addDays(today, 7)))} startIcon={<CalendarDays size={15} />} size="small" sx={{ minHeight: 30, color: "#073B75", background: "#FFF", borderRadius: 2, textTransform: "none", fontWeight: 900, "&:hover": { background: "#F1F5F9" } }}>Today</Button>
-          <Tooltip title={calendarView === "events" ? "Next month" : "Next 7 days"}><IconButton size="small" onClick={() => calendarView === "events" ? setEventMonth((value) => shiftMonth(value, 1)) : move(7)} sx={{ color: "#FFF", border: "1px solid rgba(255,255,255,.35)" }}><ChevronRight size={17} /></IconButton></Tooltip>
-        </Stack>
-        {calendarView === "events" ? <input aria-label="Event month" type="month" value={eventMonth} onChange={(event) => setEventMonth(event.target.value)} style={{ width: 132, border: "1px solid rgba(255,255,255,.55)", borderRadius: 8, padding: "5px 8px", fontSize: 11, fontWeight: 750 }} /> : <Stack direction="row" spacing={.55} alignItems="center">
-          <input aria-label="Start date" type="date" value={startDate} onChange={(event) => setStartDate(event.target.value)} style={{ width: 126, border: "1px solid rgba(255,255,255,.55)", borderRadius: 8, padding: "5px 8px", fontSize: 11, fontWeight: 750 }} />
-          <Typography sx={{ color: "rgba(255,255,255,.8)", fontSize: 11 }}>to</Typography>
-          <input aria-label="End date" type="date" min={startDate} value={endDate} onChange={(event) => setEndDate(event.target.value)} style={{ width: 126, border: "1px solid rgba(255,255,255,.55)", borderRadius: 8, padding: "5px 8px", fontSize: 11, fontWeight: 750 }} />
-        </Stack>}
-        <Button size="small" startIcon={<RefreshCw size={15} />} onClick={load} sx={{ minHeight: 30, color: "#FFF", border: "1px solid rgba(255,255,255,.55)", borderRadius: 2, textTransform: "none", fontWeight: 850 }}>Refresh</Button>
-        {calendarView === "matrix_alternate" && (
-          <Button
-            size="small"
-            startIcon={<Download size={15} />}
-            onClick={async () => {
-              try {
-                const res = await api.get("/special-events/matrix/export-excel", {
-                  params: { startDate, endDate },
-                  responseType: "blob",
-                });
-                const blob = new Blob([res.data], {
-                  type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                });
-                const url = window.URL.createObjectURL(blob);
-                const a = document.createElement("a");
-                a.href = url;
-                a.download = `Duty_Matrix_${startDate}_to_${endDate}.xlsx`;
-                document.body.appendChild(a);
-                a.click();
-                a.remove();
-                window.URL.revokeObjectURL(url);
-              } catch (e) {
-                console.error("Failed to download excel", e);
-              }
-            }}
-            sx={{
-              minHeight: 30,
-              color: "#073B75",
-              background: "#FFF",
-              borderRadius: 2,
-              textTransform: "none",
-              fontWeight: 900,
-              whiteSpace: "nowrap",
-              "&:hover": { background: "#F1F5F9" },
-            }}
-          >
-            Download Excel
-          </Button>
-        )}
-        {calendarView === "duty" && <><Button size="small" startIcon={<MousePointer2 size={15} />} onClick={openCalendarApplication} sx={{ minHeight: 30, color: applicationMode ? "#073B75" : "#FFF", background: applicationMode ? "#FFF" : "transparent", border: "1px solid rgba(255,255,255,.65)", borderRadius: 2, textTransform: "none", fontWeight: 900 }}>{applicationMode ? `Continue application${applicationSelections.length ? ` (${applicationSelections.length})` : ""}` : "Apply from calendar"}</Button>
-        {applicationMode && <Tooltip title="Cancel application selection"><IconButton size="small" onClick={() => { setApplicationMode(false); setApplicationSelections([]); setApplicationNotice(""); }} sx={{ color: "#FFF", border: "1px solid rgba(255,255,255,.55)" }}><X size={16} /></IconButton></Tooltip>}
-        <Button size="small" startIcon={<ArrowLeftRight size={15} />} onClick={() => { setReassignmentContext({ mode: "exchange", date: selectedColumn || today, employeeId: "" }); setExchangeOpen(true); }} sx={{ minHeight: 30, color: "#0755A5", background: "#FFF", borderRadius: 2, textTransform: "none", fontWeight: 900, whiteSpace: "nowrap", "&:hover": { background: "#F1F5F9" } }}>Duty exchange / reassignment</Button></>}</>}
-      </Box>
 
-      {error && <Alert severity="error" sx={{ py: 0.25, flexShrink: 0 }}>{error}</Alert>}
-      {calendarNotice && <Alert severity="success" onClose={() => setCalendarNotice("")} sx={{ py: 0.25, flexShrink: 0 }}>{calendarNotice}</Alert>}
-      {applicationNotice && <Alert severity="info" sx={{ py: 0, flexShrink: 0 }}>{applicationNotice}</Alert>}
-      {calendarView === "events" ? <EventCalendar
-        dates={eventDates}
-        month={eventMonth}
-        events={events}
-        loading={loading}
-        onAddHoliday={() => navigate("/crew/training?section=holiday")}
-        onOpenTraining={() => navigate("/crew/training?section=training")}
-        onOpenSports={() => navigate("/crew/sports?section=events")}
-      /> : calendarView === "matrix_alternate" ? (
-        <Box sx={{ flex: 1, minHeight: 0, width: "100%", overflow: "hidden", display: "flex", flexDirection: "column" }}>
-          <SpecialRosterMatrix
-            key={`matrix-${startDate}-${endDate}`}
-            initialStartDate={startDate}
-            initialEndDate={endDate}
-          />
-        </Box>
-      ) : <>
-      {!publicView && <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap sx={{ flexShrink: 0 }}>
-        <TextField size="small" label="Find employee or group" value={employeeSearch} onChange={(event) => setEmployeeSearch(event.target.value)} sx={{ minWidth: 220 }} />
-        {[["all", "All duties"], ["pending", "Pending approval"], ["coverage", "Replacement needed"]].map(([value, label]) => <Button key={value} variant={calendarFilter === value ? "contained" : "outlined"} onClick={() => setCalendarFilter(value)} sx={{ textTransform: "none" }}>{label}</Button>)}
-        <Button onClick={() => { setApplicationActivity("training"); openCalendarApplication(); }} startIcon={<GraduationCap size={16} />}>Apply training</Button>
-        <Button onClick={() => { setApplicationMode(true); setApplicationSelections([]); setApplicationNotice("Select dates for one employee, then click Continue application."); }}>Select several dates</Button>
-      </Stack>}
-      <Box sx={{ px: 1, py: .35, display: "flex", alignItems: "center", gap: 1.05, flexWrap: "wrap", border: "1px solid #CBD5E1", borderRadius: 2, background: "#FFFFFF", flexShrink: 0 }}>
-        {[
-          ["Morning", "#DCFCE7", "#86EFAC"],
-          ["Evening", "#FEF3C7", "#FCD34D"],
-          ["Night", "#DBEAFE", "#93C5FD"],
-          ["OFF", "#E5E7EB", "#9CA3AF"],
-        ].map(([label, background, border]) => <Stack key={label} direction="row" spacing={.45} alignItems="center"><Box sx={{ width: 18, height: 14, borderRadius: .7, background, border: `1px solid ${border}` }} /><Typography sx={{ color: "#475569", fontSize: 10, fontWeight: 800 }}>{label}</Typography></Stack>)}
-        <Stack direction="row" spacing={.4} alignItems="center"><Box sx={{ width: 24, height: 18, borderRadius: .7, display: "grid", placeItems: "center", background: "#FFEDD5", border: "1px solid #FB923C" }}><Box sx={{ width: 9, height: 9, borderRadius: "50%", background: "#FB923C", border: "1px solid #C2410C" }} /></Box><Typography sx={{ color: "#475569", fontSize: 10, fontWeight: 800 }}>Pending leave</Typography></Stack>
-        <Stack direction="row" spacing={.4} alignItems="center"><Box sx={{ width: 24, height: 18, borderRadius: .7, display: "grid", placeItems: "center", background: "#FEE2E2", border: "1px solid #F87171" }}><CheckCircle2 size={12} color="#15803D" strokeWidth={3} /></Box><Typography sx={{ color: "#475569", fontSize: 10, fontWeight: 800 }}>Approved leave</Typography></Stack>
-        <Stack direction="row" spacing={.4} alignItems="center"><Box sx={{ width: 18, height: 18, borderRadius: .7, display: "grid", placeItems: "center", background: "#F59E0B", color: "#FFF", fontSize: 9, fontWeight: 950, animation: "calendarReplacementPulse 1s ease-in-out infinite", "@keyframes calendarReplacementPulse": { "50%": { opacity: .35, transform: "scale(.86)" } } }}>R</Box><Typography sx={{ color: "#475569", fontSize: 10, fontWeight: 800 }}>Replacement required</Typography></Stack>
-        <Stack direction="row" spacing={.4} alignItems="center"><Box sx={{ width: 18, height: 18, borderRadius: .7, display: "grid", placeItems: "center", background: "#2563EB", color: "#FFF", fontSize: 9, fontWeight: 950 }}>R</Box><Typography sx={{ color: "#475569", fontSize: 10, fontWeight: 800 }}>Replacement assigned</Typography></Stack>
-        <Stack direction="row" spacing={.4} alignItems="center"><Box sx={{ width: 18, height: 18, borderRadius: "50%", display: "grid", placeItems: "center", background: "#9333EA", color: "#FFF", fontSize: 9, fontWeight: 950 }}>H</Box><Typography sx={{ color: "#475569", fontSize: 10, fontWeight: 800 }}>Holiday (shift duty continues)</Typography></Stack>
-      </Box>
-      <Paper
-        elevation={0}
-        sx={{
-          overflow: "hidden",
-          flex: 1,
-          minHeight: 0,
-          display: "flex",
-          flexDirection: "column",
-          borderRadius: 2.5,
-          border: "1px solid #CBD5E1",
-          boxShadow: "0 4px 18px rgba(15, 23, 42, 0.05)",
-          background: "#FFFFFF",
-        }}
-      >
-        {loading ? (
-          <Box sx={{ minHeight: 360, display: "grid", placeItems: "center" }}><CircularProgress sx={{ color: "#03624C" }} /></Box>
-        ) : (
-          <Box
+        {error && <Alert severity="error" sx={{ py: 0.25, flexShrink: 0 }}>{error}</Alert>}
+        {calendarNotice && <Alert severity="success" onClose={() => setCalendarNotice("")} sx={{ py: 0.25, flexShrink: 0 }}>{calendarNotice}</Alert>}
+        {applicationNotice && <Alert severity="info" sx={{ py: 0, flexShrink: 0 }}>{applicationNotice}</Alert>}
+        {calendarView === "events" ? <EventCalendar
+          dates={eventDates}
+          month={eventMonth}
+          events={events}
+          loading={loading}
+          onAddHoliday={() => navigate("/crew/training?section=holiday")}
+          onOpenTraining={() => navigate("/crew/training?section=training")}
+          onOpenSports={() => navigate("/crew/sports?section=events")}
+        /> : calendarView === "matrix_alternate" ? (
+          <Box sx={{ flex: 1, minHeight: 0, width: "100%", overflow: "hidden", display: "flex", flexDirection: "column" }}>
+            <SpecialRosterMatrix
+              key={`matrix-${startDate}-${endDate}`}
+              initialStartDate={startDate}
+              initialEndDate={endDate}
+            />
+          </Box>
+        ) : <>
+          {!publicView && <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap sx={{ flexShrink: 0 }}>
+            <TextField size="small" label="Find employee or group" value={employeeSearch} onChange={(event) => setEmployeeSearch(event.target.value)} sx={{ minWidth: 220 }} />
+            {[["all", "All duties"], ["pending", "Pending approval"], ["coverage", "Replacement needed"]].map(([value, label]) => <Button key={value} variant={calendarFilter === value ? "contained" : "outlined"} onClick={() => setCalendarFilter(value)} sx={{ textTransform: "none" }}>{label}</Button>)}
+            <Button onClick={() => { setApplicationActivity("training"); openCalendarApplication(); }} startIcon={<GraduationCap size={16} />}>Apply training</Button>
+            <Button onClick={() => { setApplicationMode(true); setApplicationSelections([]); setApplicationNotice("Select dates for one employee, then click Continue application."); }}>Select several dates</Button>
+          </Stack>}
+          <Box sx={{ px: 1, py: .35, display: "flex", alignItems: "center", gap: 1.05, flexWrap: "wrap", border: "1px solid #CBD5E1", borderRadius: 2, background: "#FFFFFF", flexShrink: 0 }}>
+            {[
+              ["Morning", "#DCFCE7", "#86EFAC"],
+              ["Evening", "#FEF3C7", "#FCD34D"],
+              ["Night", "#DBEAFE", "#93C5FD"],
+              ["OFF", "#E5E7EB", "#9CA3AF"],
+            ].map(([label, background, border]) => <Stack key={label} direction="row" spacing={.45} alignItems="center"><Box sx={{ width: 18, height: 14, borderRadius: .7, background, border: `1px solid ${border}` }} /><Typography sx={{ color: "#475569", fontSize: 10, fontWeight: 800 }}>{label}</Typography></Stack>)}
+            <Stack direction="row" spacing={.4} alignItems="center"><Box sx={{ width: 24, height: 18, borderRadius: .7, display: "grid", placeItems: "center", background: "#FFEDD5", border: "1px solid #FB923C" }}><Box sx={{ width: 9, height: 9, borderRadius: "50%", background: "#FB923C", border: "1px solid #C2410C" }} /></Box><Typography sx={{ color: "#475569", fontSize: 10, fontWeight: 800 }}>Pending leave</Typography></Stack>
+            <Stack direction="row" spacing={.4} alignItems="center"><Box sx={{ width: 24, height: 18, borderRadius: .7, display: "grid", placeItems: "center", background: "#FEE2E2", border: "1px solid #F87171" }}><CheckCircle2 size={12} color="#15803D" strokeWidth={3} /></Box><Typography sx={{ color: "#475569", fontSize: 10, fontWeight: 800 }}>Approved leave</Typography></Stack>
+            <Stack direction="row" spacing={.4} alignItems="center"><Box sx={{ width: 18, height: 18, borderRadius: .7, display: "grid", placeItems: "center", background: "#F59E0B", color: "#FFF", fontSize: 9, fontWeight: 950, animation: "calendarReplacementPulse 1s ease-in-out infinite", "@keyframes calendarReplacementPulse": { "50%": { opacity: .35, transform: "scale(.86)" } } }}>R</Box><Typography sx={{ color: "#475569", fontSize: 10, fontWeight: 800 }}>Replacement required</Typography></Stack>
+            <Stack direction="row" spacing={.4} alignItems="center"><Box sx={{ width: 18, height: 18, borderRadius: .7, display: "grid", placeItems: "center", background: "#2563EB", color: "#FFF", fontSize: 9, fontWeight: 950 }}>R</Box><Typography sx={{ color: "#475569", fontSize: 10, fontWeight: 800 }}>Replacement assigned</Typography></Stack>
+            <Stack direction="row" spacing={.4} alignItems="center"><Box sx={{ width: 18, height: 18, borderRadius: "50%", display: "grid", placeItems: "center", background: "#9333EA", color: "#FFF", fontSize: 9, fontWeight: 950 }}>H</Box><Typography sx={{ color: "#475569", fontSize: 10, fontWeight: 800 }}>Holiday (shift duty continues)</Typography></Stack>
+          </Box>
+          <Paper
+            elevation={0}
             sx={{
-              position: "relative",
+              overflow: "hidden",
               flex: 1,
               minHeight: 0,
-              width: "100%",
-              height: "100%",
-              overflow: "auto",
-              overscrollBehavior: "contain",
-              "&::-webkit-scrollbar": {
-                width: 10,
-                height: 10,
-              },
-              "&::-webkit-scrollbar-thumb": {
-                background: "#94A3B8",
-                borderRadius: 5,
-              },
-              "&::-webkit-scrollbar-track": {
-                background: "#F1F5F9",
-              },
+              display: "flex",
+              flexDirection: "column",
+              borderRadius: 2.5,
+              border: "1px solid #CBD5E1",
+              boxShadow: "0 4px 18px rgba(15, 23, 42, 0.05)",
+              background: "#FFFFFF",
             }}
           >
-            <Table stickyHeader size="small" sx={{ borderCollapse: "separate", borderSpacing: 0 }}>
-              <TableHead>
-                <TableRow>
-                  <TableCell sx={{ position: "sticky !important", top: 0, left: 0, zIndex: 8, minWidth: 210, py: .65, background: "#F8FAFC", fontWeight: 900, color: "#334155", borderRight: "1px solid #E2E8F0" }}>Name / designation</TableCell>
-                  {dates.map((date) => { const holidayName = holidayByDate[date]; return <TableCell key={date} title={holidayName || undefined} align="center" onClick={() => setSelectedColumn(date)} sx={{ position: "sticky !important", top: 0, zIndex: 7, minWidth: 96, py: .5, cursor: "pointer", fontWeight: 900, color: holidayName ? "#6B21A8" : date === today ? "#03624C" : "#334155", background: holidayName ? "#F3E8FF" : selectedColumn === date ? "#D1FAE5" : date === today ? "#ECFDF5" : "#F8FAFC", borderBottom: holidayName ? "3px solid #A855F7" : date === today ? "3px solid #00A86B" : undefined }}><Box>{displayDate(date)}</Box><Typography variant="caption" sx={{ fontWeight: 800, color: holidayName ? "#7E22CE" : "#94A3B8" }}>{weekday(date)}{holidayName ? " · Holiday" : ""}</Typography></TableCell>; })}
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {!activeGroups.length && <TableRow><TableCell colSpan={dates.length + 1} align="center" sx={{ py: 8, color: "#64748B", fontWeight: 700 }}>{data.length ? "No duties match this filter. Choose All duties or clear the search." : "No calendar roster has been published yet."}</TableCell></TableRow>}
-                {activeGroups.map((group) => [
-                  <TableRow key={`${group.groupName}-header`}><TableCell colSpan={dates.length + 1} sx={{ py: .55, background: "linear-gradient(90deg,#E8F5F1,#F8FAFC)", color: "#03624C", fontWeight: 900, letterSpacing: ".03em" }}>{group.groupName}</TableCell></TableRow>,
-                  ...group.employees.map((person) => (
-                    <EmployeeRow
-                      key={`${group.groupName}-${person.employeeId}`}
-                      person={person}
-                      groupName={group.groupName}
-                      active={selectedRow === person.employeeId}
-                      dates={dates}
-                      selectedColumn={selectedColumn}
-                      onSelectRow={handleSelectRow}
-                      onSelectDuty={handleSelectDuty}
-                      onTrainingDrop={setTrainingApprovalPopup}
-                      applicationMode={applicationMode}
-                      applicationKeys={applicationKeys}
-                      readOnly={publicView}
-                    />
-                  ))
-                ])}
-              </TableBody>
-            </Table>
-          </Box>
-        )}
-      </Paper>
-      </>}
+            {loading ? (
+              <Box sx={{ minHeight: 360, display: "grid", placeItems: "center" }}><CircularProgress sx={{ color: "#03624C" }} /></Box>
+            ) : (
+              <Box
+                sx={{
+                  position: "relative",
+                  flex: 1,
+                  minHeight: 0,
+                  width: "100%",
+                  height: "100%",
+                  overflow: "auto",
+                  overscrollBehavior: "contain",
+                  "&::-webkit-scrollbar": {
+                    width: 10,
+                    height: 10,
+                  },
+                  "&::-webkit-scrollbar-thumb": {
+                    background: "#94A3B8",
+                    borderRadius: 5,
+                  },
+                  "&::-webkit-scrollbar-track": {
+                    background: "#F1F5F9",
+                  },
+                }}
+              >
+                <Table stickyHeader size="small" sx={{ borderCollapse: "separate", borderSpacing: 0 }}>
+                  <TableHead>
+                    <TableRow>
+                      <TableCell sx={{ position: "sticky !important", top: 0, left: 0, zIndex: 8, minWidth: 210, py: .65, background: "#F8FAFC", fontWeight: 900, color: "#334155", borderRight: "1px solid #E2E8F0" }}>Name / designation</TableCell>
+                      {dates.map((date) => { const holidayName = holidayByDate[date]; return <TableCell key={date} title={holidayName || undefined} align="center" onClick={() => setSelectedColumn(date)} sx={{ position: "sticky !important", top: 0, zIndex: 7, minWidth: 96, py: .5, cursor: "pointer", fontWeight: 900, color: holidayName ? "#6B21A8" : date === today ? "#03624C" : "#334155", background: holidayName ? "#F3E8FF" : selectedColumn === date ? "#D1FAE5" : date === today ? "#ECFDF5" : "#F8FAFC", borderBottom: holidayName ? "3px solid #A855F7" : date === today ? "3px solid #00A86B" : undefined }}><Box>{displayDate(date)}</Box><Typography variant="caption" sx={{ fontWeight: 800, color: holidayName ? "#7E22CE" : "#94A3B8" }}>{weekday(date)}{holidayName ? " · Holiday" : ""}</Typography></TableCell>; })}
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {!activeGroups.length && <TableRow><TableCell colSpan={dates.length + 1} align="center" sx={{ py: 8, color: "#64748B", fontWeight: 700 }}>{data.length ? "No duties match this filter. Choose All duties or clear the search." : "No calendar roster has been published yet."}</TableCell></TableRow>}
+                    {activeGroups.map((group) => [
+                      <TableRow key={`${group.groupName}-header`}><TableCell colSpan={dates.length + 1} sx={{ py: .55, background: "linear-gradient(90deg,#E8F5F1,#F8FAFC)", color: "#03624C", fontWeight: 900, letterSpacing: ".03em" }}>{group.groupName}</TableCell></TableRow>,
+                      ...group.employees.map((person) => (
+                        <EmployeeRow
+                          key={`${group.groupName}-${person.employeeId}`}
+                          person={person}
+                          groupName={group.groupName}
+                          active={selectedRow === person.employeeId}
+                          dates={dates}
+                          selectedColumn={selectedColumn}
+                          onSelectRow={handleSelectRow}
+                          onSelectDuty={handleSelectDuty}
+                          onTrainingDrop={setTrainingApprovalPopup}
+                          applicationMode={applicationMode}
+                          applicationKeys={applicationKeys}
+                          readOnly={publicView}
+                        />
+                      ))
+                    ])}
+                  </TableBody>
+                </Table>
+              </Box>
+            )}
+          </Paper>
+        </>}
       </Box>}
       <Dialog open={applicationDialogOpen} onClose={dismissCalendarApplication} fullWidth maxWidth="xl" PaperProps={{ sx: { maxHeight: "92dvh", borderRadius: 3 } }}>
         <DialogTitle sx={{ px: { xs: 1.5, md: 2.5 }, py: 1.4, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 1, borderBottom: "1px solid #E2E8F0" }}>
@@ -1072,6 +1073,12 @@ export default function CrewCalendar({ publicView = false, applicationOnly = fal
                   {selectedDuty.duty.trainingAdjacentOffCurrentApproverName ? ` · awaiting ${selectedDuty.duty.trainingAdjacentOffCurrentApproverName} (${selectedDuty.duty.trainingAdjacentOffCurrentApproverLevel || "approver"})` : ""}
                 </Alert>
               )}
+              {selectedDuty.duty.sportsAdjacentOffStatus && (
+                <Alert severity={selectedDuty.duty.sportsAdjacentOffStatus === "Approved" ? "success" : "warning"}>
+                  {selectedDuty.duty.sportsAdjacentOffPosition || "Sports Travel OFF"} request for {selectedDuty.duty.sportsAdjacentOffName || "sports"} · {selectedDuty.duty.sportsAdjacentOffStatus}
+                  {selectedDuty.duty.sportsAdjacentOffCurrentApproverName ? ` · awaiting ${selectedDuty.duty.sportsAdjacentOffCurrentApproverName} (${selectedDuty.duty.sportsAdjacentOffCurrentApproverLevel || "approver"})` : ""}
+                </Alert>
+              )}
               {selectedDuty.duty.vacatedDuty && (
                 <Alert severity="warning" action={canManageReplacement && !selectedDuty.duty.replacementEmployee?.name ? <Button color="warning" size="small" onClick={() => { setReassignmentContext({ mode: "vacancy", date: selectedDuty.date, employeeId: selectedDuty.person.employeeId }); setSelectedDuty(null); setExchangeOpen(true); }} sx={{ fontWeight: 900, whiteSpace: "nowrap" }}>Fill vacancy</Button> : undefined}>
                   Vacant {selectedDuty.duty.vacatedDuty} duty{selectedDuty.duty.vacancyReason ? ` · ${selectedDuty.duty.vacancyReason}` : ""}
@@ -1091,8 +1098,8 @@ export default function CrewCalendar({ publicView = false, applicationOnly = fal
                           calendarExchangeRequest.stage === "other_employee"
                             ? "Colleague Approval"
                             : calendarExchangeRequest.stage === "sic"
-                            ? "SIC Approval"
-                            : "Final DIC / RO Approval"
+                              ? "SIC Approval"
+                              : "Final DIC / RO Approval"
                         }
                         sx={{ height: 20, fontSize: 10, fontWeight: 900 }}
                       />
@@ -1226,8 +1233,58 @@ export default function CrewCalendar({ publicView = false, applicationOnly = fal
                   {(selectedDuty.duty.trainingName || selectedDuty.duty.trainingAdjacentOffStatus) && <Button size="small" variant="contained" onClick={openTrainingWorkflow} sx={{ textTransform: "none", fontWeight: 900, background: "#6A1B9A" }}>{selectedDuty.duty.trainingAdjacentOffStatus ? "Review OFF approval" : "Manage training"}</Button>}
                   {selectedDuty.duty.sportsName && <Button size="small" variant="contained" onClick={() => navigate("/crew/sports?section=approval")} sx={{ textTransform: "none", fontWeight: 900, background: "#047857" }}>Open sports approval</Button>}
                   {canManageReplacement && String(selectedDuty.duty.leaveStatus || "").toLowerCase() === "approved" && <Button size="small" variant="outlined" onClick={openReplacementWorkflow} sx={{ textTransform: "none", fontWeight: 900, borderColor: "#D97706", color: "#B45309", ...(selectedDuty.duty.replacementRequired && !selectedDuty.duty.replacementEmployee?.name ? { animation: "calendarReplacementPulse 1s ease-in-out infinite" } : {}) }}>Assign replacement</Button>}
-                  {canManageReplacement && selectedDuty.duty.trainingName && <Button size="small" variant="outlined" onClick={openReplacementWorkflow} sx={{ textTransform: "none", fontWeight: 900, borderColor: "#D97706", color: "#B45309", ...(selectedDuty.duty.replacementRequired && !selectedDuty.duty.replacementEmployee?.name ? { animation: "calendarReplacementPulse 1s ease-in-out infinite" } : {}) }}>Assign replacement</Button>}
-                  {canManageReplacement && selectedDuty.duty.sportsName && <Button size="small" variant="outlined" onClick={openReplacementWorkflow} sx={{ textTransform: "none", fontWeight: 900, borderColor: "#D97706", color: "#B45309", ...(selectedDuty.duty.replacementRequired && !selectedDuty.duty.replacementEmployee?.name ? { animation: "calendarReplacementPulse 1s ease-in-out infinite" } : {}) }}>Assign replacement</Button>}
+                  {canManageReplacement && (selectedDuty.duty.trainingName || selectedDuty.duty.trainingAdjacentOffStatus === "Approved") && (
+                    <>
+                      <Button size="small" variant="outlined" onClick={openReplacementWorkflow} sx={{ textTransform: "none", fontWeight: 900, borderColor: "#D97706", color: "#B45309", ...(selectedDuty.duty.replacementRequired && !selectedDuty.duty.replacementEmployee?.name ? { animation: "calendarReplacementPulse 1s ease-in-out infinite" } : {}) }}>
+                        Assign replacement
+                      </Button>
+                      <Button
+                        size="small"
+                        variant="outlined"
+                        onClick={async () => {
+                          const trainId = selectedDuty.duty.trainingAdjacentOffRequestId || selectedDuty.duty.trainingNominationId;
+                          if (!trainId) return;
+                          const nextReq = !selectedDuty.duty.replacementRequired;
+                          try {
+                            await crewApi.setTrainingReplacementRequired(trainId, { date: selectedDuty.date, replacementRequired: nextReq });
+                            setCalendarNotice(`Training / Travel OFF replacement requirement set to ${nextReq ? "Required" : "Not Required"}.`);
+                            await load();
+                          } catch (err) {
+                            setCalendarNotice("Could not update training replacement requirement.");
+                          }
+                        }}
+                        sx={{ textTransform: "none", fontWeight: 850, fontSize: 11 }}
+                      >
+                        {selectedDuty.duty.replacementRequired ? "Mark No Replacement" : "Mark Replacement Required"}
+                      </Button>
+                    </>
+                  )}
+                  {canManageReplacement && (selectedDuty.duty.sportsName || selectedDuty.duty.sportsAdjacentOffStatus === "Approved") && (
+                    <>
+                      <Button size="small" variant="outlined" onClick={openReplacementWorkflow} sx={{ textTransform: "none", fontWeight: 900, borderColor: "#D97706", color: "#B45309", ...(selectedDuty.duty.replacementRequired && !selectedDuty.duty.replacementEmployee?.name ? { animation: "calendarReplacementPulse 1s ease-in-out infinite" } : {}) }}>
+                        Assign replacement
+                      </Button>
+                      <Button
+                        size="small"
+                        variant="outlined"
+                        onClick={async () => {
+                          const sportsId = selectedDuty.duty.sportsAdjacentOffRequestId || selectedDuty.duty.sportsApplicationId;
+                          if (!sportsId) return;
+                          const nextReq = !selectedDuty.duty.replacementRequired;
+                          try {
+                            await crewApi.setSportsReplacementRequired(sportsId, { date: selectedDuty.date, replacementRequired: nextReq });
+                            setCalendarNotice(`Sports / Travel OFF replacement requirement set to ${nextReq ? "Required" : "Not Required"}.`);
+                            await load();
+                          } catch (err) {
+                            setCalendarNotice("Could not update sports replacement requirement.");
+                          }
+                        }}
+                        sx={{ textTransform: "none", fontWeight: 850, fontSize: 11 }}
+                      >
+                        {selectedDuty.duty.replacementRequired ? "Mark No Replacement" : "Mark Replacement Required"}
+                      </Button>
+                    </>
+                  )}
                 </Stack>
               )}
               {selectedDuty.duty.replacementEmployee?.name && (

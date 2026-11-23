@@ -50,6 +50,7 @@ PAGE_CATALOG = [
     ("crew_leave", "Leave", "/crew/leave"),
     ("leave_calendar_all", "Administration — View All Leave Calendars", "Special permission"),
     ("leave_master_delete", "Administration — Permanently Delete Leave Master Record", "Special permission"),
+    ("crew_sports", "Sports Application", "/crew/sports"),
     ("crew_replacement", "Replacement", "/crew/replacement"),
     ("crew_training", "Holiday & Training", "/crew/training"),
     ("crew_threads", "Crew Notices", "/crew/threads"),
@@ -70,7 +71,7 @@ LANDING_PAGE_KEYS = {
     "/": "rtg_dashboard",
     "/crew/operations": "crew_dashboard",
 }
-LANDING_WORKFLOW_PAGES = {"/crew/replacement", "/crew/training"}
+LANDING_WORKFLOW_PAGES = {"/crew/replacement", "/crew/training", "/crew/sports"}
 
 
 def _landing_page_for_user(employee: dict, permissions: dict) -> str:
@@ -93,7 +94,7 @@ def _default_access(user_id: str) -> dict:
         key: {
             "view": full_access or key in {"profile", "crew_threads", "crew_training"},
             "write": full_access or key == "crew_threads",
-            **({"approve": full_access} if key in {"crew_threads", "crew_training"} else {}),
+            **({"approve": full_access} if key in {"crew_threads", "crew_training", "crew_sports"} else {}),
         }
         for key, _, _ in PAGE_CATALOG
     }
@@ -115,13 +116,13 @@ def _ensure_access(user_id: str) -> dict:
     for key, _, _ in PAGE_CATALOG:
         source = pages.get(key) or defaults[key]
         access = {"view": bool(source.get("view")) or key == "crew_training", "write": bool(source.get("write"))}
-        if key in {"crew_threads", "crew_training"}:
+        if key in {"crew_threads", "crew_training", "crew_sports"}:
             access["approve"] = bool(source.get("approve"))
             if access["approve"]:
                 access["view"] = True
         merged[key] = access
     if user_id == "50041":
-        merged = {key: {"view": True, "write": True, **({"approve": True} if key in {"crew_threads", "crew_training"} else {})} for key, _, _ in PAGE_CATALOG}
+        merged = {key: {"view": True, "write": True, **({"approve": True} if key in {"crew_threads", "crew_training", "crew_sports"} else {})} for key, _, _ in PAGE_CATALOG}
     if merged != pages:
         page_access_collection.update_one({"_id": existing["_id"]}, {"$set": {"pages": merged, "updatedOn": datetime.utcnow()}})
     return merged
@@ -326,15 +327,15 @@ class BulkPageAccessRequest(BaseModel):
 def update_user_access(user_id: str, data: AccessUpdateRequest, user=Depends(get_authenticated_user)):
     _require_access_admin(user, write=True)
     if user_id == "50041":
-        pages = {key: {"view": True, "write": True, **({"approve": True} if key in {"crew_threads", "crew_training"} else {})} for key, _, _ in PAGE_CATALOG}
+        pages = {key: {"view": True, "write": True, **({"approve": True} if key in {"crew_threads", "crew_training", "crew_sports"} else {})} for key, _, _ in PAGE_CATALOG}
     else:
         pages = {}
         for key, _, _ in PAGE_CATALOG:
             requested = data.permissions.get(key) or {}
             write = bool(requested.get("write"))
-            approve = key in {"crew_threads", "crew_training"} and bool(requested.get("approve"))
+            approve = key in {"crew_threads", "crew_training", "crew_sports"} and bool(requested.get("approve"))
             pages[key] = {"view": bool(requested.get("view")) or write or approve or key == "crew_training", "write": write}
-            if key in {"crew_threads", "crew_training"}:
+            if key in {"crew_threads", "crew_training", "crew_sports"}:
                 pages[key]["approve"] = approve
     page_access_collection.update_one(
         {"userId": user_id},

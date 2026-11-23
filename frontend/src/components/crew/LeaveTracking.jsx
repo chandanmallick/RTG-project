@@ -1,5 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
-import { Alert, Box, Button, Checkbox, Chip, Dialog, DialogActions, DialogContent, DialogTitle, FormControlLabel, Stack, Typography } from "@mui/material";
+import { Alert, Box, Button, Checkbox, Chip, Dialog, DialogActions, DialogContent, DialogTitle, FormControlLabel, Paper, Stack, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, TextField, Tooltip, Typography } from "@mui/material";
+import dayjs from "dayjs";
+import { RotateCcw } from "lucide-react";
+import api from "../../crewLegacy/api";
 
 import LeaveProgress from "./LeaveProgress";
 import LeavePeriodEditor from "./LeavePeriodEditor";
@@ -28,6 +31,171 @@ export default function LeaveTracking({ leave, onCancel, onCancelGroup, busy, gr
   const isMultiDay = applicationRows.length > 1;
   const hasGroupCancel = typeof onCancelGroup === "function";
   const showDateManagement = hasGroupCancel && (isMultiDay || selectedDatesOnly || applicationRows.some(row => row.finalStatus === "Approved"));
+
+  const [reviewDialogOpen, setReviewDialogOpen] = useState(false);
+  const [reviewDates, setReviewDates] = useState([]);
+  const [reviewRequired, setReviewRequired] = useState(false);
+  const [reviewComment, setReviewComment] = useState("");
+  const [savingReview, setSavingReview] = useState(false);
+  const [reviewNotice, setReviewNotice] = useState(null);
+
+  const replacementHistoryRows = useMemo(() => {
+    const raw = [];
+    const rows = applicationRows && applicationRows.length ? applicationRows : [leave];
+
+    for (const r of rows) {
+      const leaveDate = r.date || leave?.date;
+      const history = r.replacementDecisionHistory || [];
+      if (history.length > 0) {
+        for (const d of history) {
+          raw.push({
+            leaveDate,
+            leaveId: r.id || r._id,
+            stage: d.stage || "Approver",
+            required: Boolean(d.required),
+            decidedBy: d.decidedByName || d.decidedBy || "Approving Officer",
+            decidedById: d.decidedBy || "",
+            decidedOn: d.decidedOn,
+            comment: d.comment || d.reason || "",
+            changedFromSIC: Boolean(d.changedFromSIC),
+            isReview: Boolean(d.review || d.isReview),
+          });
+        }
+      } else {
+        if (r.sicApprovalStatus === "Forwarded" && r.sicReplacementRequired !== undefined && r.sicReplacementRequired !== null) {
+          raw.push({
+            leaveDate,
+            leaveId: r.id || r._id,
+            stage: "SIC",
+            required: Boolean(r.sicReplacementRequired),
+            decidedBy: r.sicApprovedByName || r.sicApprovedBy || "SIC",
+            decidedById: r.sicApprovedBy || "",
+            decidedOn: r.sicApprovedOn || r.updatedOn,
+            comment: "",
+            changedFromSIC: false,
+          });
+        }
+        if (r.deptApprovalStatus === "Approved" && (r.replacementRequired !== undefined || r.dicReplacementRequired !== undefined)) {
+          raw.push({
+            leaveDate,
+            leaveId: r.id || r._id,
+            stage: "DIC",
+            required: Boolean(r.dicReplacementRequired !== undefined ? r.dicReplacementRequired : r.replacementRequired),
+            decidedBy: r.deptApprovedByName || r.approvedBy || "DIC",
+            decidedById: r.approvedBy || "",
+            decidedOn: r.deptApprovedOn || r.updatedOn,
+            comment: "",
+            changedFromSIC: false,
+          });
+        }
+      }
+    }
+
+    // Group items that belong to the same decision action
+    const groups = [];
+    for (const item of raw) {
+      let matched = false;
+      for (const g of groups) {
+        if (
+          g.stage === item.stage &&
+          g.required === item.required &&
+          g.decidedById === item.decidedById &&
+          g.comment === item.comment
+        ) {
+          g.dates.push(item.leaveDate);
+          if (item.decidedOn && (!g.decidedOn || item.decidedOn > g.decidedOn)) {
+            g.decidedOn = item.decidedOn;
+          }
+          matched = true;
+          break;
+        }
+      }
+      if (!matched) {
+        groups.push({
+          stage: item.stage,
+          required: item.required,
+          decidedBy: item.decidedBy,
+          decidedById: item.decidedById,
+          decidedOn: item.decidedOn,
+          comment: item.comment,
+          changedFromSIC: item.changedFromSIC,
+          isReview: item.isReview,
+          dates: [item.leaveDate],
+        });
+      }
+    }
+
+    return groups.map((g) => {
+      const datesSorted = [...new Set(g.dates)].filter(Boolean).sort();
+      let dateLabel = "-";
+      if (datesSorted.length === 1) {
+        dateLabel = dayjs(datesSorted[0]).format("DD MMM YYYY");
+      } else if (datesSorted.length > 1) {
+        const first = datesSorted[0];
+        const last = datesSorted[datesSorted.length - 1];
+        dateLabel = `${dayjs(first).format("DD MMM")} → ${dayjs(last).format("DD MMM YYYY")} (${datesSorted.length} days)`;
+      }
+      return { ...g, dateLabel, datesList: datesSorted };
+    });
+  }, [applicationRows, leave]);
+
+  const isReplacementRequired = Boolean(leave.replacementRequired || leave.dicReplacementRequired || leave.sicReplacementRequired || replacementHistoryRows.some(d => d.required));
+  const hasReplacementAssigned = Boolean(leave.replacementAssigned || leave.replacementEmployee?.name);
+
+  const handleSaveReview = async () => {
+    if (!reviewDates.length) {
+      setReviewNotice({ severity: "warning", text: "Please select at least one date." });
+      return;
+    }
+    setSavingReview(true);
+    setReviewNotice(null);
+    try {
+      const selectedLeaveIds = applicationRows
+        .filter(r => reviewDates.includes(r.date))
+        .map(r => r.id || r._id)
+        .filter(Boolean);
+
+      const payload = {
+        leaveIds: selectedLeaveIds,
+        dates: reviewDates,
+        leaveGroupId: leave.leaveGroupId,
+        employeeId: leave.employeeId,
+        replacementRequired: reviewRequired,
+        comment: reviewComment.trim(),
+      };
+
+      await api.put("/leave/review-replacement-requirement", payload);
+      for (const r of applicationRows) {
+        if (reviewDates.includes(r.date)) {
+          r.replacementRequired = reviewRequired;
+          r.dicReplacementRequired = reviewRequired;
+          r.replacementDecisionHistory = [
+            ...(r.replacementDecisionHistory || []),
+            {
+              stage: "Review",
+              required: reviewRequired,
+              decidedByName: "Reviewer",
+              decidedBy: "Reviewer",
+              decidedOn: new Date().toISOString(),
+              comment: reviewComment.trim(),
+              isReview: true,
+            }
+          ];
+        }
+      }
+      leave.replacementRequired = reviewRequired;
+      leave.dicReplacementRequired = reviewRequired;
+
+      setSavingReview(false);
+      setReviewDialogOpen(false);
+      if (onUpdated) onUpdated();
+      window.dispatchEvent(new Event("crew-workflows-changed"));
+    } catch (err) {
+      setSavingReview(false);
+      const msg = err.response?.data?.detail || err.message || "Failed to update replacement requirement.";
+      setReviewNotice({ severity: "error", text: msg });
+    }
+  };
 
   useEffect(() => {
     if (!open) return;
@@ -77,7 +245,251 @@ export default function LeaveTracking({ leave, onCancel, onCancelGroup, busy, gr
         {leave.currentApproverNames?.length > 0 && !["Approved", "Cancelled", "Rejected", "Withdrawn"].includes(leave.finalStatus) && <Alert severity="info">Awaiting {leave.currentApproverNames.join(", ")}</Alert>}
         {(leave.rejectionHistory || []).map((item, i) => <Alert key={i} severity="warning">{item.comment || item.reason || "Rejected"} · {item.rejectedBy || item.employeeId} {when(item.rejectedOn || item.date)}</Alert>)}
         {leave.cancelledBy && <Alert severity="info">Cancelled by {leave.cancelledBy} ({leave.cancelledByRole}) · {when(leave.cancelledOn)}</Alert>}
-        {leave.replacementEmployee?.name && <Typography variant="body2">Replacement: {leave.replacementEmployee.name}</Typography>}
+        {/* Replacement Requirement & Approval Decision Audit */}
+        <Paper variant="outlined" sx={{ p: 1.8, borderRadius: 3, border: "1px solid #D9E2EC", bgcolor: "#F8FAFC" }}>
+          <Stack spacing={1.2}>
+            <Stack direction="row" alignItems="center" justifyContent="space-between" spacing={1} flexWrap="wrap">
+              <Stack direction="row" alignItems="center" spacing={1}>
+                <Box sx={{ width: 26, height: 26, borderRadius: 1.5, display: "grid", placeItems: "center", color: isReplacementRequired ? "#B45309" : "#475569", bgcolor: isReplacementRequired ? "#FEF3C7" : "#E2E8F0", fontWeight: 950, fontSize: 12 }}>
+                  R
+                </Box>
+                <Box>
+                  <Typography sx={{ fontSize: 13, fontWeight: 900, color: "#0F172A" }}>
+                    Replacement Requirement Option
+                  </Typography>
+                  <Typography sx={{ fontSize: 10.5, color: "#64748B" }}>
+                    Decisions marked during approval and subsequent reviews
+                  </Typography>
+                </Box>
+              </Stack>
+              <Stack direction="row" spacing={0.8} alignItems="center" flexWrap="wrap">
+                <Button
+                  size="small"
+                  variant="outlined"
+                  color="primary"
+                  startIcon={<RotateCcw size={13} />}
+                  onClick={() => {
+                    setReviewDates(applicationRows.map(r => r.date));
+                    setReviewRequired(isReplacementRequired);
+                    setReviewComment("");
+                    setReviewNotice(null);
+                    setReviewDialogOpen(true);
+                  }}
+                  sx={{ height: 26, fontSize: 11, fontWeight: 800, textTransform: "none", borderRadius: 1.8 }}
+                >
+                  Review / Change Option
+                </Button>
+                <Chip
+                  size="small"
+                  label={hasReplacementAssigned ? "Replacement Assigned" : isReplacementRequired ? "Replacement Required" : ["Approved", "Forwarded", "Forwarded by SIC"].includes(leave.finalStatus) ? "No Replacement Required" : "Pending Review"}
+                  color={hasReplacementAssigned ? "success" : isReplacementRequired ? "warning" : "default"}
+                  sx={{ fontWeight: 850 }}
+                />
+              </Stack>
+            </Stack>
+
+            {/* Compact Tabular Format for Replacement Decisions */}
+            <TableContainer component={Paper} variant="outlined" sx={{ maxHeight: 220, borderRadius: 2, border: "1px solid #E2E8F0" }}>
+              <Table size="small" stickyHeader sx={{ "& .MuiTableCell-root": { py: 0.6, px: 1, fontSize: 11.5 } }}>
+                <TableHead>
+                  <TableRow>
+                    <TableCell sx={{ fontWeight: 850, bgcolor: "#F8FAFC", color: "#334155" }}>Leave Date(s)</TableCell>
+                    <TableCell sx={{ fontWeight: 850, bgcolor: "#F8FAFC", color: "#334155" }}>Stage</TableCell>
+                    <TableCell sx={{ fontWeight: 850, bgcolor: "#F8FAFC", color: "#334155" }}>Option</TableCell>
+                    <TableCell sx={{ fontWeight: 850, bgcolor: "#F8FAFC", color: "#334155" }}>Decided By</TableCell>
+                    <TableCell sx={{ fontWeight: 850, bgcolor: "#F8FAFC", color: "#334155" }}>Action Time</TableCell>
+                    <TableCell sx={{ fontWeight: 850, bgcolor: "#F8FAFC", color: "#334155" }}>Remarks</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {replacementHistoryRows.map((row, idx) => (
+                    <TableRow key={idx} hover sx={{ bgcolor: row.required ? "#FFFDF7" : "inherit" }}>
+                      <TableCell sx={{ fontWeight: 800, whiteSpace: "nowrap", color: "#0F172A" }}>
+                        {row.dateLabel}
+                      </TableCell>
+                      <TableCell>
+                        <Chip
+                          size="small"
+                          label={row.stage}
+                          sx={{ height: 20, fontSize: 10, fontWeight: 900, bgcolor: row.stage === "Review" ? "#E0E7FF" : "#E2E8F0", color: row.stage === "Review" ? "#3730A3" : "#1E293B" }}
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <Chip
+                          size="small"
+                          label={row.required ? "Required" : "Not Required"}
+                          color={row.required ? "warning" : "default"}
+                          sx={{ height: 20, fontSize: 10, fontWeight: 850 }}
+                        />
+                      </TableCell>
+                      <TableCell sx={{ whiteSpace: "nowrap" }}>
+                        <Typography sx={{ fontSize: 11.5, fontWeight: 700, color: "#1E293B" }}>
+                          {row.decidedBy}
+                        </Typography>
+                        {row.decidedById && row.decidedById !== row.decidedBy && (
+                          <Typography sx={{ fontSize: 10, color: "#64748B" }}>
+                            ID: {row.decidedById}
+                          </Typography>
+                        )}
+                      </TableCell>
+                      <TableCell sx={{ fontSize: 10.5, color: "#64748B", whiteSpace: "nowrap" }}>
+                        {row.decidedOn ? dayjs(row.decidedOn).format("DD/MM/YYYY, hh:mm A") : "—"}
+                      </TableCell>
+                      <TableCell sx={{ maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        <Tooltip title={row.comment || ""}>
+                          <span>{row.comment || "—"}</span>
+                        </Tooltip>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                  {!replacementHistoryRows.length && (
+                    <TableRow>
+                      <TableCell colSpan={6} align="center" sx={{ py: 2, color: "#94A3B8" }}>
+                        No replacement decisions recorded yet.
+                      </TableCell>
+                    </TableRow>
+                  )}
+                </TableBody>
+              </Table>
+            </TableContainer>
+
+            {hasReplacementAssigned && (
+              <Alert severity="success" sx={{ py: 0.3, px: 1.2, borderRadius: 2, fontSize: 12 }}>
+                Replacement assigned to: <strong>{leave.replacementEmployee?.name || "Assigned"}</strong> {leave.replacementEmployee?.employeeId ? `(${leave.replacementEmployee.employeeId})` : ""}
+              </Alert>
+            )}
+          </Stack>
+        </Paper>
+
+        {/* Review Replacement Requirement Dialog */}
+        <Dialog
+          open={reviewDialogOpen}
+          onClose={() => !savingReview && setReviewDialogOpen(false)}
+          fullWidth
+          maxWidth="xs"
+          slotProps={{ paper: { sx: { borderRadius: 3, p: 1 } } }}
+        >
+          <DialogTitle sx={{ fontWeight: 900, fontSize: 16, pb: 1 }}>
+            Review Replacement Requirement
+            <Typography sx={{ fontSize: 11.5, color: "#64748B", mt: 0.2 }}>
+              {leave.name} ({leave.employeeId})
+            </Typography>
+          </DialogTitle>
+          <DialogContent dividers sx={{ display: "grid", gap: 1.8, py: 2 }}>
+            {reviewNotice && <Alert severity={reviewNotice.severity}>{reviewNotice.text}</Alert>}
+
+            {/* Date selection */}
+            <Box>
+              <Typography sx={{ fontSize: 11.5, fontWeight: 850, color: "#334155", mb: 0.6 }}>
+                Select Leave Date(s) to Review:
+              </Typography>
+              <Stack sx={{ maxHeight: 130, overflowY: "auto", border: "1px solid #E2E8F0", borderRadius: 1.5, p: 0.8, bgcolor: "#F8FAFC" }}>
+                {applicationRows.length > 1 && (
+                  <FormControlLabel
+                    sx={{ m: 0 }}
+                    control={
+                      <Checkbox
+                        size="small"
+                        checked={reviewDates.length === applicationRows.length}
+                        indeterminate={reviewDates.length > 0 && reviewDates.length < applicationRows.length}
+                        onChange={(e) => setReviewDates(e.target.checked ? applicationRows.map(r => r.date) : [])}
+                      />
+                    }
+                    label={<Typography sx={{ fontSize: 11.5, fontWeight: 800 }}>Select All Dates</Typography>}
+                  />
+                )}
+                {applicationRows.map((r) => {
+                  const isDateSelected = reviewDates.includes(r.date);
+                  return (
+                    <FormControlLabel
+                      key={r.date}
+                      sx={{ m: 0 }}
+                      control={
+                        <Checkbox
+                          size="small"
+                          checked={isDateSelected}
+                          onChange={(e) =>
+                            setReviewDates(curr =>
+                              e.target.checked ? [...curr, r.date] : curr.filter(d => d !== r.date)
+                            )
+                          }
+                        />
+                      }
+                      label={
+                        <Typography sx={{ fontSize: 11.5 }}>
+                          {dayjs(r.date).format("DD MMM YYYY")} · {r.replacementRequired ? "Cover Required" : "Cover Not Required"}
+                        </Typography>
+                      }
+                    />
+                  );
+                })}
+              </Stack>
+            </Box>
+
+            {/* Decision Selection */}
+            <Box>
+              <Typography sx={{ fontSize: 11.5, fontWeight: 850, color: "#334155", mb: 0.8 }}>
+                Replacement Requirement Option:
+              </Typography>
+              <Stack direction="row" spacing={1}>
+                <Button
+                  fullWidth
+                  size="small"
+                  variant={reviewRequired ? "contained" : "outlined"}
+                  color={reviewRequired ? "warning" : "inherit"}
+                  onClick={() => setReviewRequired(true)}
+                  sx={{ fontWeight: 850, fontSize: 11.5, textTransform: "none", py: 1 }}
+                >
+                  Replacement Required
+                </Button>
+                <Button
+                  fullWidth
+                  size="small"
+                  variant={!reviewRequired ? "contained" : "outlined"}
+                  onClick={() => setReviewRequired(false)}
+                  sx={{
+                    fontWeight: 850,
+                    fontSize: 11.5,
+                    textTransform: "none",
+                    py: 1,
+                    bgcolor: !reviewRequired ? "#334155" : "inherit",
+                    color: !reviewRequired ? "#FFF" : "inherit",
+                    "&:hover": { bgcolor: !reviewRequired ? "#1E293B" : undefined }
+                  }}
+                >
+                  No Replacement
+                </Button>
+              </Stack>
+            </Box>
+
+            {/* Remarks */}
+            <TextField
+              fullWidth
+              multiline
+              minRows={2}
+              size="small"
+              label="Review Remarks / Reason"
+              placeholder="e.g. Cover required due to shift shortage, or not required after review..."
+              value={reviewComment}
+              onChange={(e) => setReviewComment(e.target.value)}
+              inputProps={{ maxLength: 1000 }}
+            />
+          </DialogContent>
+          <DialogActions sx={{ px: 2, pb: 1.5 }}>
+            <Button disabled={savingReview} onClick={() => setReviewDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              variant="contained"
+              color="primary"
+              disabled={savingReview || !reviewDates.length}
+              onClick={handleSaveReview}
+              sx={{ fontWeight: 850 }}
+            >
+              {savingReview ? "Saving..." : "Save Review"}
+            </Button>
+          </DialogActions>
+        </Dialog>
 
         {showDateManagement && (
           <Box sx={{ border: "1px solid #BFDBFE", borderRadius: 2, background: "#F8FBFF", p: 1.2 }}>

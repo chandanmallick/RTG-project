@@ -700,8 +700,11 @@ def calendar_view(start_date: str = Query(...), end_date: str = Query(...)):
                 "trainingStatus": nomination.get("status"),
             })
             if str(nomination.get("status") or "").strip().lower() == "approved":
-                duty["replacementRequired"] = bool(nomination.get("replacementRequired"))
-                duty["replacementEmployee"] = nomination.get("replacementEmployee") or duty.get("replacementEmployee")
+                rep_dates = set(nomination.get("replacementRequiredDates") or [])
+                has_rep_dates = ("replacementRequiredDates" in nomination and nomination.get("replacementRequiredDates") is not None)
+                date_rep_required = (date in rep_dates) if has_rep_dates else bool(nomination.get("replacementRequired"))
+                duty["replacementRequired"] = date_rep_required
+                duty["replacementEmployee"] = (nomination.get("replacementEmployee") if date_rep_required else None) or duty.get("replacementEmployee")
             cursor += timedelta(days=1)
 
     # An adjacent-OFF request is a separate workflow from the approved
@@ -738,8 +741,11 @@ def calendar_view(start_date: str = Query(...), end_date: str = Query(...)):
                 "trainingName": None, "replacementEmployee": None,
                 "replacementFor": None,
             })
-            duty.update({
+            tr_rep_dates = set(request.get("replacementRequiredDates") or [])
+            is_tr_rep_req = (date in tr_rep_dates) if ("replacementRequiredDates" in request and request.get("replacementRequiredDates") is not None) else bool(request.get("replacementRequired"))
+            tr_update = {
                 "trainingAdjacentOffRequestId": str(request["_id"]),
+                "trainingAdjacentOffNominationId": str(request["_id"]),
                 "trainingAdjacentOffStatus": request.get("status"),
                 "trainingAdjacentOffName": request.get("trainingName") or "Training",
                 "trainingAdjacentOffPosition": (
@@ -750,12 +756,18 @@ def calendar_view(start_date: str = Query(...), end_date: str = Query(...)):
                 "trainingAdjacentOffCurrentApproverId": current_approver.get("employeeId"),
                 "trainingAdjacentOffCurrentApproverName": current_approver.get("name"),
                 "trainingAdjacentOffCurrentApproverLevel": current_approver.get("level"),
-            })
+            }
+            if is_tr_rep_req:
+                tr_update["replacementRequired"] = True
+            if request.get("replacementEmployee"):
+                tr_update["replacementEmployee"] = request["replacementEmployee"]
+            duty.update(tr_update)
 
     # Overlay approved sports applications as well. This also makes older
     # approvals visible without requiring a one-off migration of daily rows.
     approved_sports = sports_application_collection.find({
         "employeeId": {"$in": list(roster_employee_ids)},
+        "workflowKind": {"$ne": "Adjacent OFF"},
         "status": "Approved",
         "startDate": {"$lte": end_date},
         "endDate": {"$gte": start_date},
@@ -778,6 +790,8 @@ def calendar_view(start_date: str = Query(...), end_date: str = Query(...)):
                     cursor += timedelta(days=1)
             except (TypeError, ValueError):
                 selected_dates = []
+        rep_dates = set(application.get("replacementRequiredDates") or [])
+        has_rep_dates = ("replacementRequiredDates" in application and application.get("replacementRequiredDates") is not None)
         for date in selected_dates:
             duty = daily.setdefault((emp_id, date), {
                 "shift": "-", "leaveType": None, "leaveStatus": None,
@@ -785,14 +799,59 @@ def calendar_view(start_date: str = Query(...), end_date: str = Query(...)):
                 "replacementFor": None,
             })
             original_shift = duty.get("shift")
+            date_rep_required = (date in rep_dates) if has_rep_dates else bool(application.get("replacementRequired"))
             duty.update({
                 "shift": "Sports",
                 "sportsName": application.get("eventName") or "Sports",
                 "sportsApplicationId": str(application["_id"]),
                 "sportsOriginalDuty": original_shift,
-                "replacementRequired": bool(application.get("replacementRequired")),
-                "replacementEmployee": application.get("replacementEmployee") or replacement_map.get((emp_id, date)),
+                "replacementRequired": date_rep_required,
+                "replacementEmployee": (application.get("replacementEmployee") if date_rep_required else None) or replacement_map.get((emp_id, date)),
             })
+
+
+    # Surface sports travel OFF on the calendar
+    sports_adjacent_off_requests = sports_application_collection.find({
+        "employeeId": {"$in": list(roster_employee_ids)},
+        "workflowKind": "Adjacent OFF",
+        "status": {"$in": ["Pending Approval", "Approved"]},
+        "startDate": {"$lte": adjacent_window_end},
+        "endDate": {"$gte": adjacent_window_start},
+    }).sort("createdOn", 1)
+    for request in sports_adjacent_off_requests:
+        emp_id = employee_id(request)
+        chain = request.get("approvalChain") or []
+        current_index = int(request.get("currentApprovalIndex") or 0)
+        current_approver = chain[current_index] if current_index < len(chain) else {}
+        for date in (request.get("selectedDates") or []):
+            if not (start_date <= date <= end_date):
+                continue
+            duty = daily.setdefault((emp_id, date), {
+                "shift": "-", "leaveType": None, "leaveStatus": None,
+                "trainingName": None, "replacementEmployee": None,
+                "replacementFor": None,
+            })
+            sp_rep_dates = set(request.get("replacementRequiredDates") or [])
+            is_sp_rep_req = (date in sp_rep_dates) if ("replacementRequiredDates" in request and request.get("replacementRequiredDates") is not None) else bool(request.get("replacementRequired"))
+            sp_update = {
+                "sportsAdjacentOffRequestId": str(request["_id"]),
+                "sportsAdjacentOffApplicationId": str(request["_id"]),
+                "sportsAdjacentOffStatus": request.get("status"),
+                "sportsAdjacentOffName": request.get("eventName") or "Sports",
+                "sportsAdjacentOffPosition": (
+                    "Before sports"
+                    if (request.get("parentStartDate") and date < request["parentStartDate"]) or (request.get("adjacentOff", {}).get("before") and date == (request.get("selectedDates") or request.get("dates") or [""])[0])
+                    else "After sports"
+                ),
+                "sportsAdjacentOffCurrentApproverId": current_approver.get("employeeId"),
+                "sportsAdjacentOffCurrentApproverName": current_approver.get("name"),
+            }
+            if is_sp_rep_req:
+                sp_update["replacementRequired"] = True
+            if request.get("replacementEmployee"):
+                sp_update["replacementEmployee"] = request["replacementEmployee"]
+            duty.update(sp_update)
+
     dates = []
     while start <= end:
         dates.append(start.strftime("%Y-%m-%d"))

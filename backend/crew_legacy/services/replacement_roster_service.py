@@ -1,6 +1,6 @@
 import logging
 import re
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, timedelta, timezone
 from typing import Dict, List, Optional, Any, Tuple
 from zoneinfo import ZoneInfo
 from bson import ObjectId
@@ -15,6 +15,10 @@ from crew_legacy.database.database_mongo import (
     replacement_roster_config_collection,
     replacement_rejection_audit_collection,
     compensatory_off_collection,
+    training_nomination_history_collection,
+    sports_application_collection,
+    duty_denial_collection,
+    duty_notification_collection,
 )
 from crew_legacy.admin_logic.notification_service import (
     notify_all,
@@ -39,8 +43,8 @@ def get_active_shift_group_member_ids() -> set[str]:
     they shouldn't be counted for the replacement duty.
     """
     group_ids = set()
-    # 1. Any group in roster_group_collection (both active and created groups)
-    for group in roster_group_collection.find():
+    # 1. Only ACTIVE groups in roster_group_collection (roster_group_history contains historical inactive groups)
+    for group in roster_group_collection.find({"isActive": True}):
         sic = group.get("shiftInCharge") or {}
         sic_id = clean_id(
             sic.get("employeeId")
@@ -80,15 +84,31 @@ def get_frontend_base_url() -> str:
 # CONFIGURATION & POOL INITIALIZATION
 # =========================================================
 
+BASE_5_DEPARTMENTS = [
+    "System Operation",
+    "Market Operation",
+    "SCADA",
+    "Communication",
+    "Contracts",
+]
+
 def get_employee_roles(emp: dict) -> Tuple[bool, bool]:
     """
     Returns (has_sic, has_shift_engineer) based on category, designation, role, and shiftGroupSic.
     Matches any person in the database where SIC or Shift Engineer is mentioned.
+    USER REQUIREMENT: If 'None' option in 'Type of duty' or 'Category' in the employee database,
+    he is explicitly excluded from the sequence (returns False, False).
     """
     if not emp:
         return False, False
+    duty_type = str(emp.get("dutyType") or "").strip().lower()
     raw_cat = emp.get("category")
     categories = [str(x).strip().lower() for x in (raw_cat if isinstance(raw_cat, list) else [raw_cat])] if raw_cat else []
+
+    # Exclude from sequence if dutyType is None or category contains None
+    if duty_type in ["none", ""] or "none" in categories:
+        return False, False
+
     cat_str = " ".join(categories)
     desig_str = str(emp.get("designation") or "").strip().lower()
     role_str = str(emp.get("role") or "").strip().lower()
@@ -200,8 +220,11 @@ def is_sic_place_vacant(leave: dict, daily: dict = None) -> Tuple[bool, bool, bo
 
 def init_default_pools() -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
     """
-    Seeds the SIC and Shift Engineer pools ONLY from active employees marked as Replacement in the Employee database.
-    Excludes all persons who are currently in an active shift group.
+    Seeds the SIC and Shift Engineer pools ONLY from active employees in the Employee database.
+    USER REQUIREMENTS:
+      1. 'None' option in 'Type of duty' and 'Category' in the employee database excludes from the sequence.
+      2. The list of sequential roster should be included from the base 5 departments selected in the options.
+      3. Excludes all persons who are currently in an active shift group.
     Pool 1: SIC Pool (SIC, SIC & Shift Engineer)
     Pool 2: Shift Engineer Pool (Shift Engineers)
     """
@@ -213,13 +236,31 @@ def init_default_pools() -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
     # Exclude anyone currently in an active shift group
     active_shift_group_ids = get_active_shift_group_member_ids()
 
-    # USER REQUIREMENT: Pool should include only persons marked in the Employee database (dutyType == 'Replacement')
+    # Retrieve selected departments from config options (defaults to base 5 departments)
+    config = replacement_roster_config_collection.find_one({"_id": CONFIG_ID}) or {}
+    selected_depts = config.get("selectedDepartments")
+    if not selected_depts:
+        selected_depts = list(BASE_5_DEPARTMENTS)
+
     active_employees = list(employee_collection.find({"isActive": {"$ne": False}}))
     for emp in active_employees:
         eid = clean_id(emp.get("userId") or emp.get("employeeId"))
         if not eid or eid in active_shift_group_ids:
             continue
         duty_type = str(emp.get("dutyType") or "").strip().lower()
+        raw_cat = emp.get("category")
+        categories = [str(x).strip().lower() for x in (raw_cat if isinstance(raw_cat, list) else [raw_cat])] if raw_cat else []
+
+        # 1. EXCLUDE IF None option in 'Type of duty' or 'Category'
+        if duty_type in ["none", ""] or "none" in categories:
+            continue
+
+        # 2. EXCLUDE IF not in selected base 5 departments from options
+        emp_dept = str(emp.get("department") or "").strip()
+        emp_depts = [str(d).strip() for d in (emp.get("departments") or [emp_dept]) if str(d).strip()]
+        if not any(d in selected_depts for d in emp_depts):
+            continue
+
         is_sic_registered, is_se_registered = get_employee_roles(emp)
 
         # Include candidate if dutyType is 'replacement' or if SIC/Shift Engineer is explicitly mentioned
@@ -287,6 +328,7 @@ def get_replacement_roster_config() -> Dict[str, Any]:
                 "nextSicIndex": 0,
                 "nextShiftEngineerIndex": 0,
                 "delayedCandidateIds": {"sic": [], "shiftEngineer": []},
+                "selectedDepartments": list(BASE_5_DEPARTMENTS),
                 "rejectionCounters": {},
                 "longDurationPolicies": {},
                 "createdAt": datetime.utcnow(),
@@ -330,6 +372,8 @@ def get_replacement_roster_config() -> Dict[str, Any]:
             for eid, item in fresh_sic_map.items():
                 if eid not in clean_sic_ids:
                     updated_sic.append(item)
+            # Keep synced pool in strict alphabetical order so newly added members are not appended at the end
+            updated_sic.sort(key=lambda x: str(x.get("name") or "").strip().lower())
             for i, item in enumerate(updated_sic):
                 item["seniorityOrder"] = i + 1
             config["sicPool"] = updated_sic
@@ -341,6 +385,8 @@ def get_replacement_roster_config() -> Dict[str, Any]:
             for eid, item in fresh_se_map.items():
                 if eid not in clean_se_ids:
                     updated_se.append(item)
+            # Keep synced pool in strict alphabetical order so newly added members are not appended at the end
+            updated_se.sort(key=lambda x: str(x.get("name") or "").strip().lower())
             for i, item in enumerate(updated_se):
                 item["seniorityOrder"] = i + 1
             config["shiftEngineerPool"] = updated_se
@@ -350,6 +396,11 @@ def get_replacement_roster_config() -> Dict[str, Any]:
         if "delayedCandidateIds" not in config:
             config["delayedCandidateIds"] = {"sic": [], "shiftEngineer": []}
             updates["delayedCandidateIds"] = {"sic": [], "shiftEngineer": []}
+            needs_save = True
+
+        if "selectedDepartments" not in config or not config["selectedDepartments"]:
+            config["selectedDepartments"] = list(BASE_5_DEPARTMENTS)
+            updates["selectedDepartments"] = list(BASE_5_DEPARTMENTS)
             needs_save = True
 
         if needs_save:
@@ -384,6 +435,14 @@ def save_replacement_roster_config(payload: Dict[str, Any]) -> Dict[str, Any]:
         update_data["nextSicIndex"] = int(payload["nextSicIndex"])
     if "nextShiftEngineerIndex" in payload:
         update_data["nextShiftEngineerIndex"] = int(payload["nextShiftEngineerIndex"])
+    if "selectedDepartments" in payload and isinstance(payload["selectedDepartments"], list):
+        cleaned_depts = [d for d in payload["selectedDepartments"] if d in BASE_5_DEPARTMENTS]
+        update_data["selectedDepartments"] = cleaned_depts if cleaned_depts else list(BASE_5_DEPARTMENTS)
+        # Update in-memory config so init_default_pools reads the new selection
+        replacement_roster_config_collection.update_one({"_id": CONFIG_ID}, {"$set": {"selectedDepartments": update_data["selectedDepartments"]}})
+        fresh_sic, fresh_se = init_default_pools()
+        update_data["sicPool"] = fresh_sic
+        update_data["shiftEngineerPool"] = fresh_se
 
     replacement_roster_config_collection.update_one(
         {"_id": CONFIG_ID},
@@ -542,12 +601,88 @@ def reject_replacement_assignment(leave_id: str, comment: str, user: dict) -> Di
 # EMPLOYEE VS DUTY MATRIX
 # =========================================================
 
+def count_allocations_since_denial(candidate_id: str, pool_type: str = "SIC", denial: dict = None) -> int:
+    """
+    Counts how many sequential allocations in the candidate's pool have occurred
+    strictly after the given denial.
+    """
+    if not denial:
+        return 999
+    denial_dt = denial.get("createdAt") or denial.get("updatedAt") or denial.get("timestamp")
+    if not denial_dt:
+        return 999
+    if isinstance(denial_dt, str):
+        try:
+            denial_dt = datetime.fromisoformat(denial_dt.replace("Z", "+00:00"))
+        except Exception:
+            return 999
+    if denial_dt.tzinfo is None:
+        denial_dt = denial_dt.replace(tzinfo=timezone.utc)
+
+    config = get_replacement_roster_config()
+    history = config.get("allocationHistory") or []
+    count = 0
+    history_matched = False
+    for h in history:
+        h_pool = h.get("pool") or "SIC"
+        if h_pool == pool_type:
+            h_ts = h.get("timestamp")
+            if isinstance(h_ts, str):
+                try:
+                    h_ts = datetime.fromisoformat(h_ts.replace("Z", "+00:00"))
+                except Exception:
+                    continue
+            if h_ts and h_ts.tzinfo is None:
+                h_ts = h_ts.replace(tzinfo=timezone.utc)
+            if h_ts and h_ts > denial_dt:
+                count += 1
+                history_matched = True
+
+    if history_matched:
+        return count
+
+    # Fallback to employee_daily_collection
+    is_sic = (pool_type == "SIC")
+    daily_query = {
+        "replacementDuty": True,
+        "isActingSIC": True if is_sic else {"$ne": True},
+    }
+    subsequent = 0
+    for doc in employee_daily_collection.find(daily_query):
+        doc_time = doc.get("updatedAt") or doc.get("allocatedAt") or doc["_id"].generation_time
+        if isinstance(doc_time, datetime):
+            if doc_time.tzinfo is None:
+                doc_time = doc_time.replace(tzinfo=timezone.utc)
+            if doc_time > denial_dt:
+                subsequent += 1
+    return subsequent
+
+
+def set_denial_cooldown_iterations(iterations: int, user: dict = None) -> Dict[str, Any]:
+    """
+    Sets the number of pool allocation iterations a candidate is deferred following a denial (2 or 3).
+    """
+    iterations = int(iterations)
+    if iterations not in {2, 3}:
+        raise HTTPException(400, "Cooldown iterations must be either 2 or 3")
+    replacement_roster_config_collection.update_one(
+        {"_id": CONFIG_ID},
+        {"$set": {"denialCooldownIterations": iterations, "updatedAt": datetime.utcnow()}},
+        upsert=True
+    )
+    return {
+        "message": f"Denial deferral cooldown set to {iterations} iterations",
+        "denialCooldownIterations": iterations,
+    }
+
+
 def get_employee_duty_matrix(month: str = None) -> Dict[str, Any]:
     """
-    Builds the matrix of Employee vs Number of duties (with dates & duty types)
-    and rejection counters for all candidates in both pools.
+    Builds the matrix of Employee vs Number of duties (with dates & duty types),
+    denials, and rejection counters for all candidates in both pools.
     """
     config = get_replacement_roster_config()
+    cooldown_target = int(config.get("denialCooldownIterations") or 2)
     rejection_counters = config.get("rejectionCounters") or {}
 
     sic_pool = config.get("sicPool") or []
@@ -619,11 +754,138 @@ def get_employee_duty_matrix(month: str = None) -> Dict[str, Any]:
             "duty": duty_type,
             "groupName": record.get("groupName"),
             "replacedFor": record.get("replacementFor"),
-            "isSIC": bool(record.get("isSIC")),
+            "isSIC": bool(record.get("isSIC") or record.get("isActingSIC")),
         })
 
-    # Sort duties by date desc and attach aliases for frontend
-    for entry in duty_matrix.values():
+    # Query duty denials from duty_denial_collection and duty_notification_collection
+    denial_query = {}
+    if month:
+        denial_query["date"] = {"$regex": f"^{month}"}
+
+    seen_denial_keys = set()
+    denial_records = []
+
+    for doc in duty_denial_collection.find(denial_query):
+        eid = clean_id(doc.get("employeeId"))
+        d_date = clean_id(doc.get("date"))
+        d_duty = clean_id(doc.get("assignedDuty") or "Shift")
+        key = (eid, d_date, d_duty)
+        if key in seen_denial_keys:
+            continue
+        seen_denial_keys.add(key)
+        denial_records.append(doc)
+
+    notif_query = {"status": "Denied"}
+    if month:
+        notif_query["date"] = {"$regex": f"^{month}"}
+    for doc in duty_notification_collection.find(notif_query):
+        eid = clean_id(doc.get("employeeId"))
+        d_date = clean_id(doc.get("date"))
+        d_duty = clean_id(doc.get("assignedDuty") or "Shift")
+        key = (eid, d_date, d_duty)
+        if key in seen_denial_keys:
+            continue
+        seen_denial_keys.add(key)
+        denial_records.append(doc)
+
+    recent_rejections = []
+
+    for ddoc in denial_records:
+        eid = clean_id(ddoc.get("employeeId"))
+        d_date = clean_id(ddoc.get("date"))
+        d_duty = clean_id(ddoc.get("assignedDuty") or "Shift")
+        reason = ddoc.get("reason") or "Duty denied"
+        denied_by = clean_id(ddoc.get("deniedBy"))
+        denied_by_role = ddoc.get("deniedByRole") or "Reporting Officer"
+
+        denied_by_name = denied_by
+        if denied_by:
+            denier_emp = employee_collection.find_one({"$or": [{"userId": denied_by}, {"employeeId": denied_by}]})
+            if denier_emp:
+                denied_by_name = denier_emp.get("name") or denied_by
+
+        replaced_for = ddoc.get("replacedFor") or ddoc.get("replacementFor")
+        replaced_name = ""
+        if isinstance(replaced_for, dict):
+            replaced_name = replaced_for.get("name") or replaced_for.get("employeeName") or ""
+        elif isinstance(replaced_for, str) and replaced_for:
+            replaced_name = replaced_for
+        if not replaced_name:
+            lid = ddoc.get("leaveId")
+            if lid and ObjectId.is_valid(lid):
+                nom = training_nomination_history_collection.find_one({"_id": ObjectId(lid)})
+                if nom:
+                    replaced_name = nom.get("employeeName")
+                else:
+                    leave = leave_request_collection.find_one({"_id": ObjectId(lid)})
+                    if leave:
+                        replaced_name = leave.get("name") or leave.get("employeeName")
+
+        created_ts = ddoc.get("createdAt") or ddoc.get("updatedAt") or ddoc.get("timestamp")
+        ts_str = created_ts.isoformat() if isinstance(created_ts, datetime) else str(created_ts or "")
+
+        is_sic_duty = bool(
+            ddoc.get("isSIC")
+            or ddoc.get("isActingSIC")
+            or (eid in [clean_id(x.get("employeeId")) for x in sic_pool])
+        )
+
+        denial_duty_item = {
+            "date": d_date,
+            "duty": d_duty,
+            "isDenied": True,
+            "status": "Denied",
+            "denialReason": reason,
+            "deniedBy": denied_by_name or denied_by,
+            "deniedByRole": denied_by_role,
+            "replacedFor": replaced_name,
+            "isSIC": is_sic_duty,
+            "timestamp": ts_str,
+        }
+
+        # If employee not in matrix, ensure they are added
+        if eid not in duty_matrix:
+            emp = employee_collection.find_one({"$or": [{"userId": eid}, {"employeeId": eid}]}) or {}
+            duty_matrix[eid] = {
+                "employeeId": eid,
+                "name": clean_id(emp.get("name") or ddoc.get("employeeName") or eid),
+                "designation": clean_id(emp.get("designation") or "Staff"),
+                "pool": "SIC" if is_sic_duty else "Shift Engineer",
+                "seniorityOrder": 999,
+                "isActive": True,
+                "totalReplacementDuties": 0,
+                "dutyTypeBreakdown": {},
+                "duties": [],
+                "rejectionCount": 0,
+            }
+
+        # Append denial item to employee's duties and increment rejection count
+        duty_matrix[eid]["duties"].append(denial_duty_item)
+        duty_matrix[eid]["rejectionCount"] = duty_matrix[eid].get("rejectionCount", 0) + 1
+
+        recent_rejections.append({
+            "_id": str(ddoc.get("_id") or f"denial-{eid}-{d_date}"),
+            "employeeId": eid,
+            "employeeName": duty_matrix[eid].get("name") or ddoc.get("employeeName"),
+            "date": d_date,
+            "duty": d_duty,
+            "dutyType": d_duty,
+            "reason": reason,
+            "comment": reason,
+            "denialReason": reason,
+            "deniedBy": denied_by_name or denied_by,
+            "rejectedByName": denied_by_name or denied_by,
+            "deniedByRole": denied_by_role,
+            "rejectedByRole": denied_by_role,
+            "timestamp": ts_str,
+            "replacedFor": replaced_name,
+        })
+
+    # Sort recent_rejections by timestamp/date desc
+    recent_rejections.sort(key=lambda x: str(x.get("timestamp") or x.get("date") or ""), reverse=True)
+
+    # Attach aliases, compute deferral/cooldown status per employee
+    for eid, entry in duty_matrix.items():
         entry["duties"].sort(key=lambda x: str(x.get("date") or ""), reverse=True)
         entry["employeeName"] = entry.get("name")
         entry["poolCategory"] = entry.get("pool")
@@ -631,17 +893,43 @@ def get_employee_duty_matrix(month: str = None) -> Dict[str, Any]:
         entry["dutiesByType"] = entry.get("dutyTypeBreakdown", {})
         entry["dutyDates"] = [d["date"] for d in entry.get("duties", []) if d.get("date")]
 
+        # Denial deferral cooldown check
+        latest_denial = duty_denial_collection.find_one({"employeeId": eid}, sort=[("createdAt", -1)])
+        if not latest_denial:
+            latest_denial = duty_notification_collection.find_one({"employeeId": eid, "status": "Denied"}, sort=[("updatedAt", -1)])
+
+        if latest_denial:
+            pool_type = entry.get("pool") or "SIC"
+            allocs = count_allocations_since_denial(eid, pool_type, latest_denial)
+            is_def = (allocs < cooldown_target)
+            rem = max(0, cooldown_target - allocs)
+            denial_ts_val = latest_denial.get("createdAt") or latest_denial.get("updatedAt")
+            entry["hasRecentDenial"] = True
+            entry["latestDenial"] = {
+                "date": latest_denial.get("date"),
+                "duty": latest_denial.get("assignedDuty"),
+                "reason": latest_denial.get("reason"),
+                "timestamp": denial_ts_val.isoformat() if isinstance(denial_ts_val, datetime) else str(denial_ts_val or ""),
+            }
+            entry["allocationsSinceDenial"] = allocs
+            entry["denialCooldownIterations"] = cooldown_target
+            entry["isDeferred"] = is_def
+            entry["deferralRemaining"] = rem
+            entry["deferralStatus"] = (
+                f"Deferred ({allocs}/{cooldown_target} iters · {rem} remaining)"
+                if is_def
+                else f"Re-eligible ({allocs}/{cooldown_target} iters completed)"
+            )
+        else:
+            entry["hasRecentDenial"] = False
+            entry["isDeferred"] = False
+            entry["allocationsSinceDenial"] = 0
+            entry["denialCooldownIterations"] = cooldown_target
+            entry["deferralRemaining"] = 0
+            entry["deferralStatus"] = "Eligible"
+
     rows = list(duty_matrix.values())
     rows.sort(key=lambda x: (0 if x["pool"] == "SIC" else 1, x["seniorityOrder"], (x.get("name") or "").lower()))
-
-    # Rejection audit logs
-    recent_rejections = list(
-        replacement_rejection_audit_collection.find().sort("timestamp", -1).limit(50)
-    )
-    for r in recent_rejections:
-        r["_id"] = str(r["_id"])
-        if isinstance(r.get("timestamp"), datetime):
-            r["timestamp"] = r["timestamp"].isoformat()
 
     # Scan for long duration leaves (consecutive days >= longDurationThreshold)
     today_str = datetime.now(ZoneInfo("Asia/Kolkata")).date().isoformat()
@@ -692,9 +980,11 @@ def get_employee_duty_matrix(month: str = None) -> Dict[str, Any]:
         "testMode": config.get("testMode", False),
         "allocationDaysNotice": config.get("allocationDaysNotice", 5),
         "longDurationThreshold": long_duration_threshold,
+        "denialCooldownIterations": cooldown_target,
         "matrix": rows,
         "recentRejections": recent_rejections,
         "rejections": recent_rejections,
+        "totalRejections": len(recent_rejections),
         "longDurationLeaves": long_duration_leaves,
     }
 
@@ -756,6 +1046,22 @@ def is_candidate_available_on_date(candidate_id: str, target_date: str, target_s
     if leave_status and leave_status not in {"Rejected", "Withdrawn", "Cancelled", "Canceled"}:
         return False, f"On leave ({leave_status})"
 
+
+
+    # 2b. Check if candidate is attending Training or Sports
+
+    actual_st = clean_id(daily.get("actualStatus"))
+
+    if actual_st in {"Training", "Sports"}:
+
+        return False, f"Attending {actual_st}"
+
+    assigned_st = clean_id(daily.get("assignedDuty"))
+
+    if assigned_st in {"Training", "Sports"}:
+
+        return False, f"Attending {assigned_st}"
+
     # 3. Check leave_request_collection for any approved OR proposed/pending leave
     leave_doc = leave_request_collection.find_one({
         "employeeId": candidate_id,
@@ -774,6 +1080,19 @@ def is_candidate_available_on_date(candidate_id: str, target_date: str, target_s
     from crew_legacy.database.database_mongo import duty_denial_collection
     if duty_denial_collection.find_one({"employeeId": candidate_id, "date": target_date}):
         return False, "Candidate previously denied duty on this date"
+
+    # Check if candidate has an active deferral cooldown following a duty denial
+    config = get_replacement_roster_config()
+    cooldown_target = int(config.get("denialCooldownIterations") or 2)
+    latest_denial = duty_denial_collection.find_one({"employeeId": candidate_id}, sort=[("createdAt", -1)])
+    if not latest_denial:
+        latest_denial = duty_notification_collection.find_one({"employeeId": candidate_id, "status": "Denied"}, sort=[("updatedAt", -1)])
+    if latest_denial:
+        sic_pool_ids = {clean_id(x.get("employeeId")) for x in (config.get("sicPool") or [])}
+        cand_pool = "SIC" if candidate_id in sic_pool_ids else "Shift Engineer"
+        allocs = count_allocations_since_denial(candidate_id, cand_pool, latest_denial)
+        if allocs < cooldown_target:
+            return False, f"Deferred cooldown following duty denial ({allocs}/{cooldown_target} iterations completed)"
 
     assigned = clean_id(daily.get("assignedDuty"))
     # In shift operations, candidates on OFF / General duty are preferred for replacement
@@ -836,6 +1155,8 @@ def auto_allocate_d5_replacements(force: bool = False, test_mode: bool = None) -
         ],
         "$and": [
             {"$or": [{"replacementAssigned": {"$ne": True}}, {"replacement": None}]},
+            {"replacementRequired": {"$ne": False}},
+            {"dicReplacementRequired": {"$ne": False}},
         ],
     }
 
@@ -1017,20 +1338,27 @@ def auto_allocate_d5_replacements(force: bool = False, test_mode: bool = None) -
             )
 
             # Assign replacement duty on employee_daily_collection
+            rep_set_fields = {
+                "replacementDuty": True,
+                "assignedDuty": target_duty,
+                "isSIC": is_sic_duty,
+                "replacementFor": {
+                    "employeeId": applicant_id,
+                    "name": leave.get("name"),
+                    "leaveId": leave_id,
+                },
+            }
+            if is_sic_duty:
+                rep_set_fields["isActingSIC"] = True
+                rep_set_fields["actingSICGroup"] = clean_id(duty_doc.get("groupName") or leave.get("groupName"))
+                rep_set_fields["actingSICFor"] = {
+                    "employeeId": applicant_id,
+                    "name": leave.get("name"),
+                }
+
             employee_daily_collection.update_one(
                 {"employeeId": cid, "date": leave_date},
-                {
-                    "$set": {
-                        "replacementDuty": True,
-                        "assignedDuty": target_duty,
-                        "isSIC": is_sic_duty,
-                        "replacementFor": {
-                            "employeeId": applicant_id,
-                            "name": leave.get("name"),
-                            "leaveId": leave_id,
-                        },
-                    }
-                },
+                {"$set": rep_set_fields},
                 upsert=True,
             )
 
@@ -1291,4 +1619,110 @@ def auto_allocate_next_candidate_for_denied_duty(notification_id: str, user: dic
             "date": duty_date,
             "pool": pool_name,
         }
+    }
+
+
+def recalculate_sequential_pointers(month: str = None) -> Dict[str, Any]:
+    """
+    Recomputes and syncs nextSicIndex and nextShiftEngineerIndex in both
+    replacement_roster_config_collection and system_settings_collection using
+    strict BACKLOG-FIRST A-Z leveling: always points to the first eligible
+    candidate from index 0 at the minimum duty count in the month (respecting
+    denial cooldown), so omitted/backlog candidates are always cleared first.
+    """
+    from crew_legacy.database.database_mongo import system_settings_collection
+
+    config = get_replacement_roster_config()
+    cooldown_target = int(config.get("denialCooldownIterations") or 2)
+    sic_pool = [x for x in (config.get("sicPool") or []) if x.get("isActive", True)]
+    se_pool = [x for x in (config.get("shiftEngineerPool") or []) if x.get("isActive", True)]
+
+    if not month:
+        month = datetime.now(KOLKATA_TZ).strftime("%Y-%m")
+
+    sic_ids = [clean_id(x.get("employeeId")) for x in sic_pool]
+    se_ids = [clean_id(x.get("employeeId")) for x in se_pool]
+
+    # Active replacement duties in the month
+    daily_reps = list(employee_daily_collection.find({
+        "date": {"$regex": f"^{month}"},
+        "replacementDuty": True,
+    }))
+
+    duty_count_map = {}
+    for doc in daily_reps:
+        deid = clean_id(doc.get("employeeId"))
+        if deid:
+            duty_count_map[deid] = duty_count_map.get(deid, 0) + 1
+
+    def _is_in_cooldown(cid: str, pool_type: str) -> bool:
+        try:
+            latest_denial = (
+                duty_denial_collection.find_one({"employeeId": cid}, sort=[("createdAt", -1)])
+                or duty_notification_collection.find_one({"employeeId": cid, "status": "Denied"}, sort=[("updatedAt", -1)])
+            )
+            if latest_denial:
+                return count_allocations_since_denial(cid, pool_type, latest_denial) < cooldown_target
+        except Exception:
+            pass
+        return False
+
+    # Backlog-first A-Z: always find the first candidate from index 0 with minimum duties (not in cooldown)
+    next_sic_idx = 0
+    if sic_pool:
+        min_sic = min(duty_count_map.get(eid, 0) for eid in sic_ids)
+        found = None
+        for idx, eid in enumerate(sic_ids):
+            if duty_count_map.get(eid, 0) == min_sic and not _is_in_cooldown(eid, "SIC"):
+                found = idx
+                break
+        if found is None:
+            for idx, eid in enumerate(sic_ids):
+                if duty_count_map.get(eid, 0) == min_sic:
+                    found = idx
+                    break
+        next_sic_idx = found if found is not None else 0
+
+    next_se_idx = 0
+    if se_pool:
+        min_se = min(duty_count_map.get(eid, 0) for eid in se_ids)
+        found = None
+        for idx, eid in enumerate(se_ids):
+            if duty_count_map.get(eid, 0) == min_se and not _is_in_cooldown(eid, "Shift Engineer"):
+                found = idx
+                break
+        if found is None:
+            for idx, eid in enumerate(se_ids):
+                if duty_count_map.get(eid, 0) == min_se:
+                    found = idx
+                    break
+        next_se_idx = found if found is not None else 0
+
+    now_utc = datetime.utcnow()
+    replacement_roster_config_collection.update_one(
+        {"_id": CONFIG_ID},
+        {"$set": {
+            "nextSicIndex": next_sic_idx,
+            "nextShiftEngineerIndex": next_se_idx,
+            "updatedAt": now_utc,
+        }},
+        upsert=True,
+    )
+    system_settings_collection.update_one(
+        {"type": "sequential_roster_pointer", "pool": "sic"},
+        {"$set": {"nextIndex": next_sic_idx, "updatedAt": now_utc}},
+        upsert=True,
+    )
+    system_settings_collection.update_one(
+        {"type": "sequential_roster_pointer", "pool": "shift_engineer"},
+        {"$set": {"nextIndex": next_se_idx, "updatedAt": now_utc}},
+        upsert=True,
+    )
+
+    return {
+        "month": month,
+        "nextSicIndex": next_sic_idx,
+        "nextSicName": sic_pool[next_sic_idx]["name"] if sic_pool else None,
+        "nextShiftEngineerIndex": next_se_idx,
+        "nextShiftEngineerName": se_pool[next_se_idx]["name"] if se_pool else None,
     }

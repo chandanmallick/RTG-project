@@ -26,7 +26,7 @@ export const ROUTE_PAGE_KEYS = {
   "/crew/dashboard": "crew_dashboard",
   "/crew/dash-test": "crew_dashboard",
   "/crew/operations": "crew_dashboard",
-  "/crew/sports": "crew_leave",
+  "/crew/sports": "crew_sports",
   "/crew/calendar": "crew_calendar",
   "/crew/roster": "crew_roster",
   "/crew/morning-presentation": "crew_presentation",

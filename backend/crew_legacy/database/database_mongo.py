@@ -55,6 +55,7 @@ sports_application_collection = operational_collection("sports_application_colle
 leave_request_collection = operational_collection("leave_request_collection")
 leave_approval_delegation_collection = operational_collection("leave_approval_delegation")
 training_nomination_history_collection = operational_collection("training_nomination_history_collection")
+training_nominations_collection = operational_collection("training_nominations")
 compensatory_off_collection = operational_collection("compensatory_off_collection")
 deleted_leave_collection = operational_collection("deleted_leave_collection")
 duty_denial_collection = operational_collection("duty_denial_collection")

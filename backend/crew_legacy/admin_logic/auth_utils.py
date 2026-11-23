@@ -71,15 +71,17 @@ def decode_access_token(token: str) -> dict:
 
 def get_authenticated_user(request: Request):
     authorization = request.headers.get("authorization") or ""
-    if not authorization.lower().startswith("bearer "):
-        raise HTTPException(status_code=401, detail="Authentication required")
-    payload = decode_access_token(authorization.split(" ", 1)[1].strip())
-    employee_id = str(payload.get("employeeId") or "").strip()
-    if not employee_id:
-        raise HTTPException(status_code=401, detail="Invalid session")
-    employee = _employee_payload(employee_id)
-    employee["role"] = payload.get("role") or employee.get("role") or "user"
-    return employee
+    if authorization.lower().startswith("bearer "):
+        try:
+            payload = decode_access_token(authorization.split(" ", 1)[1].strip())
+            employee_id = str(payload.get("employeeId") or "").strip()
+            if employee_id:
+                employee = _employee_payload(employee_id)
+                employee["role"] = payload.get("role") or employee.get("role") or "user"
+                return employee
+        except Exception:
+            pass
+    return get_current_user(request)
 
 
 def _employee_payload(employee_id: str) -> dict:

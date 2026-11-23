@@ -11,7 +11,7 @@ const ACCESS_GROUPS = [
   { key: "home", label: "Homepage & dashboards", note: "Landing dashboards and PSP operational views", pages: ["rtg_dashboard", "psp_dashboard", "psp_report_checking"] },
   { key: "analytics", label: "Analytics & data", note: "Analysis, validation, schedules and system data", pages: ["frequency_report", "data_validation", "outage_analysis", "mis_report", "nldc_plots", "schedule_data"] },
   { key: "reports", label: "Report preparation", note: "Operational, reliability and historical reports", pages: ["dso_evening_report", "sri_report", "dso_morning_report", "psp_highlights_report", "plant_deviation_report", "old_logbook"] },
-  { key: "crew", label: "Crew management", note: "Calendar, roster, leave, replacement and team workflows", pages: ["crew_dashboard", "crew_calendar", "crew_compact_matrix", "crew_roster", "crew_presentation", "crew_leave", "crew_replacement", "crew_training", "crew_threads", "crew_reports"] },
+  { key: "crew", label: "Crew management", note: "Calendar, roster, leave, replacement and team workflows", pages: ["crew_dashboard", "crew_calendar", "crew_compact_matrix", "crew_roster", "crew_presentation", "crew_leave", "crew_sports", "crew_replacement", "crew_training", "crew_threads", "crew_reports"] },
   { key: "crew_admin", label: "Crew administration", note: "Sensitive crew masters, setup and special permissions", pages: ["leave_calendar_all", "leave_master_delete", "crew_setup", "crew_employees", "crew_admin"] },
   { key: "portal_admin", label: "Portal administration", note: "Database, configuration, access and audit controls", pages: ["database_sync", "psp_admin", "user_access", "mail_settings", "audit_trail"] },
   { key: "account", label: "Personal account", note: "Employee self-service profile", pages: ["profile"] },
@@ -95,7 +95,7 @@ export default function UserAccessControl() {
       data.pages.map((page) => {
         const sourceAccess = copySource.permissions?.[page.key] || {};
         const write = Boolean(sourceAccess.write);
-        const hasApprovalRight = ["crew_threads", "crew_training"].includes(page.key);
+        const hasApprovalRight = ["crew_threads", "crew_training", "crew_sports"].includes(page.key);
         const approve = hasApprovalRight && Boolean(sourceAccess.approve);
         return [page.key, { view: Boolean(sourceAccess.view) || write || approve, write, ...(hasApprovalRight ? { approve } : {}) }];
       }),
@@ -292,7 +292,7 @@ export default function UserAccessControl() {
                   >
                     <Box>
                       <Typography sx={{ fontSize: 13, fontWeight: 800 }}>{item.name || item.userId}</Typography>
-                    <Typography sx={{ fontSize: 11, color: "#64748B" }}>{item.userId} - {item.designation || "Employee"}</Typography>
+                      <Typography sx={{ fontSize: 11, color: "#64748B" }}>{item.userId} - {item.designation || "Employee"}</Typography>
                     </Box>
                   </Button>
                 ))}
@@ -403,9 +403,9 @@ export default function UserAccessControl() {
                         </Stack>}
                         {group.items.map((page) => {
                           const access = draft[page.key] || {};
-                          const supportsApproval = ["crew_threads", "crew_training"].includes(page.key);
+                          const supportsApproval = ["crew_threads", "crew_training", "crew_sports"].includes(page.key);
                           return <Box key={page.key} sx={{ px: 2, py: 1.35, display: "grid", gridTemplateColumns: { xs: "1fr", sm: "minmax(220px,1fr) repeat(3, 105px)" }, gap: 1, alignItems: "center", borderBottom: "1px solid #EDF2F7", "&:last-child": { borderBottom: 0 }, background: access.view ? "#FCFEFF" : "#FFFFFF" }}>
-                            <Box><Typography sx={{ fontSize: 13, fontWeight: 850, color: "#0F172A" }}>{page.label}</Typography><Typography sx={{ fontSize: 10.5, color: "#94A3B8" }}>{page.path}</Typography>{page.key === "leave_calendar_all" && <Typography sx={{ fontSize: 10.5, color: "#B45309", mt: .25 }}>Sensitive: permits viewing every employee's leave calendar.</Typography>}{page.key === "crew_training" && <Typography sx={{ fontSize: 10.5, color: "#B45309", mt: .25 }}>Write controls nomination; Approve grants HR final approval.</Typography>}{page.key === "user_access" && <Typography sx={{ fontSize: 10.5, color: "#B91C1C", mt: .25 }}>Write permits managing other users' portal access.</Typography>}</Box>
+                            <Box><Typography sx={{ fontSize: 13, fontWeight: 850, color: "#0F172A" }}>{page.label}</Typography><Typography sx={{ fontSize: 10.5, color: "#94A3B8" }}>{page.path}</Typography>{page.key === "leave_calendar_all" && <Typography sx={{ fontSize: 10.5, color: "#B45309", mt: .25 }}>Sensitive: permits viewing every employee's leave calendar.</Typography>}{page.key === "crew_training" && <Typography sx={{ fontSize: 10.5, color: "#B45309", mt: .25 }}>Write controls nomination; Approve grants HR final approval.</Typography>}{page.key === "crew_sports" && <Typography sx={{ fontSize: 10.5, color: "#B45309", mt: .25 }}>Write controls event creation; Approve grants workflow approval authority.</Typography>}{page.key === "user_access" && <Typography sx={{ fontSize: 10.5, color: "#B91C1C", mt: .25 }}>Write permits managing other users' portal access.</Typography>}</Box>
                             <FormControlLabel sx={{ m: 0 }} control={<Checkbox checked={Boolean(access.view)} disabled={selectedId === "50041"} onChange={() => toggle(page.key, "view")} />} label={<Typography sx={{ fontSize: 11.5, fontWeight: 750 }}>View</Typography>} />
                             <FormControlLabel sx={{ m: 0 }} control={<Checkbox checked={Boolean(access.write)} disabled={selectedId === "50041"} onChange={() => toggle(page.key, "write")} color="success" />} label={<Typography sx={{ fontSize: 11.5, fontWeight: 750 }}>Write</Typography>} />
                             {supportsApproval ? <FormControlLabel sx={{ m: 0 }} control={<Checkbox checked={Boolean(access.approve)} disabled={selectedId === "50041"} onChange={() => toggle(page.key, "approve")} color="warning" />} label={<Typography sx={{ fontSize: 11.5, fontWeight: 750 }}>Approve</Typography>} /> : <Typography sx={{ pl: 1.2, fontSize: 11, color: "#CBD5E1" }}>No approval role</Typography>}

@@ -26,12 +26,14 @@ def can_manage_events(user):
     if str(user.get("role") or "").lower() == "admin" or actor_id(user) == "50041": return True
     access = page_access_collection.find_one({"userId": actor_id(user)}) or {}
     pages = access.get("pages") or {}
-    return bool((pages.get("crew_training") or {}).get("approve") or (pages.get("crew_leave") or {}).get("approve"))
+    return bool((pages.get("crew_sports") or {}).get("write") or (pages.get("crew_sports") or {}).get("approve") or (pages.get("crew_training") or {}).get("approve") or (pages.get("crew_leave") or {}).get("approve"))
 
 
 def serialize(document):
     output = dict(document)
     output["id"] = str(output.pop("_id"))
+    output["dates"] = application_dates(document)
+    output["replacementRequiredDates"] = document.get("replacementRequiredDates") or []
     for key in ("createdOn", "updatedOn"):
         if isinstance(output.get(key), datetime): output[key] = output[key].isoformat()
     return output
@@ -45,6 +47,9 @@ def step_actor(user, step):
     actor = actor_id(user)
     approvers = [clean(value) for value in (step.get("employeeIds") or [step.get("employeeId")]) if clean(value)]
     if actor in approvers or str(user.get("role") or "").lower() == "admin": return True
+    access = page_access_collection.find_one({"userId": actor}) or {}
+    pages = access.get("pages") or {}
+    if bool((pages.get("crew_sports") or {}).get("approve")): return True
     return any(active_leave_delegation(approver, actor) for approver in approvers)
 
 
@@ -74,6 +79,8 @@ def finalize_sports_daily(item):
             "groupName": trainee_daily.get("groupName"),
         }
         group_name = original.get("groupName") or shift_group_context(item.get("employeeId")).get("groupName")
+        rep_dates = set(item.get("replacementRequiredDates") or [])
+        date_rep_required = (date in rep_dates) if ("replacementRequiredDates" in item and item.get("replacementRequiredDates") is not None) else bool(item.get("replacementRequired"))
         employee_daily_collection.update_one(
             {"employeeId": item.get("employeeId"), "date": date},
             {
@@ -83,7 +90,7 @@ def finalize_sports_daily(item):
                     "sportsName": item.get("eventName"),
                     "sportsApplicationId": str(item["_id"]),
                     "sportsOriginalAssignment": original,
-                    "replacementRequired": bool(item.get("replacementRequired")),
+                    "replacementRequired": date_rep_required,
                     "updatedOn": datetime.utcnow(),
                 },
                 "$setOnInsert": {
@@ -95,7 +102,7 @@ def finalize_sports_daily(item):
             },
             upsert=True,
         )
-        if replacement_id:
+        if replacement_id and date_rep_required:
             candidate_daily = employee_daily_collection.find_one({"employeeId": replacement_id, "date": date}) or {}
             prior = (
                 candidate_daily.get("sportsReplacementPreviousAssignment")
@@ -119,6 +126,100 @@ def finalize_sports_daily(item):
                     "$setOnInsert": {
                         "employeeId": replacement_id, "date": date, "year": int(date[:4]),
                         "month": int(date[5:7]), "flag": "Sports Replacement", "createdOn": datetime.utcnow(),
+                    },
+                },
+                upsert=True,
+            )
+
+
+
+def finalize_sports_adjacent_off(item):
+    rep_dates = set(item.get("replacementRequiredDates") or [])
+    rep_emp = item.get("replacementEmployee") or {}
+    rep_id = clean(rep_emp.get("employeeId"))
+    for date in (item.get("selectedDates") or []):
+        trainee_daily = employee_daily_collection.find_one({"employeeId": item.get("employeeId"), "date": date}) or {}
+        original = trainee_daily.get("sportsAdjacentOffOriginalAssignment") or {
+            "assignedDuty": trainee_daily.get("assignedDuty"),
+            "actualStatus": trainee_daily.get("actualStatus"),
+            "groupName": trainee_daily.get("groupName"),
+        }
+        group_name = original.get("groupName") or shift_group_context(item.get("employeeId")).get("groupName") or "Other Employees"
+        date_rep_required = (date in rep_dates) if ("replacementRequiredDates" in item and item.get("replacementRequiredDates") is not None) else bool(item.get("replacementRequired"))
+        employee_daily_collection.update_one(
+            {"employeeId": item.get("employeeId"), "date": date},
+            {
+                "$set": {
+                    "assignedDuty": "OFF",
+                    "actualStatus": "OFF",
+                    "sportsAdjacentOff": {
+                        "applicationId": str(item["_id"]),
+                        "eventName": item.get("eventName"),
+                        "status": "Approved",
+                    },
+                    "sportsAdjacentOffOriginalAssignment": original,
+                    "replacementRequired": date_rep_required,
+                    "updatedOn": datetime.utcnow(),
+                },
+                "$setOnInsert": {
+                    "employeeId": item.get("employeeId"),
+                    "name": item.get("employeeName"),
+                    "designation": item.get("designation"),
+                    "date": date,
+                    "year": int(date[:4]),
+                    "month": int(date[5:7]),
+                    "groupName": group_name,
+                    "flag": "Sports Travel OFF",
+                    "createdOn": datetime.utcnow(),
+                },
+            },
+            upsert=True,
+        )
+
+        if date_rep_required and rep_id:
+            rep_daily = employee_daily_collection.find_one({"employeeId": rep_id, "date": date}) or {}
+            prev_assignment = (
+                rep_daily.get("sportsReplacementPreviousAssignment")
+                if (rep_daily.get("sportsReplacement") or {}).get("applicationId") == str(item["_id"])
+                else {
+                    "assignedDuty": rep_daily.get("assignedDuty"),
+                    "groupName": rep_daily.get("groupName"),
+                }
+            )
+            orig_duty = (original.get("assignedDuty") or "G") if original.get("assignedDuty") not in ["OFF", "TR", "S"] else "G"
+            employee_daily_collection.update_one(
+                {"employeeId": rep_id, "date": date},
+                {
+                    "$set": {
+                        "assignedDuty": orig_duty,
+                        "actualStatus": orig_duty,
+                        "groupName": group_name,
+                        "replacementDuty": True,
+                        "replacementMode": item.get("replacementMode") or "normal",
+                        "replacementFor": {
+                            "employeeId": item.get("employeeId"),
+                            "name": item.get("employeeName"),
+                            "reason": "Sports Travel OFF",
+                        },
+                        "sportsReplacement": {
+                            "applicationId": str(item["_id"]),
+                            "eventName": item.get("eventName"),
+                            "athleteEmployeeId": item.get("employeeId"),
+                            "isAdjacentOff": True,
+                        },
+                        "replacementCreatedDaily": not bool(rep_daily),
+                        "sportsReplacementPreviousAssignment": prev_assignment,
+                        "updatedOn": datetime.utcnow(),
+                    },
+                    "$setOnInsert": {
+                        "employeeId": rep_id,
+                        "name": rep_emp.get("name"),
+                        "designation": rep_emp.get("designation"),
+                        "date": date,
+                        "year": int(date[:4]),
+                        "month": int(date[5:7]),
+                        "flag": "Sports Replacement",
+                        "createdOn": datetime.utcnow(),
                     },
                 },
                 upsert=True,
@@ -231,7 +332,7 @@ def applications(user=Depends(get_authenticated_user)):
     return output
 
 
-def decide(application_id, approved, user):
+def decide(application_id, approved, user, data=None):
     if not ObjectId.is_valid(application_id): raise HTTPException(400, "Invalid application")
     item = sports_application_collection.find_one({"_id": ObjectId(application_id)})
     if not item or item.get("status") != "Pending Approval": raise HTTPException(409, "Application is no longer pending")
@@ -241,26 +342,116 @@ def decide(application_id, approved, user):
     now, next_index = datetime.utcnow(), index + 1
     updates = {f"approvalChain.{index}.status": "Approved" if approved else "Rejected",
                f"approvalChain.{index}.actedBy": actor_id(user), f"approvalChain.{index}.actedOn": now, "updatedOn": now}
+    if data and "replacementRequiredDates" in data:
+        rep_dates = list(dict.fromkeys(clean(d) for d in (data.get("replacementRequiredDates") or []) if clean(d)))
+        updates["replacementRequiredDates"] = rep_dates
+        updates["replacementRequired"] = bool(rep_dates)
+    elif data and "replacementRequired" in data:
+        updates["replacementRequired"] = bool(data.get("replacementRequired"))
     if not approved: updates["status"] = "Rejected"
     elif next_index >= len(chain): updates.update({"status": "Approved", "currentApprovalIndex": next_index})
     else: updates["currentApprovalIndex"] = next_index
     sports_application_collection.update_one({"_id": item["_id"]}, {"$set": updates})
     if approved and updates.get("status") == "Approved":
         approved_item = {**item, **updates}
-        finalize_sports_daily(approved_item)
+        is_adjacent_off = item.get("workflowKind") == "Adjacent OFF"
+        if is_adjacent_off:
+            finalize_sports_adjacent_off(approved_item)
+        else:
+            finalize_sports_daily(approved_item)
         chain_ids = [clean(step.get("employeeId")) for step in chain if clean(step.get("employeeId"))]
         recipients = list(dict.fromkeys([clean(item.get("employeeId")), *chain_ids]))
+        adj_days_text = ", ".join(item.get("selectedDates") or [])
         notify_all(
             email_list=recipient_emails(recipients), employee_ids=recipients,
-            subject="Sports application approved",
-            message=f"{item.get('employeeName')} has been approved for {item.get('eventName')} ({item.get('startDate')} to {item.get('endDate')}).",
-            ref_id=str(item["_id"]), action="/crew/calendar", type="SPORTS",
+            subject="Sports travel OFF approved" if is_adjacent_off else "Sports application approved",
+            message=(
+                f"{item.get('employeeName')} has been approved for travel OFF ({adj_days_text}) for {item.get('eventName')}."
+                if is_adjacent_off
+                else f"{item.get('employeeName')} has been approved for {item.get('eventName')} ({item.get('startDate')} to {item.get('endDate')})."
+            ),
+            ref_id=str(item["_id"]), action="/crew/calendar", type="SPORTS_ADJACENT_OFF" if is_adjacent_off else "SPORTS",
         )
     return {"message": "Sports application approved" if approved else "Sports application rejected"}
 
 
 @router.post("/applications/{application_id}/approve")
-def approve(application_id: str, user=Depends(get_authenticated_user)): return decide(application_id, True, user)
+def approve(application_id: str, data: dict = None, user=Depends(get_authenticated_user)):
+    return decide(application_id, True, user, data=data)
+
+
+@router.put("/applications/{application_id}/set-replacement-required")
+def set_sports_replacement_required(application_id: str, data: dict, user=Depends(get_authenticated_user)):
+    if not ObjectId.is_valid(application_id):
+        raise HTTPException(400, "Invalid application")
+    item = sports_application_collection.find_one({"_id": ObjectId(application_id)})
+    if not item:
+        raise HTTPException(404, "Sports application not found")
+    if not can_manage_events(user):
+        raise HTTPException(403, "Administrator or approval permission is required")
+
+    rep_dates_input = data.get("replacementRequiredDates")
+    single_date = clean(data.get("date"))
+    if single_date and rep_dates_input is None:
+        all_event_dates = application_dates(item)
+        current_dates = set(item.get("replacementRequiredDates") if "replacementRequiredDates" in item else (all_event_dates if item.get("replacementRequired") else []))
+        if bool(data.get("replacementRequired")):
+            current_dates.add(single_date)
+        else:
+            current_dates.discard(single_date)
+        rep_dates_list = sorted(current_dates)
+        replacement_required = bool(rep_dates_list)
+    elif rep_dates_input is not None:
+        rep_dates_list = list(dict.fromkeys(clean(d) for d in rep_dates_input if clean(d)))
+        replacement_required = bool(rep_dates_list)
+    else:
+        rep_dates_list = None
+        replacement_required = bool(data.get("replacementRequired"))
+    replacement_id = clean(data.get("replacementEmployeeId"))
+    update = {
+        "replacementRequired": replacement_required,
+        "updatedOn": datetime.utcnow(),
+    }
+    if rep_dates_list is not None:
+        update["replacementRequiredDates"] = rep_dates_list
+    previous_replacement = item.get("replacementEmployee") or {}
+    if not replacement_required and clean(previous_replacement.get("employeeId")):
+        release_sports_replacement(item, previous_replacement)
+        update["replacementEmployee"] = None
+        update["replacementMode"] = None
+        update["replacementAssignedBy"] = None
+    elif replacement_required and replacement_id:
+        replacement = employee_by_id(replacement_id)
+        if not replacement:
+            raise HTTPException(404, "Selected replacement employee was not found")
+        if clean(previous_replacement.get("employeeId")) and clean(previous_replacement.get("employeeId")) != replacement_id:
+            release_sports_replacement(item, previous_replacement)
+        update["replacementEmployee"] = employee_snapshot(replacement)
+        update["replacementMode"] = clean(data.get("mode")) or "normal"
+        update["replacementAssignedBy"] = actor_id(user)
+
+    sports_application_collection.update_one({"_id": item["_id"]}, {"$set": update})
+    approved_item = {**item, **update}
+
+    if item.get("status") == "Approved":
+        if item.get("workflowKind") == "Adjacent OFF":
+            finalize_sports_adjacent_off(approved_item)
+        else:
+            finalize_sports_daily(approved_item)
+    else:
+        for date in application_dates(item):
+            d_req = (date in rep_dates_list) if rep_dates_list is not None else replacement_required
+            employee_daily_collection.update_one(
+                {"employeeId": item.get("employeeId"), "date": date},
+                {"$set": {"replacementRequired": d_req, "updatedOn": datetime.utcnow()}}
+            )
+
+    return {
+        "message": f"Sports replacement requirement updated to {'Required' if replacement_required else 'Not Required'}",
+        "replacementRequired": replacement_required,
+        "replacementEmployee": update.get("replacementEmployee")
+    }
+
 
 
 @router.post("/applications/{application_id}/reject")
@@ -321,7 +512,10 @@ def assign_sports_replacement(application_id: str, data: dict, user=Depends(get_
     }
     sports_application_collection.update_one({"_id": item["_id"]}, {"$set": update})
     approved_item = {**item, **update}
-    finalize_sports_daily(approved_item)
+    if item.get("workflowKind") == "Adjacent OFF":
+        finalize_sports_adjacent_off(approved_item)
+    else:
+        finalize_sports_daily(approved_item)
     context = shift_group_context(item.get("employeeId"))
     chain_ids = [clean(step.get("employeeId")) for step in (item.get("approvalChain") or []) if clean(step.get("employeeId"))]
     recipients = [value for value in dict.fromkeys([clean(item.get("employeeId")), replacement_id, clean(context.get("sicEmployeeId")), *chain_ids]) if value]
@@ -356,3 +550,112 @@ def assign_sports_replacement(application_id: str, data: dict, user=Depends(get_
         {"$set": {"replacementMailDelivery": {**mail_result, "attemptedAt": datetime.utcnow()}}},
     )
     return {"message": "Sports replacement assigned successfully", "mailDelivery": mail_result}
+
+
+@router.get("/my-approved")
+def get_my_approved_sports(user=Depends(get_authenticated_user)):
+    """Return the logged-in employee's approved sports applications and linked travel OFF request."""
+    actor = actor_id(user)
+    if not actor:
+        raise HTTPException(401, "Employee identity is required")
+    records = list(sports_application_collection.find({
+        "employeeId": actor,
+        "status": "Approved",
+        "workflowKind": {"$ne": "Adjacent OFF"},
+    }).sort("startDate", -1).limit(100))
+    parent_ids = [str(item["_id"]) for item in records]
+    requests = list(sports_application_collection.find({
+        "workflowKind": "Adjacent OFF",
+        "parentApplicationId": {"$in": parent_ids},
+        "status": {"$nin": ["Rejected", "Cancelled"]},
+    }).sort("createdOn", -1)) if parent_ids else []
+    request_by_parent = {clean(item.get("parentApplicationId")): item for item in requests}
+    output = []
+    for item in records:
+        serialized = serialize(item)
+        linked = request_by_parent.get(str(item["_id"]))
+        serialized["adjacentOffRequest"] = serialize(linked) if linked else None
+        serialized["canRequestAdjacentOff"] = not bool(linked and linked.get("status") in ["Pending Approval", "Approved"])
+        output.append(serialized)
+    return output
+
+
+@router.post("/applications/{application_id}/request-adjacent-off")
+def request_sports_adjacent_off(
+    application_id: str,
+    data: dict,
+    user=Depends(get_authenticated_user),
+):
+    """Start a new hierarchy approval for travel OFF beside approved sports."""
+    if not ObjectId.is_valid(application_id):
+        raise HTTPException(400, "Invalid sports application")
+    actor = actor_id(user)
+    parent = sports_application_collection.find_one({
+        "_id": ObjectId(application_id),
+        "employeeId": actor,
+        "status": "Approved",
+        "workflowKind": {"$ne": "Adjacent OFF"},
+    })
+    if not parent:
+        raise HTTPException(404, "Approved sports application was not found for this employee")
+    adjacent_off = {
+        "before": bool(data.get("before")),
+        "after": bool(data.get("after")),
+    }
+    if not any(adjacent_off.values()):
+        raise HTTPException(400, "Select the day before, the day after, or both")
+    existing = sports_application_collection.find_one({
+        "workflowKind": "Adjacent OFF",
+        "parentApplicationId": application_id,
+        "parentStartDate": parent.get("startDate"),
+        "parentEndDate": parent.get("endDate"),
+        "status": {"$nin": ["Rejected", "Cancelled"]},
+    })
+    if existing:
+        raise HTTPException(409, "A travel OFF request already exists for this sports application")
+    employee = employee_by_id(actor) or {}
+    chain = approval_chain(employee)
+    if not chain:
+        raise HTTPException(409, "Organization reporting hierarchy is not mapped")
+    target_dates = []
+    try:
+        if adjacent_off["before"]:
+            target_dates.append((datetime.strptime(parent["startDate"], "%Y-%m-%d") - timedelta(days=1)).strftime("%Y-%m-%d"))
+        if adjacent_off["after"]:
+            target_dates.append((datetime.strptime(parent["endDate"], "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d"))
+    except (TypeError, ValueError):
+        raise HTTPException(400, "Invalid sports dates for computing travel days")
+    now = datetime.utcnow()
+    linked = {
+        "workflowKind": "Adjacent OFF",
+        "parentApplicationId": application_id,
+        "eventId": f"adj_off_{parent.get('eventId')}_{application_id}",
+        "originalEventId": parent.get("eventId"),
+        "eventName": parent.get("eventName"),
+        "employeeId": actor,
+        "employeeName": parent.get("employeeName") or employee.get("name"),
+        "designation": parent.get("designation") or employee.get("designation"),
+        "venue": parent.get("venue"),
+        "startDate": target_dates[0],
+        "endDate": target_dates[-1],
+        "selectedDates": target_dates,
+        "adjacentOff": adjacent_off,
+        "reason": clean(data.get("reason")) or f"Travel OFF for sports participation: {parent.get('eventName')}",
+        "status": "Pending Approval",
+        "approvalChain": chain,
+        "currentApprovalIndex": 0,
+        "createdOn": now,
+        "updatedOn": now,
+    }
+    result = sports_application_collection.insert_one(linked)
+    first_recipients = [clean(chain[0].get("employeeId"))] if chain else []
+    target_days_text = ", ".join(
+        label for label, enabled in (("day before sports", adjacent_off["before"]), ("day after sports", adjacent_off["after"])) if enabled
+    )
+    notify_all(
+        email_list=recipient_emails(first_recipients), employee_ids=first_recipients,
+        subject="Sports travel OFF requested",
+        message=f"{linked.get('employeeName')} requested travel OFF ({target_days_text}) for {linked.get('eventName')} ({parent.get('startDate')} to {parent.get('endDate')}).",
+        ref_id=str(result.inserted_id), action="/crew/sports?section=approval", type="SPORTS_ADJACENT_OFF",
+    )
+    return {"message": "Sports travel OFF request submitted for approval", "id": str(result.inserted_id)}

@@ -60,6 +60,8 @@ import {
   Sunrise,
   Sunset,
   Trash2,
+  Ban,
+  Mail,
   Moon,
   Coffee,
   Umbrella,
@@ -507,6 +509,124 @@ export default function SpecialRosterMatrix({
     }
   };
 
+  const [triggeringMail, setTriggeringMail] = useState(false);
+
+  const handleTriggerDutyMail = async (dateStr, employeeId, employeeName, shiftKey) => {
+    setTriggeringMail(true);
+    try {
+      const res = await api.post("/replacement/trigger-duty-mail", {
+        employeeId,
+        date: dateStr,
+        shift: shiftKey,
+      });
+      setNotice({
+        severity: "success",
+        text: res.data?.message || `Duty notification email sent to ${employeeName || employeeId}.`,
+      });
+    } catch (err) {
+      setNotice({
+        severity: "error",
+        text: err.response?.data?.detail || `Failed to trigger email to ${employeeName || employeeId}.`,
+      });
+    } finally {
+      setTriggeringMail(false);
+    }
+  };
+
+  const handleTriggerCancellationMail = async (dateStr, employeeId, employeeName, shiftKey, reason) => {
+    setTriggeringMail(true);
+    try {
+      const res = await api.post("/replacement/trigger-cancellation-mail", {
+        employeeId,
+        date: dateStr,
+        shift: shiftKey,
+        reason: reason || "Duty assignment revoked by Administrator",
+      });
+      setNotice({
+        severity: "success",
+        text: res.data?.message || `Cancellation notification email sent for ${employeeName || employeeId}.`,
+      });
+    } catch (err) {
+      setNotice({
+        severity: "error",
+        text: err.response?.data?.detail || `Failed to trigger cancellation email for ${employeeName || employeeId}.`,
+      });
+    } finally {
+      setTriggeringMail(false);
+    }
+  };
+
+  const [cancelDenyDialog, setCancelDenyDialog] = useState({
+    open: false,
+    dateStr: "",
+    employeeId: "",
+    employeeName: "",
+    shiftKey: "",
+    reason: "",
+    submitting: false,
+  });
+
+  const handleOpenCancelDenyDialog = (dateStr, employeeId, employeeName, shiftKey) => {
+    setCancelDenyDialog({
+      open: true,
+      dateStr,
+      employeeId,
+      employeeName,
+      shiftKey,
+      reason: "",
+      submitting: false,
+    });
+  };
+
+  const handleConfirmCancelDenyWithRemarks = async () => {
+    const trimmed = String(cancelDenyDialog.reason || "").trim();
+    if (!trimmed) return;
+    setCancelDenyDialog((prev) => ({ ...prev, submitting: true }));
+    try {
+      await api.put("/replacement/notifications/deny/by-employee", {
+        employeeId: cancelDenyDialog.employeeId,
+        date: cancelDenyDialog.dateStr,
+        reason: trimmed,
+      });
+      setNotice({
+        severity: "success",
+        text: `Duty for ${cancelDenyDialog.employeeName || cancelDenyDialog.employeeId} on ${cancelDenyDialog.dateStr} cancelled/denied with remarks. Denial logged & revocation mail sent.`,
+      });
+      setCancelDenyDialog({ open: false, dateStr: "", employeeId: "", employeeName: "", shiftKey: "", reason: "", submitting: false });
+      await loadMatrix();
+    } catch (err) {
+      setNotice({
+        severity: "error",
+        text: err.response?.data?.detail || "Failed to cancel/deny duty with remarks.",
+      });
+      setCancelDenyDialog((prev) => ({ ...prev, submitting: false }));
+    }
+  };
+
+  const handleDeleteDutyAssignment = async (dateStr, employeeId, employeeName, shiftKey) => {
+    if (!window.confirm(`Remove / delete this duty assignment for ${employeeName || employeeId} on ${dateStr}?`)) {
+      return;
+    }
+    setLoading(true);
+    try {
+      await api.delete("/special-events/daily-assignment", {
+        params: { date: dateStr, employeeId, shift: shiftKey }
+      });
+      setNotice({
+        severity: "success",
+        text: `Duty assignment for ${employeeName || employeeId} on ${dateStr} removed successfully.`,
+      });
+      await loadMatrix();
+    } catch (err) {
+      setNotice({
+        severity: "error",
+        text: err.response?.data?.detail || "Failed to remove duty assignment.",
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
   // Sequential Allocation from Created Pools & Multi-Department Dialog state
   const [sequentialDialogOpen, setSequentialDialogOpen] = useState(false);
   const [seqStartDate, setSeqStartDate] = useState(startDate);
@@ -514,7 +634,7 @@ export default function SpecialRosterMatrix({
   const [seqLeaveScope, setSeqLeaveScope] = useState("mandatory"); // "mandatory" or "all"
   const [sourcePool, setSourcePool] = useState("all_pools");
   const [sourceDepartments, setSourceDepartments] = useState([]);
-  const [allocationType, setAllocationType] = useState("both");
+  const [allocationType, setAllocationType] = useState("leave");
   const [surgePerShift, setSurgePerShift] = useState(1);
   const [seqTargetShifts, setSeqTargetShifts] = useState(["Morning", "Evening", "Night"]);
   const [maxDuties, setMaxDuties] = useState(2);
@@ -1267,26 +1387,89 @@ export default function SpecialRosterMatrix({
               </Stack>
             </Stack>
 
-            {/* If marked as replacement duty, show word "Replacement" and blink! */}
-            {person.replacementDuty && (
-              <Stack direction="row" spacing={0.3} sx={{ mt: 0.2 }}>
+            {/* If marked as replacement duty or additional manpower, show chip with delete option! */}
+            {(person.replacementDuty || person.additionalManpower) && (
+              <Stack direction="row" spacing={0.4} alignItems="center" sx={{ mt: 0.2 }}>
                 <Chip
                   size="small"
-                  label="Replacement"
+                  label={person.additionalManpower && !person.replacementDuty ? "Surge Staff" : "Replacement"}
+                  onDelete={(e) => {
+                    e.stopPropagation();
+                    handleDeleteDutyAssignment(dateStr, person.employeeId, person.name, shiftKey);
+                  }}
                   sx={{
-                    height: 15,
+                    height: 16,
                     fontSize: "0.58rem",
                     fontWeight: 950,
                     bgcolor: "#DCFCE7",
                     color: "#166534",
                     border: "1px solid #86EFAC",
                     animation: "replacementBlink 1.4s ease-in-out infinite",
+                    "& .MuiChip-label": { px: 0.4 },
+                    "& .MuiChip-deleteIcon": { fontSize: 11, color: "#DC2626", ml: -0.2, mr: 0.1 },
                     "@keyframes replacementBlink": {
                       "0%, 100%": { opacity: 1, backgroundColor: "#DCFCE7", boxShadow: "0 0 6px rgba(34, 197, 94, 0.5)" },
                       "50%": { opacity: 0.4, backgroundColor: "#F0FDF4", boxShadow: "none" },
                     },
                   }}
                 />
+                <Tooltip title={`Trigger / Resend Duty Notification Email to ${person.name}`}>
+                  <IconButton
+                    size="small"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleTriggerDutyMail(dateStr, person.employeeId, person.name, shiftKey);
+                    }}
+                    sx={{
+                      p: 0.15,
+                      color: "#2563EB",
+                      bgcolor: "#EFF6FF",
+                      border: "1px solid #BFDBFE",
+                      borderRadius: 1,
+                      "&:hover": { bgcolor: "#DBEAFE", color: "#1D4ED8" },
+                    }}
+                  >
+                    <Mail size={10} />
+                  </IconButton>
+                </Tooltip>
+                <Tooltip title={`Admin Cancel / Deny duty with remarks for ${person.name}`}>
+                  <IconButton
+                    size="small"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleOpenCancelDenyDialog(dateStr, person.employeeId, person.name, shiftKey);
+                    }}
+                    sx={{
+                      p: 0.15,
+                      color: "#B45309",
+                      bgcolor: "#FEF3C7",
+                      border: "1px solid #FCD34D",
+                      borderRadius: 1,
+                      "&:hover": { bgcolor: "#FDE68A", color: "#92400E" },
+                    }}
+                  >
+                    <Ban size={10} />
+                  </IconButton>
+                </Tooltip>
+                <Tooltip title={`Remove / delete this duty assignment for ${person.name}`}>
+                  <IconButton
+                    size="small"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleDeleteDutyAssignment(dateStr, person.employeeId, person.name, shiftKey);
+                    }}
+                    sx={{
+                      p: 0.15,
+                      color: "#DC2626",
+                      bgcolor: "#FEE2E2",
+                      border: "1px solid #FCA5A5",
+                      borderRadius: 1,
+                      "&:hover": { bgcolor: "#FECACA", color: "#991B1B" },
+                    }}
+                  >
+                    <Trash2 size={10} />
+                  </IconButton>
+                </Tooltip>
               </Stack>
             )}
 
@@ -1359,10 +1542,10 @@ export default function SpecialRosterMatrix({
   // Render unified Leave & Replacement Box with Hover Display and Continuous Blinking 'R' for Mandatory Replacement
   const renderUnifiedLeaveCard = (l, dateStr, shiftKey) => {
     const isCovered = Boolean(l.replacementAssigned || l.replacement?.name);
-    const isMandatory = Boolean(
-      (l.isSIC || (l.replacementRequired && l.replacementMarked !== false)) &&
-      (l.replacementRequired || l.isSIC)
-    );
+    // USER REQUIREMENT:
+    // If SIC on leave and DIC didn't mark for replacement, replacement requirement shouldn't be there!
+    // Replacement is mandatory ONLY if replacementRequired is true (and explicitly marked).
+    const isMandatory = Boolean(l.replacementRequired && l.replacementMarked !== false);
     const repGroup = (l.replacement?.groupName && String(l.replacement.groupName).trim()) || "General";
     const repGroupStyle = getGroupStyle(repGroup);
 
@@ -2740,44 +2923,23 @@ export default function SpecialRosterMatrix({
                 )}
 
                 {/* 3. Allocation Target */}
-                <Grid item xs={12} sm={6}>
+                <Grid item xs={12} sm={12}>
                   <FormControl fullWidth size="small">
                     <InputLabel id="seq-allocation-type-label">Allocation Target</InputLabel>
                     <Select
                       labelId="seq-allocation-type-label"
                       label="Allocation Target"
-                      value={allocationType}
-                      onChange={(e) => setAllocationType(e.target.value)}
+                      value="leave"
+                      disabled
                     >
-                      <MenuItem value="both">
-                        🔄 Auto-Fill (Leave Replacements + Surge Strength)
-                      </MenuItem>
                       <MenuItem value="leave">
-                        📋 Leave Replacements Only (Marked by SIC/DIC)
-                      </MenuItem>
-                      <MenuItem value="surge">
-                        ⚡ Surge Manpower Only (Extra coverage per shift)
+                        📋 Marked Replacements Only (Leaves, Training & Sports requiring cover)
                       </MenuItem>
                     </Select>
                   </FormControl>
-                </Grid>
-
-                {/* 4. Surge per Shift */}
-                <Grid item xs={12} sm={6}>
-                  <TextField
-                    type="number"
-                    size="small"
-                    label="Surge Strength per Shift"
-                    fullWidth
-                    value={surgePerShift}
-                    onChange={(e) => setSurgePerShift(Math.max(1, Number(e.target.value) || 1))}
-                    disabled={allocationType === "leave"}
-                    helperText={
-                      allocationType === "leave"
-                        ? "Only applies when allocating surge coverage"
-                        : "Number of additional staff assigned per shift"
-                    }
-                  />
+                  <Typography variant="caption" sx={{ color: "#059669", fontWeight: 700, mt: 0.5, display: "block" }}>
+                    ✓ Protected mode: Only roster duties with verified replacement requirements will be allocated. Multiple/surge allocations are disabled.
+                  </Typography>
                 </Grid>
 
                 {/* 5. Max Duties per Person */}
@@ -3760,6 +3922,52 @@ export default function SpecialRosterMatrix({
           </Button>
         </DialogActions>
       </Dialog>
-    </Box>
+    
+      {/* Admin Cancel / Deny Replacement Duty with Remarks Dialog */}
+      <Dialog
+        open={cancelDenyDialog.open}
+        onClose={() => !cancelDenyDialog.submitting && setCancelDenyDialog((prev) => ({ ...prev, open: false }))}
+        fullWidth
+        maxWidth="xs"
+      >
+        <DialogTitle sx={{ fontWeight: 900, color: "#9A3412" }}>
+          Cancel / Deny Duty with Remarks
+        </DialogTitle>
+        <DialogContent dividers>
+          <Typography variant="body2" sx={{ mb: 1.5, color: "#334155" }}>
+            Cancelling / denying <strong>{cancelDenyDialog.shiftKey}</strong> duty on{" "}
+            <strong>{cancelDenyDialog.dateStr}</strong> for{" "}
+            <strong>{cancelDenyDialog.employeeName || cancelDenyDialog.employeeId}</strong>.
+          </Typography>
+          <TextField
+            autoFocus
+            fullWidth
+            multiline
+            minRows={3}
+            required
+            label="Remarks / Denial Reason"
+            placeholder="e.g., Parallel SAT in progress in SCADA/EMS and Infra"
+            value={cancelDenyDialog.reason}
+            onChange={(e) => setCancelDenyDialog((prev) => ({ ...prev, reason: e.target.value }))}
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button
+            disabled={cancelDenyDialog.submitting}
+            onClick={() => setCancelDenyDialog((prev) => ({ ...prev, open: false }))}
+          >
+            Close
+          </Button>
+          <Button
+            variant="contained"
+            color="error"
+            disabled={!cancelDenyDialog.reason.trim() || cancelDenyDialog.submitting}
+            onClick={handleConfirmCancelDenyWithRemarks}
+          >
+            {cancelDenyDialog.submitting ? "Submitting..." : "Confirm Cancel / Deny"}
+          </Button>
+        </DialogActions>
+      </Dialog>
+</Box>
   );
 }

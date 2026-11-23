@@ -217,7 +217,7 @@ export default function App() {
         />
         <Route
           path="/crew/sports"
-          element={protectedPage("crew_leave", <SportsManagement />)}
+          element={protectedPage("crew_sports", <SportsManagement />)}
         />
 
         <Route

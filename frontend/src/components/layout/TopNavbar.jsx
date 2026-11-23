@@ -49,6 +49,7 @@ import {
   ClipboardList,
   Smartphone,
   Repeat2,
+  Medal,
 } from "lucide-react";
 import crewApi from "../../crewLegacy/api";
 import { useAuth } from "../../auth/AuthContext";
@@ -717,6 +718,16 @@ export default function TopNavbar() {
                     iconBg="#E8F5F1"
                     path="/crew/calendar"
                     active={location.pathname === "/crew/calendar"}
+                    onClick={handleNavigate}
+                  />
+                  <DropdownItem
+                    title="Sports Application"
+                    description="Sports events, applications and approvals"
+                    icon={Medal}
+                    iconColor="#6D28D9"
+                    iconBg="#F5F3FF"
+                    path="/crew/sports"
+                    active={location.pathname === "/crew/sports"}
                     onClick={handleNavigate}
                   />
                   <DropdownItem

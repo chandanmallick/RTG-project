@@ -5,6 +5,7 @@ import {
   Typography,
   TextField,
   Button,
+  ButtonGroup,
   Paper,
   Table,
   TableBody,
@@ -124,8 +125,17 @@ export default function EmployeeMaster() {
     const orgRes = await api.get(`/admin/organization/units`);
     const designationRes = await api.get(`/admin/designations`);
 
-    setDutyTypes(dutyRes.data);
-    setCategories(catRes.data);
+    const dutyData = dutyRes.data || [];
+    const catData = catRes.data || [];
+    const dutyList = dutyData.some((x) => x.value === "None")
+      ? dutyData
+      : [{ id: "none_dt", value: "None" }, ...dutyData];
+    const catList = catData.some((x) => x.value === "None")
+      ? catData
+      : [{ id: "none_cat", value: "None" }, ...catData];
+
+    setDutyTypes(dutyList);
+    setCategories(catList);
     setOrganizationUnits(orgRes.data || []);
     setDesignationMasters(designationRes.data?.masters || []);
   };
@@ -426,12 +436,31 @@ export default function EmployeeMaster() {
             <TextField size="small" label="Phone" name="phone" fullWidth InputLabelProps={{ shrink: true }} value={formData.phone} onChange={handleChange} />
             <TextField size="small" label="Gmail" name="gmail" fullWidth InputLabelProps={{ shrink: true }} value={formData.gmail} onChange={handleChange} />
 
-            <TextField size="small" select label="Type of Duty" name="dutyType" fullWidth InputLabelProps={{ shrink: true }} value={formData.dutyType} onChange={handleChange}>
-              {dutyTypes.map((item) => (
-                <MenuItem key={item.id} value={item.value}>
-                  {item.value}
-                </MenuItem>
-              ))}
+            <TextField
+              size="small"
+              select
+              label="Type of Duty"
+              name="dutyType"
+              fullWidth
+              InputLabelProps={{ shrink: true }}
+              value={formData.dutyType || "None"}
+              onChange={handleChange}
+              helperText={
+                formData.dutyType === "None"
+                  ? "Excluded from sequential replacement roster"
+                  : "Assigned duty type"
+              }
+            >
+              <MenuItem value="None">
+                <em>None (Exclude from Sequence)</em>
+              </MenuItem>
+              {dutyTypes
+                .filter((item) => item.value !== "None")
+                .map((item) => (
+                  <MenuItem key={item.id} value={item.value}>
+                    {item.value}
+                  </MenuItem>
+                ))}
             </TextField>
 
             <TextField
@@ -456,19 +485,43 @@ export default function EmployeeMaster() {
                 notched
                 name="category"
                 value={normalizeListValue(formData.category)}
-                onChange={handleChange}
+                onChange={(e) => {
+                  const val = typeof e.target.value === "string" ? e.target.value.split(",") : e.target.value;
+                  let nextVal = val;
+                  const hadNone = (normalizeListValue(formData.category) || []).includes("None");
+                  const hasNone = val.includes("None");
+                  if (hasNone && !hadNone) {
+                    nextVal = ["None"];
+                  } else if (hasNone && val.length > 1) {
+                    nextVal = val.filter((x) => x !== "None");
+                  }
+                  handleChange({ target: { name: "category", value: nextVal } });
+                }}
                 input={<OutlinedInput label="Category" />}
                 renderValue={(selected) => (
                   <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.5 }}>
-                    {selected.map((value) => <Chip key={value} label={value} size="small" />)}
+                    {selected.map((value) => (
+                      <Chip
+                        key={value}
+                        label={value === "None" ? "None (Excluded from Sequence)" : value}
+                        size="small"
+                        color={value === "None" ? "default" : "primary"}
+                        variant={value === "None" ? "outlined" : "filled"}
+                      />
+                    ))}
                   </Box>
                 )}
               >
-                {categories.map((item) => (
-                  <MenuItem key={item.id} value={item.value}>
-                    {item.value}
-                  </MenuItem>
-                ))}
+                <MenuItem value="None">
+                  <em>None (Exclude from Sequence)</em>
+                </MenuItem>
+                {categories
+                  .filter((item) => item.value !== "None")
+                  .map((item) => (
+                    <MenuItem key={item.id} value={item.value}>
+                      {item.value}
+                    </MenuItem>
+                  ))}
               </Select>
             </FormControl>
 
@@ -658,9 +711,21 @@ export default function EmployeeMaster() {
                     sx={{ height: 20, fontSize: "0.72rem", fontWeight: 700 }}
                   />
                 </TableCell>
-                <TableCell>{emp.dutyType}</TableCell>
+                <TableCell>
+                  {emp.dutyType === "None" || !emp.dutyType ? (
+                    <Chip size="small" label="None" variant="outlined" sx={{ height: 20, fontSize: "0.72rem", color: "#64748B" }} />
+                  ) : (
+                    emp.dutyType
+                  )}
+                </TableCell>
                 <TableCell>{emp.phone}</TableCell>
-                <TableCell>{normalizeListValue(emp.category).join(", ") || "-"}</TableCell>
+                <TableCell>
+                  {normalizeListValue(emp.category).includes("None") || !normalizeListValue(emp.category).length ? (
+                    <Chip size="small" label="None" variant="outlined" sx={{ height: 20, fontSize: "0.72rem", color: "#64748B" }} />
+                  ) : (
+                    normalizeListValue(emp.category).join(", ")
+                  )}
+                </TableCell>
                 <TableCell>{normalizeListValue(emp.verticals || emp.vertical).join(", ") || "-"}</TableCell>
                 <TableCell>{normalizeListValue(emp.reportingOfficerNames || emp.reportingOfficerName).join(", ") || "-"}</TableCell>
                 <TableCell>{normalizeListValue(emp.functionNames).join(", ") || "-"}</TableCell>

@@ -59,6 +59,7 @@ ALLOWED_PLACEHOLDERS = {
     "leave_date",
     "leave_type",
     "comment",
+    "remarks",
     "training_name",
     "training_period",
     "training_location",

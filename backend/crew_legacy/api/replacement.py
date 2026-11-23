@@ -27,9 +27,15 @@ from crew_legacy.database.database_mongo import (
     organization_unit_collection,
     roster_group_collection,
     system_settings_collection,
+    page_access_collection,
+    training_nomination_history_collection,
+    sports_application_collection,
 )
 
 router = APIRouter()
+
+def clean_id(val):
+    return str(val or "").strip()
 
 ACTIVE_LEAVE_STATUSES = {"Applied", "Forwarded", "Forwarded by SIC", "Approved"}
 
@@ -798,16 +804,151 @@ def assign_acting_sic_for_duty_move(
         elif group_name:
             emp_filter["groupName"] = group_name
             emp_filter["isActingSIC"] = True
-        employee_daily_collection.update_many(
-            emp_filter,
-            {"$set": {
-                "isActingSIC": False,
-                "actingSICGroup": "",
-                "actingSICFor": None,
-                "actingSICAssignedBy": "",
-                "actingSICAssignedOn": None,
-            }}
-        )
+
+        matching_dailies = list(employee_daily_collection.find(emp_filter))
+        for d in matching_dailies:
+            eid = clean_id(d.get("employeeId"))
+            if not eid:
+                continue
+
+            # 1. Sports application release
+            sports_application_collection.update_many(
+                {
+                    "$or": [
+                        {"actingSICEmployee.employeeId": eid},
+                        {"replacementEmployee.employeeId": eid},
+                    ],
+                    "$and": [
+                        {"$or": [
+                            {"startDate": {"$lte": duty_date}, "endDate": {"$gte": duty_date}},
+                            {"replacementRequiredDates": duty_date},
+                            {"selectedDates": duty_date},
+                        ]}
+                    ],
+                },
+                {"$set": {
+                    "actingSICEmployee": None,
+                    "replacementEmployee": None,
+                    "replacementMode": None,
+                    "updatedOn": datetime.utcnow(),
+                }},
+            )
+
+            # 2. Training nomination release
+            training_nomination_history_collection.update_many(
+                {
+                    "$or": [
+                        {"actingSICEmployee.employeeId": eid},
+                        {"replacementEmployee.employeeId": eid},
+                    ],
+                    "$and": [
+                        {"$or": [
+                            {"startDate": {"$lte": duty_date}, "endDate": {"$gte": duty_date}},
+                            {"trainingDate": duty_date},
+                            {"replacementRequiredDates": duty_date},
+                            {"selectedDates": duty_date},
+                        ]}
+                    ],
+                },
+                {"$set": {
+                    "actingSICEmployee": None,
+                    "replacementEmployee": None,
+                    "replacementMode": None,
+                    "updatedOn": datetime.utcnow(),
+                }},
+            )
+
+            # 3. Leave request release
+            leave_request_collection.update_many(
+                {
+                    "date": duty_date,
+                    "$or": [
+                        {"actingSIC.employeeId": eid},
+                        {"replacement.employeeId": eid},
+                        {"replacementEmployee.employeeId": eid},
+                    ],
+                },
+                {"$set": {
+                    "actingSIC": None,
+                    "replacement": None,
+                    "replacementEmployee": None,
+                    "replacementAssigned": False,
+                    "updatedOn": datetime.utcnow(),
+                }},
+            )
+
+            # 4. Absent person's daily doc
+            employee_daily_collection.update_many(
+                {
+                    "date": duty_date,
+                    "$or": [
+                        {"actingSICEmployee.employeeId": eid},
+                        {"replacementEmployee.employeeId": eid},
+                    ],
+                },
+                {"$set": {
+                    "replacementAssigned": False,
+                    "replacementEmployee": None,
+                    "actingSICEmployee": None,
+                    "updatedOn": datetime.utcnow(),
+                }},
+            )
+
+            # 5. Handle candidate's daily doc
+            if d.get("replacementCreatedDaily"):
+                employee_daily_collection.delete_one({"_id": d["_id"]})
+            else:
+                prev = (
+                    d.get("sportsReplacementPreviousAssignment")
+                    or d.get("trainingReplacementPreviousAssignment")
+                    or d.get("previousAssignment")
+                    or {}
+                )
+                restore_duty = prev.get("assignedDuty") or "General"
+                restore_grp = prev.get("groupName") or "Other Employees"
+                employee_daily_collection.update_one(
+                    {"_id": d["_id"]},
+                    {
+                        "$set": {
+                            "assignedDuty": restore_duty,
+                            "actualStatus": restore_duty,
+                            "groupName": restore_grp,
+                            "isActingSIC": False,
+                            "actingSICGroup": "",
+                            "actingSICFor": None,
+                            "actingSICAssignedBy": "",
+                            "actingSICAssignedOn": None,
+                            "replacementDuty": False,
+                            "updatedOn": datetime.utcnow(),
+                        },
+                        "$unset": {
+                            "replacementFor": "",
+                            "sportsReplacement": "",
+                            "trainingReplacement": "",
+                            "replacementMode": "",
+                        },
+                    },
+                )
+
+            # 6. Cancel notification & dispatch revocation email
+            try:
+                dispatch_replacement_cancellation_mail(
+                    employee_id=eid,
+                    duty_date=duty_date,
+                    assigned_duty=d.get("assignedDuty") or "Shift",
+                    reason="Acting SIC designation removed by Administrator",
+                    actor_id=actor,
+                )
+            except Exception:
+                pass
+
+        # Recalculate sequential pointers
+        try:
+            from crew_legacy.services.replacement_roster_service import recalculate_sequential_pointers
+            recalculate_sequential_pointers(duty_date[:7])
+        except Exception:
+            pass
+
         return {"message": "Acting SIC designation removed successfully"}
 
     if not acting_sic_id:
@@ -3067,6 +3208,14 @@ def pending_replacements(user=Depends(get_authenticated_user)):
             continue
 
         is_sic_flag = leave_requires_sic(l, duty)
+        if is_sic_flag:
+            # USER REQUIREMENT: If SIC on leave and DIC didn't mark for replacement, no replacement requirement!
+            sic_marked = bool(
+                l.get("dicReplacementRequired") is True
+                or (l.get("replacementRequired") is True and l.get("dicReplacementRequired") is not False)
+            )
+            if not sic_marked:
+                continue
 
         # =============================
         # DATE LOGIC (FIXED POSITION)
@@ -3172,7 +3321,12 @@ def replacement_assignment_audit(
 ):
     check_replacement_access(user)
     auto_accept_pending_duty_notifications()
-    query = {"leaveId": {"$exists": True}, "assignedDuty": {"$exists": True}}
+    query = {
+        "$or": [
+            {"assignedDuty": {"$exists": True, "$ne": None}},
+            {"status": {"$in": ["Denied", "Cancelled", "Accepted", "Pending"]}},
+        ]
+    }
     if startDate or endDate:
         query["date"] = {}
         if startDate:
@@ -3241,6 +3395,10 @@ def replacement_assignment_audit(
             "mailDelivery": {
                 **(item.get("mailDelivery") or {}),
                 "attemptedAt": api_datetime((item.get("mailDelivery") or {}).get("attemptedAt")),
+            },
+            "cancellationMailDelivery": {
+                **(item.get("cancellationMailDelivery") or {}),
+                "attemptedAt": api_datetime((item.get("cancellationMailDelivery") or {}).get("attemptedAt")),
             },
             "decisionHistory": decisions,
         })
@@ -3597,6 +3755,17 @@ def assign_replacement(leave_id: str, payload: dict, user=Depends(get_authentica
     })
 
     if not leave:
+        # Check if this is a training nomination
+        nom = training_nomination_history_collection.find_one({"_id": ObjectId(leave_id)})
+        if nom:
+            from crew_legacy.api.training_assignment import assign_training_replacement
+            return assign_training_replacement(leave_id, payload, user=user)
+        # Check if this is a sports application
+        from crew_legacy.database.database_mongo import sports_application_collection
+        sp = sports_application_collection.find_one({"_id": ObjectId(leave_id)})
+        if sp:
+            from crew_legacy.api.sports_api import assign_sports_replacement
+            return assign_sports_replacement(leave_id, payload, user=user)
         raise HTTPException(404, "Leave not found")
     require_replacement_authority(user, leave)
     if leave.get("finalStatus") != "Approved":
@@ -4262,6 +4431,17 @@ def assign_sic(
     })
 
     if not leave:
+        # Check if this is a training nomination
+        nom = training_nomination_history_collection.find_one({"_id": ObjectId(leave_id)})
+        if nom:
+            from crew_legacy.api.training_assignment import assign_training_replacement
+            return assign_training_replacement(leave_id, payload, user=user)
+        # Check if this is a sports application
+        from crew_legacy.database.database_mongo import sports_application_collection
+        sp = sports_application_collection.find_one({"_id": ObjectId(leave_id)})
+        if sp:
+            from crew_legacy.api.sports_api import assign_sports_replacement
+            return assign_sports_replacement(leave_id, payload, user=user)
         raise HTTPException(404, "Leave not found")
     require_replacement_authority(user, leave)
 
@@ -4433,6 +4613,17 @@ def get_sic_candidates(leave_id: str, user=Depends(get_current_user), scope: str
     })
 
     if not leave:
+        # Check if this is a training nomination
+        nom = training_nomination_history_collection.find_one({"_id": ObjectId(leave_id)})
+        if nom:
+            from crew_legacy.api.training_assignment import assign_training_replacement
+            return assign_training_replacement(leave_id, payload, user=user)
+        # Check if this is a sports application
+        from crew_legacy.database.database_mongo import sports_application_collection
+        sp = sports_application_collection.find_one({"_id": ObjectId(leave_id)})
+        if sp:
+            from crew_legacy.api.sports_api import assign_sports_replacement
+            return assign_sports_replacement(leave_id, payload, user=user)
         raise HTTPException(404, "Leave not found")
     require_replacement_authority(user, leave)
 
@@ -4525,6 +4716,13 @@ def pending_sic(user=Depends(get_current_user)):
         # â— only if SIC required
         is_sic_leave = leave_requires_sic(l, duty)
         if not is_sic_leave:
+            continue
+        # USER REQUIREMENT: If SIC on leave and DIC didn't mark for replacement, no replacement requirement!
+        sic_marked = bool(
+            l.get("dicReplacementRequired") is True
+            or (l.get("replacementRequired") is True and l.get("dicReplacementRequired") is not False)
+        )
+        if not sic_marked:
             continue
 
         # â— skip if already assigned
@@ -4670,12 +4868,12 @@ def get_notifications(user=Depends(get_current_user)):
             and (before_cutoff or is_reporting_or_hod)
             and not is_elapsed
         )
-        # Deny option: STRICTLY restricted to Reporting / HOD officer (or Admin) - Employee cannot deny
+        # Deny / Cancel option: Admin can always cancel/deny Pending or Accepted (including auto-accepted) duties with remarks;
+        # Reporting / HOD officers can deny for their subordinates (employees cannot self-deny).
         n["canDeny"] = bool(
-            is_reporting_or_hod
-            and not is_assignee
+            (user_is_admin or (is_reporting_or_hod and not is_assignee))
             and n.get("status") in {"Pending", "Accepted"}
-            and (before_cutoff or is_reporting_or_hod)
+            and (before_cutoff or is_reporting_or_hod or user_is_admin)
             and not is_elapsed
         )
         # Can revert assignment: Admin only for testing (reporting officer cannot reallocate/revert)
@@ -4747,29 +4945,60 @@ def accept_duty(id: str, user=Depends(get_current_user)):
 @router.put("/notifications/deny/{id}")
 def deny_duty(id: str, payload: dict, user=Depends(get_current_user)):
 
-    if not ObjectId.is_valid(id):
-        raise HTTPException(400, "Invalid duty notification")
-    notif = duty_notification_collection.find_one({
-        "_id": ObjectId(id)
-    })
+    notif = None
+    if ObjectId.is_valid(id):
+        notif = duty_notification_collection.find_one({"_id": ObjectId(id)})
+        if not notif:
+            # Fallback: id might be a leaveId from the Assigned Replacement Board
+            notif = duty_notification_collection.find_one(
+                {"leaveId": str(id), "status": {"$in": ["Pending", "Accepted"]}},
+                sort=[("createdAt", -1)],
+            )
+    if not notif and payload:
+        p_eid = str(payload.get("employeeId") or "").strip()
+        p_date = str(payload.get("date") or "").strip()
+        if p_eid and p_date:
+            notif = duty_notification_collection.find_one(
+                {"employeeId": p_eid, "date": p_date, "status": {"$in": ["Pending", "Accepted"]}},
+                sort=[("createdAt", -1)],
+            )
 
     if not notif:
         raise HTTPException(404, "Notification not found")
 
+    def id_matches(a, b):
+        s1 = str(a or "").strip()
+        s2 = str(b or "").strip()
+        if not s1 or not s2:
+            return False
+        if s1 == s2:
+            return True
+        if s1.isdigit() and s2.isdigit():
+            return int(s1) == int(s2)
+        return False
+
     user_id = str(user.get("userId") or user.get("employeeId") or "")
     controller_ids = normalized_categories(notif.get("controllerIds"))
-    if user_id not in controller_ids:
+    if not any(id_matches(cid, user_id) for cid in controller_ids):
         controller_ids.extend(controlling_officer_ids(notif.get("employeeId"), notif.get("date"), notif.get("groupName")))
-    is_controller = user_id in controller_ids
+    is_controller = any(id_matches(cid, user_id) for cid in controller_ids)
     user_role = str(user.get("role") or "").lower()
     user_is_admin = user_role in ["admin", "hod", "dic", "dept_ic", "controller"] or user_id in ["50041", "admin"]
 
+    access_doc = page_access_collection.find_one({"userId": user_id}) or {}
+    user_pages = access_doc.get("pages") or {}
+    has_leave_approval_power = bool((user_pages.get("crew_leave") or {}).get("write") or (user_pages.get("crew_leave") or {}).get("approve") or (user_pages.get("crew_replacement") or {}).get("write"))
+
+    from crew_legacy.api.leave_api import get_my_role
+    my_role = get_my_role(user=user)
+    is_ro_or_authority = is_controller or user_is_admin or has_leave_approval_power or bool(my_role.get("isLeaveAuthority") or my_role.get("isReportingOfficer") or my_role.get("isSIC") or my_role.get("isDeptIC"))
+
     # USER REQUIREMENT: Employee should NOT have option to deny. Only His reporting officer/HOD/Admin can deny.
-    is_assignee = str(notif.get("employeeId") or "").strip() == user_id
+    is_assignee = id_matches(notif.get("employeeId"), user_id)
     if is_assignee and not user_is_admin:
         raise HTTPException(403, "Employees cannot deny replacement duties. Only the Reporting Officer or HOD can deny.")
 
-    if not is_controller and not user_is_admin:
+    if not is_ro_or_authority:
         raise HTTPException(403, "Deny option is restricted to Reporting / HOD officers only")
 
     if notif.get("status") not in {"Pending", "Accepted"}:
@@ -4777,7 +5006,7 @@ def deny_duty(id: str, payload: dict, user=Depends(get_current_user)):
 
     now = datetime.utcnow()
     cutoff = utc_naive(notif.get("cutoffTime"))
-    if cutoff and now > cutoff:
+    if cutoff and now > cutoff and not user_is_admin:
         auto_accept_pending_duty_notifications()
         raise HTTPException(400, "Denial time expired after the 16:00 cutoff")
 
@@ -4841,6 +5070,86 @@ def deny_duty(id: str, payload: dict, user=Depends(get_current_user)):
             user_id,
             actor_role,
         )
+    else:
+        nom_id = notif.get("leaveId")
+        if nom_id and ObjectId.is_valid(str(nom_id)):
+            nom = training_nomination_history_collection.find_one({"_id": ObjectId(nom_id)})
+            if nom:
+                try:
+                    from crew_legacy.api.training_assignment import release_training_replacement
+                    release_training_replacement(nom, {"employeeId": notif.get("employeeId")})
+                except Exception as rel_err:
+                    logger.warning("release_training_replacement failed: %s", rel_err)
+                training_nomination_history_collection.update_one(
+                    {"_id": nom["_id"]},
+                    {"$set": {"replacementEmployee": None, "actingSICEmployee": None, "replacementMode": None, "updatedOn": now}}
+                )
+                trainee_id = clean_id(nom.get("employeeId"))
+                rep_date = clean_id(notif.get("date"))
+                if trainee_id and rep_date:
+                    employee_daily_collection.update_one(
+                        {"employeeId": trainee_id, "date": rep_date},
+                        {"$set": {"replacementAssigned": False, "replacementEmployee": None, "updatedOn": now}}
+                    )
+
+    # Also release sports application if leaveId refers to a sports application
+    if not leave:
+        sp_id_val = notif.get("leaveId")
+        if sp_id_val and ObjectId.is_valid(str(sp_id_val)):
+            sp_doc = sports_application_collection.find_one({"_id": ObjectId(sp_id_val)})
+            if sp_doc:
+                sports_application_collection.update_one(
+                    {"_id": sp_doc["_id"]},
+                    {"$set": {"replacementEmployee": None, "actingSICEmployee": None, "updatedOn": now}}
+                )
+                sp_eid = clean_id(sp_doc.get("employeeId"))
+                sp_d = clean_id(notif.get("date"))
+                if sp_eid and sp_d:
+                    employee_daily_collection.update_one(
+                        {"employeeId": sp_eid, "date": sp_d},
+                        {"$set": {"replacementAssigned": False, "replacementEmployee": None, "updatedOn": now}}
+                    )
+
+    # In all cases, release the replacement record from employee_daily_collection
+    rep_eid = clean_id(notif.get("employeeId"))
+    rep_date = clean_id(notif.get("date"))
+    if rep_eid and rep_date:
+        compensatory_off_collection.delete_many({
+            "employeeId": employee_id_filter(rep_eid),
+            "earnedDate": rep_date,
+            "status": {"$nin": ["Reserved", "Used"]},
+        })
+    if rep_eid and rep_date:
+        d_rec = employee_daily_collection.find_one({"employeeId": rep_eid, "date": rep_date})
+        if d_rec and (d_rec.get("replacementDuty") or d_rec.get("isActingSIC")):
+            prev = d_rec.get("trainingReplacementPreviousAssignment") or d_rec.get("sportsReplacementPreviousAssignment") or {}
+            if d_rec.get("replacementCreatedDaily") and not prev.get("assignedDuty"):
+                employee_daily_collection.delete_one({"_id": d_rec["_id"]})
+            else:
+                employee_daily_collection.update_one(
+                    {"_id": d_rec["_id"]},
+                    {
+                        "$set": {
+                            "assignedDuty": prev.get("assignedDuty") or "General",
+                            "actualStatus": prev.get("assignedDuty") or "General",
+                            "groupName": prev.get("groupName") or "Other Employees",
+                            "updatedOn": now,
+                        },
+                        "$unset": {
+                            "replacementDuty": "",
+                            "replacementMode": "",
+                            "replacementFor": "",
+                            "trainingReplacement": "",
+                            "sportsReplacement": "",
+                            "isActingSIC": "",
+                            "actingSICFor": "",
+                            "actingSICGroup": "",
+                            "sic": "",
+                            "actingSICAssignedBy": "",
+                            "actingSICAssignedOn": "",
+                        }
+                    }
+                )
 
     # USER REQUIREMENT: In case of denial mail to Admin
     notif_date = str(notif.get("date") or "")
@@ -4850,8 +5159,8 @@ def deny_duty(id: str, payload: dict, user=Depends(get_current_user)):
     except Exception:
         display_date = notif_date
 
-    admin_users = list(employee_collection.find({"$or": [{"role": "admin"}, {"employeeId": "50041"}]}))
-    admin_emails = [a.get("email") for a in admin_users if a.get("email")]
+    admin_users = list(employee_collection.find({"$or": [{"role": "admin"}, {"userId": "50041"}, {"employeeId": "50041"}]}))
+    admin_emails = list(dict.fromkeys(mail_address(a) for a in admin_users if mail_address(a)))
     from crew_legacy.admin_logic.notification_service import replacement_mail_settings, send_email
     settings = replacement_mail_settings()
     if settings.get("reportMailbox") and settings.get("reportMailbox") not in admin_emails:
@@ -4878,6 +5187,77 @@ def deny_duty(id: str, payload: dict, user=Depends(get_current_user)):
             send_email(admin_emails, denial_subject, denial_body)
         except Exception as e:
             logger.warning("Failed to send denial email: %s", e)
+
+    # Also notify the employee & controlling officers that the replacement duty is revoked / cancelled
+    try:
+        from crew_legacy.admin_logic.notification_service import send_replacement_revoked_email
+        revoked_emp = employee_by_id(rep_eid)
+        if revoked_emp:
+            leave_stub = leave or {
+                "employeeId": "",
+                "name": notif.get("replacementForName") or "Shift Duty",
+                "groupName": notif.get("groupName") or "",
+            }
+            rev_recipients, _, _ = replacement_mail_recipients(revoked_emp, leave_stub, rep_date, leave_stub.get("groupName") or "")
+            emp_email = mail_address(revoked_emp)
+            if emp_email and emp_email.lower() not in [r.lower() for r in rev_recipients]:
+                rev_recipients.insert(0, emp_email)
+            if rev_recipients:
+                rev_desig = revoked_emp.get("designation") or "Staff"
+                rev_res = send_replacement_revoked_email(
+                    rev_recipients,
+                    {
+                        "replacement_name": revoked_emp.get("name") or rep_eid,
+                        "replacement_person": f"{revoked_emp.get('name') or rep_eid} ({rev_desig}, Employee ID {rep_eid})",
+                        "shift_name": display_shift_name(notif.get("assignedDuty") or "Shift"),
+                        "date": display_date,
+                        "leave_person": leave_stub.get("name") or "Shift Duty",
+                        "group_name": leave_stub.get("groupName") or "Shift Group",
+                        "reason": f"{reason} (Cancelled/Denied by {user.get('name') or user_id} - {actor_role})",
+                    },
+                )
+                cancellation_record = {
+                    **(rev_res or {}),
+                    "attemptedAt": datetime.utcnow(),
+                    "recipients": rev_recipients,
+                    "recipientCount": len(rev_recipients),
+                    "reason": reason,
+                    "triggeredBy": user_id,
+                }
+                duty_notification_collection.update_one(
+                    {"_id": notif["_id"]},
+                    {"$set": {"cancellationMailDelivery": cancellation_record, "mailDelivery": cancellation_record, "updatedAt": datetime.utcnow()}}
+                )
+                duty_denial_collection.update_many(
+                    {"employeeId": rep_eid, "date": rep_date},
+                    {"$set": {"cancellationMailDelivery": cancellation_record, "mailDelivery": cancellation_record}}
+                )
+    except Exception as rev_err:
+        logger.warning("Failed to send revocation email during deny_duty: %s", rev_err)
+        err_record = {
+            "status": "failed",
+            "error": str(rev_err),
+            "attemptedAt": datetime.utcnow(),
+            "reason": reason,
+            "triggeredBy": user_id,
+        }
+        if notif and "_id" in notif:
+            duty_notification_collection.update_one(
+                {"_id": notif["_id"]},
+                {"$set": {"cancellationMailDelivery": err_record, "mailDelivery": err_record, "updatedAt": datetime.utcnow()}}
+            )
+        if rep_eid and rep_date:
+            duty_denial_collection.update_many(
+                {"employeeId": rep_eid, "date": rep_date},
+                {"$set": {"cancellationMailDelivery": err_record, "mailDelivery": err_record}}
+            )
+
+    # Recalculate backlog-first sequential pointers so cooldown & freed slots reflect immediately
+    try:
+        from crew_legacy.services.replacement_roster_service import recalculate_sequential_pointers
+        recalculate_sequential_pointers(rep_date[:7] if rep_date and len(rep_date) >= 7 else None)
+    except Exception as ptr_err:
+        logger.warning("Failed to recalculate sequential pointers after deny_duty: %s", ptr_err)
 
     # USER REQUIREMENT: If admin gets Duty denied, option to allocate another duty or auto corn job will allocate next person in roster (as per activate process - Manual or auto sequential)
     auto_allocated_res = None
@@ -5090,3 +5470,382 @@ def set_roster_long_duration_policy(payload: dict, user=Depends(get_current_user
         policy=policy,
         permanent_employee_id=permanent_employee_id,
     )
+
+@router.post("/roster/cooldown-iterations")
+@router.post("/replacement/roster/cooldown-iterations")
+def set_denial_cooldown_iterations_endpoint(payload: dict, user=Depends(get_current_user)):
+    from crew_legacy.services.replacement_roster_service import set_denial_cooldown_iterations
+    iterations = int((payload or {}).get("iterations", 2))
+    return set_denial_cooldown_iterations(iterations=iterations, user=user)
+
+
+
+def dispatch_replacement_duty_mail(
+    employee_id: str,
+    duty_date: str,
+    assigned_duty: str,
+    leave_or_slot: dict = None,
+    notification_id: str = None,
+    actor_id: str = "SYSTEM",
+):
+    """
+    Dispatches replacement duty email notification via Microsoft Graph API
+    and records/updates duty_notification_collection.
+    """
+    emp_id = str(employee_id or "").strip()
+    d_date = str(duty_date or "").strip()
+    d_shift = str(assigned_duty or "General").strip()
+
+    if not emp_id or not d_date:
+        return {"status": "skipped", "reason": "Missing employeeId or duty_date"}
+
+    replacement_emp = employee_by_id(emp_id)
+    if not replacement_emp:
+        return {"status": "skipped", "reason": f"Employee {emp_id} not found"}
+
+    # Find existing notification
+    notif = None
+    if notification_id and ObjectId.is_valid(notification_id):
+        notif = duty_notification_collection.find_one({"_id": ObjectId(notification_id)})
+    if not notif:
+        notif = duty_notification_collection.find_one({
+            "employeeId": emp_id,
+            "date": d_date,
+            "status": {"$ne": "Cancelled"},
+        })
+
+    # Resolve context/leave
+    leave = None
+    if leave_or_slot and isinstance(leave_or_slot, dict):
+        leave = leave_or_slot
+    if not leave and notif and notif.get("leaveId") and ObjectId.is_valid(notif.get("leaveId")):
+        lid = ObjectId(notif["leaveId"])
+        leave = (
+            leave_request_collection.find_one({"_id": lid})
+            or sports_application_collection.find_one({"_id": lid})
+            or training_nomination_history_collection.find_one({"_id": lid})
+        )
+    if not leave:
+        daily = employee_daily_collection.find_one({"employeeId": emp_id, "date": d_date})
+        rep_for = (daily or {}).get("replacementFor") or {}
+        rep_for_id = rep_for.get("employeeId") if isinstance(rep_for, dict) else None
+        if rep_for_id:
+            leave_emp = employee_by_id(rep_for_id)
+            leave = {
+                "employeeId": rep_for_id,
+                "name": rep_for.get("name") or (leave_emp or {}).get("name") or rep_for_id,
+                "groupName": (daily or {}).get("groupName") or (leave_emp or {}).get("groupName") or "",
+                "date": d_date,
+                "assignedDuty": d_shift,
+            }
+
+    if not leave:
+        leave = {
+            "employeeId": "",
+            "name": (notif or {}).get("replacementForName") or "Shift Replacement",
+            "groupName": (notif or {}).get("groupName") or "",
+            "date": d_date,
+            "assignedDuty": d_shift,
+        }
+
+    recipients, reporting_officer_ids, sic_ids = replacement_mail_recipients(
+        replacement_emp,
+        leave,
+        d_date,
+        leave.get("groupName") or "",
+    )
+
+    rep_mail = mail_address(replacement_emp)
+    if rep_mail and rep_mail.lower() not in [r.lower() for r in recipients]:
+        recipients.insert(0, rep_mail)
+
+    if not recipients:
+        return {"status": "skipped", "reason": f"No email address found for employee {emp_id}"}
+
+    leave_emp_doc = employee_by_id(leave.get("employeeId")) if leave.get("employeeId") else {}
+    try:
+        dt = datetime.strptime(d_date, "%Y-%m-%d")
+        display_date = f"{dt.strftime('%d-%b-%Y')}, {dt.strftime('%A')}"
+    except Exception:
+        display_date = d_date
+
+    rep_desig = replacement_emp.get("designation") or ""
+    rep_person = f"{replacement_emp.get('name') or emp_id} ({rep_desig or 'Designation not available'}, Employee ID {replacement_emp.get('userId') or emp_id})"
+    leave_person_name = leave.get("name") or leave.get("applicantName") or (leave_emp_doc or {}).get("name") or "Special Assignment"
+
+    mail_values = {
+        "replacement_person": rep_person,
+        "replacement_name": replacement_emp.get("name"),
+        "replacement_designation": rep_desig,
+        "replacement_employee_id": replacement_emp.get("userId") or emp_id,
+        "shift_name": display_shift_name(d_shift),
+        "date": display_date,
+        "date_iso": d_date,
+        "leave_person": leave_person_name,
+        "leave_name": leave_person_name,
+        "leave_designation": (leave_emp_doc or {}).get("designation") or "",
+        "leave_employee_id": leave.get("employeeId") or "",
+        "group_name": leave.get("groupName") or "",
+    }
+
+    mail_result = send_replacement_duty_email(recipients, mail_values)
+
+    # Save to notification
+    mail_delivery_record = {
+        **mail_result,
+        "attemptedAt": datetime.utcnow(),
+        "reportingOfficerIds": reporting_officer_ids,
+        "shiftInChargeIds": sic_ids,
+    }
+    if notif:
+        duty_notification_collection.update_one(
+            {"_id": notif["_id"]},
+            {"$set": {"mailDelivery": mail_delivery_record, "updatedAt": datetime.utcnow()}}
+        )
+    else:
+        duty_notification_collection.insert_one({
+            "employeeId": emp_id,
+            "employeeName": replacement_emp.get("name"),
+            "assignedBy": actor_id,
+            "controllerIds": reporting_officer_ids,
+            "leaveId": str(leave.get("_id") or leave.get("leaveId") or ""),
+            "date": d_date,
+            "groupName": leave.get("groupName") or "",
+            "assignedDuty": d_shift,
+            "status": "Pending",
+            "decision": None,
+            "autoAccepted": False,
+            "source": "Sequential / Trigger Mail",
+            "createdAt": datetime.utcnow(),
+            "mailDelivery": mail_delivery_record,
+        })
+
+    return {
+        "status": mail_result.get("status"),
+        "recipientCount": mail_result.get("recipientCount", 0),
+        "recipients": recipients,
+        "employeeName": replacement_emp.get("name"),
+    }
+
+
+@router.post("/trigger-duty-mail")
+@router.post("/notifications/trigger-mail")
+@router.post("/replacement/trigger-duty-mail")
+def trigger_duty_mail_endpoint(payload: dict, user=Depends(get_current_user)):
+    """
+    Manually triggers or resends duty notification email to an employee and controlling officers.
+    Accepts: { notificationId?: str, employeeId?: str, date?: str, shift?: str }
+    """
+    payload = payload or {}
+    notif_id = payload.get("notificationId")
+    emp_id = str(payload.get("employeeId") or "").strip()
+    duty_date = str(payload.get("date") or "").strip()
+    duty_shift = str(payload.get("shift") or "").strip()
+    actor_id = str(user.get("employeeId") or user.get("userId") or "ADMIN")
+
+    if not notif_id and not (emp_id and duty_date):
+        raise HTTPException(400, "Provide either 'notificationId' or both 'employeeId' and 'date'.")
+
+    res = dispatch_replacement_duty_mail(
+        employee_id=emp_id,
+        duty_date=duty_date,
+        assigned_duty=duty_shift,
+        notification_id=notif_id,
+        actor_id=actor_id,
+    )
+    if res.get("status") == "skipped":
+        raise HTTPException(400, res.get("reason", "Email dispatch skipped."))
+
+    return {
+        "success": True,
+        "message": f"Duty notification email sent to {res.get('employeeName', emp_id)} ({res.get('recipientCount', 0)} recipients).",
+        "result": res,
+    }
+
+
+def dispatch_replacement_cancellation_mail(
+    employee_id: str = "",
+    duty_date: str = "",
+    assigned_duty: str = "",
+    reason: str = "",
+    notification_id: str = None,
+    actor_id: str = "ADMIN",
+):
+    """
+    Dispatches cancellation/revocation email to employee and controlling officers,
+    and records the delivery status under 'cancellationMailDelivery'.
+    """
+    from crew_legacy.admin_logic.notification_service import send_replacement_revoked_email
+
+    notif = None
+    if notification_id and ObjectId.is_valid(str(notification_id)):
+        notif = duty_notification_collection.find_one({"_id": ObjectId(notification_id)})
+    if not notif and employee_id and duty_date:
+        notif = duty_notification_collection.find_one(
+            {"employeeId": employee_id, "date": duty_date},
+            sort=[("updatedAt", -1), ("createdAt", -1)],
+        )
+
+    emp_id = employee_id or (notif.get("employeeId") if notif else "")
+    d_date = duty_date or (notif.get("date") if notif else "")
+    d_shift = assigned_duty or (notif.get("assignedDuty") if notif else "")
+    c_reason = reason or (notif.get("reason") if notif else "") or f"Duty assignment cancelled/revoked by {actor_id}"
+
+    if not emp_id:
+        return {"status": "skipped", "reason": "Employee ID is required for cancellation email."}
+
+    replacement_emp = employee_by_id(emp_id)
+    if not replacement_emp:
+        return {"status": "skipped", "reason": f"Employee {emp_id} not found."}
+
+    leave = None
+    leave_id = notif.get("leaveId") if notif else None
+    if leave_id and ObjectId.is_valid(str(leave_id)):
+        leave = leave_request_collection.find_one({"_id": ObjectId(leave_id)})
+
+    if not leave and notif:
+        leave = {
+            "employeeId": "",
+            "name": notif.get("applicantName") or notif.get("replacementForName") or "Shift Duty",
+            "groupName": notif.get("groupName") or "",
+        }
+    if not leave:
+        leave = {"employeeId": "", "name": "Shift Duty", "groupName": ""}
+
+    recipients, reporting_officer_ids, sic_ids = replacement_mail_recipients(
+        replacement_emp,
+        leave,
+        d_date,
+        leave.get("groupName") or "",
+    )
+
+    rep_mail = mail_address(replacement_emp)
+    if rep_mail and rep_mail.lower() not in [r.lower() for r in recipients]:
+        recipients.insert(0, rep_mail)
+
+    if not recipients:
+        return {"status": "skipped", "reason": f"No email address found for employee {emp_id} or reporting officers."}
+
+    leave_emp_doc = employee_by_id(leave.get("employeeId")) if leave.get("employeeId") else {}
+    try:
+        dt = datetime.strptime(d_date, "%Y-%m-%d")
+        display_date = f"{dt.strftime('%d-%b-%Y')}, {dt.strftime('%A')}"
+    except Exception:
+        display_date = d_date
+
+    rep_desig = replacement_emp.get("designation") or ""
+    rep_person = f"{replacement_emp.get('name') or emp_id} ({rep_desig or 'Designation not available'}, Employee ID {replacement_emp.get('userId') or emp_id})"
+    leave_person_name = leave.get("name") or leave.get("applicantName") or (leave_emp_doc or {}).get("name") or "Shift Duty"
+
+    mail_values = {
+        "replacement_person": rep_person,
+        "replacement_name": replacement_emp.get("name"),
+        "replacement_designation": rep_desig,
+        "replacement_employee_id": replacement_emp.get("userId") or emp_id,
+        "shift_name": display_shift_name(d_shift or "Shift"),
+        "date": display_date,
+        "date_iso": d_date,
+        "leave_person": leave_person_name,
+        "leave_name": leave_person_name,
+        "leave_designation": (leave_emp_doc or {}).get("designation") or "",
+        "leave_employee_id": leave.get("employeeId") or "",
+        "group_name": leave.get("groupName") or "",
+        "reason": c_reason,
+    }
+
+    try:
+        mail_result = send_replacement_revoked_email(recipients, mail_values)
+    except Exception as send_err:
+        mail_result = {"status": "failed", "error": str(send_err), "recipientCount": len(recipients)}
+
+    cancellation_record = {
+        **mail_result,
+        "attemptedAt": datetime.utcnow(),
+        "reportingOfficerIds": reporting_officer_ids,
+        "shiftInChargeIds": sic_ids,
+        "recipients": recipients,
+        "recipientCount": mail_result.get("recipientCount") or len(recipients),
+        "reason": c_reason,
+        "triggeredBy": actor_id,
+    }
+
+    if notif:
+        duty_notification_collection.update_one(
+            {"_id": notif["_id"]},
+            {
+                "$set": {
+                    "cancellationMailDelivery": cancellation_record,
+                    "mailDelivery": cancellation_record,
+                    "updatedAt": datetime.utcnow(),
+                }
+            },
+        )
+    else:
+        duty_notification_collection.insert_one({
+            "employeeId": emp_id,
+            "employeeName": replacement_emp.get("name"),
+            "assignedBy": actor_id,
+            "controllerIds": reporting_officer_ids,
+            "leaveId": str(leave.get("_id") or leave.get("leaveId") or ""),
+            "date": d_date,
+            "groupName": leave.get("groupName") or "",
+            "assignedDuty": d_shift or "Shift",
+            "status": "Denied",
+            "decision": f"Cancelled/Revoked by {actor_id}",
+            "reason": c_reason,
+            "autoAccepted": False,
+            "source": "Trigger Cancellation Mail",
+            "createdAt": datetime.utcnow(),
+            "cancellationMailDelivery": cancellation_record,
+            "mailDelivery": cancellation_record,
+        })
+
+    duty_denial_collection.update_many(
+        {"employeeId": emp_id, "date": d_date},
+        {"$set": {"cancellationMailDelivery": cancellation_record, "mailDelivery": cancellation_record}},
+    )
+
+    return {
+        "status": mail_result.get("status"),
+        "recipientCount": mail_result.get("recipientCount", 0),
+        "recipients": recipients,
+        "employeeName": replacement_emp.get("name"),
+        "error": mail_result.get("error"),
+    }
+
+
+@router.post("/trigger-cancellation-mail")
+@router.post("/notifications/trigger-cancellation-mail")
+@router.post("/replacement/trigger-cancellation-mail")
+def trigger_cancellation_mail_endpoint(payload: dict, user=Depends(get_current_user)):
+    """
+    Manually triggers or resends duty cancellation/revocation email to an employee and controlling officers.
+    Accepts: { notificationId?: str, employeeId?: str, date?: str, shift?: str, reason?: str }
+    """
+    payload = payload or {}
+    notif_id = payload.get("notificationId")
+    emp_id = str(payload.get("employeeId") or "").strip()
+    duty_date = str(payload.get("date") or "").strip()
+    duty_shift = str(payload.get("shift") or "").strip()
+    reason = str(payload.get("reason") or "").strip()
+    actor_id = str(user.get("employeeId") or user.get("userId") or "ADMIN")
+
+    if not notif_id and not (emp_id and duty_date):
+        raise HTTPException(400, "Provide either 'notificationId' or both 'employeeId' and 'date'.")
+
+    res = dispatch_replacement_cancellation_mail(
+        employee_id=emp_id,
+        duty_date=duty_date,
+        assigned_duty=duty_shift,
+        reason=reason,
+        notification_id=notif_id,
+        actor_id=actor_id,
+    )
+    if res.get("status") == "skipped":
+        raise HTTPException(400, res.get("reason", "Cancellation email dispatch skipped."))
+
+    return {
+        "success": True,
+        "message": f"Cancellation notification email sent for {res.get('employeeName', emp_id)} ({res.get('recipientCount', 0)} recipients).",
+        "result": res,
+    }
